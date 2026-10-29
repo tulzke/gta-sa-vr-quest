@@ -3,6 +3,7 @@
 #include <jni.h>
 
 #include <cstdint>
+#include "HolsterMarker.h"
 
 namespace savr::xr {
 
@@ -88,6 +89,9 @@ struct HandPose {
 };
 // Copy out both hands' poses (index 0 = left, 1 = right). Safe every frame.
 void GetHandPoses(HandPose out[2]);
+// Atomic head/hands sample: all poses belong to the same tracking epoch.
+bool GetTrackingSnapshot(float headPosition[3], float headOrientation[4],
+                         HandPose hands[2], std::uint64_t* epoch);
 
 // Publish the exact GameThread hand snapshot used to build this frame's
 // RenderWare weapon matrices. SetStereoEyeTextures copies it into the matching
@@ -291,9 +295,11 @@ void SetAnyMenuOpen(bool open);
 // actions such as dropping the jetpack.
 bool IsMenuVisible();
 
-// VR holster marker anchors (XR world space), published by the GameThread; the
-// present thread draws a small cube at each. Up to 8.
+// Markers in LOCAL, published by the GameThread; seven sockets plus support.
+// Position-only publication is retained for the legacy holster update path.
 void SetHolsterMarkers(const float positions[][3], int count);
+void SetHolsterMarkerStates(const holstermarker::Marker* markers, int count,
+                           std::uint64_t epoch, const float headPosition[3]);
 
 // Rhythm-minigame direction prompt (lowrider dance). dir: 0 none, 1 UP, 2 DOWN,
 // 3 LEFT, 4 RIGHT; msUntil counts down to the beat. Drawn head-locked because

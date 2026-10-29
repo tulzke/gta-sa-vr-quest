@@ -50,10 +50,41 @@ packs are supplied separately.
 
 ## Settings
 
+In **VR MENU > HOLSTER LOADOUT > HOLSTER FRAME**, select **BODY** to let an
+upright estimated torso follow sustained/large head turns and room movement.
+Nearby hands pause its yaw while reaching. **RECENTERED** retains the previous
+frame and remains the default for existing settings. BODY currently applies to
+ordinary on-foot movement; vehicles and special movement retain their existing frame.
+
+A held weapon leaves a ring with an inward chevron at its return socket.
+The global marker toggle and each socket's SHOW/HIDE/OFF setting control these
+hints; dropped weapons do not leave a return ring.
+
+To tune the pause near a resting hand, edit `vr_holsters.ini` and restart the game:
+
+```ini
+body_reach_idle_ms 1200
+body_reach_motion_cm 3
+```
+
+After 1200 ms without at least 3 cm of controller displacement, a nearby hand
+stops holding the torso yaw. Real hand movement or a grip action re-arms reach
+protection; a socket moving past a stationary hand does not. The idle timeout
+accepts 0–10000 ms (0 restores unlimited protection); movement accepts 1–20 cm.
+The existing 0.2-second exit grace also applies when the last protecting hand
+becomes idle.
+
 - `RESET_VR_SETTINGS.bat` or `bash RESET_VR_SETTINGS.sh` restores default VR
   settings after confirmation, preserving saves and game assets.
 - `tools/export-savr-settings.ps1` exports VR settings to the computer.
 - `COLLECT_RENDER_REPORT.bat` collects a render diagnostic report.
+
+## Developer tests
+
+Developers can run `python tools/test-holsters.py` for host tests of the body,
+marker geometry, production grab/return branches, camera transforms and settings.
+On Windows the runner discovers Visual Studio C++ tools, or uses `VS_VCVARS64`.
+On Linux/macOS it uses `CXX` or `c++` with C++20 support.
 
 ## License
 

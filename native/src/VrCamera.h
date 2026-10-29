@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 namespace savr::xr {
 struct HandPose;
@@ -58,10 +59,14 @@ bool GetLocalHeadYaw(float* yawOut);
 // layer whenever a VR menu (cheats or calibration) is open.
 void SetInputBlocked(bool blocked);
 
-// Body-fixed holster anchor in OpenXR LOCAL space. It uses the exact recentered
-// body frame that places the RenderWare holstered model, so looking around does
-// not make the cyan grab point orbit away from the visible weapon.
+// Socket from the most recent input-tick body snapshot in OpenXR LOCAL space.
+// Rendering converts this same frame to game space before model calibration.
 bool GetHolsterAnchorTracking(int point, float positionOut[3]);
+// Advance once before weapon interaction. near flags protect a reach from yaw
+// drift; inputs come from the previous socket snapshot, never ownership getters.
+void UpdateHolsterBodyTracking(const float headPosition[3], const float headOrientation[4],
+                               bool valid, std::uint64_t epoch, bool bodyAllowed,
+                               bool nearInner, bool nearOuter, double now);
 
 // Controller-calibrated weapon ray in GTA world space. `hand` is the physical
 // OpenXR hand (0 left, 1 right); calibration still comes from the one canonical

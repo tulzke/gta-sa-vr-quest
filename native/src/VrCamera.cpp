@@ -14,6 +14,7 @@
 #include "GestureMove.h"
 #include "GraphicsEffects.h"
 #include "Holster.h"
+#include "HolsterBody.h"
 #include "HudSettings.h"
 #include "Hydraulics.h"
 #include "Jetpack.h"
@@ -2443,6 +2444,8 @@ V3 TrackingToGame(const CamBasis& base, V3 v) {
 
 struct Origin { bool valid{}; V3 pos; Q ori; };
 Origin g_origin{};
+holsterbody::Body g_holsterBody{};
+std::uint64_t g_cameraTrackingEpoch{~std::uint64_t{0}};
 std::uint64_t g_cameraResetSerial{};
 void TraceTracking(const char* event,V3 point) {
     if(FILE* f=std::fopen("/sdcard/Android/data/com.rockstargames.gtasa/files/vr_tracking.log","a")) {
@@ -2699,19 +2702,26 @@ void SetMatBasis(RwMat& m, V3 right, V3 up, V3 at, V3 pos) {
     m.t[0] = pos.x;   m.t[1] = pos.y;   m.t[2] = pos.z;
 }
 
+V3 TrackingPointToGame(V3 localPoint);
+V3 TrackingVectorToGame(V3 localVector);
+
 bool HolsterWeaponMatrix(int point, int weaponType, RwMat& out) {
-    if (!g_vrBaseValid) return false;
+    if (!g_vrBaseValid || !g_origin.valid || !g_holsterBody.valid) return false;
     const holster::PointMetadata* meta = holster::Metadata(point);
     if (!meta) return false;
     // CamBasis.right is camera-left in this mobile RW path; holster metadata is
     // authored along true body-right, matching the PC SA / Vice City layout.
-    const V3 bodyRight = g_vrBase.right * -1.0f;
+    const float yaw = g_holsterBody.yaw;
+    const V3 bodyRight = TrackingVectorToGame({std::cos(yaw), 0, -std::sin(yaw)});
+    const V3 bodyUp = TrackingVectorToGame({0, 1, 0});
+    const V3 bodyForward = TrackingVectorToGame({-std::sin(yaw), 0, -std::cos(yaw)});
+    const auto socketTracking = holsterbody::Socket(g_holsterBody.position, yaw,
+        meta->lateral, meta->vertical, meta->depth);
     Mat34 m{};
-    m.right = g_vrBase.up * -1.0f;                         // SA weapon local +X: barrel down
-    m.fwd   = g_vrBase.forward * (meta->behind ? 1.0f : -1.0f);
+    m.right = bodyUp * -1.0f;                         // SA weapon local +X: barrel down
+    m.fwd   = bodyForward * (meta->behind ? 1.0f : -1.0f);
     m.up    = bodyRight * (meta->behind ? 1.0f : -1.0f);
-    m.pos   = g_vrBase.pos + bodyRight * meta->lateral +
-              g_vrBase.up * meta->vertical + g_vrBase.forward * meta->depth;
+    m.pos   = TrackingPointToGame({socketTracking.x, socketTracking.y, socketTracking.z});
 
     // The dedicated menu edits this pose per eWeaponType. Match the PC SA order:
     // rotate the model around its socket first, then offset along the final axes.
@@ -3524,9 +3534,8 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
         float hp[3], hq[4];
         std::uint64_t epoch{};
         if (xr::GetHeadPose(hp, hq, &epoch)) {
-            static std::uint64_t trackingEpoch=~std::uint64_t{0};
-            if(trackingEpoch!=epoch) {
-                trackingEpoch=epoch;
+            if(g_cameraTrackingEpoch!=epoch) {
+                g_cameraTrackingEpoch=epoch;
                 RequestRecenter();
                 LOGI("[tracking] camera/holsters rebased epoch=%llu",(unsigned long long)epoch);
             }
@@ -29946,14 +29955,28 @@ void SetInputBlocked(bool blocked) {
     g_inputBlocked.store(blocked, std::memory_order_relaxed);
 }
 
+void UpdateHolsterBodyTracking(const float headPosition[3], const float headOrientation[4],
+                               bool valid, std::uint64_t epoch, bool bodyAllowed,
+                               bool nearInner, bool nearOuter, double now) {
+    const bool useBody = holster::BodyFrameEnabled() && bodyAllowed;
+    V3 p = useBody ? V3{headPosition[0], headPosition[1], headPosition[2]} : g_origin.pos;
+    const Q q = useBody ? Q{headOrientation[0], headOrientation[1], headOrientation[2], headOrientation[3]}
+                        : g_origin.ori;
+    const V3 forward = Rotate(q, {0,0,-1});
+    const float horizontal = forward.x * forward.x + forward.z * forward.z;
+    const bool reliable = Finite(forward) && horizontal > 0.01f;
+    const float yaw = reliable ? std::atan2(-forward.x, -forward.z) : g_holsterBody.yaw;
+    g_holsterBody.Update({p.x,p.y,p.z}, yaw, valid && g_origin.valid && g_vrBaseValid && epoch == g_cameraTrackingEpoch,
+                        reliable, useBody, epoch, g_cameraResetSerial,
+                        nearInner, nearOuter, now);
+}
+
 bool GetHolsterAnchorTracking(int point, float positionOut[3]) {
-    if (!positionOut || !g_origin.valid || !g_vrBaseValid) return false;
+    if (!positionOut || !g_origin.valid || !g_vrBaseValid || !g_holsterBody.valid) return false;
     const holster::PointMetadata* meta = holster::Metadata(point);
     if (!meta) return false;
-    // Inverse of TrackingToGame for the body-relative delta used by
-    // HolsterWeaponMatrix: body-right maps to +X, up to +Y, forward to -Z.
-    const V3 recentered{meta->lateral, meta->vertical, -meta->depth};
-    const V3 local = g_origin.pos + Rotate(g_origin.ori, recentered);
+    const auto local = holsterbody::Socket(g_holsterBody.position, g_holsterBody.yaw,
+                                         meta->lateral, meta->vertical, meta->depth);
     positionOut[0] = local.x; positionOut[1] = local.y; positionOut[2] = local.z;
     return true;
 }
@@ -29972,6 +29995,8 @@ bool GroundWalkControlsActive() {
 }
 
 void RequestRecenter() {
+    g_holsterBody.Invalidate();
+    xr::SetHolsterMarkers(nullptr, 0);
     ++g_cameraResetSerial; // also invalidates the vehicle-local seat cache
     TraceTracking("RECENTER",g_origin.pos);
     g_duckLatched=false;g_crouchBlend=0.0f;

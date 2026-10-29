@@ -86,6 +86,14 @@ bool GripMarkersEnabled();
 void SetGripMarkersEnabled(bool enabled);
 void ToggleGripMarkers();
 
+// Legacy configs retain RECENTERED. BODY estimates an upright torso from HMD.
+bool BodyFrameEnabled();
+void SetBodyFrameEnabled(bool enabled);
+// Config-only tuning: body_reach_idle_ms (0 disables timeout),
+// body_reach_motion_cm (controller displacement that resets inactivity).
+float BodyReachIdleSeconds();
+float BodyReachMotionMetres();
+
 // Reach for pulling a weapon off a body socket, player-adjustable from the
 // loadout menu (persisted). Metres variant feeds the PhysicalWeapon grab test.
 int   GrabRadiusCm();
