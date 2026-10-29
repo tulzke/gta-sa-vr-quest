@@ -16,6 +16,32 @@ inline Vec Socket(Vec position, float yaw, float lateral, float vertical, float 
             position.z - s * lateral - c * depth};
 }
 
+struct ReachIntent {
+    Vec motionOrigin{};
+    double lastMotion{}, lastSample{};
+    bool valid{}, idle{};
+
+    void Invalidate() { valid = idle = false; }
+
+    // Observe actual controller movement, never socket movement. Once idle, a
+    // hand stays idle even if a turning socket leaves and re-enters its reach.
+    bool Update(Vec hand, bool usable, bool near, bool gripAction, double now,
+                float idleSeconds, float motionMetres) {
+        if (!usable || !Finite(hand) || !std::isfinite(now)) { Invalidate(); return false; }
+        if (!valid || now < lastSample || now - lastSample > 0.25) {
+            valid = true; idle = false; motionOrigin = hand; lastMotion = now;
+        }
+        lastSample = now;
+        const float dx = hand.x - motionOrigin.x, dy = hand.y - motionOrigin.y, dz = hand.z - motionOrigin.z;
+        if (gripAction || dx*dx + dy*dy + dz*dz >= motionMetres*motionMetres) {
+            motionOrigin = hand; lastMotion = now; idle = false;
+        }
+        if (idleSeconds <= 0) { idle = false; return true; }
+        if (near && now - lastMotion >= idleSeconds) idle = true;
+        return !idle;
+    }
+};
+
 // State is advanced only by the game input tick; consumers copy the result.
 // No camera, controller, clock or inventory globals are accessed here.
 struct Body {

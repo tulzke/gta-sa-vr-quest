@@ -18,6 +18,35 @@ static float Follow(int rate,float target) {
     return b.yaw;
 }
 int main() {
+    // A resting hand stops suppressing yaw. Socket motion alone cannot re-arm it.
+    ReachIntent intent;
+    for (int i=0; i<90; ++i)
+        CHECK(intent.Update({0,1,0},true,true,false,i/90.0,1.2f,0.03f));
+    for (int i=90; i<=120; ++i)
+        intent.Update({0,1,0},true,true,false,i/90.0,1.2f,0.03f);
+    CHECK(intent.idle);
+    for(int i=121;i<=180;++i)
+        CHECK(!intent.Update({0,1,0},true,(i%2)==0,false,i/90.0,1.2f,0.03f));
+    CHECK(!intent.Update({0.01f,1,0},true,true,false,2.01,1.2f,0.03f)); // small jitter
+    CHECK(intent.Update({0.04f,1,0},true,true,false,2.02,1.2f,0.03f)); // a real reach
+    for(int i=1;i<=120;++i) intent.Update({0.04f,1,0},true,true,false,2.02+i/90.0,1.2f,0.03f);
+    CHECK(intent.idle);
+    CHECK(intent.Update({0.04f,1,0},true,true,true,3.36,1.2f,0.03f)); // squeeze/release action
+    ReachIntent otherHand;
+    CHECK(otherHand.Update({0,1,0},true,true,false,0,0,0.03f));
+    for(int i=1;i<=900;++i) CHECK(otherHand.Update({0,1,0},true,true,false,i/90.0,0,0.03f));
+    CHECK(!otherHand.idle); // zero opts out, even after ten seconds
+    CHECK(!intent.Update({},false,true,false,3.37,1.2f,0.03f));CHECK(!intent.valid);
+    // Feed the production reach intent into the production torso algorithm.
+    Body idleBody; ReachIntent idleHand;
+    idleBody.Update({},0,true,true,true,1,0,false,false,0);
+    for(int i=1;i<=270;++i) {
+        const double t=i/90.0;
+        const bool protect=idleHand.Update({},true,true,false,t,1.2f,0.03f);
+        idleBody.Update({},Radians(90),true,true,true,1,0,protect,protect,t);
+        if(t<1.2) Close(idleBody.yaw,0);
+    }
+    CHECK(idleBody.yaw>Radians(70) && !idleBody.frozen);
     Body b; Sample(b,0,0);
     for(int i=1;i<=180;++i) Sample(b,Radians(15),i/90.0);
     Close(b.yaw,0); // an ordinary look does not turn the torso

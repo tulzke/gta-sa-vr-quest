@@ -3,6 +3,7 @@
 #include "Calib.h"
 #include "Driving.h"
 #include "Holster.h"
+#include "HolsterBody.h"
 #include "Locomotion.h"
 #include "Log.h"
 #include "Symbols.h"
@@ -79,6 +80,7 @@ bool gAwaitFirstGrip[kHandCount]{};
 int gLastObservedActiveSlot = -1;
 bool gWasScriptedWeaponCamera = false;
 bool gHolsterTrackingReady = false;
+holsterbody::ReachIntent gReachIntent[kHandCount]{};
 std::uint64_t gInteractionEpoch{~std::uint64_t{0}};
 int gPreferredHand = -1;
 // Visual-only support-hand preview selected while the weapon calibration menu
@@ -308,6 +310,7 @@ void ClearHeldLocked(int hand) {
 
 void ResetRuntimeLocked() {
     gHolsterTrackingReady = false;
+    for (auto& intent : gReachIntent) intent.Invalidate();
     for (int hand = 0; hand < kHandCount; ++hand) {
         gHeldSlot[hand] = -1;
         gSupportHand[hand] = -1;
@@ -772,6 +775,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     interactionsBlocked = interactionsBlocked || !headValid ||
                           !gHolsterTrackingReady || trackingEpoch != gInteractionEpoch;
     if (!headValid || !gHolsterTrackingReady || trackingEpoch != gInteractionEpoch) {
+        for (auto& intent : gReachIntent) intent.Invalidate();
         for (int hand=0; hand<kHandCount; ++hand)
             gGripLatched[hand] = gHands[hand].valid && gHands[hand].grip > kGripOpen;
     }
@@ -855,6 +859,8 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
 
     // Test reach against last tick's socket before allowing its yaw to advance.
     bool nearInner = interactionsBlocked, nearOuter = interactionsBlocked;
+    bool handNearInner[kHandCount]{}, handNearOuter[kHandCount]{};
+    const bool bodyAllowed = !inVehicle && vrcam::GroundWalkControlsActive();
     const std::uint32_t previousOccupied = OccupiedSlotMaskLocked();
     for (int point=0; point<holster::POINT_COUNT; ++point) {
         float previous[3]{};
@@ -869,12 +875,24 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             if (!returning && !drawing) continue;
             const float reach = returning ? kHolsterReturnRadius : holster::GrabRadiusMetres();
             const float distance = Distance(GripPosition(gHands[hand]), {previous[0],previous[1],previous[2]});
-            nearInner |= distance <= reach + 0.08f;
-            nearOuter |= distance <= reach + 0.13f;
+            handNearInner[hand] |= distance <= reach + 0.08f;
+            handNearOuter[hand] |= distance <= reach + 0.13f;
         }
     }
+    for (int hand=0; hand<kHandCount; ++hand) {
+        const bool usable = headValid && gHands[hand].valid && bodyAllowed &&
+            holster::BodyFrameEnabled() && !interactionsBlocked && !IsSupportHandLocked(hand);
+        const bool gripAction = (gHands[hand].grip >= kGripClose && !gGripLatched[hand]) ||
+                                (gHands[hand].grip <= kGripOpen && gGripLatched[hand]);
+        const V3 p = GripPosition(gHands[hand]);
+        const bool protect = gReachIntent[hand].Update({p.x,p.y,p.z}, usable,
+            handNearOuter[hand], gripAction, now,
+            holster::BodyReachIdleSeconds(), holster::BodyReachMotionMetres());
+        nearInner |= protect && handNearInner[hand];
+        nearOuter |= protect && handNearOuter[hand];
+    }
     vrcam::UpdateHolsterBodyTracking(headPosition, headOrientation, headValid, trackingEpoch,
-        !inVehicle && vrcam::GroundWalkControlsActive(), nearInner, nearOuter, now);
+        bodyAllowed, nearInner, nearOuter, now);
 
     float anchors[holster::POINT_COUNT][3]{};
     bool anchorValid[holster::POINT_COUNT]{};
@@ -1203,6 +1221,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
 void ResetTracking() {
     xr::HandPose latest[kHandCount]{};xr::GetHandPoses(latest);
     std::lock_guard<std::mutex> lock(gMutex);
+    for (auto& intent : gReachIntent) intent.Invalidate();
     std::memcpy(gHands,latest,sizeof(gHands));
     for(int h=0;h<kHandCount;++h) {
         gPreviousPoseValid[h]=false;gHandVelocity[h]={};gHandAngularVelocity[h]={};

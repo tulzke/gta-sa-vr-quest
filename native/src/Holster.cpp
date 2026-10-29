@@ -47,6 +47,10 @@ std::atomic<int> gPointSlots[POINT_COUNT] = {4, 2, 3, 1, 8, 7, 5};
 std::atomic<int> gPointState[POINT_COUNT] = {0, 0, 0, 0, 0, 0, 0};
 std::atomic<bool> gGripMarkersEnabled{true};
 std::atomic<bool> gBodyFrameEnabled{false};
+constexpr int kDefaultBodyReachIdleMs = 1200;
+constexpr int kDefaultBodyReachMotionCm = 3;
+std::atomic<int> gBodyReachIdleMs{kDefaultBodyReachIdleMs};
+std::atomic<int> gBodyReachMotionCm{kDefaultBodyReachMotionCm};
 // Player-adjustable reach for pulling a weapon from a body socket.
 constexpr int kDefaultGrabRadiusCm = 18;
 constexpr int kMinGrabRadiusCm = 8;
@@ -159,6 +163,8 @@ void LoadSettings() {
     int grabRadiusCm = kDefaultGrabRadiusCm;
     bool gripLock = false;
     bool bodyFrame = false;
+    int bodyReachIdleMs = kDefaultBodyReachIdleMs;
+    int bodyReachMotionCm = kDefaultBodyReachMotionCm;
     int state[POINT_COUNT] = {0, 0, 0, 0, 0, 0, 0};
 
     FILE* f = std::fopen(kSettingsPath, "r");
@@ -166,6 +172,13 @@ void LoadSettings() {
     if (f != nullptr) {
         char line[128];
         while (std::fgets(line, sizeof(line), f)) {
+            int tuning = 0;
+            if (std::sscanf(line, "body_reach_idle_ms %d", &tuning) == 1) {
+                bodyReachIdleMs = std::clamp(tuning, 0, 10000); continue;
+            }
+            if (std::sscanf(line, "body_reach_motion_cm %d", &tuning) == 1) {
+                bodyReachMotionCm = std::clamp(tuning, 1, 20); continue;
+            }
             int body = 0;
             if (std::sscanf(line, "body_frame %d", &body) == 1) {
                 bodyFrame = body == 1; continue;
@@ -210,6 +223,8 @@ void LoadSettings() {
         std::fclose(f);
     }
     gBodyFrameEnabled.store(bodyFrame, std::memory_order_release);
+    gBodyReachIdleMs.store(bodyReachIdleMs, std::memory_order_release);
+    gBodyReachMotionCm.store(bodyReachMotionCm, std::memory_order_release);
     gGrabRadiusCm.store(grabRadiusCm, std::memory_order_release);
     gGripLockEnabled.store(gripLock, std::memory_order_release);
 
@@ -245,6 +260,8 @@ void SaveSettingsLocked() {
     std::fputs("# vr_holsters v2  p <point 0..6> <SA weapon slot, -1=empty>\n", f);
     std::fprintf(f, "body_frame %d\n",
                  gBodyFrameEnabled.load(std::memory_order_acquire) ? 1 : 0);
+    std::fprintf(f, "body_reach_idle_ms %d\n", gBodyReachIdleMs.load(std::memory_order_acquire));
+    std::fprintf(f, "body_reach_motion_cm %d\n", gBodyReachMotionCm.load(std::memory_order_acquire));
     std::fprintf(f, "grip_markers %d\n",
                  gGripMarkersEnabled.load(std::memory_order_acquire) ? 1 : 0);
     std::fprintf(f, "grab_radius_cm %d\n",
@@ -458,6 +475,12 @@ void SetGripMarkersEnabled(bool enabled) {
 void ToggleGripMarkers() { SetGripMarkersEnabled(!GripMarkersEnabled()); }
 
 bool BodyFrameEnabled() { Init(); return gBodyFrameEnabled.load(std::memory_order_acquire); }
+float BodyReachIdleSeconds() {
+    Init(); return gBodyReachIdleMs.load(std::memory_order_acquire) * 0.001f;
+}
+float BodyReachMotionMetres() {
+    Init(); return gBodyReachMotionCm.load(std::memory_order_acquire) * 0.01f;
+}
 void SetBodyFrameEnabled(bool enabled) {
     Init();
     if (gBodyFrameEnabled.exchange(enabled, std::memory_order_acq_rel) == enabled) return;

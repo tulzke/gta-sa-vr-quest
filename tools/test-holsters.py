@@ -229,6 +229,7 @@ settings_prefix=r'''
 #include "Holster.h"
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <mutex>
 #include <cstdio>
 #include <cstdlib>
@@ -241,15 +242,25 @@ namespace savr::holster {
 '''+globals_text
 settings_production='\n'.join(function(sig,holsters) for sig in (
     'bool ValidPoint(', 'bool SelectableSlot(', 'void LoadSettings(',
-    'void SaveSettingsLocked(', 'void Init()', 'bool BodyFrameEnabled()', 'void SetBodyFrameEnabled('))
+    'void SaveSettingsLocked(', 'void Init()', 'bool BodyFrameEnabled()', 'void SetBodyFrameEnabled(',
+    'float BodyReachIdleSeconds()', 'float BodyReachMotionMetres()'))
 settings_tests=r'''
 void Write(const char* text){FILE* f=std::fopen(kSettingsPath,"w");CHECK(f);std::fputs(text,f);std::fclose(f);}
 }
 int main(){
     using namespace savr::holster;
     std::remove(kSettingsPath);Init();CHECK(!BodyFrameEnabled());
+    CHECK(std::abs(BodyReachIdleSeconds()-1.2f)<0.001f);CHECK(std::abs(BodyReachMotionMetres()-0.03f)<0.001f);
+    Write("body_reach_idle_ms 3400\nbody_reach_motion_cm 5\n");LoadSettings();SaveSettingsLocked();
+    gBodyReachIdleMs=0;gBodyReachMotionCm=1;LoadSettings();
+    CHECK(gBodyReachIdleMs==3400&&gBodyReachMotionCm==5);
+    Write("body_reach_idle_ms 99999\nbody_reach_motion_cm 0\n");LoadSettings();
+    CHECK(gBodyReachIdleMs==10000&&gBodyReachMotionCm==1);
+    Write("body_reach_idle_ms -1\nbody_reach_motion_cm 99\n");LoadSettings();
+    CHECK(gBodyReachIdleMs==0&&gBodyReachMotionCm==20);
     Write("grip_markers 0\ngrab_radius_cm 23\ngrip_lock 1\nvisible 0 0\np 0 4\n");
     LoadSettings();CHECK(!BodyFrameEnabled());CHECK(!gGripMarkersEnabled);CHECK(gGrabRadiusCm==23);CHECK(gGripLockEnabled);CHECK(gPointState[0]==1);
+    CHECK(gBodyReachIdleMs==1200&&gBodyReachMotionCm==3);
     SetBodyFrameEnabled(true);CHECK(BodyFrameEnabled());
     gBodyFrameEnabled=false;LoadSettings();CHECK(BodyFrameEnabled());CHECK(gPointState[0]==1&&gGrabRadiusCm==23);
     SetBodyFrameEnabled(false);gBodyFrameEnabled=true;LoadSettings();CHECK(!BodyFrameEnabled());
