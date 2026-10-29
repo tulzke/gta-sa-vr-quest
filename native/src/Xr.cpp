@@ -615,6 +615,10 @@ float                 g_chuteRingAnchor[3]{};
 float                 g_chuteRingForward[3]{0.0f, 0.0f, -1.0f};
 bool                  g_chuteRingGrabbed{false};
 bool                  g_chuteRingVisible{false};
+holstermarker::Kind    g_holsterKind[8]{};
+std::uint64_t         g_holsterEpoch{};
+float                 g_holsterEye[3]{}; // one billboard orientation for both eyes
+holstermarker::Frame   g_stereoHolsterMarkers[kStereoSets]{};
 int                   g_holsterCount = 0;
 // Active weapon object-space geometry (guarded by g_headPoseMutex). Published by
 // the GameThread; the present thread transforms it to the hand pose and draws it.
@@ -5173,6 +5177,18 @@ void GetHandPoses(HandPose out[2]) {
     out[1] = g_headPoseValid?g_handPose[1]:HandPose{};
 }
 
+bool GetTrackingSnapshot(float p[3], float q[4], HandPose hands[2], std::uint64_t* epoch) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    if (epoch) *epoch = g_trackingRecovery.epoch;
+    hands[0] = g_headPoseValid ? g_handPose[0] : HandPose{};
+    hands[1] = g_headPoseValid ? g_handPose[1] : HandPose{};
+    if (!g_headPoseValid) return false;
+    p[0]=g_headPose.position.x; p[1]=g_headPose.position.y; p[2]=g_headPose.position.z;
+    q[0]=g_headPose.orientation.x; q[1]=g_headPose.orientation.y;
+    q[2]=g_headPose.orientation.z; q[3]=g_headPose.orientation.w;
+    return true;
+}
+
 bool GetHeadPose(float positionOut[3], float orientationOut[4]) {
     return GetHeadPose(positionOut,orientationOut,nullptr);
 }
@@ -5631,11 +5647,25 @@ void SetMobileColorState(const MobileColorState& state) {
 
 void SetHolsterMarkers(const float positions[][3], int count) {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_holsterEpoch = g_trackingRecovery.epoch;
     g_holsterCount = count > 8 ? 8 : (count < 0 ? 0 : count);
     for (int i = 0; i < g_holsterCount; ++i) {
+        g_holsterKind[i] = holstermarker::Kind::Grab;
         g_holsterPos[i][0] = positions[i][0];
         g_holsterPos[i][1] = positions[i][1];
         g_holsterPos[i][2] = positions[i][2];
+    }
+}
+
+void SetHolsterMarkerStates(const holstermarker::Marker* markers, int count,
+                           std::uint64_t epoch, const float headPosition[3]) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_holsterEpoch = epoch;
+    std::memcpy(g_holsterEye, headPosition, sizeof(g_holsterEye));
+    g_holsterCount = markers ? std::clamp(count, 0, holstermarker::kCapacity) : 0;
+    for (int i=0; i<g_holsterCount; ++i) {
+        std::memcpy(g_holsterPos[i], markers[i].position, sizeof(g_holsterPos[i]));
+        g_holsterKind[i] = markers[i].kind;
     }
 }
 
@@ -6159,6 +6189,16 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
             ? g_renderedHandPose[1] : g_handPose[1];
         g_stereoWeaponHandMask[ws]  = g_weaponHandMask.load(std::memory_order_relaxed);
         g_stereoTwoHandVisualState[ws] = g_twoHandVisualState;
+        // Capture markers with the eye textures containing their socket models.
+        // The compositor reuses this immutable batch for both eyes.
+        auto& markerFrame = g_stereoHolsterMarkers[ws];
+        markerFrame.count = g_holsterCount;
+        markerFrame.epoch = g_holsterEpoch;
+        std::memcpy(markerFrame.eye, g_holsterEye, sizeof(markerFrame.eye));
+        for (int i=0; i<markerFrame.count; ++i) {
+            std::memcpy(markerFrame.markers[i].position, g_holsterPos[i], sizeof(g_holsterPos[i]));
+            markerFrame.markers[i].kind = g_holsterKind[i];
+        }
         g_stereoScopeState[ws] = scopeaim::Snapshot();
         g_stereoDrivingWheelState[ws] = drivingWheel;
         g_stereoBallHandLock[ws] = g_ballHandLock;
@@ -7347,8 +7387,8 @@ void BuildHolsterMenu() {
     PanelText("HOLSTER LOADOUT", cx, 14, 4, 100, 225, 255);
     PanelText("OWNED + UNASSIGNED CATEGORIES ONLY", cx, 48, 2, 150, 190, 210);
     const int sel = g_holsterMenuSel.load(std::memory_order_relaxed);
-    const int rows = holster::PointCount() + 4;
-    const int top = 74, rowH = 38;
+    const int rows = holster::PointCount() + 5;
+    const int top = 74, rowH = 34;
     for (int i = 0; i < rows; ++i) {
         const int y = top + i * rowH;
         if (i == sel) PanelFillRect(18, y - 4, kPanelW - 18, y + 20, 120, 40, 110, 235);
@@ -7364,6 +7404,9 @@ void BuildHolsterMenu() {
             std::snprintf(row, sizeof(row), "HOLSTER MARKERS   < %s >",
                           holster::GripMarkersEnabled() ? "ON" : "OFF");
         } else if (i == holster::PointCount() + 3) {
+            std::snprintf(row, sizeof(row), "HOLSTER FRAME   < %s >",
+                          holster::BodyFrameEnabled() ? "BODY" : "RECENTERED");
+        } else if (i == holster::PointCount() + 4) {
             std::snprintf(row, sizeof(row), "BACK");
         } else {
             const int slot = holster::PointSlot(i);
@@ -7375,8 +7418,8 @@ void BuildHolsterMenu() {
         PanelText(row, cx, y, 2, c, c, (i == sel) ? 120 : c);
     }
     const char* hint = "L2/R2 CHOOSE   A SHOW/HIDE   B BACK";
-    if (sel >= holster::PointCount() && sel <= holster::PointCount() + 2)
-        hint = "A/B BACK";
+    if (sel >= holster::PointCount() && sel <= holster::PointCount() + 3)
+        hint = "L2/R2 CHANGE   A TOGGLE   B BACK";
     else if (holster::IsPointFixed(sel))
         hint = "THROWABLE IS FIXED   B BACK";
     else if (holster::PointSlot(sel) < 0)
@@ -9589,43 +9632,50 @@ void DrawScopeOverlay(int width, int height,
 }
 
 // Draw the holster marker cubes (uses the depth already set up by the hand pass).
-void DrawHolsterMarkers(const float* mvp) {
-    float pos[8][3]; int count;
-    {
-        std::lock_guard<std::mutex> lock(g_headPoseMutex);
-        count = g_holsterCount;
-        for (int i = 0; i < count; ++i) { pos[i][0] = g_holsterPos[i][0]; pos[i][1] = g_holsterPos[i][1]; pos[i][2] = g_holsterPos[i][2]; }
-    }
+void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
+    const auto& markers = frame.markers;
+    const float* eye = frame.eye;
+    const int count = frame.count;
     if (count <= 0) return;
     EnsureMarkerProgram();
-    const float s = 0.026f;
-    int vc = 0, ic = 0;
+    const float size = 0.026f;
+    int vc=0, ic=0;
     static const unsigned short cube[36] = {0,1,2, 2,1,3, 4,6,5, 5,6,7, 0,2,4, 4,2,6,
                                             1,5,3, 3,5,7, 0,4,1, 1,4,5, 2,3,6, 6,3,7};
-    for (int m = 0; m < count; ++m) {
-        const int base = vc;
-        for (int i = 0; i < 8; ++i) {
-            float* o = &g_markerVerts[vc * 3];
-            o[0] = pos[m][0] + ((i & 1) ? s : -s);
-            o[1] = pos[m][1] + ((i & 2) ? s : -s);
-            o[2] = pos[m][2] + ((i & 4) ? s : -s);
-            ++vc;
+    for (int m=0; m<count; ++m) {
+        if (markers[m].kind == holstermarker::Kind::Return) continue;
+        const float* p=markers[m].position;
+        const int base=vc;
+        for (int i=0; i<8; ++i) {
+            float* o=&g_markerVerts[vc++*3];
+            o[0]=p[0]+((i&1)?size:-size); o[1]=p[1]+((i&2)?size:-size); o[2]=p[2]+((i&4)?size:-size);
         }
-        for (int k = 0; k < 36; ++k) g_markerIdx[ic++] = static_cast<unsigned short>(base + cube[k]);
+        for (auto index : cube) g_markerIdx[ic++]=static_cast<unsigned short>(base+index);
     }
     glUseProgram(g_markerProg);
     glUniformMatrix4fv(g_markerMvpLoc, 1, GL_FALSE, mvp);
-    glUniform4f(g_markerColLoc, 30 / 255.0f, 205 / 255.0f, 245 / 255.0f, 1.0f);   // VC cyan
     glBindBuffer(GL_ARRAY_BUFFER, g_markerVbo);
-    glBufferData(GL_ARRAY_BUFFER, vc * 3 * sizeof(float), g_markerVerts, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_markerEbo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, ic * sizeof(unsigned short), g_markerIdx, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
-    glDrawElements(GL_TRIANGLES, ic, GL_UNSIGNED_SHORT, nullptr);
-    glDisableVertexAttribArray(0);
-    glUseProgram(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),nullptr);
+    auto draw=[&](const float* vertices,int vertexCount,const unsigned short* indices,int indexCount) {
+        glBufferData(GL_ARRAY_BUFFER,vertexCount*3*sizeof(float),vertices,GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER,indexCount*sizeof(unsigned short),indices,GL_DYNAMIC_DRAW);
+        glDrawElements(GL_TRIANGLES,indexCount,GL_UNSIGNED_SHORT,nullptr);
+    };
+    glUniform4f(g_markerColLoc,30/255.0f,205/255.0f,245/255.0f,1);
+    if (ic) draw(g_markerVerts,vc,g_markerIdx,ic);
+    const bool cull=glIsEnabled(GL_CULL_FACE);
+    glDisable(GL_CULL_FACE); // flat return geometry must be visible from either side
+    glUniform4f(g_markerColLoc,1.0f,0.75f,0.25f,1);
+    for (int i=0; i<count; ++i) {
+        if (markers[i].kind != holstermarker::Kind::Return) continue;
+        const auto mesh=holstermarker::ReturnMesh(markers[i].position,eye);
+        draw(mesh.vertices.data(),mesh.vertexCount,mesh.indices.data(),mesh.indexCount);
+    }
+    if (cull) glEnable(GL_CULL_FACE);
+    glDisableVertexAttribArray(0); glUseProgram(0);
+    glBindBuffer(GL_ARRAY_BUFFER,0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 }
 
 // ---- immersive jetpack: handheld-thruster flames ---------------------------
@@ -11016,6 +11066,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const ThrowableTrajectory throwableTrajectory[2],
                      const HandPose bakedHands[2],
                      const TwoHandVisualState& bakedTwoHand,
+                     const holstermarker::Frame& bakedHolsters,
                      unsigned int hudSourceTex) {
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
@@ -11039,7 +11090,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         (dashAnchored ||
          (trackedVisuals &&
           (bakedHands[0].valid || bakedHands[1].valid)));
-    if (!haveHands && (!trackedVisuals || g_holsterCount <= 0) &&
+    if (!haveHands && (!trackedVisuals || bakedHolsters.count <= 0) &&
         (!trackedVisuals || g_wVc <= 0) &&
         (!trackedVisuals || !laser.valid) &&
         (!trackedVisuals || !drivingWheel.active) &&
@@ -11213,7 +11264,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     }
 
     if (trackedVisuals) {
-        DrawHolsterMarkers(mvp);   // cyan cubes at the holster anchors (shares this depth pass)
+        DrawHolsterMarkers(mvp, bakedHolsters); // body/support hints share this depth pass
         DrawWeaponLaser(mvp, laser); // calibrated red beam, occluded by world + weapon
         DrawWeaponForEye(mvp);     // active weapon mesh pinned to the hand (Stage 1)
         DrawThrowableTrajectories(mvp, throwableTrajectory);
@@ -11421,6 +11472,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     HandPose bakedHands[2]{};
     LaserRay bakedLaser{};
     TwoHandVisualState bakedTwoHand{};
+    holstermarker::Frame bakedHolsters{};
     scopeaim::VisualState bakedScope{};
     driving::WheelVisualState drivingWheel{};
     BallHandLock ballHandLock{};
@@ -11436,6 +11488,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedHands[1]  = g_stereoHandPose[set][1];
         bakedLaser     = g_stereoLaserRay[set];
         bakedTwoHand   = g_stereoTwoHandVisualState[set];
+        bakedHolsters = g_stereoHolsterMarkers[set];
+        if (!bakedHolsters.Usable(g_headPoseValid, g_trackingRecovery.epoch)) bakedHolsters.count = 0;
         bakedScope     = g_stereoScopeState[set];
         drivingWheel   = g_stereoDrivingWheelState[set];
         ballHandLock   = g_stereoBallHandLock[set];
@@ -11595,7 +11649,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, hudSource);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, hudSource);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

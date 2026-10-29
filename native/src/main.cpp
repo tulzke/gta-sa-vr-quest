@@ -1324,9 +1324,9 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             break;
         }
         case PG_HOLSTERS: {
-            // Points, GRAB REACH, GRIP LOCK, HOLSTER MARKERS, BACK — matching
+            // Points, GRAB REACH, GRIP LOCK, HOLSTER MARKERS, HOLSTER FRAME, BACK — matching
             // BuildHolsterMenu.
-            const int rows = savr::holster::PointCount() + 4;
+            const int rows = savr::holster::PointCount() + 5;
             if (navUp)   holsterSel = (holsterSel - 1 + rows) % rows;
             if (navDown) holsterSel = (holsterSel + 1) % rows;
             if (holsterSel < savr::holster::PointCount()) {
@@ -1344,6 +1344,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 if (minus) savr::holster::SetGripMarkersEnabled(false);
                 if (plus)  savr::holster::SetGripMarkersEnabled(true);
                 if (enter) savr::holster::ToggleGripMarkers();
+            } else if (holsterSel == savr::holster::PointCount() + 3) {
+                if (minus) savr::holster::SetBodyFrameEnabled(false);
+                if (plus) savr::holster::SetBodyFrameEnabled(true);
+                if (enter) savr::holster::SetBodyFrameEnabled(!savr::holster::BodyFrameEnabled());
             } else if (enter) {
                 menuPage = PG_MAIN;
             }

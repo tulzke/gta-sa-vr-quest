@@ -25,6 +25,8 @@ constexpr int   kWeaponSlotCount = 13;
 constexpr int   kOffWeapons = 0x730;
 constexpr int   kWeaponStride = 0x20;
 constexpr int   kOffActiveWeaponSlot = 0x8DC;
+static_assert(holster::POINT_COUNT + 1 == holstermarker::kCapacity,
+              "Reserve seven body sockets and one support marker");
 
 constexpr float kGripClose = 0.65f;
 constexpr float kGripCatch = 0.55f;
@@ -76,6 +78,8 @@ bool gGripLatched[kHandCount]{};
 bool gAwaitFirstGrip[kHandCount]{};
 int gLastObservedActiveSlot = -1;
 bool gWasScriptedWeaponCamera = false;
+bool gHolsterTrackingReady = false;
+std::uint64_t gInteractionEpoch{~std::uint64_t{0}};
 int gPreferredHand = -1;
 // Visual-only support-hand preview selected while the weapon calibration menu
 // blocks interactions. It deliberately does not mutate gSupportHand/ownership.
@@ -303,6 +307,7 @@ void ClearHeldLocked(int hand) {
 }
 
 void ResetRuntimeLocked() {
+    gHolsterTrackingReady = false;
     for (int hand = 0; hand < kHandCount; ++hand) {
         gHeldSlot[hand] = -1;
         gSupportHand[hand] = -1;
@@ -757,11 +762,21 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             bool showSupportMarkerWhileBlocked) {
     holster::Init();
     xr::HandPose latest[kHandCount]{};
-    xr::GetHandPoses(latest);
+    float headPosition[3]{}, headOrientation[4]{0,0,0,1};
+    std::uint64_t trackingEpoch{};
+    const bool headValid = xr::GetTrackingSnapshot(headPosition, headOrientation, latest, &trackingEpoch);
     const double now = NowSeconds();
 
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));
+    interactionsBlocked = interactionsBlocked || !headValid ||
+                          !gHolsterTrackingReady || trackingEpoch != gInteractionEpoch;
+    if (!headValid || !gHolsterTrackingReady || trackingEpoch != gInteractionEpoch) {
+        for (int hand=0; hand<kHandCount; ++hand)
+            gGripLatched[hand] = gHands[hand].valid && gHands[hand].grip > kGripOpen;
+    }
+    gHolsterTrackingReady = headValid;
+    gInteractionEpoch = trackingEpoch;
     UpdateHandVelocityLocked(now);
     ExpireDroppedLocked(now);
     gInteractionsBlocked = interactionsBlocked;
@@ -838,10 +853,40 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         }
     }
 
+    // Test reach against last tick's socket before allowing its yaw to advance.
+    bool nearInner = interactionsBlocked, nearOuter = interactionsBlocked;
+    const std::uint32_t previousOccupied = OccupiedSlotMaskLocked();
+    for (int point=0; point<holster::POINT_COUNT; ++point) {
+        float previous[3]{};
+        if (!vrcam::GetHolsterAnchorTracking(point, previous)) continue;
+        const int slot = holster::PointSlot(point);
+        for (int hand=0; hand<kHandCount; ++hand) {
+            if (!gHands[hand].valid || IsSupportHandLocked(hand) ||
+                (vehicleImmersive && seatWheel.grabbed[hand])) continue;
+            const bool returning = ValidSlot(gHeldSlot[hand]) && gHeldSlot[hand] == slot;
+            const bool drawing = !ValidSlot(gHeldSlot[hand]) && holster::PointGrabbable(point) &&
+                OwnedConfiguredSlot(ped, slot) && (previousOccupied & (1u << slot)) == 0;
+            if (!returning && !drawing) continue;
+            const float reach = returning ? kHolsterReturnRadius : holster::GrabRadiusMetres();
+            const float distance = Distance(GripPosition(gHands[hand]), {previous[0],previous[1],previous[2]});
+            nearInner |= distance <= reach + 0.08f;
+            nearOuter |= distance <= reach + 0.13f;
+        }
+    }
+    vrcam::UpdateHolsterBodyTracking(headPosition, headOrientation, headValid, trackingEpoch,
+        !inVehicle && vrcam::GroundWalkControlsActive(), nearInner, nearOuter, now);
+
     float anchors[holster::POINT_COUNT][3]{};
     bool anchorValid[holster::POINT_COUNT]{};
     for (int point = 0; point < holster::PointCount(); ++point)
         anchorValid[point] = vrcam::GetHolsterAnchorTracking(point, anchors[point]);
+
+    // Camera rebasing can lag this input tick. Preserve held ownership until
+    // the camera and socket snapshots are usable in the same tracking space.
+    if (std::none_of(anchorValid, anchorValid + holster::POINT_COUNT, [](bool v) { return v; })) {
+        interactionsBlocked = true;
+        gInteractionsBlocked = true;
+    }
 
     if (!interactionsBlocked) {
         std::uint32_t handledHands = 0;
@@ -1063,7 +1108,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         if (held >= 0) SelectCurrentSlot(ped, gHeldSlot[held]);
     }
 
-    float markers[holster::POINT_COUNT + 1][3]{};
+    holstermarker::Marker markers[holster::POINT_COUNT + 1]{};
     int markerCount = 0;
     const bool gameplayMarkers = !interactionsBlocked &&
                                  holster::GripMarkersEnabled();
@@ -1080,13 +1125,18 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 if (!anchorValid[point]) continue;
                 // Holster calibration is spatial: every valid socket (including
                 // EMPTY and the occupied preview socket) must remain visible.
-                // Normal gameplay retains the owned + unoccupied reach hints.
-                if (!holsterCalibrationMarkers &&
-                    (!OwnedConfiguredSlot(ped, slot) ||
-                     (occupied & (1u << slot)) != 0))
-                        continue;
-                std::memcpy(markers[markerCount], anchors[point],
-                            sizeof(markers[markerCount]));
+                // Gameplay distinguishes available, held and flying slots.
+                const bool owned = OwnedConfiguredSlot(ped, slot);
+                const bool held = owned && HeldHandForSlotLocked(slot) >= 0;
+                const bool dropped = owned && !held && (occupied & (1u << slot)) != 0;
+                const bool drawable = !vehicleImmersive || scriptedGunner ||
+                    VehicleSidearmWeaponType(WeaponTypeInSlot(ped, slot));
+                if (!holstermarker::Visible(holster::GripMarkersEnabled(), holsterCalibrationMarkers,
+                        holster::PointVisible(point), owned, held, dropped, drawable)) continue;
+                markers[markerCount].kind = holsterCalibrationMarkers ? holstermarker::Kind::Preview :
+                    held ? holstermarker::Kind::Return : holstermarker::Kind::Grab;
+                std::memcpy(markers[markerCount].position, anchors[point],
+                            sizeof(markers[markerCount].position));
                 ++markerCount;
             }
         }
@@ -1134,14 +1184,15 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                      Distance(GripPosition(gHands[support]),
                               PositionOf(anchor)) > kSupportHintRadius))
                     continue;
-                std::memcpy(markers[markerCount], anchor.position,
-                            sizeof(markers[markerCount]));
+                markers[markerCount].kind = holstermarker::Kind::Support;
+                std::memcpy(markers[markerCount].position, anchor.position,
+                            sizeof(markers[markerCount].position));
                 ++markerCount;
                 break; // two controllers can form at most one support pair
             }
         }
     }
-    xr::SetHolsterMarkers(markerCount > 0 ? markers : nullptr, markerCount);
+    xr::SetHolsterMarkerStates(markerCount > 0 ? markers : nullptr, markerCount, trackingEpoch, headPosition);
 
     unsigned int heldMask = 0;
     for (int hand = 0; hand < kHandCount; ++hand)
