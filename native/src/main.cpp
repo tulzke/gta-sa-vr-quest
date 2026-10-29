@@ -1410,6 +1410,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::ToggleBikeWheelieBlock();
             } else if (item==savr::driving::MENU_LOCAL_HORIZON&&enter) {
                 savr::driving::ToggleBikeHorizonLock();
+            } else if (item==savr::driving::MENU_BIKE_LEAN_STEERING&&(enter||step)) {
+                savr::driving::ToggleBikeLeanSteering();
+            } else if (item==savr::driving::MENU_BIKE_LEAN_SENSITIVITY&&step) {
+                savr::driving::AdjustBikeLeanSensitivityPercent(step);
             } else if (item==savr::driving::MENU_BIKE_VISUAL_LEAN&&step) {
                 savr::driving::AdjustBikeVisualLeanPercent(step);
             } else if (item==savr::driving::MENU_KEEP_RIDER_ON_FLIPS&&enter) {

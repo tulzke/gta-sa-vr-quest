@@ -2,6 +2,7 @@
 #include "BeachDance.h"
 #include "JustBusiness.h"
 #include "Driving.h"
+#include "BikeSteering.h"
 #include "MissionComfort.h"
 
 #include "Locomotion.h"
@@ -160,6 +161,8 @@ std::atomic<bool> g_bikeHandsFollowTilt{true};
 std::atomic<bool> g_bikeBlockWheelie{false};
 std::atomic<bool> g_bikeHorizonLocked{true};
 std::atomic<int> g_bikeVisualLeanPercent{50};
+std::atomic<bool> g_bikeLeanSteering{true};
+std::atomic<int> g_bikeLeanSensitivity{100};
 std::atomic<bool> g_keepRiderOnFlips{false};
 std::atomic<bool> g_hideInteriorGlass{true};
 std::atomic<bool> g_drivebyImmersive{false};
@@ -195,6 +198,9 @@ int    g_radioLastStation = -999;
 
 std::mutex g_stateMutex;
 WheelVisualState g_visual{};
+// Last sampled vehicle, retained across grab resets (bicycle MOTION clears
+// grabs when it starts). Only UpdateInput changes this identity.
+void* g_grabVehicle{};
 // The aircraft yoke follows the seated head bone, but that bone and the
 // world-to-tracking base can both be stale for the first few frames after a
 // save loads directly in a plane.  Keep the exit-drift reference outside
@@ -238,6 +244,7 @@ bool g_bikeThrottleGestureActive{};
 bool g_bikeThrottleReferenceValid{};
 float g_bikeThrottleReferenceOrientation[4]{0.0f,0.0f,0.0f,1.0f};
 float g_bikeLean{};
+bikesteering::State g_bikeSteering{};
 bool g_bikeLeanReferenceValid[2]{};
 float g_bikeLeanReferenceY[2]{};
 int g_bikeLeanGestureState{};
@@ -473,6 +480,8 @@ void Save() {
     std::fprintf(file, "BikeLockHorizon=%d\n", g_bikeHorizonLocked.load()?1:0);
     std::fprintf(file, "BikeVisualLeanPercent=%d\n",
                  g_bikeVisualLeanPercent.load());
+    std::fprintf(file, "BikeLeanSteering=%d\n", g_bikeLeanSteering.load()?1:0);
+    std::fprintf(file, "BikeLeanSensitivityPercent=%d\n", g_bikeLeanSensitivity.load());
     std::fprintf(file, "KeepRiderOnFlips=%d\n",
                  g_keepRiderOnFlips.load()?1:0);
     std::fprintf(file, "HideInteriorGlass=%d\n",
@@ -546,6 +555,7 @@ void Load() {
     std::copy(std::begin(kDefaults), std::end(kDefaults), values);
     int visible = 1, highlights = 1, bikeHandsFollowTilt = 1;
     int bikeLockHorizon = 1, bikeVisualLeanPercent = 50;
+    int bikeLeanSteering = 1, bikeLeanSensitivity = 100;
     int keepRiderOnFlips = 0;
     int hideInteriorGlass = 1;
     int drivebyImmersive = 0;
@@ -643,6 +653,10 @@ void Load() {
             else if (std::sscanf(line, "BikeLockHorizon=%d", &value)==1) bikeLockHorizon=value;
             else if (std::sscanf(line, "BikeVisualLeanPercent=%d", &value)==1)
                 bikeVisualLeanPercent=value;
+            else if (std::sscanf(line, "BikeLeanSteering=%d", &value)==1)
+                bikeLeanSteering=value;
+            else if (std::sscanf(line, "BikeLeanSensitivityPercent=%d", &value)==1)
+                bikeLeanSensitivity=value;
             else if (std::sscanf(line, "KeepRiderOnFlips=%d", &value)==1)
                 keepRiderOnFlips=value;
             else if (std::sscanf(line, "HideInteriorGlass=%d", &value)==1)
@@ -758,6 +772,8 @@ void Load() {
     g_bikeHorizonLocked.store(bikeLockHorizon!=0);
     g_bikeVisualLeanPercent.store(
         std::clamp(bikeVisualLeanPercent,25,100));
+    g_bikeLeanSteering.store(bikeLeanSteering==1);
+    g_bikeLeanSensitivity.store(std::clamp(bikeLeanSensitivity,25,200));
     g_keepRiderOnFlips.store(keepRiderOnFlips!=0);
     g_hideInteriorGlass.store(hideInteriorGlass!=0);
     g_drivebyImmersive.store(drivebyImmersive!=0);
@@ -798,6 +814,7 @@ void ClearGrabStateLocked() {
     g_bikeThrottleReferenceValid=false;
     g_bikeLean=0.0f;
     g_bikeLeanGestureState=0;
+    g_bikeSteering.Reset();
     g_bikeLeanReferenceValid[0]=g_bikeLeanReferenceValid[1]=false;
     g_bicycleGestureActive=false;
     g_bicycleSteering=0.0f;
@@ -3042,6 +3059,7 @@ constexpr int kImmersiveBikeItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
+    MENU_BIKE_LEAN_STEERING, MENU_BIKE_LEAN_SENSITIVITY,
     MENU_BIKE_HAND_TILT, MENU_BIKE_BLOCK_WHEELIE, MENU_LOCAL_HORIZON, MENU_BIKE_VISUAL_LEAN,
     MENU_KEEP_RIDER_ON_FLIPS, MENU_RESET, MENU_BACK
 };
@@ -3373,6 +3391,8 @@ void ResetVehiclePreset(int vehicleType) {
     if (vehicleType==VEHICLE_BIKE) {
         g_bikeVisualLeanPercent.store(50,std::memory_order_release);
         g_bikeBlockWheelie.store(false);
+        g_bikeLeanSteering.store(true);
+        g_bikeLeanSensitivity.store(100);
     }
     if (HasCurrentModelForType(vehicleType)) {
         const int model=GetActiveVehicleModelId();
@@ -3398,6 +3418,18 @@ void ToggleWheelVisible() { EnsureInit(); g_wheelVisible.store(!g_wheelVisible.l
 bool AreHandleHighlightsEnabled() { EnsureInit(); return g_highlights.load(); }
 void ToggleHandleHighlights() { EnsureInit(); g_highlights.store(!g_highlights.load()); Save(); }
 bool DoBikeHandsFollowTilt() { EnsureInit(); return g_bikeHandsFollowTilt.load(); }
+bool IsBikeLeanSteeringEnabled() { EnsureInit(); return g_bikeLeanSteering.load(); }
+void ToggleBikeLeanSteering() {
+    EnsureInit(); g_bikeLeanSteering.store(!g_bikeLeanSteering.load());
+    ResetInteraction(); Save();
+}
+int GetBikeLeanSensitivityPercent() { EnsureInit(); return g_bikeLeanSensitivity.load(); }
+void AdjustBikeLeanSensitivityPercent(int direction) {
+    EnsureInit(); if (!direction) return;
+    g_bikeLeanSensitivity.store(std::clamp(
+        g_bikeLeanSensitivity.load()+(direction<0?-5:5),25,200));
+    Save();
+}
 void ToggleBikeHandsFollowTilt() {
     EnsureInit(); g_bikeHandsFollowTilt.store(!g_bikeHandsFollowTilt.load()); Save();
 }
@@ -3734,6 +3766,10 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
         (g_wheelSeatVehicle&&g_wheelSeatVehicle!=activeVehicle)) {
         ClearWheelSeatReferenceLocked();
     }
+    if (g_grabVehicle!=activeVehicle) {
+        ClearGrabStateLocked();
+        g_grabVehicle=activeVehicle;
+    }
     if (!gameplay||!CabinVisualContext()) {
         ClearInteractionLocked();
         return;
@@ -3830,8 +3866,19 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     }
     xr::HandPose poses[2]{}; xr::GetHandPoses(poses);
     const V3 center{visual.center[0],visual.center[1],visual.center[2]};
-    const V3 right{visual.right[0],visual.right[1],visual.right[2]};
-    const V3 up{visual.up[0],visual.up[1],visual.up[2]};
+    V3 right{visual.right[0],visual.right[1],visual.right[2]};
+    V3 up{visual.up[0],visual.up[1],visual.up[2]};
+    const bool leanSteering=visual.bike&&g_bikeLeanSteering.load();
+    if (leanSteering) {
+        // Input yaw uses gravity-level axes; visual axes keep the retail roll
+        // for rendering. Reading yaw in the rolled bar plane feeds the game's
+        // response back into the next input and couples roll to yaw.
+        const V3 levelForward=Normalized(V3{up.x,0.0f,up.z});
+        const V3 levelRight=Normalized(Cross(levelForward,V3{0.0f,1.0f,0.0f}));
+        if (Length(levelRight)>0.5f&&Dot(levelRight,right)>0.0f) {
+            right=levelRight; up=levelForward;
+        }
+    }
     V3 positions[2]{}; bool poseValid[2]{},justGrabbed[2]{};
     // A hand holding the drawn sidearm cannot also grab a vehicle control. The mask is lock-free.
     const unsigned int weaponHands = physicalweapon::HeldHandMaskRelaxed();
@@ -3884,12 +3931,18 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     if (visual.bike) {
         constexpr float bikeMax=35.0f*3.14159265358979323846f/180.0f;
         constexpr float discontinuity=45.0f*3.14159265358979323846f/180.0f;
-        const V3 neutral=
+        V3 neutral=
             V3{visual.handlePosition[1][0],visual.handlePosition[1][1],
                visual.handlePosition[1][2]}-
             V3{visual.handlePosition[0][0],visual.handlePosition[0][1],
                visual.handlePosition[0][2]};
-        const V3 normal{visual.normal[0],visual.normal[1],visual.normal[2]};
+        const V3 normal=leanSteering?V3{0.0f,1.0f,0.0f}:
+            V3{visual.normal[0],visual.normal[1],visual.normal[2]};
+        if (leanSteering) {
+            // Calibrated visual sockets already contain body roll. Their
+            // direction must not inject that roll into the input reference.
+            neutral=right*std::max(0.15f,2.0f*visual.radius);
+        }
         const int mask=(left?1:0)|(rightGrabbed?2:0);
         if (mask==3) {
             g_bikeOneHandValid=false;
@@ -3980,6 +4033,38 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     if (std::abs(steering)<=deadZone) steering=0.0f;
     else steering=std::copysign((std::abs(steering)-deadZone)/(1.0f-deadZone),steering);
     visual.steering=steering;
+    if (leanSteering&&!preview) {
+        float forwardSpeed=0.0f;
+        void* bike=nullptr;
+        V3 entityRight,entityForward,entityUp,entityPosition;
+        if (GetActivePlayerBike(&bike,nullptr)&&
+            ReadEntityMatrix(bike,&entityRight,&entityForward,&entityUp,&entityPosition)) {
+            // Same verified ARM64 velocity field used by BuildBikeTracking.
+            const V3 velocity=*reinterpret_cast<const V3*>(
+                static_cast<const char*>(bike)+0x68);
+            forwardSpeed=Dot(velocity,entityForward);
+        }
+        const auto result=g_bikeSteering.Update(
+            {positions[0].x,positions[0].y,positions[0].z},
+            {positions[1].x,positions[1].y,positions[1].z},
+            left&&rightGrabbed,forwardSpeed,steering,
+            g_bikeLeanSensitivity.load(),MonotonicSeconds());
+        // Keep physicalAngle as the measured bar yaw. The gameplay command
+        // must not rotate the displayed handlebar as if it were the hand yaw.
+        visual.steering=result.steering;
+#if SAVR_DEV
+        static double lastLeanLog=0.0;
+        const double now=MonotonicSeconds();
+        if (now-lastLeanLog>=1.0) {
+            LOGI("[driving.lean] speed=%.3f yaw=%.3f roll_deg=%.1f weight=%.2f steer=%.3f two=%d",
+                 forwardSpeed,steering,result.roll/bikesteering::kRadians,
+                 result.weight,result.steering,result.twoHands?1:0);
+            lastLeanLog=now;
+        }
+#endif
+    } else {
+        g_bikeSteering.Reset();
+    }
     if (appearance==5) {
         // Yoke pitch: axial displacement of the grabbed hands along the wheel
         // normal (vehicle forward), referenced at grab. Pulling toward the

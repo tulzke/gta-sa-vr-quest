@@ -79,12 +79,43 @@ becomes idle.
 - `tools/export-savr-settings.ps1` exports VR settings to the computer.
 - `COLLECT_RENDER_REPORT.bat` collects a render diagnostic report.
 
+## Bike lean steering
+
+In immersive handlebar driving, **BIKE STEERING > LEAN + BARS** is enabled by
+default. At parking speed, turn the bars normally. As forward speed increases,
+tilt the line between the two held controllers to steer into a curve (raise
+the right grip to lean left, or the left grip to lean right). Capture a
+comfortable neutral by releasing and grabbing the bars. Lean authority blends
+in over 0.18 seconds after the second hand grabs; one hand and reverse retain
+handlebar steering. This also applies to bicycles in HANDLEBAR + R2 mode.
+Bicycle MOTION and ordinary stick driving retain their controls.
+
+**LEAN SENSITIVITY** accepts 25–200%; at 100%, the roll dead zone is 2 degrees
+and a 25-degree hand tilt requests full steering. Select **BARS ONLY** to
+restore the previous handlebar solver. Both settings persist in `vr_driving.ini`:
+
+```ini
+BikeLeanSteering=1
+BikeLeanSensitivityPercent=100
+```
+
+This controls the turn through GTA's existing physics; the bike angle still
+depends on speed, traction and handling. **VISUAL BIKE LEAN** and **LOCAL HORIZON**
+remain separate display preferences. Moving both hands sideways without tilting
+them does not steer. Wheelie/forward-lean gestures and throttle are unchanged.
+The default speed blend spans 0.04–0.12 in GTA velocity units; it only applies
+while moving forwards. Quest handling and comfort still need a riding check.
+
 ## Developer tests
 
 Developers can run `python tools/test-holsters.py` for host tests of the body,
 marker geometry, production grab/return branches, camera transforms and settings.
 On Windows the runner discovers Visual Studio C++ tools, or uses `VS_VCVARS64`.
 On Linux/macOS it uses `CXX` or `c++` with C++20 support.
+
+Run `python tools/test-bike-steering.py` for production lean-input maths,
+handover, settings and motorcycle/bicycle routing tests. Developer builds log
+`[driving.lean]` speed, bar input, hand roll, blend and resulting steering.
 
 ## License
 

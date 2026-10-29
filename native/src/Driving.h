@@ -152,7 +152,9 @@ enum MenuItem {
     MENU_RESET,
     MENU_BACK,
     MENU_PLANE_INVERT_PITCH,
-    MENU_BIKE_BLOCK_WHEELIE
+    MENU_BIKE_BLOCK_WHEELIE,
+    MENU_BIKE_LEAN_STEERING,
+    MENU_BIKE_LEAN_SENSITIVITY
 };
 
 enum ControlCalibrationField {
@@ -267,6 +269,10 @@ void ToggleWheelVisible();
 bool AreHandleHighlightsEnabled();
 void ToggleHandleHighlights();
 bool DoBikeHandsFollowTilt();
+bool IsBikeLeanSteeringEnabled();
+void ToggleBikeLeanSteering();
+int GetBikeLeanSensitivityPercent();
+void AdjustBikeLeanSensitivityPercent(int direction);
 void ToggleBikeHandsFollowTilt();
 bool IsBikeWheelieBlocked();
 void ToggleBikeWheelieBlock();

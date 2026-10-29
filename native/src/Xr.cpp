@@ -7701,6 +7701,16 @@ void BuildDrivingMenu() {
             case driving::MENU_BIKE_BLOCK_WHEELIE:
                 std::snprintf(rows[row],sizeof(rows[row]),"BLOCK WHEELIE   < %s >",driving::IsBikeWheelieBlocked()?"ON":"OFF");
                 break;
+            case driving::MENU_BIKE_LEAN_STEERING:
+                std::snprintf(rows[row],sizeof(rows[row]),
+                    "BIKE STEERING   < %s >",
+                    driving::IsBikeLeanSteeringEnabled()?"LEAN + BARS":"BARS ONLY");
+                break;
+            case driving::MENU_BIKE_LEAN_SENSITIVITY:
+                std::snprintf(rows[row],sizeof(rows[row]),
+                    "LEAN SENSITIVITY   < %d%% >",
+                    driving::GetBikeLeanSensitivityPercent());
+                break;
             case driving::MENU_BIKE_VISUAL_LEAN:
                 std::snprintf(rows[row],sizeof(rows[row]),
                     "VISUAL BIKE LEAN   < %d%% >",

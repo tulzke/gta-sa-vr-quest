@@ -59,6 +59,8 @@ int GlobalSeatField(int,int,bool height) { return height?F_HEIGHT:F_DISTANCE; }
 bool HasCurrentModelForType(int) { return activeModel>=0; }
 std::atomic<int> g_value[F_COUNT]{};
 std::atomic<int> g_bikeVisualLeanPercent{50};
+std::atomic<bool> g_bikeLeanSteering{true};
+std::atomic<int> g_bikeLeanSensitivity{100};
 int kDefaults[F_COUNT]{};
 '''
 
