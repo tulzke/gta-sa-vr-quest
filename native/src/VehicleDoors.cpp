@@ -32,6 +32,7 @@ unsigned (*g_status)(const void*,int){};
 void (*g_setStatus)(void*,int,unsigned){};
 void* (*g_frameLtm)(void*){};
 bool g_ready{};
+std::uintptr_t g_driveDoorStatusReturn{};
 GripEdge g_edges[2];
 GripEdge g_editEdges[2];
 std::atomic<unsigned> g_claimed{};
@@ -56,6 +57,20 @@ template<class T> T Read(const void* p,int off) {
 }
 template<class T> void Write(void* p,int off,T value) {
     std::memcpy(static_cast<char*>(p)+off,&value,sizeof(value));
+}
+unsigned DoorStatusAt(const void* damage,int door,std::uintptr_t caller) {
+    const unsigned status=static_cast<unsigned>(door)<=5?Read<std::uint8_t>(damage,9+door):4;
+    if (status==1&&door==2&&caller==g_driveDoorStatusReturn&&g_driveDoorStatusReturn&&
+        g.FindPlayerPed&&g.FindPlayerVehicle&&g.CVehicle_IsDriver) {
+        void* ped=g.FindPlayerPed(-1);
+        void* vehicle=g.FindPlayerVehicle(-1,false);
+        if (ped&&vehicle&&static_cast<const char*>(damage)==static_cast<char*>(vehicle)+0x758&&
+            g.CVehicle_IsDriver(vehicle,ped)) return 0;
+    }
+    return status;
+}
+unsigned DoorStatusForDrive(const void* damage,int door) {
+    return DoorStatusAt(damage,door,reinterpret_cast<std::uintptr_t>(__builtin_return_address(0)));
 }
 struct Pool {
     void* identity{};
@@ -228,6 +243,28 @@ bool Hook(void* target) {
     __builtin___clear_cache(reinterpret_cast<char*>(code),reinterpret_cast<char*>(code)+16);
     return true;
 }
+bool HookAutomaticDriverClose(void* status,void* drive) {
+    // Retail 2.11.311: ProcessPed asks GetDoorStatus(2), then starts the
+    // rolling-close task for status 1. Restrict the override to that callsite.
+    constexpr std::uint32_t expectedStatus[]={0x7100143f,0x54000088,0x8b214008,0x39402500,
+                                              0xd65f03c0,0x52800080,0xd65f03c0};
+    constexpr std::uint32_t expectedCall[]={0x911d6100,0x52800041,0x940712ab,0x7100041f,0x54000f21};
+    if (!status||!drive||std::memcmp(status,expectedStatus,sizeof(expectedStatus))||
+        std::memcmp(static_cast<char*>(drive)+0x3b8,expectedCall,sizeof(expectedCall))) return false;
+    const long page=sysconf(_SC_PAGESIZE);
+    if (page<=0) return false;
+    const auto address=reinterpret_cast<std::uintptr_t>(status);
+    const auto start=address&~(static_cast<std::uintptr_t>(page)-1);
+    const auto end=(address+16+page-1)&~(static_cast<std::uintptr_t>(page)-1);
+    if (mprotect(reinterpret_cast<void*>(start),end-start,PROT_READ|PROT_WRITE|PROT_EXEC)) return false;
+    g_driveDoorStatusReturn=reinterpret_cast<std::uintptr_t>(drive)+0x3c4;
+    auto* code=static_cast<std::uint32_t*>(status);
+    const auto hook=reinterpret_cast<std::uintptr_t>(&DoorStatusForDrive);
+    std::memcpy(code+2,&hook,8);code[1]=0xd61f0220;
+    __atomic_store_n(code,0x58000051,__ATOMIC_RELEASE);
+    __builtin___clear_cache(reinterpret_cast<char*>(code),reinterpret_cast<char*>(code)+16);
+    return true;
+}
 void AddMarker(MarkerFrame& frame,const Door& door,bool held,bool inside=false) {
     if (frame.count>=MarkerFrame::kCapacity) return;
     Marker marker{door.handle,door.tangent,door.car.up,held};
@@ -247,6 +284,9 @@ void Install(void* handle) {
     g_setStatus=reinterpret_cast<decltype(g_setStatus)>(dlsym(handle,"_ZN14CDamageManager13SetDoorStatusE6eDoorsj"));
     g_frameLtm=reinterpret_cast<decltype(g_frameLtm)>(dlsym(handle,"_Z13RwFrameGetLTMP7RwFrame"));
     void* swing=dlsym(handle,"_ZN11CAutomobile19ProcessSwingingDoorEi6eDoors");
+    void* drive=dlsym(handle,"_ZN19CTaskSimpleCarDrive10ProcessPedEP4CPed");
+    if (!HookAutomaticDriverClose(reinterpret_cast<void*>(g_status),drive))
+        LOGE("[doors] automatic driver door close hook unavailable");
     g_ready=g_open&&g_canOpen&&g_inUse&&g_status&&g_setStatus&&g_frameLtm&&swing&&
         g.CPools_ms_pVehiclePool&&g.CVehicle_GetVehicleAppearance&&g.CWorld_ProcessLineOfSight&&Hook(swing);
     if (g_ready) LOGI("[doors] hand interaction installed");
@@ -330,7 +370,19 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             (g_grab.inside ? seated!=g_grab.target.vehicle : seated!=nullptr)||
             !ReadDoor(g_grab.target,ped,d,g_grab.inside)||Length(d.handle-world[h])>.7f||
             !Visible(eye,d.handle,g_grab.target.vehicle)||
-            !g_grab.motion.Step(d.car.Local(world[h]),dt)) { Reset();return; }
+            !g_grab.motion.Step(d.car.Local(world[h]),dt)) {
+            // Losing the hand, line of sight or reach cancels the grab, but
+            // must not hand a door opened from the seat to swinging physics.
+            const auto grab=g_grab;
+            const bool keep=grab.inside&&seated==grab.target.vehicle&&grab.target.Live(pool)&&
+                ReadDoor(grab.target,ped,d,true)&&grab.motion.Ratio()>0;
+            Reset();
+            if (keep) {
+                g_release.target=grab.target;g_release.inside=true;g_release.active=true;
+                g_release.motion={grab.motion.angle,grab.motion.closed,grab.motion.open,0.f,false,true};
+            }
+            return;
+        }
         Apply();
         if (hands[h].grip<=.35f) {
             const float velocity=g_grab.motion.ReleaseVelocity(dt);
@@ -340,8 +392,11 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             Reset();
             if ((inside&&motion.Ratio()>0)||slam) {
                 g_release.target=target;g_release.inside=inside;g_release.active=true;
+                // A slow closing movement stops where it is released; only a
+                // deliberate throw should continue toward the latch.
+                const float carried=inside&&motion.velocity*(motion.open-motion.closed)<0&&!slam?0.f:motion.velocity;
                 g_release.motion={motion.angle,motion.closed,motion.open,
-                    slam?std::copysign(std::max(std::abs(motion.velocity),.9f),motion.velocity):motion.velocity,slam,inside};
+                    slam?std::copysign(std::max(std::abs(motion.velocity),.9f),motion.velocity):carried,slam,inside};
             }
             return;
         }

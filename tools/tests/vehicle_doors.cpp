@@ -181,6 +181,17 @@ void GrabIt(int hand=0) {
 }
 }
 int main() {
+    Setup();
+    auto* damage=static_cast<char*>(vehicle)+0x758;
+    Write<std::uint8_t>(damage,11,1);g_driveDoorStatusReturn=1234;
+    CHECK(DoorStatusAt(damage,2,1234)==1); // no player vehicle
+    seated=vehicle;
+    CHECK(DoorStatusAt(damage,2,1234)==0); // only the automatic-close call
+    CHECK(DoorStatusAt(damage,2,1235)==1);
+    Write<std::uint8_t>(damage,12,1);
+    CHECK(DoorStatusAt(damage,3,1234)==1);
+    CHECK(DoorStatusAt(damage,6,1234)==4);
+    g_driveDoorStatusReturn=0;
     for (float sign:{-1.f,1.f}) for (int hz:{36,72,90}) {
         Motion m;const float dt=1.f/hz;
         CHECK(m.Begin({},{0,-1,0},sign*.5f,0,sign*1.5f));
@@ -322,6 +333,20 @@ int main() {
     Write<float>(vehicle,0x770+2*0x18+0xc,0);OnSwing(vehicle,10,2);
     CHECK(Read<float>(vehicle,0x770+2*0x18+0xc)<-.3f);
     seated=nullptr;Tick();CHECK(!g_release.active);
+    // If an open seated grab loses tracking or visibility, preserve its last
+    // angle without imparting a throw, rather than letting native physics close it.
+    for(int failure=0;failure<2;++failure) {
+        Setup();seated=vehicle;vrcam::eye={-.35f,-.3f,1.3f};hands[0]={};hands[1]={};
+        std::memcpy(hands[0].gripPos,&inner,12);Tick();hands[0].grip=1;Tick();
+        const Vec opened=innerHinge+Rotate(inner-innerHinge,-.12f);
+        std::memcpy(hands[0].gripPos,&opened,12);Tick();
+        CHECK(ClaimedHands()==1);
+        if(failure==0) hands[0].valid=false; else wall=true;
+        Tick();CHECK(ClaimedHands()==0&&g_release.active&&g_release.motion.velocity==0);
+        wall=false;hands[0].valid=true;
+        for(int i=0;i<30;++i) Tick();
+        CHECK(g_release.active&&std::abs(g_release.motion.angle)>.1f);
+    }
     // A closing throw from the fully open stop reaches and latches the door.
     Setup();hands[0]={};hands[1]={};Write<float>(vehicle,0x770+2*0x18+0xc,-1.2f);
     status[2]=1;RefreshFrames();

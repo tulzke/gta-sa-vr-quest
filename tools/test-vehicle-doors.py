@@ -22,6 +22,8 @@ def remove_function(text, signature):
 # Only OS-specific symbol resolution/patch installation is omitted. All live
 # selection, pool validation, latching, writes and PreRender dispatch are real.
 source = remove_function(source, 'bool Hook(void* target)')
+source = remove_function(source, 'bool HookAutomaticDriverClose(void* status,void* drive)')
+source = remove_function(source, 'unsigned DoorStatusForDrive(const void* damage,int door)')
 source = remove_function(source, 'void Install(void* handle)')
 source = '\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness = (ROOT / 'tools/tests/vehicle_doors.cpp').read_text(encoding='utf8')
