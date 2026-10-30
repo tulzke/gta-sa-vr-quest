@@ -16,9 +16,9 @@
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::exit(1); } } while(0)
 #define LOGI(...) ((void)0)
 namespace savr::npcgrab {
-int stopsRequested{};unsigned blockedHands{};
+int stopsRequested{};unsigned claimedHands{};
 void OnDoorOpening(void*) {++stopsRequested;}
-bool BlocksVehicleInteraction(void*,int hand) {return (blockedHands&(1u<<hand))!=0;}
+unsigned ClaimedHands() {return claimedHands;}
 }
 namespace savr {
 GameSymbols g{};
@@ -156,7 +156,7 @@ void Setup() {
     driving::grabbed=0;driving::debugMode=0;driving::corrections.clear();driving::saves=0;xr::focused=true;seated=nullptr;
     writes=nativeSwings=invalidWrites=0;
     npcgrab::stopsRequested=0;
-    npcgrab::blockedHands=0;
+    npcgrab::claimedHands=0;
     vrcam::eye={-1.7f,-.3f,1.3f};
     vrcam::rebase={};
 }
@@ -238,8 +238,9 @@ int main() {
 
     Setup();Ready();hands[0].grip=1;Tick();CHECK(ClaimedHands()==1);
     CHECK(npcgrab::stopsRequested==1);
-    npcgrab::blockedHands=1;Tick();CHECK(ClaimedHands()==0); // scene cancels an existing door grab
-    Setup();Ready();npcgrab::blockedHands=3;hands[0].grip=1;Tick();CHECK(ClaimedHands()==0&&xr::published.count==0);
+    npcgrab::claimedHands=1;Tick();CHECK(ClaimedHands()==0); // one hand cannot own both NPC and door
+    Setup();Ready();npcgrab::claimedHands=3;hands[0].grip=1;Tick();CHECK(ClaimedHands()==0&&xr::published.count>0);
+    Setup();Ready();npcgrab::claimedHands=2;hands[0].grip=1;Tick();CHECK(ClaimedHands()==1); // the free hand can still open the door
     Setup();Ready();hands[0].grip=1;Tick();CHECK(ClaimedHands()==1);
     const float initial=Read<float>(vehicle,0x770+2*0x18+0xc);
     CHECK(initial==0);

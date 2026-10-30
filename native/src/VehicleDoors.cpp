@@ -301,7 +301,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     Vec eye{};float origin[3]{},forward[3]{};
     if (!usable||!pool.ReadCurrent()||!vrcam::GetHeadWorldRay(origin,forward)) { Reset();return; }
     eye={origin[0],origin[1],origin[2]};
-    unsigned occupied=physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask();
+    unsigned occupied=physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands();
     void* seated=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
     if (g_release.active) {
         Door d;
@@ -327,7 +327,6 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     if (g_grab.hand>=0) {
         const int h=g_grab.hand;Door d;
         if (!g_grab.target.Live(pool)||!valid[h]||(occupied&(1u<<h))||
-            npcgrab::BlocksVehicleInteraction(g_grab.target.vehicle,h)||
             (g_grab.inside ? seated!=g_grab.target.vehicle : seated!=nullptr)||
             !ReadDoor(g_grab.target,ped,d,g_grab.inside)||Length(d.handle-world[h])>.7f||
             !Visible(eye,d.handle,g_grab.target.vehicle)||
@@ -494,7 +493,6 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         void* vehicle=pool.objects+slot*kStride;
         if (seated && (vehicle!=seated || !g.CVehicle_IsDriver || !g.CVehicle_IsDriver(vehicle,ped))) continue;
         if ((Read<std::uint8_t>(vehicle,0x5a)&7)!=2||g.CVehicle_GetVehicleAppearance(vehicle)!=1) continue;
-        if (npcgrab::BlocksVehicleInteraction(vehicle,0)&&npcgrab::BlocksVehicleInteraction(vehicle,1)) continue;
         void* matrix=Read<void*>(vehicle,0x18);
         if (!matrix) continue;
         const Vec position=Read<Vec>(matrix,0x30);
@@ -520,7 +518,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             !Visible(eye,d.handle,t.vehicle)) continue;
         AddMarker(markers,d,false,seated!=nullptr);
         for (int h=0;h<2;++h) {
-            if (!valid[h]||(occupied&(1u<<h))||npcgrab::BlocksVehicleInteraction(t.vehicle,h)) continue;
+            if (!valid[h]||(occupied&(1u<<h))) continue;
             const float distance=Length(world[h]-d.handle);
             if (fresh[h]&&distance<best) { best=distance;chosen=t;chosenDoor=d;chosenHand=h; }
             if (editMode&&editFresh[h]&&distance<bestEdit) {bestEdit=distance;editTarget=t;editDoor=d;editHand=h;}
