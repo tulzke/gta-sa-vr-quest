@@ -23,6 +23,7 @@
 #include "Swimming.h"
 #include "BoatEntry.h"
 #include "VehicleDoors.h"
+#include "NpcGrab.h"
 #include "VehicleTestArea.h"
 #include "MissionWeaponGrant.h"
 #include "PerfTelemetry.h"
@@ -1956,6 +1957,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     else {
         savr::physicalweapon::ResetTransient();
         savr::vehicledoors::Reset();
+        savr::npcgrab::Reset();
         savr::melee::Reset();
         savr::scopeaim::Reset();
         savr::vrfire::Update(true);
@@ -2579,6 +2581,7 @@ void* WaitForGameLibrary(void*) {
     savr::swimming::Install(handle);
     savr::boatentry::Install(handle);
     savr::vehicledoors::Install(handle);
+    savr::npcgrab::Install(handle);
     savr::testarea::Install(handle);
     savr::missionweapon::Install(handle);
     savr::braindiag::Install(handle);  // basketball brain-chain diagnostics

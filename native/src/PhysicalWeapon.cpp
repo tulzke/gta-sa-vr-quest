@@ -12,6 +12,7 @@
 #include "Throwable.h"
 #include "Xr.h"
 #include "VehicleDoors.h"
+#include "NpcGrab.h"
 #include "VehicleTestArea.h"
 #include "RadialHolsterMenu.h"
 #include "MissionWeaponGrant.h"
@@ -787,7 +788,8 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     const bool navigationClaimed=testarea::UpdateNavigation(interactionsBlocked,latest,
         headPosition,headOrientation,headValid,trackingEpoch);
     vehicledoors::Update(interactionsBlocked||navigationClaimed, latest, headValid, trackingEpoch);
-    const unsigned int doorHands = vehicledoors::ClaimedHands();
+    npcgrab::Update(interactionsBlocked||navigationClaimed||driving::GetVehicleDebugMode()!=0, latest, headValid, trackingEpoch);
+    const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands();
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));
     interactionsBlocked = interactionsBlocked || navigationClaimed || driving::GetVehicleDebugMode()!=0 || !headValid ||

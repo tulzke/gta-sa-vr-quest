@@ -79,6 +79,7 @@ add_library(savr SHARED
     src/ModelSets.cpp
     src/LoadingTrace.cpp
     src/Holster.cpp
+    src/NpcGrab.cpp
     src/Melee.cpp
     src/MissionControls.cpp
     src/Catalyst.cpp

@@ -32,6 +32,7 @@
 #include "Swimming.h"
 #include "BoatEntry.h"
 #include "VehicleDoors.h"
+#include "NpcGrab.h"
 #include "VehicleTestArea.h"
 #include "StereoSurfacePolicy.h"
 #include "Symbols.h"
@@ -30134,6 +30135,7 @@ void RequestRecenter() {
     TraceTracking("RECENTER",g_origin.pos);
     g_duckLatched=false;g_crouchBlend=0.0f;
     physicalweapon::ResetTracking();
+    npcgrab::Reset();
     driving::ResetTracking();
     melee::Reset();
     g_origin.valid=false;
