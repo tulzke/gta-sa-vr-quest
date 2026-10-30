@@ -45,6 +45,10 @@ void (*draggedDtor)(void*){};
 void* (*association)(void*,unsigned){};
 void (*setAnimationTime)(void*,float){};
 bool (*vehicleAI)(void*,unsigned*){};
+void (*vehicleControl)(void*){};
+void (*vehicleRails)(void*){};
+void (*lineUpPed)(void*,void*,void*,void*){};
+void (*seatPosition)(void*){};
 void (*realPhysics)(void*){};
 std::atomic<unsigned> claimed{};
 GripEdge edges[2];
@@ -55,7 +59,19 @@ double updated{};
 bool ready{};
 void* owner{};
 MarkerFrame worldMarkers{};
-struct HandMotion { Vec previous{};bool valid{}; } handMotion[2];
+struct HandMotion { Vec previous{};bool valid{},clenched{}; } handMotion[2];
+struct Feedback { Marker marker{};double started{};bool active{}; } feedback[4];
+unsigned nextFeedback{};
+Vec Bone(void* ped,int bone);
+void ActionFeedback(void* ped,bool fist) {
+    const Vec head=Bone(ped,fist?5:4);
+    for (int i=0;i<worldMarkers.count;++i) {
+        const auto& marker=worldMarkers.markers[i];
+        if (marker.fist==fist&&Length(marker.position-head)<.5f) {
+            feedback[nextFeedback++%4]={marker,updated,true};return;
+        }
+    }
+}
 
 template<class T> T Read(const void* p,int offset) {
     T value{};std::memcpy(&value,static_cast<const char*>(p)+offset,sizeof(value));return value;
@@ -109,6 +125,7 @@ struct Animation {
     double until{};
     Phase phase{Phase::Hit};
     double waitUntil{};
+    double punchAfter{};
     float speed{1.f};
     void* task{};
     void* pausedAssociation{};
@@ -200,6 +217,31 @@ bool OnVehicleAI(void* car,unsigned* flags) {
     const bool result=vehicleAI(car,flags);
     StopCar(car,Now()); // after the native driver has chosen acceleration/braking
     return result;
+}
+void OnVehicleControl(void* car) {
+    if (StopCar(car,Now())) {
+        Write(car,0x68,Vec{});Write(car,0x74,Vec{});
+        return; // no propulsion/integration while this NPC scene owns the car
+    }
+    vehicleControl(car);
+}
+void OnVehicleRails(void* car) {
+    if (!StopCar(car,Now())) vehicleRails(car);
+}
+void* Manager(void* ped);
+bool Seated(void* ped);
+void OnLineUpPed(void* utility,void* ped,void* car,void* anim) {
+    Pool pool;
+    if (pool.Load()) for (const auto& a:animations) if (a.target.ped==ped&&a.car==car&&
+        a.phase!=Phase::Pull&&a.target.Live(pool)&&Seated(ped)) {
+        void* manager=Manager(ped);
+        if (!manager||Read<void*>(manager,3*8)!=a.task) break;
+        void* leaf=simplestTask(a.task);
+        if (leaf&&Read<void*>(leaf,0)==draggedAnimationVtable&&Read<void*>(leaf,0x30)==utility) {
+            seatPosition(ped);return; // recoil stays in the original seat until the grip
+        }
+    }
+    lineUpPed(utility,ped,car,anim);
 }
 void ClearAnimation(Animation& animation) {
     if (animation.car) cleanReference(animation.car,&animation.car);
@@ -379,14 +421,15 @@ void ReportCarjack(Animation& pending,void* player) {
 bool BeginHit(Hold& h,bool preparing=false) {
     const int door=ExitDoor(h.ped,owner);
     if (!preparing) if (auto* pending=BeforeHit(h.ped)) {
-        if (door<0) return false;
+        if (door<0||pending->phase!=Phase::AwaitHit||updated<pending->punchAfter) return false;
         void* anim=VictimAnimation(h.ped);
         if (!anim) return false;
-        if (pending->phase==Phase::AwaitHit) ResumePose(*pending);
-        else if (const auto* point=AnimationPoint(anim)) setAnimationTime(anim,point->start);
+        ResumePose(*pending);
+        ActionFeedback(h.ped,true);
         pending->phase=Phase::Hit;pending->until=updated+8.0;
         return true;
     }
+    if (!preparing) return false; // door-opening motion cannot bypass preparation
     if (door<0||Animating(h.ped)||Waiting(h.ped)) return false;
     if (BeforeHit(h.ped)) return false;
     constexpr int nodes[]={10,8,11,9};
@@ -399,9 +442,10 @@ bool BeginHit(Hold& h,bool preparing=false) {
     dragTaskCtor(task,car,nodes[door-2]);
     pending->target=h;pending->car=car;pending->until=updated+8.0;
     pending->phase=preparing?Phase::Preparing:Phase::Hit;
+    pending->punchAfter=updated+.35;
     registerReference(car,&pending->car);
-    // Play only the hit/recoil portion first. The occupant is still seated and
-    // traffic is braked until a fresh grip confirms the pull or the wait expires.
+    // Prepare the hit pose while the occupant remains seated. Traffic is braked
+    // until a fresh grip confirms the pull or the post-hit wait expires.
     // Install synchronously so a menu/recenter can cancel the hit before any
     // queued script command starts an unconfirmed full extraction later.
     setTask(Manager(h.ped),task,3,false);
@@ -414,10 +458,6 @@ bool BeginHit(Hold& h,bool preparing=false) {
     void* leaf=simplestTask(task);
     if (leaf&&Read<void*>(leaf,0)==draggedAnimationVtable) {
         if (!Read<void*>(leaf,0x18)) startDraggedAnimation(leaf,h.ped);
-        if (void* anim=Read<void*>(leaf,0x18)) {
-            if (const auto* point=AnimationPoint(anim);!preparing&&point&&point->start>0)
-                setAnimationTime(anim,point->start);
-        }
     }
     return true;
 }
@@ -461,6 +501,7 @@ bool ContinuePull(Animation& pending,void* player) {
     Vec destination{};
     if (door<0||!FindDoorExit(pending.target.ped,pending.car,door,destination)) return false;
     ResumePose(pending);
+    ActionFeedback(pending.target.ped,false);
     pending.phase=Phase::Pull;pending.until=updated+8.0;
     ReportCarjack(pending,player);
     return true;
@@ -505,6 +546,7 @@ void PruneAnimations(const Pool& pool,double now) {
                 const float time=Read<float>(anim,0x38),pause=point?point->start:0.f;
                 if (std::isfinite(time)&&time>=pause) {
                     PausePose(a,anim,pause);a.phase=Phase::AwaitHit;
+                    a.punchAfter=std::max(a.punchAfter,now+.2);
                 }
             }
         } else if (a.phase==Phase::Hit) {
@@ -513,7 +555,7 @@ void PruneAnimations(const Pool& pool,double now) {
                 const float pause=PauseTime(anim);
                 if (std::isfinite(time)&&time>=pause) {
                     PausePose(a,anim,pause);
-                    a.phase=Phase::Waiting;a.waitUntil=now+1.0;
+                    a.phase=Phase::Waiting;a.waitUntil=now+2.0;
                 }
             }
         } else if (now>=a.waitUntil) CancelHit(a,true);
@@ -599,11 +641,12 @@ void Install(void* handle) {
     RESOLVE(association,"_Z30RpAnimBlendClumpGetAssociationP7RpClumpj");
     RESOLVE(setAnimationTime,"_ZN21CAnimBlendAssociation14SetCurrentTimeEf");
     RESOLVE(realPhysics,"_ZN8CCarCtrl26SwitchVehicleToRealPhysicsEP8CVehicle");
+    RESOLVE(seatPosition,"_ZN4CPed19SetPedPositionInCarEv");
     auto nameKey=reinterpret_cast<std::uint32_t(*)(const char*)>(dlsym(handle,"_ZN7CKeyGen15GetUppercaseKeyEPKc"));
     if (nameKey) for (auto& point:pausePoints) point.key=nameKey(point.name);
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
-        simplestTask&&startDraggedAnimation&&draggedAnimationVtable&&
+        simplestTask&&startDraggedAnimation&&draggedAnimationVtable&&seatPosition&&
         dragTaskCtor&&registerReference&&cleanReference&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
         canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
         draggedCtor&&draggedDtor&&association&&setAnimationTime&&realPhysics&&nameKey&&g.CEventGroup_Add&&
@@ -625,6 +668,24 @@ void Install(void* handle) {
             constexpr std::uint32_t ai[]={0xd10343ff,0x6d072beb,0x6d0823e9,0xa9097bfd};
             ready=Hook(dlsym(handle,"_ZN11CAutomobile9ProcessAIERj"),ai,reinterpret_cast<void*>(&OnVehicleAI),original);
             vehicleAI=reinterpret_cast<decltype(vehicleAI)>(original);
+        }
+        if (ready) {
+            constexpr std::uint32_t control[]={0xd105c3ff,0x6d0d3bef,0x6d0e33ed,0x6d0f2beb};
+            ready=Hook(dlsym(handle,"_ZN11CAutomobile14ProcessControlEv"),control,
+                reinterpret_cast<void*>(&OnVehicleControl),original);
+            vehicleControl=reinterpret_cast<decltype(vehicleControl)>(original);
+        }
+        if (ready) {
+            constexpr std::uint32_t lineup[]={0x6db73bef,0x6d0133ed,0x6d022beb,0x6d0323e9};
+            ready=Hook(dlsym(handle,"_ZN28CTaskUtilityLineUpPedWithCar10ProcessPedEP4CPedP8CVehicleP21CAnimBlendAssociation"),lineup,
+                reinterpret_cast<void*>(&OnLineUpPed),original);
+            lineUpPed=reinterpret_cast<decltype(lineUpPed)>(original);
+        }
+        if (ready) {
+            constexpr std::uint32_t rails[]={0xd10343ff,0x6d082beb,0x6d0923e9,0xa90a7bfd};
+            ready=Hook(dlsym(handle,"_ZN8CCarCtrl16UpdateCarOnRailsEP8CVehicle"),rails,
+                reinterpret_cast<void*>(&OnVehicleRails),original);
+            vehicleRails=reinterpret_cast<decltype(vehicleRails)>(original);
         }
     }
     LOGI("[npcgrab] available=%d",ready);
@@ -653,6 +714,14 @@ bool BlocksVehicleInteraction(void* car,int hand) {
     const auto& target=approach[hand];
     return target.Live(pool)&&Seated(target.ped)&&Read<void*>(target.ped,0x708)==car;
 }
+bool BlocksNpcPunch(void* ped,int hand) {
+    if (!ped||hand<0||hand>1||!ready||Now()-updated>.2||
+        (physicalweapon::HeldHandMaskRelaxed()&(1u<<hand))||physicalweapon::IsSupportHand(hand)) return false;
+    Pool pool;
+    if (!pool.Load()) return false;
+    for (const auto& a:animations) if (a.target.ped==ped&&a.target.Live(pool)) return true;
+    return false;
+}
 void PublishMarkers() {
     MarkerFrame frame{};frame.epoch=worldMarkers.epoch;
     for (int i=0;i<worldMarkers.count;++i) {
@@ -665,7 +734,8 @@ void PublishMarkers() {
             !vrcam::WorldPointToTracking(above,u)) continue;
         const Vec position{p[0],p[1],p[2]},direction{r[0]-p[0],r[1]-p[1],r[2]-p[2]},vertical{u[0]-p[0],u[1]-p[1],u[2]-p[2]};
         if (Finite(position)&&Finite(direction)&&Finite(vertical))
-            frame.markers[frame.count++]={position,direction,vertical,marker.held,marker.fist};
+            frame.markers[frame.count++]={position,direction,vertical,marker.held,marker.fist,
+                marker.opacity,marker.highlight,marker.scale};
     }
     xr::SetNpcGrabMarkers(frame);
 }
@@ -677,6 +747,7 @@ void Reset() {
     for (auto& released:extracted) released=false;
     for (auto& motion:handMotion) motion={};
     for (auto& target:approach) target={};
+    for (auto& effect:feedback) effect={};
     Pool current;current.Load();
     for (auto& a:animations) if (a.target.Live(current)&&a.phase!=Phase::Pull) CancelHit(a,false);
     for (auto& flight:flights) flight={};
@@ -724,12 +795,13 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const bool good=valid&&Finite(p)&&Finite(eye)&&Length(p-eye)<1.6f;
         // Reserve the punch corridor before the ordinary melee sweep reaches
         // a door/window collider, not only once the fist reaches the face.
-        approach[hand]=good&&hands[hand].grip>=.65f&&hands[hand].trigger>=.45f?
+        approach[hand]=good&&hands[hand].grip>=.8f?
             ApproachAtSeat(pool,player,eye,p):Hold{};
         const Vec previous=handMotion[hand].previous;
+        const bool wasClenched=handMotion[hand].clenched;
         const bool haveMotion=handMotion[hand].valid&&good&&Length(p-previous)<.6f;
         const float handSpeed=haveMotion?Length(p-previous)/dt:0.f;
-        handMotion[hand]={p,good};
+        handMotion[hand]={p,good,good&&hands[hand].grip>=.8f};
         const bool fresh=edges[hand].Step(hands[hand].grip,good);
         if (fresh) intent[hand]=true;
         if (!good||hands[hand].grip<=.35f) intent[hand]=false;
@@ -761,7 +833,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 Write(h.ped,0x68,h.command);
                 if (Length(p-h.start)>.12f&&Length(h.velocity)>.6f) Aggression(h,player);
             }
-        } else if (good&&haveMotion&&Length(p-previous)>=.01f&&hands[hand].grip>=.65f&&hands[hand].trigger>=.45f&&handSpeed>=1.25f&&
+        } else if (good&&haveMotion&&wasClenched&&Length(p-previous)>=.01f&&hands[hand].grip>=.8f&&handSpeed>=1.25f&&
                    PunchAtSeat(pool,player,eye,p,previous)) {
             intent[hand]=false;extracted[hand]=true;mask|=1u<<hand;
             xr::TriggerHaptic(hand,.6f,80.f,45.f);
@@ -804,6 +876,14 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     // Offer one real torso grab point per eligible seated occupant. This uses
     // the same door, side, pool, distance and occlusion gates as acquisition.
     worldMarkers={};worldMarkers.epoch=epoch;
+    for (auto& effect:feedback) if (effect.active) {
+        const float t=std::clamp(float((now-effect.started)/.5),0.f,1.f);
+        if (t>=1.f) { effect={};continue; }
+        auto marker=effect.marker;marker.held=true;
+        marker.opacity=1.f-t*t*(3.f-2.f*t);
+        marker.highlight=1.f-.5f*t;marker.scale=1.f+.18f*t;
+        worldMarkers.markers[worldMarkers.count++]=marker;
+    }
     unsigned free=~(occupied|mask)&3u;
     for (int hand=0;hand<2;++hand) if (!hands[hand].valid||physicalweapon::IsSupportHand(hand)) free&=~(1u<<hand);
     if (free) for (int slot=0;slot<pool.size&&worldMarkers.count<MarkerFrame::kCapacity;++slot) {

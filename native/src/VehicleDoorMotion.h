@@ -91,7 +91,10 @@ struct Motion {
     float Ratio() const { return std::clamp((angle-closed)/(open-closed),0.f,1.f); }
 };
 
-struct Marker { Vec position{},direction{},up{}; bool held{},fist{}; };
+struct Marker {
+    Vec position{},direction{},up{};bool held{},fist{};
+    float opacity{1.f},highlight{},scale{1.f};
+};
 struct MarkerFrame {
     static constexpr int kCapacity=6;
     std::array<Marker,kCapacity> markers{};

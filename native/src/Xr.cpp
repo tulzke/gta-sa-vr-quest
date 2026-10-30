@@ -9754,12 +9754,15 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
     for (int i=0;i<frame.count;++i) {
         const auto& marker=frame.markers[i];
         const auto arrow=vehicledoors::Arrow(marker);
-        const auto palm=marker.fist?npcgrab::Fist(marker):npcgrab::Palm(marker);
+        auto styled=marker;
+        styled.direction=styled.direction*marker.scale;styled.up=styled.up*marker.scale;
+        const auto palm=marker.fist?npcgrab::Fist(styled):npcgrab::Palm(styled);
         const auto* vertices=palms?palm.vertices.data():arrow.data();
         const int count=palms?palm.count:static_cast<int>(arrow.size());
         static_assert(sizeof(vehicledoors::Vec)==3*sizeof(float));
         if(navigation)glUniform4f(g_markerColLoc,.10f,1.f,.22f,marker.held?.95f:.75f);
-        else glUniform4f(g_markerColLoc,1.f,.86f,.08f,palms?(marker.held?.92f:.72f):(marker.held?.72f:.45f));
+        else glUniform4f(g_markerColLoc,1.f,.86f+.14f*marker.highlight,.08f+.82f*marker.highlight,
+            marker.opacity*(palms?(marker.held?.92f:.72f):(marker.held?.72f:.45f)));
         glBufferData(GL_ARRAY_BUFFER,count*sizeof(vehicledoors::Vec),vertices,GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLES,0,count);
     }

@@ -294,6 +294,7 @@ bool Damageable(void* entity, void* player,int weaponType,int hand) {
     if (!entity || entity == player) return false;
     const int type = EntityType(entity);
     if (type==kEntityVehicle&&weaponType<=1&&npcgrab::BlocksVehicleInteraction(entity,hand)) return false;
+    if (type==kEntityPed&&weaponType<=1&&npcgrab::BlocksNpcPunch(entity,hand)) return false;
     if (type == kEntityObject) {
         // Props (gym punching bags first of all) only become melee targets
         // when the object response symbols resolved; otherwise a swing near
