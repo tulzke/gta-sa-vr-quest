@@ -28,9 +28,10 @@ void (*fallCtor)(void*,int,int){};
 void (*standCtor)(void*,int,bool,bool,float){};
 void (*calculateVelocity)(void*){};
 void (*setTask)(void*,void*,int,bool){};
-void (*outCtor)(void*,void*,int,bool){};
-bool (*outProcess)(void*,void*){};
-void (*outDtor)(void*){};
+void (*dragTaskCtor)(void*,void*,int){};
+void (*registerReference)(void*,void**){};
+void (*cleanReference)(void*,void**){};
+bool (*originalPlacement)(void*,int,void*,bool){};
 GameSymbols::Vec3 (*doorPosition)(const void*,int){};
 bool (*groundPosition)(GameSymbols::Vec3*){};
 void (*worldRemove)(void*){};
@@ -47,6 +48,7 @@ std::uint64_t previousEpoch{};
 double updated{};
 bool ready{};
 void* owner{};
+MarkerFrame worldMarkers{};
 
 template<class T> T Read(const void* p,int offset) {
     T value{};std::memcpy(&value,static_cast<const char*>(p)+offset,sizeof(value));return value;
@@ -80,12 +82,30 @@ struct Hold {
     double until{};
     bool aggression{};
     bool Live(const Pool& p) const {
-        return ped&&p.identity==pool&&p.objects==objects&&ref>=0&&(ref>>8)<p.size&&
+        return ped&&p.flags&&p.size>0&&p.size<=1024&&p.identity==pool&&p.objects==objects&&ref>=0&&(ref>>8)<p.size&&
             p.flags[ref>>8]==(ref&255)&&!(p.flags[ref>>8]&128)&&getPed(ref)==ped;
     }
 } holds[2];
 Hold flights[4];
 unsigned nextFlight{};
+struct Animation {
+    Hold target{};
+    void* car{}; // registered engine reference, stable storage
+    double until{};
+} animations[4];
+void ClearAnimation(Animation& animation) {
+    if (animation.car) cleanReference(animation.car,&animation.car);
+    animation={};
+}
+void PruneAnimations(const Pool& pool,double now) {
+    for (auto& a:animations) if (a.target.ped&&
+        (!a.target.Live(pool)||!a.car||now>=a.until||playerlife::Dead(a.target.ped)||
+         !(Read<std::uint8_t>(a.target.ped,0x585)&1))) ClearAnimation(a);
+}
+bool Animating(void* ped) {
+    for (const auto& a:animations) if (a.target.ped==ped) return true;
+    return false;
+}
 void* Manager(void* ped) {
     void* intelligence=Read<void*>(ped,0x538);
     return intelligence?static_cast<char*>(intelligence)+8:nullptr;
@@ -182,7 +202,7 @@ bool SeatReachable(void* ped,int door,Vec eye,Vec hand) {
     const Vec localEye=basis.Local(eye),localHand=basis.Local(hand);
     return localEye.x*side>.45f&&localHand.x*side>-.1f&&Length(eye-hand)<1.6f;
 }
-bool PlaceAtDoor(void* ped,void* car,int door) {
+bool FindDoorExit(void* ped,void* car,int door,Vec& destination) {
     constexpr int nodes[]={10,8,11,9};
     void* matrix=Read<void*>(car,0x18);
     if (!matrix) return false;
@@ -221,56 +241,53 @@ bool PlaceAtDoor(void* ped,void* car,int door) {
             true,true,false,true,true,false,false,false);
         *g.CWorld_pIgnoreEntity=previous;
         if (blocked) continue;
-        // Keep sector membership current without CPed::Teleport's task flush.
-        worldRemove(ped);
-        if (void* pedMatrix=Read<void*>(ped,0x18)) Write(pedMatrix,0x30,point);
-        else Write(ped,8,point);
-        Write(ped,0x68,Vec{});Write(ped,0x74,Vec{});
-        worldAdd(ped);
+        destination=point;
         return true;
     }
     return false;
 }
+bool OnPlacement(void* ped,int node,void* car,bool search) {
+    Pool pool;
+    if (pool.Load()) for (const auto& animation:animations) {
+        if (animation.car&&(car==animation.car||!car)&&animation.target.ped==ped&&animation.target.Live(pool)) {
+            const int door=node==10?2:node==8?3:node==11?4:node==9?5:-1;
+            Vec point{};
+            if (door<0||!FindDoorExit(ped,animation.car,door,point)) return false;
+            worldRemove(ped);
+            if (void* matrix=Read<void*>(ped,0x18)) Write(matrix,0x30,point);
+            else Write(ped,8,point);
+            Write(ped,0x68,Vec{});Write(ped,0x74,Vec{});
+            worldAdd(ped);
+            return true;
+        }
+    }
+    return originalPlacement(ped,node,car,search);
+}
 bool Extract(Hold& h,void* player) {
     const int door=ExitDoor(h.ped,player);
-    if (door<0) return false;
+    if (door<0||Animating(h.ped)) return false;
     constexpr int nodes[]={10,8,11,9};
     void* car=Read<void*>(h.ped,0x708);
+    Vec destination{};
+    if (!FindDoorExit(h.ped,car,door,destination)) return false;
+    Animation* pending=nullptr;
+    for (auto& a:animations) if (!a.target.ped) { pending=&a;break; }
+    if (!pending) return false;
+    void* task=allocate(0x28);
+    if (!task) return false;
+    dragTaskCtor(task,car,nodes[door-2]);
+    pending->target=h;pending->car=car;pending->until=updated+8.0;
+    registerReference(car,&pending->car);
     const bool wasDriver=Read<void*>(car,0x5a0)==h.ped;
-    if (!PlaceAtDoor(h.ped,car,door)) return false;
-    alignas(16) std::uint8_t task[0x30]{};
-    outCtor(task,car,nodes[door-2],false);
-    // Retail ProcessPed @646770: m_bWarpingOut +1f skips the automatic
-    // PositionPedOutOfCollision call. The validated doorway point is final.
-    Write<std::uint8_t>(task,0x1f,1);
-    const bool done=outProcess(task,h.ped);
-    outDtor(task);
-    if (!done||Seated(h.ped)) return false;
     void* intelligence=Read<void*>(h.ped,0x538);
-    // The normal F/carjack path replaces the victim's primary car task using
-    // AddTaskPrimaryMaybeInGroup, then adds DraggedOutCar to intelligence+c8
-    // (EnterCar::CreateNextSubTask @635f1c). Merely clearing bInVehicle leaves
-    // CarDrive/EnterCar underneath and sends the NPC straight back to the seat.
-    if (void* idle=allocate(0x28)) {
-        standCtor(idle,0,false,false,8.f);
-        addPrimary(intelligence,idle,true);
-    }
-    // Fall occupies physical response only; personality responses can queue
-    // underneath and run after getting up. The hand releases at extraction.
-    if (void* fall=allocate(0x28)) {
-        // Treat the fall as a hit from inside the cabin. A fixed direction 0
-        // uses the seated ped's forward heading and falls toward the boot.
-        void* matrix=Read<void*>(car,0x18);
-        const Vec inward=Read<Vec>(matrix,0)*(door==2||door==4?1.f:-1.f);
-        const GameSymbols::Vec2 source{inward.x,inward.y};
-        const int direction=std::clamp(g.CPed_GetLocalDirection(h.ped,&source),0,3);
-        fallCtor(fall,direction,1200);
-        setTask(Manager(h.ped),fall,0,false);
-    }
+    // Exactly the stock EnterCar carjack sequence: the engine owns alignment,
+    // the seated pull-out animation, seat removal, falling and getting up.
+    // No position/health/collision flags are changed at gesture completion.
+    addPrimary(intelligence,task,true);
     alignas(16) std::uint8_t event[0x30]{};
     draggedCtor(event,car,player,wasDriver);
     g.CEventGroup_Add(static_cast<char*>(intelligence)+0xc8,event,true);
-    draggedDtor(event); // Add clones the event and owns its entity references.
+    draggedDtor(event);
     return true;
 }
 
@@ -297,9 +314,8 @@ void OnCalculateVelocity(void* ped) {
         if (apply(h,true)) return;
     }
 }
-bool HookVelocity(void* target) {
-    // Only stack saves: no PC-relative instructions need relocating.
-    constexpr std::uint32_t expected[]={0x6dbb2beb,0x6d0123e9,0xa9027bfd,0xf9001bf5};
+bool Hook(void* target,const std::uint32_t (&expected)[4],void* replacement,void*& original) {
+    // Both supported prologues only save stack/registers.
     if (!target||std::memcmp(target,expected,sizeof(expected))) return false;
     const long page=sysconf(_SC_PAGESIZE);
     if (page<=0) return false;
@@ -317,8 +333,8 @@ bool HookVelocity(void* target) {
     if (mprotect(reinterpret_cast<void*>(start),end-start,PROT_READ|PROT_WRITE|PROT_EXEC)) {
         munmap(trampoline,page);return false;
     }
-    calculateVelocity=reinterpret_cast<decltype(calculateVelocity)>(trampoline);
-    const auto hook=reinterpret_cast<std::uintptr_t>(&OnCalculateVelocity);
+    original=trampoline;
+    const auto hook=reinterpret_cast<std::uintptr_t>(replacement);
     std::memcpy(code+2,&hook,8);code[1]=0xd61f0220;
     __atomic_store_n(code,0x58000051,__ATOMIC_RELEASE);
     __builtin___clear_cache(reinterpret_cast<char*>(code),reinterpret_cast<char*>(code)+16);
@@ -335,9 +351,9 @@ void Install(void* handle) {
     RESOLVE(fallCtor,"_ZN24CTaskComplexFallAndGetUpC1Eii");
     RESOLVE(standCtor,"_ZN21CTaskSimpleStandStillC1Eibbf");
     RESOLVE(setTask,"_ZN12CTaskManager7SetTaskEP5CTaskib");
-    RESOLVE(outCtor,"_ZN23CTaskSimpleCarSetPedOutC1EP8CVehicleib");
-    RESOLVE(outProcess,"_ZN23CTaskSimpleCarSetPedOut10ProcessPedEP4CPed");
-    RESOLVE(outDtor,"_ZN23CTaskSimpleCarSetPedOutD1Ev");
+    RESOLVE(dragTaskCtor,"_ZN41CTaskComplexCarSlowBeDraggedOutAndStandUpC1EP8CVehiclei");
+    RESOLVE(registerReference,"_ZN7CEntity17RegisterReferenceEPPS_");
+    RESOLVE(cleanReference,"_ZN7CEntity19CleanUpOldReferenceEPPS_");
     RESOLVE(doorPosition,"_ZN13CCarEnterExit24GetPositionToOpenCarDoorERK8CVehiclei");
     RESOLVE(groundPosition,"_ZN13CPedPlacement15FindZCoorForPedEP7CVector");
     RESOLVE(worldRemove,"_ZN6CWorld6RemoveEP7CEntity");
@@ -348,15 +364,43 @@ void Install(void* handle) {
     RESOLVE(addPrimary,"_ZN16CPedIntelligence26AddTaskPrimaryMaybeInGroupEP5CTaskb");
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
-        outCtor&&outProcess&&outDtor&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
+        dragTaskCtor&&registerReference&&cleanReference&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
         canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
         draggedCtor&&draggedDtor&&addPrimary&&g.CEventGroup_Add&&
         g.CWeapon_GenerateDamageEvent&&g.CPed_GetLocalDirection&&
-        g.CWorld_ProcessLineOfSight&&g.CVehicle_GetVehicleAppearance&&
-        HookVelocity(dlsym(handle,"_ZN4CPed20CalculateNewVelocityEv"));
+        g.CWorld_ProcessLineOfSight&&g.CVehicle_GetVehicleAppearance;
+    if (ready) {
+        constexpr std::uint32_t velocity[]={0x6dbb2beb,0x6d0123e9,0xa9027bfd,0xf9001bf5};
+        constexpr std::uint32_t placement[]={0xd10343ff,0xfd002bea,0x6d0623e9,0xa9077bfd};
+        void* original{};
+        ready=Hook(dlsym(handle,"_ZN4CPed20CalculateNewVelocityEv"),velocity,
+            reinterpret_cast<void*>(&OnCalculateVelocity),original);
+        calculateVelocity=reinterpret_cast<decltype(calculateVelocity)>(original);
+        if (ready) {
+            ready=Hook(dlsym(handle,"_ZN4CPed25PositionPedOutOfCollisionEiP8CVehicleb"),placement,
+                reinterpret_cast<void*>(&OnPlacement),original);
+            originalPlacement=reinterpret_cast<decltype(originalPlacement)>(original);
+        }
+    }
     LOGI("[npcgrab] available=%d",ready);
 }
 unsigned ClaimedHands() { return claimed.load(std::memory_order_relaxed); }
+void PublishMarkers() {
+    MarkerFrame frame{};frame.epoch=worldMarkers.epoch;
+    for (int i=0;i<worldMarkers.count;++i) {
+        const auto& marker=worldMarkers.markers[i];
+        float p[3]{},r[3]{},u[3]{};
+        const Vec rp=marker.position+marker.direction,up=marker.position+marker.up;
+        const float world[3]={marker.position.x,marker.position.y,marker.position.z};
+        const float right[3]={rp.x,rp.y,rp.z},above[3]={up.x,up.y,up.z};
+        if (!vrcam::WorldPointToTracking(world,p)||!vrcam::WorldPointToTracking(right,r)||
+            !vrcam::WorldPointToTracking(above,u)) continue;
+        const Vec position{p[0],p[1],p[2]},direction{r[0]-p[0],r[1]-p[1],r[2]-p[2]},vertical{u[0]-p[0],u[1]-p[1],u[2]-p[2]};
+        if (Finite(position)&&Finite(direction)&&Finite(vertical))
+            frame.markers[frame.count++]={position,direction,vertical,marker.held};
+    }
+    xr::SetNpcGrabMarkers(frame);
+}
 void Reset() {
     Pool pool;pool.Load();
     for (auto& h:holds) Release(h,pool,false);
@@ -365,6 +409,7 @@ void Reset() {
     for (auto& released:extracted) released=false;
     for (auto& flight:flights) flight={};
     claimed.store(0,std::memory_order_relaxed);
+    worldMarkers={};xr::SetNpcGrabMarkers({});
 }
 void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uint64_t epoch) {
     const double now=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -372,7 +417,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     void* player=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
     if (player!=owner) { Reset();owner=player; }
     void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
-    Pool pool;
+    Pool pool;pool.Load();
+    PruneAnimations(pool,now);
     const bool usable=ready&&!blocked&&trackingValid&&epoch==previousEpoch&&
         dt>0&&dt<=.15f&&xr::IsSessionFocused()&&player&&!playerlife::Dead(player)&&pad&&
         !Read<std::uint16_t>(pad,0x110)&&!Read<std::uint8_t>(pad,0x12d)&&
@@ -443,7 +489,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 const int ref=(slot<<8)|pool.flags[slot];
                 void* ped=getPed(ref);
                 if (!ped||ped==player||ped==holds[1-hand].ped||isPlayer(ped)||playerlife::Dead(ped)||
-                    !Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f) continue;
+                    !Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f||Animating(ped)) continue;
                 const bool seated=Seated(ped);
                 const int door=seated?ExitDoor(ped,player):-1;
                 if (seated&&(door<0||!SeatReachable(ped,door,eye,p))) continue;
@@ -466,5 +512,34 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         if (h.ped) mask|=1u<<hand;
     }
     claimed.store(mask,std::memory_order_relaxed);
+    // Offer one real torso grab point per eligible seated occupant. This uses
+    // the same door, side, pool, distance and occlusion gates as acquisition.
+    worldMarkers={};worldMarkers.epoch=epoch;
+    unsigned free=~(occupied|mask)&3u;
+    for (int hand=0;hand<2;++hand) if (!hands[hand].valid||physicalweapon::IsSupportHand(hand)) free&=~(1u<<hand);
+    if (free) for (int slot=0;slot<pool.size&&worldMarkers.count<MarkerFrame::kCapacity;++slot) {
+        if (pool.flags[slot]&128) continue;
+        void* ped=getPed((slot<<8)|pool.flags[slot]);
+        if (!ped||ped==player||isPlayer(ped)||playerlife::Dead(ped)||!Seated(ped)||
+            !Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f||Animating(ped)) continue;
+        void* manager=Manager(ped);
+        if (!manager||Read<void*>(manager,0)) continue;
+        const int door=ExitDoor(ped,player);
+        const Vec point=Bone(ped,4);
+        if (door<0||!Finite(point)||!SeatReachable(ped,door,eye,point)||
+            !Visible(eye,point,ped,Read<void*>(ped,0x708))) continue;
+        Vec right=Cross(eye-point,Vec{0,0,1});
+        if (Length(right)<.1f) continue;
+        right=right*(1.f/Length(right));
+        bool near=false;
+        for (int hand=0;hand<2;++hand) if ((free&(1u<<hand))&&hands[hand].valid&&
+            !physicalweapon::IsSupportHand(hand)) {
+            float p[3]{};
+            if (vrcam::TrackingPointToWorld(hands[hand].gripPos,p)&&Length(Vec{p[0],p[1],p[2]}-point)<.35f) near=true;
+        }
+        // Offset toward the viewer so the silhouette rests over the clothing.
+        const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
+        worldMarkers.markers[worldMarkers.count++]={point+facing*.18f,right,{0,0,1},near};
+    }
 }
 }

@@ -22009,6 +22009,7 @@ void OnRenderScene(bool underwater) {
     const float tanY = tanX * static_cast<float>(g_eyeRasterH) / static_cast<float>(g_eyeRasterW);
     xr::SetStereoRenderFov(tanX, tanY);
     vehicledoors::PublishMarkers();
+    npcgrab::PublishMarkers();
     testarea::PublishMarkers();
     xr::SetRadialHolsterAtlas(radialReady ? EyeRasterTexId(g_radialIconRaster[set]) : 0);
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex,

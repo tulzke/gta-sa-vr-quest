@@ -1,4 +1,5 @@
 #include "Xr.h"
+#include "NpcGrabVisual.h"
 #include "TrackingRecovery.h"
 #include "TheaterScreen.h"
 
@@ -621,6 +622,8 @@ holstermarker::Kind    g_holsterKind[8]{};
 std::uint64_t         g_holsterEpoch{};
 float                 g_holsterEye[3]{}; // one billboard orientation for both eyes
 holstermarker::Frame   g_stereoHolsterMarkers[kStereoSets]{};
+vehicledoors::MarkerFrame g_npcGrabMarkers{};
+vehicledoors::MarkerFrame g_stereoNpcGrabMarkers[kStereoSets]{};
 vehicledoors::MarkerFrame g_vehicleDoorMarkers{};
 vehicledoors::MarkerFrame g_stereoVehicleDoorMarkers[kStereoSets]{};
 vehicledoors::MarkerFrame g_vehicleTestMarkers{};
@@ -5649,6 +5652,10 @@ void SetMobileColorState(const MobileColorState& state) {
     }
 }
 
+void SetNpcGrabMarkers(const vehicledoors::MarkerFrame& frame) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_npcGrabMarkers=frame;
+}
 void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& frame) {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
     g_vehicleDoorMarkers=frame;
@@ -6228,6 +6235,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
             markerFrame.markers[i].kind = g_holsterKind[i];
         }
         g_stereoVehicleDoorMarkers[ws] = g_vehicleDoorMarkers;
+        g_stereoNpcGrabMarkers[ws] = g_npcGrabMarkers;
         g_stereoVehicleTestMarkers[ws] = g_vehicleTestMarkers;
         g_stereoRadialHolsterMenu[ws] = g_radialHolsterMenu;
         g_stereoRadialHolsterMenu[ws].atlasTexture = g_radialHolsterAtlas;
@@ -9731,7 +9739,7 @@ void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
     glBindBuffer(GL_ARRAY_BUFFER,0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 }
 
-void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& frame,bool navigation=false) {
+void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& frame,bool navigation=false,bool palms=false) {
     if (frame.count<=0) return;
     EnsureMarkerProgram();
     glEnable(GL_BLEND);
@@ -9745,12 +9753,15 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
     glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),nullptr);
     for (int i=0;i<frame.count;++i) {
         const auto& marker=frame.markers[i];
-        const auto mesh=vehicledoors::Arrow(marker);
+        const auto arrow=vehicledoors::Arrow(marker);
+        const auto palm=npcgrab::Palm(marker);
+        const auto* vertices=palms?palm.vertices.data():arrow.data();
+        const int count=palms?palm.count:static_cast<int>(arrow.size());
         static_assert(sizeof(vehicledoors::Vec)==3*sizeof(float));
         if(navigation)glUniform4f(g_markerColLoc,.10f,1.f,.22f,marker.held?.95f:.75f);
-        else glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.72f:.45f);
-        glBufferData(GL_ARRAY_BUFFER,sizeof(mesh),mesh.data(),GL_DYNAMIC_DRAW);
-        glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(mesh.size()));
+        else glUniform4f(g_markerColLoc,1.f,.86f,.08f,palms?(marker.held?.92f:.72f):(marker.held?.72f:.45f));
+        glBufferData(GL_ARRAY_BUFFER,count*sizeof(vehicledoors::Vec),vertices,GL_DYNAMIC_DRAW);
+        glDrawArrays(GL_TRIANGLES,0,count);
     }
     glDisableVertexAttribArray(0);glBindBuffer(GL_ARRAY_BUFFER,0);glUseProgram(0);
     glDepthMask(GL_TRUE);glDisable(GL_BLEND);
@@ -11232,6 +11243,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const TwoHandVisualState& bakedTwoHand,
                      const holstermarker::Frame& bakedHolsters,
                      const vehicledoors::MarkerFrame& bakedDoors,
+                     const vehicledoors::MarkerFrame& bakedNpcGrabs,
                      const vehicledoors::MarkerFrame& bakedTestArea,
                      const radialholster::Frame& bakedRadial,
                      unsigned int hudSourceTex) {
@@ -11265,7 +11277,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                              throwableTrajectory[1].count <= 1)) &&
         !chuteVisuals && !chuteRingVisual &&
         !wristWanted &&
-        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && bakedTestArea.count<=0 && !bakedRadial.visible) return;
+        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && bakedNpcGrabs.count<=0 && bakedTestArea.count<=0 && !bakedRadial.visible) return;
     if (haveHands) EnsureHandProgram();
 
     const float sign = (e == 0) ? -1.0f : 1.0f;
@@ -11437,6 +11449,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors);
+    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,false,true);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,true);
     if (!scope.active) DrawRadialHolsterMenu(mvp,bakedRadial);
     // Riser controls are their own world-space interaction. They must remain
@@ -11644,6 +11657,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     TwoHandVisualState bakedTwoHand{};
     holstermarker::Frame bakedHolsters{};
     vehicledoors::MarkerFrame bakedDoors{};
+    vehicledoors::MarkerFrame bakedNpcGrabs{};
     vehicledoors::MarkerFrame bakedTestArea{};
     radialholster::Frame bakedRadial{};
     scopeaim::VisualState bakedScope{};
@@ -11663,6 +11677,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedTwoHand   = g_stereoTwoHandVisualState[set];
         bakedHolsters = g_stereoHolsterMarkers[set];
         if (!bakedHolsters.Usable(g_headPoseValid, g_trackingRecovery.epoch)) bakedHolsters.count = 0;
+        bakedNpcGrabs = g_stereoNpcGrabMarkers[set];
+        if (!bakedNpcGrabs.Usable(g_headPoseValid,g_trackingRecovery.epoch)||IsMenuVisible()) bakedNpcGrabs.count=0;
         bakedDoors = g_stereoVehicleDoorMarkers[set];
         if (!bakedDoors.Usable(g_headPoseValid,g_trackingRecovery.epoch)) bakedDoors.count=0;
         bakedTestArea = g_stereoVehicleTestMarkers[set];
@@ -11828,7 +11844,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedTestArea, bakedRadial, hudSource);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

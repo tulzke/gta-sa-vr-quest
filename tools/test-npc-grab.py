@@ -21,7 +21,7 @@ def remove_function(text, signature):
 
 # Only OS-specific symbol resolution is omitted. Selection, pool validation,
 # grip edges, task ownership, extraction and velocity writes are production code.
-source = remove_function(source, 'bool HookVelocity(void* target)')
+source = remove_function(source, 'bool Hook(void* target')
 source = remove_function(source, 'void Install(void* handle)')
 source = '\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness = (ROOT / 'tools/tests/npc_grab.cpp').read_text(encoding='utf8')
