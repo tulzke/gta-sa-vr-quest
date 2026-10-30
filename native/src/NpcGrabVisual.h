@@ -39,4 +39,21 @@ inline PalmMesh Palm(const vehicledoors::Marker& marker) {
     triangle(-.027f,-.027f,-.051f,.023f,-.023f,.002f);
     return mesh;
 }
+inline PalmMesh Fist(const vehicledoors::Marker& marker) {
+    PalmMesh mesh;
+    const auto point=[&](float x,float y) { return marker.position+marker.direction*x+marker.up*y; };
+    const auto rectangle=[&](float x0,float y0,float x1,float y1) {
+        const auto a=point(x0,y0),b=point(x1,y0),c=point(x1,y1),d=point(x0,y1);
+        for (auto p:{a,b,c,a,c,d}) mesh.vertices[mesh.count++]=p;
+    };
+    rectangle(-.029f,-.027f,.034f,.023f);
+    rectangle(-.019f,-.049f,.024f,-.025f);
+    // Four curled fingers/knuckles, visibly shorter than the open-palm hint.
+    for (int finger=0;finger<4;++finger) {
+        const float x=-.032f+finger*.018f;
+        rectangle(x,.008f,x+.015f,.034f+(finger==1||finger==2?.006f:0.f));
+    }
+    rectangle(-.045f,-.014f,-.025f,.015f); // opposed curled thumb
+    return mesh;
+}
 }

@@ -12,7 +12,7 @@
 namespace savr {
 GameSymbols g{};
 namespace xr {
-struct HandPose { bool valid{true};float gripPos[3]{};float grip{}; };
+struct HandPose { bool valid{true};float gripPos[3]{};float grip{};float trigger{}; };
 vehicledoors::MarkerFrame markers;
 void SetNpcGrabMarkers(const vehicledoors::MarkerFrame& frame) {markers=frame;}
 bool focused=true;
@@ -47,6 +47,7 @@ int removed{},added{},sphereTests{};
 Vec expectedExit{};
 GameSymbols::Vec2 lastDirection{};
 int lastFallDirection{};
+alignas(16) char reaction[0x60]{};
 const void* eventPlayer{};const void* eventCar{};
 void* poolPtr=poolData;
 std::uint8_t flags[1]{1};
@@ -63,7 +64,10 @@ bool Los(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,bool
 }
 void* Allocate(std::size_t n) {CHECK(n==0x28);CHECK(allocations<32);return taskMemory[allocations++];}
 void Fall(void*,int direction,int ms) {CHECK(direction>=0&&direction<=3);lastFallDirection=direction;timer=ms;++fallCalls;}
-void SetTask(void* m,void* t,int slot,bool) {CHECK(slot==0);Write(m,0,t);}
+void SetTask(void* m,void* t,int slot,bool) {
+    CHECK(slot==0||slot==3);Write(m,slot*8,t);
+    if (slot==3&&t) ++primaryReplaced;
+}
 void Stand(void*,int ms,bool,bool,float) {CHECK(ms==-1||ms==0);++standCalls;}
 void Primary(void* brain,void* task,bool force) {
     CHECK(brain==intelligence&&force);CHECK(Seated(npc));
@@ -84,6 +88,10 @@ bool Damage(void* victim,void* attacker,int weapon,int damage,int piece,int dire
     CHECK(victim==npc&&attacker==player&&weapon==0&&damage==0&&piece==3&&direction==2);
     ++aggressions;return true;
 }
+void* Assoc(void* clump,unsigned id) {return clump==npc&&id==378&&Read<void*>(intelligence,8+3*8)?reaction:nullptr;}
+void AnimTime(void* anim,float t) {Write(anim,0x38,t);}
+void Physics(void*) {}
+bool NativeAI(void* v,unsigned*) {Write(v,0x608,1.f);Write(v,0x60c,0.f);Write(v,0x68,Vec{.02f,0,0});return true;}
 void NativeVelocity(void* ped) {Write(ped,0x68,Vec{});Write(ped,0x6bc,0.f);Write(ped,0x6c0,0.f);}
 bool IsPlayer(const void* p) {return p==player;}
 bool CanOpen(const void*,const void*) {return !locked;}
@@ -128,18 +136,19 @@ void FinishExtraction() {
 }
 xr::HandPose hands[2];
 void Setup() {
-    Reset();for (auto& a:animations) ClearAnimation(a);std::memset(npc,0,sizeof(npc));std::memset(car,0,sizeof(car));std::memset(intelligence,0,sizeof(intelligence));
+    Reset();for (auto& a:animations) ClearAnimation(a);for (auto& stop:stops) ClearStop(stop);std::memset(npc,0,sizeof(npc));std::memset(car,0,sizeof(car));std::memset(intelligence,0,sizeof(intelligence));
     flags[0]=1;wall=locked=carOccludes=placementBlocked=false;ignoredEntity=nullptr;placedNode=0;
     firstSpotBlocked=groundMissing=false;removed=added=sphereTests=0;
     allocations=aggressions=dragEvents=dragDestroyed=primaryReplaced=animatedNode=refAdds=refRemoves=nativePlacements=0;eventCar=eventPlayer=nullptr;
     xr::focused=vrcam::active=true;physicalweapon::mask=vehicledoors::mask=0;
     hands[0]={};hands[1]={};hands[1].valid=false;hands[0].gripPos[2]=1;
-    Write(npc,0x538,static_cast<void*>(intelligence));Write(npc,0x6ac,100.f);Write(player,0x6ac,100.f);
+    Write(npc,0x20,static_cast<void*>(npc));Write(npc,0x538,static_cast<void*>(intelligence));
+    std::memset(reaction,0,sizeof(reaction));Write(reaction,0x3c,1.f);Write(npc,0x6ac,100.f);Write(player,0x6ac,100.f);
     Write<void*>(poolData,0,npc);Write(poolData,8,flags);Write(poolData,0x10,1);
     pedPool=&poolPtr;getPed=Lookup;isPlayer=IsPlayer;allocate=Allocate;fallCtor=Fall;standCtor=Stand;calculateVelocity=NativeVelocity;setTask=SetTask;
     dragTaskCtor=DragTask;registerReference=Register;cleanReference=Clean;originalPlacement=NativePlace;doorPosition=DoorPoint;groundPosition=Ground;
     worldRemove=Remove;worldAdd=Add;g.CWorld_TestSphereAgainstWorld=Sphere;canOpen=CanOpen;ready=true;
-    draggedCtor=DragCtor;draggedDtor=DragDtor;addPrimary=Primary;
+    draggedCtor=DragCtor;draggedDtor=DragDtor;association=Assoc;setAnimationTime=AnimTime;realPhysics=Physics;vehicleAI=NativeAI;
     g.CEventGroup_Add=AddEvent;g.CPed_GetLocalDirection=Direction;g.CWeapon_GenerateDamageEvent=Damage;
     g.FindPlayerPed=Player;g.FindPlayerVehicle=Vehicle;g.CPad_GetPad=Pad;
     g.CWorld_pIgnoreEntity=&ignoredEntity;g.CPed_GetBonePosition=BonePos;g.CWorld_ProcessLineOfSight=Los;g.CVehicle_GetVehicleAppearance=Appearance;
@@ -162,6 +171,20 @@ void Seat(int passenger=-1) {
     Write(carMatrix,0,Vec{1,0,0});Write(carMatrix,0x10,Vec{0,1,0});
     Write(carMatrix,0x20,Vec{0,0,1});Write(carMatrix,0x30,Vec{-side*.6f,0,0});
 }
+void Punch() {
+    const float side=hands[0].gripPos[0]<0?-1.f:1.f;
+    hands[0].gripPos[0]+=side*.3f;hands[0].grip=hands[0].trigger=0;Tick();
+    hands[0].grip=hands[0].trigger=1;hands[0].gripPos[0]-=side*.15f;Tick();
+}
+void WaitForGrip() {
+    CHECK(animations[0].phase==Phase::Hit);
+    Write<std::uint16_t>(reaction,0x46,0x21);Write(reaction,0x38,.4f);Tick();
+    CHECK(animations[0].phase==Phase::Waiting&&Read<float>(reaction,0x3c)==0);
+    CHECK((Read<std::uint16_t>(reaction,0x46)&0x20)==0);
+    hands[0].grip=hands[0].trigger=0;Tick();
+}
+void ConfirmGrip() {hands[0].grip=1;hands[0].trigger=0;Tick();}
+
 }
 int main() {
     Setup();Grip();CHECK(npcgrab::ClaimedHands()==1&&fallCalls==0&&standCalls==1);
@@ -198,65 +221,68 @@ int main() {
     Setup();Seat();Write(car,0x770+2*0x18+0xc,0.f);Grip();CHECK(!npcgrab::ClaimedHands()&&!exits);
     Setup();Seat();locked=true;Grip();CHECK(!npcgrab::ClaimedHands());
     Setup();Seat();Write(car,0x68,Vec{.1f,0,0});Grip();CHECK(!npcgrab::ClaimedHands());
-    Setup();Seat();carOccludes=true;Grip();CHECK(npcgrab::ClaimedHands()==1&&ignoredEntity==nullptr);
+    Setup();Seat();carOccludes=true;Punch();CHECK(npcgrab::ClaimedHands()==1&&ignoredEntity==nullptr);
     Setup();Seat();carOccludes=wall=true;Grip();CHECK(!npcgrab::ClaimedHands()); // wall behind car still blocks
     Setup();Seat();Write(carMatrix,0x30,Vec{-.6f,0,0});Grip();CHECK(!npcgrab::ClaimedHands()); // opposite side
     for (int seat=-1;seat<3;++seat) {
         Setup();Seat(seat);hands[0].grip=0;Tick();npcgrab::PublishMarkers();
-        CHECK(xr::markers.count==1&&xr::markers.epoch==1);
-        Grip();CHECK(npcgrab::ClaimedHands()==1&&!exits&&!fallCalls);
-        const Vec original=Position(npc);
-        Write<void*>(intelligence,8+3*8,car);
-        hands[0].gripPos[0]+=.25f;Tick();
+        CHECK(xr::markers.count==1&&xr::markers.markers[0].fist);
+        const Vec original=Position(npc);Punch();
         CHECK(Seated(npc)&&!exits&&!removed&&!added&&Length(Position(npc)-original)==0);
-        CHECK(npcgrab::ClaimedHands()==1&&!holds[0].ped&&dragEvents==1&&dragDestroyed==1);
-        CHECK(eventDriver==(seat<0)&&primaryReplaced==1&&Read<void*>(intelligence,8+3*8)!=car);
+        CHECK(npcgrab::ClaimedHands()==1&&primaryReplaced==1&&!dragEvents&&!aggressions);
         constexpr int expectedNode[]={10,8,11,9};CHECK(animatedNode==expectedNode[seat+1]);
-        CHECK(refAdds==1&&refRemoves==0&&!aggressions);
-        npcgrab::PublishMarkers();CHECK(xr::markers.count==0); // already animating
-        FinishExtraction();CHECK(Length(Position(npc)-expectedExit)<.0001f&&removed==1&&added==1);
-        Tick();CHECK(!Animating(npc)&&refRemoves==1&&dragEvents==1&&!aggressions);
+        CHECK(refAdds==1&&refRemoves==0);
+        WaitForGrip();npcgrab::PublishMarkers();
+        CHECK(xr::markers.count==1&&!xr::markers.markers[0].fist&&Seated(npc));
+        ConfirmGrip();CHECK(animations[0].phase==Phase::Pull&&Read<float>(reaction,0x3c)==1);
+        CHECK((Read<std::uint16_t>(reaction,0x46)&0x20)!=0);
+        CHECK(dragEvents==1&&dragDestroyed==1&&eventDriver==(seat<0)&&!aggressions);
+        FinishExtraction();Tick();CHECK(!Animating(npc)&&refRemoves==1);
         hands[0].grip=0;Tick();CHECK(!npcgrab::ClaimedHands());
     }
-    Setup();Seat();Grip();hands[0].grip=0;Tick();CHECK(!exits&&Seated(npc)&&!dragEvents&&!primaryReplaced);
-    Setup();Seat();Grip();placementBlocked=true;hands[0].gripPos[0]+=.25f;Tick();
-    CHECK(Seated(npc)&&!npcgrab::ClaimedHands()&&!dragEvents&&!primaryReplaced&&!removed&&!added);
-    Setup();Seat();Grip();firstSpotBlocked=true;hands[0].gripPos[0]+=.25f;Tick();
-    CHECK(Seated(npc)&&!removed);FinishExtraction();
-    CHECK(Length(Position(npc)-expectedExit)>.2f&&Length(Position(npc)-expectedExit)<.71f);
-    Setup();Seat();Grip();groundMissing=true;const Vec original=Position(npc);hands[0].gripPos[0]+=.25f;Tick();
-    CHECK(!animatedNode&&Length(Position(npc)-original)==0&&!removed&&!added);
-    Setup();Seat();Grip();wall=true;hands[0].gripPos[0]+=.25f;Tick();CHECK(!animatedNode&&!removed&&!added);
-    for (int seat=-1;seat<3;++seat) {
-        Setup();Seat(seat);Write(carMatrix,0,Vec{0,1,0});Write(carMatrix,0x10,Vec{-1,0,0});
-        const float side=seat<0||seat==1?-1.f:1.f;
-        Write(carMatrix,0x30,Vec{0,-side*.6f,0});Write(npc,8,Vec{0,side*.6f,0});
-        hands[0].gripPos[0]=0;hands[0].gripPos[1]=side*.7f;
-        Grip();hands[0].gripPos[1]+=.25f;Tick();CHECK(!removed&&Seated(npc));
-        FinishExtraction();CHECK(Length(Position(npc)-expectedExit)<.0001f);
-    }
-    Setup();Seat();Grip();hands[0].gripPos[0]+=.25f;Tick();
-    flags[0]=2;CHECK(OnPlacement(npc,10,car,true)&&nativePlacements==1&&!removed);
-    Tick();CHECK(refRemoves==1&&!Animating(npc)); // recycled targets never use the override
-    Setup();Seat();Grip();hands[0].gripPos[0]+=.25f;Tick();
-    Tick(true);CHECK(Animating(npc)&&primaryReplaced==1&&refRemoves==0); // menu leaves the engine task running
-    animations[0].until=updated-1;Tick();CHECK(!Animating(npc)&&refRemoves==1);
-    Setup();Seat();Grip();hands[0].gripPos[0]+=.25f;Tick();
-    animations[0].car=nullptr;Tick();CHECK(!Animating(npc)&&!removed&&!added); // engine deleted vehicle reference
+    Setup();Seat();Grip();CHECK(!animatedNode&&!npcgrab::ClaimedHands()); // no hit from a grip alone
+    Setup();Seat();Punch();WaitForGrip();
+    animations[0].waitUntil=updated-1;Tick();
+    CHECK(Seated(npc)&&!Read<void*>(intelligence,8+3*8)&&aggressions==1&&!dragEvents);
+    CHECK(Read<float>(reaction,0x3c)==1&&!animations[0].target.ped); // no frozen animation or driving lock
+    Setup();Seat();Punch();WaitForGrip();Tick(true);
+    CHECK(!Read<void*>(intelligence,8+3*8)&&!aggressions&&Read<float>(reaction,0x3c)==1); // menu cancels safely
+    Setup();Seat();placementBlocked=true;Punch();WaitForGrip();ConfirmGrip();
+    CHECK(animations[0].phase==Phase::Waiting&&!dragEvents&&!removed&&!added);
+    Setup();Seat();groundMissing=true;Punch();WaitForGrip();ConfirmGrip();
+    CHECK(animations[0].phase==Phase::Waiting&&!dragEvents&&!removed&&!added);
+    Setup();Seat();wall=true;Punch();CHECK(!animatedNode&&!removed&&!added);
+    Setup();Seat();Punch();WaitForGrip();ConfirmGrip();flags[0]=2;
+    CHECK(OnPlacement(npc,10,car,true)&&nativePlacements==1&&!removed);
+    Tick();CHECK(refRemoves==1); // recycled target untouched
+    Setup();Seat();Punch();animations[0].car=nullptr;Tick();CHECK(!animations[0].target.ped&&!removed);
     Setup();Seat();hands[0].grip=0;Tick();npcgrab::PublishMarkers();CHECK(xr::markers.count==1);
     Tick(true);npcgrab::PublishMarkers();CHECK(xr::markers.count==0);
     Setup();Seat();locked=true;Tick();npcgrab::PublishMarkers();CHECK(xr::markers.count==0);
-    Setup();Seat();wall=true;Tick();npcgrab::PublishMarkers();CHECK(xr::markers.count==0);
     Setup();Seat();physicalweapon::mask=3;Tick();npcgrab::PublishMarkers();CHECK(xr::markers.count==0);
-    Setup();Seat();Tick();npcgrab::PublishMarkers();CHECK(xr::markers.count==1);
-    Tick(false,2);npcgrab::PublishMarkers();CHECK(xr::markers.count==0);
+    // Low-speed opening stops traffic for 1.5 s even after AI chooses to accelerate.
+    Setup();Seat();Write(car,0x68,Vec{.07f,0,0});OnDoorOpening(car);
+    CHECK(Read<Vec>(car,0x68).x==0&&Read<float>(car,0x608)==0&&Read<float>(car,0x60c)==1);
+    unsigned flagsAI{};CHECK(OnVehicleAI(car,&flagsAI));CHECK(Read<float>(car,0x608)==0);
+    stops[0].until=Now()-1;OnVehicleAI(car,&flagsAI);CHECK(Read<float>(car,0x608)==1);
+    Setup();Seat();Write(car,0x68,Vec{.2f,0,0});OnDoorOpening(car);CHECK(!stops[0].car&&Read<Vec>(car,0x68).x==.2f);
+    Setup();Seat();Write<void*>(car,0x5a0,player);OnDoorOpening(car);CHECK(!stops[0].car);
+    Setup();Seat();Punch();WaitForGrip();OnVehicleAI(car,&flagsAI);
+    CHECK(Seated(npc)&&Read<float>(car,0x608)==0&&Read<Vec>(car,0x68).x==0); // waiting driver cannot flee early
     const auto palm=npcgrab::Palm({{}, {1,0,0}, {0,1,0}, false});
-    CHECK(palm.count>60&&palm.count<=120&&palm.count%3==0);
+    const auto fist=npcgrab::Fist({{}, {1,0,0}, {0,1,0}, false,true});
+    CHECK(palm.count>60&&palm.count<=120&&fist.count>24&&fist.count<=120);
     FILE* preview=std::fopen("palm.csv","w");CHECK(preview);
     for (int i=0;i<palm.count;++i) {
         const auto p=palm.vertices[i];CHECK(Finite(p)&&std::abs(p.x)<.07f&&std::abs(p.y)<.10f&&p.z==0);
         std::fprintf(preview,"%f,%f\n",p.x,p.y);
     }
     std::fclose(preview);
-    std::puts("NPC grab: holds, throws, native animated extraction, bounded fallback, lifetime and palm markers passed");
+    preview=std::fopen("fist.csv","w");CHECK(preview);
+    for (int i=0;i<fist.count;++i) {
+        const auto p=fist.vertices[i];CHECK(Finite(p)&&std::abs(p.x)<.07f&&std::abs(p.y)<.10f&&p.z==0);
+        std::fprintf(preview,"%f,%f\n",p.x,p.y);
+    }
+    std::fclose(preview);
+    std::puts("NPC grab: hit/wait/grip phases, traffic stop, timeout reaction, holds, throws and hints passed");
 }

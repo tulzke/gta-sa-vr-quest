@@ -39,7 +39,10 @@ void (*worldAdd)(void*){};
 bool (*canOpen)(const void*,const void*){};
 void (*draggedCtor)(void*,const void*,const void*,bool){};
 void (*draggedDtor)(void*){};
-void (*addPrimary)(void*,void*,bool){};
+void* (*association)(void*,unsigned){};
+void (*setAnimationTime)(void*,float){};
+bool (*vehicleAI)(void*,unsigned*){};
+void (*realPhysics)(void*){};
 std::atomic<unsigned> claimed{};
 GripEdge edges[2];
 bool intent[2]{};
@@ -49,6 +52,7 @@ double updated{};
 bool ready{};
 void* owner{};
 MarkerFrame worldMarkers{};
+struct HandMotion { Vec previous{};bool valid{}; } handMotion[2];
 
 template<class T> T Read(const void* p,int offset) {
     T value{};std::memcpy(&value,static_cast<const char*>(p)+offset,sizeof(value));return value;
@@ -88,22 +92,71 @@ struct Hold {
 } holds[2];
 Hold flights[4];
 unsigned nextFlight{};
+enum class Phase { Hit,Waiting,Pull };
 struct Animation {
     Hold target{};
     void* car{}; // registered engine reference, stable storage
     double until{};
+    Phase phase{Phase::Hit};
+    double waitUntil{};
+    float speed{1.f};
+    void* task{};
+    void* pausedAssociation{};
+    bool synchronized{};
 } animations[4];
+struct TrafficStop { void* car{};double until{}; } stops[4];
+double Now() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+Animation* Waiting(void* ped) {
+    for (auto& a:animations) if (a.target.ped==ped&&a.phase==Phase::Waiting) return &a;
+    return nullptr;
+}
+void* VictimAnimation(void* ped) {
+    void* clump=Read<void*>(ped,0x20);
+    if (!clump) return nullptr;
+    void* anim=association(clump,378);
+    return anim?anim:association(clump,379);
+}
+void ResumePose(Animation& a) {
+    void* anim=VictimAnimation(a.target.ped);
+    if (anim&&anim==a.pausedAssociation) {
+        Write(anim,0x3c,a.speed);Write(anim,0x40,0.f);
+        const auto flags=Read<std::uint16_t>(anim,0x46);
+        Write<std::uint16_t>(anim,0x46,(flags&~0x20u)|(a.synchronized?0x20u:0u));
+    }
+}
+void ClearStop(TrafficStop& stop) {
+    if (stop.car) cleanReference(stop.car,&stop.car);
+    stop={};
+}
+bool StopCar(void* car,double now) {
+    void* driver=Read<void*>(car,0x5a0);
+    if (!driver||isPlayer(driver)||(g.FindPlayerVehicle&&g.FindPlayerVehicle(-1,false)==car)) return false;
+    bool stop=false;
+    for (const auto& s:stops) if (s.car==car&&now<s.until) stop=true;
+    for (const auto& a:animations) if (a.car==car) stop=true;
+    if (!stop) return false;
+    const Vec speed=Read<Vec>(car,0x68);
+    if (!Finite(speed)||Length(speed)>.12f) return false; // do not arrest collision/high-speed motion
+    if ((Read<std::uint8_t>(car,0x5a)>>3)==2) realPhysics(car);
+    Write(car,0x68,Vec{0,0,speed.z});
+    Write(car,0x608,0.f);Write(car,0x60c,1.f); // gas/brake, retail ProcessAI
+    return true;
+}
+bool OnVehicleAI(void* car,unsigned* flags) {
+    const bool result=vehicleAI(car,flags);
+    StopCar(car,Now()); // after the native driver has chosen acceleration/braking
+    return result;
+}
 void ClearAnimation(Animation& animation) {
     if (animation.car) cleanReference(animation.car,&animation.car);
     animation={};
 }
-void PruneAnimations(const Pool& pool,double now) {
-    for (auto& a:animations) if (a.target.ped&&
-        (!a.target.Live(pool)||!a.car||now>=a.until||playerlife::Dead(a.target.ped)||
-         !(Read<std::uint8_t>(a.target.ped,0x585)&1))) ClearAnimation(a);
-}
+void PruneAnimations(const Pool& pool,double now);
+
 bool Animating(void* ped) {
-    for (const auto& a:animations) if (a.target.ped==ped) return true;
+    for (const auto& a:animations) if (a.target.ped==ped&&a.phase!=Phase::Waiting) return true;
     return false;
 }
 void* Manager(void* ped) {
@@ -263,13 +316,18 @@ bool OnPlacement(void* ped,int node,void* car,bool search) {
     }
     return originalPlacement(ped,node,car,search);
 }
-bool Extract(Hold& h,void* player) {
-    const int door=ExitDoor(h.ped,player);
-    if (door<0||Animating(h.ped)) return false;
+void ReportCarjack(Animation& pending,void* player) {
+    alignas(16) std::uint8_t event[0x30]{};
+    draggedCtor(event,pending.car,player,Read<void*>(pending.car,0x5a0)==pending.target.ped);
+    void* brain=Read<void*>(pending.target.ped,0x538);
+    g.CEventGroup_Add(static_cast<char*>(brain)+0xc8,event,true);
+    draggedDtor(event);
+}
+bool BeginHit(Hold& h) {
+    const int door=ExitDoor(h.ped,owner);
+    if (door<0||Animating(h.ped)||Waiting(h.ped)) return false;
     constexpr int nodes[]={10,8,11,9};
     void* car=Read<void*>(h.ped,0x708);
-    Vec destination{};
-    if (!FindDoorExit(h.ped,car,door,destination)) return false;
     Animation* pending=nullptr;
     for (auto& a:animations) if (!a.target.ped) { pending=&a;break; }
     if (!pending) return false;
@@ -278,17 +336,86 @@ bool Extract(Hold& h,void* player) {
     dragTaskCtor(task,car,nodes[door-2]);
     pending->target=h;pending->car=car;pending->until=updated+8.0;
     registerReference(car,&pending->car);
-    const bool wasDriver=Read<void*>(car,0x5a0)==h.ped;
-    void* intelligence=Read<void*>(h.ped,0x538);
-    // Exactly the stock EnterCar carjack sequence: the engine owns alignment,
-    // the seated pull-out animation, seat removal, falling and getting up.
-    // No position/health/collision flags are changed at gesture completion.
-    addPrimary(intelligence,task,true);
-    alignas(16) std::uint8_t event[0x30]{};
-    draggedCtor(event,car,player,wasDriver);
-    g.CEventGroup_Add(static_cast<char*>(intelligence)+0xc8,event,true);
-    draggedDtor(event);
+    // Play only the hit/recoil portion first. The occupant is still seated and
+    // traffic is braked until a fresh grip confirms the pull or the wait expires.
+    // Install synchronously so a menu/recenter can cancel the hit before any
+    // queued script command starts an unconfirmed full extraction later.
+    setTask(Manager(h.ped),task,3,false);
+    pending->task=Read<void*>(Manager(h.ped),3*8)==task?task:nullptr;
+    if (!pending->task) { ClearAnimation(*pending);return false; }
+    StopCar(car,updated);
     return true;
+}
+bool PunchAtSeat(const Pool& pool,void* player,Vec eye,Vec p,Vec previous) {
+            Hold struck{};float nearest=.30f;
+            for (int slot=0;slot<pool.size;++slot) {
+                if (pool.flags[slot]&128) continue;
+                const int ref=(slot<<8)|pool.flags[slot];void* ped=getPed(ref);
+                if (!ped||ped==player||playerlife::Dead(ped)||!Seated(ped)||Animating(ped)||Waiting(ped)||isPlayer(ped)) continue;
+                const int door=ExitDoor(ped,player);if (door<0) continue;
+                const Vec head=Bone(ped,5),travel=p-previous;
+                const float length=Dot(travel,travel);
+                const Vec closest=previous+travel*(length>1.e-6f?std::clamp(Dot(head-previous,travel)/length,0.f,1.f):0.f);
+                const float distance=Length(head-closest);
+                if (Finite(head)&&distance<nearest&&SeatReachable(ped,door,eye,p)&&Visible(eye,head,ped,Read<void*>(ped,0x708))) {
+                    nearest=distance;struck={ped,pool.identity,pool.objects,nullptr,ref,5,p,{},p,true};
+                }
+            }
+    return struck.ped&&BeginHit(struck);
+}
+bool ContinuePull(Animation& pending,void* player) {
+    if (pending.phase!=Phase::Waiting) return false;
+    const int door=ExitDoor(pending.target.ped,player);
+    Vec destination{};
+    if (door<0||!FindDoorExit(pending.target.ped,pending.car,door,destination)) return false;
+    ResumePose(pending);
+    pending.phase=Phase::Pull;pending.until=updated+8.0;
+    ReportCarjack(pending,player);
+    return true;
+}
+void CancelHit(Animation& a,bool react) {
+    ResumePose(a);
+    if (void* manager=Manager(a.target.ped)) {
+        if (a.task&&Read<void*>(manager,3*8)==a.task) setTask(manager,nullptr,3,false);
+    }
+    // No carjack happened. Native unarmed aggression chooses leaving to fight
+    // or escaping in the car, with the victim still seated at this point.
+    if (react) Aggression(a.target,owner);
+    ClearAnimation(a);
+}
+void PruneAnimations(const Pool& pool,double now) {
+    for (auto& stop:stops) if (stop.car&&now>=stop.until) ClearStop(stop);
+    for (auto& a:animations) if (a.target.ped) {
+        const bool live=a.target.Live(pool);
+        if (!live||!a.car||playerlife::Dead(a.target.ped)||!Seated(a.target.ped)) {
+            if (live&&a.phase==Phase::Waiting) ResumePose(a);
+            ClearAnimation(a);continue;
+        }
+        if (a.phase==Phase::Pull) {
+            if (now>=a.until) ClearAnimation(a);
+            continue;
+        }
+        void* manager=Manager(a.target.ped);
+        if (!manager||Read<void*>(manager,3*8)!=a.task||now>=a.until) { CancelHit(a,false);continue; }
+        if (a.phase==Phase::Hit) {
+            if (void* anim=VictimAnimation(a.target.ped)) {
+                const float time=Read<float>(anim,0x38);
+                if (std::isfinite(time)&&time>=.35f) {
+                    a.speed=Read<float>(anim,0x3c);
+                    if (!std::isfinite(a.speed)||a.speed<=0) a.speed=1.f;
+                    setAnimationTime(anim,.35f);
+                    a.pausedAssociation=anim;
+                    const auto flags=Read<std::uint16_t>(anim,0x46);
+                    a.synchronized=(flags&0x20u)!=0;
+                    Write<std::uint16_t>(anim,0x46,flags&~0x20u);
+                    Write(anim,0x3c,0.f);Write(anim,0x40,0.f);
+                    a.phase=Phase::Waiting;a.waitUntil=now+1.0;
+                }
+            }
+        } else if (now>=a.waitUntil) CancelHit(a,true);
+    }
+    for (const auto& stop:stops) if (stop.car) StopCar(stop.car,now);
+    for (const auto& a:animations) if (a.car) StopCar(a.car,now);
 }
 
 void OnCalculateVelocity(void* ped) {
@@ -361,12 +488,14 @@ void Install(void* handle) {
     RESOLVE(canOpen,"_ZNK8CVehicle15CanPedOpenLocksEPK4CPed");
     RESOLVE(draggedCtor,"_ZN19CEventDraggedOutCarC1EPK8CVehiclePK4CPedb");
     RESOLVE(draggedDtor,"_ZN19CEventDraggedOutCarD1Ev");
-    RESOLVE(addPrimary,"_ZN16CPedIntelligence26AddTaskPrimaryMaybeInGroupEP5CTaskb");
+    RESOLVE(association,"_Z30RpAnimBlendClumpGetAssociationP7RpClumpj");
+    RESOLVE(setAnimationTime,"_ZN21CAnimBlendAssociation14SetCurrentTimeEf");
+    RESOLVE(realPhysics,"_ZN8CCarCtrl26SwitchVehicleToRealPhysicsEP8CVehicle");
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
         dragTaskCtor&&registerReference&&cleanReference&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
         canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
-        draggedCtor&&draggedDtor&&addPrimary&&g.CEventGroup_Add&&
+        draggedCtor&&draggedDtor&&association&&setAnimationTime&&realPhysics&&g.CEventGroup_Add&&
         g.CWeapon_GenerateDamageEvent&&g.CPed_GetLocalDirection&&
         g.CWorld_ProcessLineOfSight&&g.CVehicle_GetVehicleAppearance;
     if (ready) {
@@ -381,8 +510,26 @@ void Install(void* handle) {
                 reinterpret_cast<void*>(&OnPlacement),original);
             originalPlacement=reinterpret_cast<decltype(originalPlacement)>(original);
         }
+        if (ready) {
+            constexpr std::uint32_t ai[]={0xd10343ff,0x6d072beb,0x6d0823e9,0xa9097bfd};
+            ready=Hook(dlsym(handle,"_ZN11CAutomobile9ProcessAIERj"),ai,reinterpret_cast<void*>(&OnVehicleAI),original);
+            vehicleAI=reinterpret_cast<decltype(vehicleAI)>(original);
+        }
     }
     LOGI("[npcgrab] available=%d",ready);
+}
+void OnDoorOpening(void* car) {
+    if (!ready||!car||g.CVehicle_GetVehicleAppearance(car)!=1) return;
+    const Vec speed=Read<Vec>(car,0x68);
+    void* driver=Read<void*>(car,0x5a0);
+    if (!driver||isPlayer(driver)||!Finite(speed)||Length(speed)>.08f) return;
+    TrafficStop* chosen=nullptr;
+    for (auto& stop:stops) if (stop.car==car) { chosen=&stop;break; }
+    if (!chosen) for (auto& stop:stops) if (!stop.car) { chosen=&stop;break; }
+    if (!chosen) return;
+    if (!chosen->car) { chosen->car=car;registerReference(car,&chosen->car); }
+    chosen->until=Now()+1.5;
+    StopCar(car,Now());
 }
 unsigned ClaimedHands() { return claimed.load(std::memory_order_relaxed); }
 void PublishMarkers() {
@@ -397,7 +544,7 @@ void PublishMarkers() {
             !vrcam::WorldPointToTracking(above,u)) continue;
         const Vec position{p[0],p[1],p[2]},direction{r[0]-p[0],r[1]-p[1],r[2]-p[2]},vertical{u[0]-p[0],u[1]-p[1],u[2]-p[2]};
         if (Finite(position)&&Finite(direction)&&Finite(vertical))
-            frame.markers[frame.count++]={position,direction,vertical,marker.held};
+            frame.markers[frame.count++]={position,direction,vertical,marker.held,marker.fist};
     }
     xr::SetNpcGrabMarkers(frame);
 }
@@ -407,6 +554,9 @@ void Reset() {
     for (auto& edge:edges) edge.latched=true;
     for (auto& active:intent) active=false;
     for (auto& released:extracted) released=false;
+    for (auto& motion:handMotion) motion={};
+    Pool current;current.Load();
+    for (auto& a:animations) if (a.target.Live(current)&&a.phase!=Phase::Pull) CancelHit(a,false);
     for (auto& flight:flights) flight={};
     claimed.store(0,std::memory_order_relaxed);
     worldMarkers={};xr::SetNpcGrabMarkers({});
@@ -441,6 +591,10 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             vrcam::TrackingPointToWorld(hands[hand].gripPos,world);
         const Vec p{world[0],world[1],world[2]};
         const bool good=valid&&Finite(p)&&Finite(eye)&&Length(p-eye)<1.6f;
+        const Vec previous=handMotion[hand].previous;
+        const bool haveMotion=handMotion[hand].valid&&good&&Length(p-previous)<.6f;
+        const float handSpeed=haveMotion?Length(p-previous)/dt:0.f;
+        handMotion[hand]={p,good};
         const bool fresh=edges[hand].Step(hands[hand].grip,good);
         if (fresh) intent[hand]=true;
         if (!good||hands[hand].grip<=.35f) intent[hand]=false;
@@ -458,16 +612,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             h.velocity=h.velocity+(Limit(measured,10.f)-h.velocity)*(1.f-std::exp(-dt/.045f));
             h.previous=p;
             if (hands[hand].grip<=.35f) { Release(h,pool,true);continue; }
-            if (h.seated) {
-                if (!Seated(h.ped)||ExitDoor(h.ped,player)<0) { Release(h,pool,false);continue; }
-                if (Length(p-h.start)>.22f) {
-                    if (Extract(h,player)) {
-                        h={};extracted[hand]=true;mask|=1u<<hand;
-                    }
-                    else Release(h,pool,false);
-                    continue;
-                }
-            }
+            if (h.seated) { Release(h,pool,false);continue; }
             if (!h.seated) {
                 if (Seated(h.ped)||!OwnTask(h)) { Release(h,pool,false);continue; }
                 const Vec anchor=Bone(h.ped,h.bone);
@@ -481,6 +626,10 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 Write(h.ped,0x68,h.command);
                 if (Length(p-h.start)>.12f&&Length(h.velocity)>.6f) Aggression(h,player);
             }
+        } else if (good&&haveMotion&&Length(p-previous)>=.02f&&hands[hand].grip>=.65f&&hands[hand].trigger>=.45f&&handSpeed>=1.8f&&
+                   PunchAtSeat(pool,player,eye,p,previous)) {
+            intent[hand]=false;extracted[hand]=true;mask|=1u<<hand;
+            xr::TriggerHaptic(hand,.6f,80.f,45.f);
         } else if (intent[hand]&&hands[hand].grip>=.65f&&good) {
             float best=.35f;
             Hold chosen{};
@@ -492,7 +641,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                     !Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f||Animating(ped)) continue;
                 const bool seated=Seated(ped);
                 const int door=seated?ExitDoor(ped,player):-1;
-                if (seated&&(door<0||!SeatReachable(ped,door,eye,p))) continue;
+                if (seated&&(!Waiting(ped)||door<0||!SeatReachable(ped,door,eye,p))) continue;
                 void* manager=Manager(ped);
                 if (!manager||Read<void*>(manager,0)) continue;
                 for (int bone:{3,4,5}) {
@@ -506,7 +655,12 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             }
             if (chosen.ped&&(chosen.seated||StartHold(chosen))) {
                 intent[hand]=false;
-                h=chosen;xr::TriggerHaptic(hand,.45f,80.f,35.f);
+                if (chosen.seated) {
+                    if (ContinuePull(*Waiting(chosen.ped),player)) {
+                        extracted[hand]=true;mask|=1u<<hand;
+                    }
+                } else h=chosen;
+                xr::TriggerHaptic(hand,.45f,80.f,35.f);
             }
         }
         if (h.ped) mask|=1u<<hand;
@@ -525,7 +679,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         void* manager=Manager(ped);
         if (!manager||Read<void*>(manager,0)) continue;
         const int door=ExitDoor(ped,player);
-        const Vec point=Bone(ped,4);
+        const bool waiting=Waiting(ped)!=nullptr;
+        const Vec point=Bone(ped,waiting?4:5);
         if (door<0||!Finite(point)||!SeatReachable(ped,door,eye,point)||
             !Visible(eye,point,ped,Read<void*>(ped,0x708))) continue;
         Vec right=Cross(eye-point,Vec{0,0,1});
@@ -539,7 +694,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         }
         // Offset toward the viewer so the silhouette rests over the clothing.
         const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
-        worldMarkers.markers[worldMarkers.count++]={point+facing*.18f,right,{0,0,1},near};
+        worldMarkers.markers[worldMarkers.count++]={point+facing*.18f,right,{0,0,1},near,!waiting};
     }
 }
 }

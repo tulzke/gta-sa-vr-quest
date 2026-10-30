@@ -9754,7 +9754,7 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
     for (int i=0;i<frame.count;++i) {
         const auto& marker=frame.markers[i];
         const auto arrow=vehicledoors::Arrow(marker);
-        const auto palm=npcgrab::Palm(marker);
+        const auto palm=marker.fist?npcgrab::Fist(marker):npcgrab::Palm(marker);
         const auto* vertices=palms?palm.vertices.data():arrow.data();
         const int count=palms?palm.count:static_cast<int>(arrow.size());
         static_assert(sizeof(vehicledoors::Vec)==3*sizeof(float));
