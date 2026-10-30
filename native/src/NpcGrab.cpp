@@ -47,9 +47,8 @@ void (*setAnimationTime)(void*,float){};
 bool (*vehicleAI)(void*,unsigned*){};
 void (*vehicleControl)(void*){};
 void (*vehicleRails)(void*){};
-void* (*requestSound)(void*,void*){};
-void (*updateSound)(void*,short){};
-void (*stopSound)(void*){};
+void (*pedJacked)(void*,int){};
+void (*pedAudioEvent)(void*,int,float,float,void*,unsigned char,int,unsigned){};
 void (*realPhysics)(void*){};
 std::atomic<unsigned> claimed{};
 GripEdge edges[2];
@@ -135,14 +134,7 @@ struct Animation {
     Vec exitPoint{};
     bool exitChecked{};
     int doorNode{};
-    unsigned audioSerial{};
-    std::uint32_t audioStart{};
 } animations[4];
-unsigned nextAudioSerial{};
-struct SceneSound {
-    void* sound{};void* entity{};int event{};float stamp{},due{};
-    unsigned serial{};bool cancelled{};
-} sceneSounds[32];
 struct TrafficStop { void* car{};double until{}; } stops[4];
 double Now() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -192,49 +184,16 @@ void ResumePose(Animation& a) {
     }
     a.pausedAssociation=nullptr;
 }
-Animation* SoundScene(void* entity) {
-    for (auto& a:animations) if (a.target.ped&&
-        static_cast<char*>(a.target.ped)+0x198==entity) return &a;
-    return nullptr;
+void OnPedJacked(void* entity,int event) {
+    // Only the long, wall-clock jacking sequence for our own actor is replaced.
+    // Generic CAESound allocation, playback and ordinary melee are untouched.
+    Pool pool;
+    if (event>=69&&event<=73&&pool.Load()) for (const auto& a:animations)
+        if (a.target.ped&&a.target.Live(pool)&&static_cast<char*>(a.target.ped)+0x198==entity) return;
+    pedJacked(entity,event);
 }
-void* OnRequestSound(void* manager,void* sound) {
-    const int event=Read<int>(sound,0x18);
-    auto* a=event>=69&&event<=73?SoundScene(Read<void*>(sound,8)):nullptr;
-    if (!a) return requestSound(manager,sound);
-    SceneSound* track=nullptr;
-    for (auto& s:sceneSounds) if (!s.sound) { track=&s;break; }
-    if (!track) return nullptr; // never create an untracked full-scene sound
-    const float stamp=Read<float>(sound,0x1c);
-    const float speed=Read<float>(sound,0x28),frequency=Read<float>(sound,0x70);
-    Write(sound,0x28,0.f);Write(sound,0x70,0.f);
-    void* live=requestSound(manager,sound);
-    Write(sound,0x28,speed);Write(sound,0x70,frequency);
-    if (live) {
-        for (auto& old:sceneSounds) if (old.sound==live) old={};
-        *track={live,Read<void*>(sound,8),event,stamp,
-            std::max(0.f,(stamp-float(a->audioStart))*.001f),a->audioSerial,false};
-    }
-    return live;
-}
-void OnUpdateSound(void* sound,short position) {
-    updateSound(sound,position);
-    for (auto& s:sceneSounds) if (s.sound==sound) {
-        if (position<0||Read<void*>(sound,8)!=s.entity||Read<int>(sound,0x18)!=s.event||
-            Read<float>(sound,0x1c)!=s.stamp) { s={};return; }
-        if (s.cancelled) { stopSound(sound);s={};return; }
-        auto* a=SoundScene(s.entity);
-        if (!a||a->audioSerial!=s.serial) { s={};return; } // natural exit: let its last sound finish
-        Pool pool;
-        if (!pool.Load()||!a->target.Live(pool)) { stopSound(sound);s={};return; }
-        void* anim=VictimAnimation(a->target.ped);
-        const float time=anim?Read<float>(anim,0x38):0.f;
-        const bool playing=(a->phase==Phase::Hit||a->phase==Phase::Pull)&&
-            std::isfinite(time)&&time>=s.due;
-        // Retail delayed jacking SFX already use speed zero before their due
-        // time. Use the same mechanism for both pauses, including virtual time.
-        Write(sound,0x28,playing?1.f:0.f);Write(sound,0x70,playing?1.f:0.f);
-        return;
-    }
+void SceneAudio(Animation& a,int event) {
+    pedAudioEvent(static_cast<char*>(a.target.ped)+0x198,event,0.f,1.f,owner,0,0,0);
 }
 void PausePose(Animation& a,void* anim,float time) {
     a.speed=Read<float>(anim,0x3c);
@@ -470,6 +429,7 @@ bool BeginHit(Hold& h,bool preparing=false) {
         ResumePose(*pending);
         ActionFeedback(h.ped,true);
         pending->phase=Phase::Hit;pending->until=updated+8.0;
+        SceneAudio(*pending,65); // AE_PED_HIT_HIGH_UNARMED, at the physical hit
         return true;
     }
     if (!preparing) return false; // door-opening motion cannot bypass preparation
@@ -485,8 +445,6 @@ bool BeginHit(Hold& h,bool preparing=false) {
     dragTaskCtor(task,car,nodes[door-2]);
     pending->target=h;pending->car=car;pending->until=updated+8.0;
     pending->doorNode=nodes[door-2];
-    pending->audioSerial=++nextAudioSerial;
-    pending->audioStart=g.CTimer_m_snTimeInMilliseconds?*g.CTimer_m_snTimeInMilliseconds:0;
     pending->phase=preparing?Phase::Preparing:Phase::Hit;
     pending->punchAfter=updated+.35;
     registerReference(car,&pending->car);
@@ -555,7 +513,6 @@ bool ContinuePull(Animation& pending,void* player) {
     return true;
 }
 void CancelHit(Animation& a,bool react) {
-    for (auto& sound:sceneSounds) if (sound.serial==a.audioSerial) sound.cancelled=true;
     // The task destructor only detaches its finish callback. It does not stop
     // the association, which otherwise keeps moving a seated ped after abort.
     void* anim=VictimAnimation(a.target.ped);
@@ -591,6 +548,7 @@ void PruneAnimations(const Pool& pool,double now) {
                     if (!OnPlacement(a.target.ped,a.doorNode,a.car,true))
                         originalPlacement(a.target.ped,a.doorNode,a.car,true);
                 }
+                SceneAudio(a,59); // AE_PED_COLLAPSE_AFTER_FALL, never while waiting for grip
             }
             if (live&&(a.phase==Phase::Waiting||a.phase==Phase::AwaitHit)) ResumePose(a);
             ClearAnimation(a);continue;
@@ -708,12 +666,12 @@ void Install(void* handle) {
     RESOLVE(association,"_Z30RpAnimBlendClumpGetAssociationP7RpClumpj");
     RESOLVE(setAnimationTime,"_ZN21CAnimBlendAssociation14SetCurrentTimeEf");
     RESOLVE(realPhysics,"_ZN8CCarCtrl26SwitchVehicleToRealPhysicsEP8CVehicle");
-    RESOLVE(stopSound,"_ZN8CAESound18StopSoundAndForgetEv");
+    RESOLVE(pedAudioEvent,"_ZN17CAEPedAudioEntity13AddAudioEventEiffP9CPhysicalhij");
     auto nameKey=reinterpret_cast<std::uint32_t(*)(const char*)>(dlsym(handle,"_ZN7CKeyGen15GetUppercaseKeyEPKc"));
     if (nameKey) for (auto& point:pausePoints) point.key=nameKey(point.name);
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
-        simplestTask&&startDraggedAnimation&&draggedAnimationVtable&&stopSound&&g.CTimer_m_snTimeInMilliseconds&&
+        simplestTask&&startDraggedAnimation&&draggedAnimationVtable&&pedAudioEvent&&
         dragTaskCtor&&registerReference&&cleanReference&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
         canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
         draggedCtor&&draggedDtor&&association&&setAnimationTime&&realPhysics&&nameKey&&g.CEventGroup_Add&&
@@ -749,16 +707,10 @@ void Install(void* handle) {
             vehicleRails=reinterpret_cast<decltype(vehicleRails)>(original);
         }
         if (ready) {
-            constexpr std::uint32_t request[]={0xfc1c0fe8,0xa9017bfd,0xa90257f6,0xa9034ff4};
-            ready=Hook(dlsym(handle,"_ZN15CAESoundManager15RequestNewSoundEP8CAESound"),request,
-                reinterpret_cast<void*>(&OnRequestSound),original);
-            requestSound=reinterpret_cast<decltype(requestSound)>(original);
-        }
-        if (ready) {
-            constexpr std::uint32_t update[]={0xa9be7bfd,0xa9014ff4,0x910003fd,0x7940c408};
-            ready=Hook(dlsym(handle,"_ZN8CAESound16UpdateParametersEs"),update,
-                reinterpret_cast<void*>(&OnUpdateSound),original);
-            updateSound=reinterpret_cast<decltype(updateSound)>(original);
+            constexpr std::uint32_t jacked[]={0xfc1b0fe8,0xa9017bfd,0xa9025ff8,0xa90357f6};
+            ready=Hook(dlsym(handle,"_ZN17CAEPedAudioEntity15HandlePedJackedEi"),jacked,
+                reinterpret_cast<void*>(&OnPedJacked),original);
+            pedJacked=reinterpret_cast<decltype(pedJacked)>(original);
         }
     }
     LOGI("[npcgrab] available=%d",ready);
