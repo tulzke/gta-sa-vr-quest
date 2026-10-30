@@ -113,6 +113,23 @@ Animation* Waiting(void* ped) {
     for (auto& a:animations) if (a.target.ped==ped&&a.phase==Phase::Waiting) return &a;
     return nullptr;
 }
+struct PausePoint { const char* name;float seconds;std::uint32_t key{}; } pausePoints[]={
+    // INU imports IFP time at fixed 30 fps with frame zero at time zero.
+    {"CAR_jackedLHS",30.f/30.f},
+    {"CAR_LjackedLHS",45.f/30.f},
+    {"CAR_LjackedRHS",45.f/30.f},
+    {"CAR_jackedRHS",45.f/30.f},
+};
+float PauseTime(void* anim) {
+    // Retail arm64 Init stores m_BlendHier at +0x28; SetName stores its
+    // uppercase CKeyGen hash at +0. IDs 378/379 alone do not identify the clip.
+    void* hierarchy=Read<void*>(anim,0x28);
+    if (hierarchy) {
+        const auto key=Read<std::uint32_t>(hierarchy,0);
+        for (const auto& point:pausePoints) if (point.key&&point.key==key) return point.seconds;
+    }
+    return .35f; // Unreviewed vehicle-specific clips stay unchanged.
+}
 void* VictimAnimation(void* ped) {
     void* clump=Read<void*>(ped,0x20);
     if (!clump) return nullptr;
@@ -417,10 +434,11 @@ void PruneAnimations(const Pool& pool,double now) {
         if (a.phase==Phase::Hit) {
             if (void* anim=VictimAnimation(a.target.ped)) {
                 const float time=Read<float>(anim,0x38);
-                if (std::isfinite(time)&&time>=.35f) {
+                const float pause=PauseTime(anim);
+                if (std::isfinite(time)&&time>=pause) {
                     a.speed=Read<float>(anim,0x3c);
                     if (!std::isfinite(a.speed)||a.speed<=0) a.speed=1.f;
-                    setAnimationTime(anim,.35f);
+                    setAnimationTime(anim,pause);
                     a.pausedAssociation=anim;
                     const auto flags=Read<std::uint16_t>(anim,0x46);
                     a.synchronized=(flags&0x20u)!=0;
@@ -508,11 +526,13 @@ void Install(void* handle) {
     RESOLVE(association,"_Z30RpAnimBlendClumpGetAssociationP7RpClumpj");
     RESOLVE(setAnimationTime,"_ZN21CAnimBlendAssociation14SetCurrentTimeEf");
     RESOLVE(realPhysics,"_ZN8CCarCtrl26SwitchVehicleToRealPhysicsEP8CVehicle");
+    auto nameKey=reinterpret_cast<std::uint32_t(*)(const char*)>(dlsym(handle,"_ZN7CKeyGen15GetUppercaseKeyEPKc"));
+    if (nameKey) for (auto& point:pausePoints) point.key=nameKey(point.name);
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
         dragTaskCtor&&registerReference&&cleanReference&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
         canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
-        draggedCtor&&draggedDtor&&association&&setAnimationTime&&realPhysics&&g.CEventGroup_Add&&
+        draggedCtor&&draggedDtor&&association&&setAnimationTime&&realPhysics&&nameKey&&g.CEventGroup_Add&&
         g.CWeapon_GenerateDamageEvent&&g.CPed_GetLocalDirection&&
         g.CWorld_ProcessLineOfSight&&g.CVehicle_GetVehicleAppearance;
     if (ready) {

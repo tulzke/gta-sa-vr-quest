@@ -50,6 +50,8 @@ Vec expectedExit{};
 GameSymbols::Vec2 lastDirection{};
 int lastFallDirection{};
 alignas(16) char reaction[0x60]{};
+alignas(16) char animationHierarchy[0x28]{};
+unsigned animationId=378;
 const void* eventPlayer{};const void* eventCar{};
 void* poolPtr=poolData;
 std::uint8_t flags[1]{1};
@@ -90,7 +92,7 @@ bool Damage(void* victim,void* attacker,int weapon,int damage,int piece,int dire
     CHECK(victim==npc&&attacker==player&&weapon==0&&damage==0&&piece==3&&direction==2);
     ++aggressions;return true;
 }
-void* Assoc(void* clump,unsigned id) {return clump==npc&&id==378&&Read<void*>(intelligence,8+3*8)?reaction:nullptr;}
+void* Assoc(void* clump,unsigned id) {return clump==npc&&id==animationId&&Read<void*>(intelligence,8+3*8)?reaction:nullptr;}
 void AnimTime(void* anim,float t) {Write(anim,0x38,t);}
 void Physics(void*) {}
 bool NativeAI(void* v,unsigned*) {Write(v,0x608,1.f);Write(v,0x60c,0.f);Write(v,0x68,Vec{.02f,0,0});return true;}
@@ -147,6 +149,9 @@ void Setup() {
     Write(npc,0x20,static_cast<void*>(npc));Write(npc,0x538,static_cast<void*>(intelligence));
     Write<std::uint8_t>(car,0x5a,2);Write<std::uint8_t>(otherCar,0x5a,2);Write<std::uint8_t>(npc,0x5a,3);
     std::memset(reaction,0,sizeof(reaction));Write(reaction,0x3c,1.f);Write(npc,0x6ac,100.f);Write(player,0x6ac,100.f);
+    animationId=378;std::memset(animationHierarchy,0,sizeof(animationHierarchy));
+    Write<void*>(reaction,0x28,animationHierarchy);
+    for (unsigned i=0;i<4;++i) pausePoints[i].key=i+1; // fake engine name hashes
     Write<void*>(poolData,0,npc);Write(poolData,8,flags);Write(poolData,0x10,1);
     pedPool=&poolPtr;getPed=Lookup;isPlayer=IsPlayer;allocate=Allocate;fallCtor=Fall;standCtor=Stand;calculateVelocity=NativeVelocity;setTask=SetTask;
     dragTaskCtor=DragTask;registerReference=Register;cleanReference=Clean;originalPlacement=NativePlace;doorPosition=DoorPoint;groundPosition=Ground;
@@ -190,6 +195,30 @@ void ConfirmGrip() {hands[0].grip=1;hands[0].trigger=0;Tick();}
 
 }
 int main() {
+    // Choose by the actual clip hierarchy, not the shared 378/379 animation IDs.
+    struct Clip { const char* name;unsigned key,id;float pause; } clips[]={
+        {"CAR_jackedLHS",1,378,1.f},
+        {"CAR_LjackedLHS",2,378,1.5f},
+        {"CAR_LjackedRHS",3,379,1.5f},
+        {"CAR_jackedRHS",4,379,1.5f},
+        {"unreviewed",100,378,.35f},
+    };
+    CHECK(std::strcmp(pausePoints[0].name,clips[0].name)==0);
+    CHECK(std::strcmp(pausePoints[1].name,clips[1].name)==0);
+    CHECK(std::strcmp(pausePoints[2].name,clips[2].name)==0);
+    CHECK(std::strcmp(pausePoints[3].name,clips[3].name)==0);
+    for (const auto& clip:clips) {
+        Setup();Seat();Punch();animationId=clip.id;Write(animationHierarchy,0,clip.key);
+        Write(reaction,0x38,clip.pause-.01f);Tick();
+        CHECK(animations[0].phase==Phase::Hit&&Read<float>(reaction,0x3c)==1.f);
+        Write(reaction,0x38,clip.pause+.02f);Tick();
+        CHECK(animations[0].phase==Phase::Waiting&&Read<float>(reaction,0x38)==clip.pause);
+        CHECK(Seated(npc)&&Read<float>(reaction,0x3c)==0&&Read<float>(car,0x608)==0);
+        CHECK(animations[0].waitUntil-Now()>.9&&animations[0].waitUntil-Now()<=1.0);
+        hands[0].grip=hands[0].trigger=0;Tick();ConfirmGrip();
+        CHECK(animations[0].phase==Phase::Pull&&Read<float>(reaction,0x3c)==1.f&&dragEvents==1);
+    }
+    Setup();Write<void*>(reaction,0x28,nullptr);CHECK(PauseTime(reaction)==.35f);
     Setup();Grip();CHECK(npcgrab::ClaimedHands()==1&&fallCalls==0&&standCalls==1);
     hands[0].gripPos[0]=.04f;Tick();CHECK(Read<Vec>(npc,0x68).x>0);
     const Vec heldSpeed=Read<Vec>(npc,0x68);
