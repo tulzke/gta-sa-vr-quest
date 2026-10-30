@@ -31,7 +31,10 @@ void (*setTask)(void*,void*,int,bool){};
 void (*outCtor)(void*,void*,int,bool){};
 bool (*outProcess)(void*,void*){};
 void (*outDtor)(void*){};
-bool (*placeOutside)(void*,int,void*,bool){};
+GameSymbols::Vec3 (*doorPosition)(const void*,int){};
+bool (*groundPosition)(GameSymbols::Vec3*){};
+void (*worldRemove)(void*){};
+void (*worldAdd)(void*){};
 bool (*canOpen)(const void*,const void*){};
 void (*draggedCtor)(void*,const void*,const void*,bool){};
 void (*draggedDtor)(void*){};
@@ -179,18 +182,67 @@ bool SeatReachable(void* ped,int door,Vec eye,Vec hand) {
     const Vec localEye=basis.Local(eye),localHand=basis.Local(hand);
     return localEye.x*side>.45f&&localHand.x*side>-.1f&&Length(eye-hand)<1.6f;
 }
+bool PlaceAtDoor(void* ped,void* car,int door) {
+    constexpr int nodes[]={10,8,11,9};
+    void* matrix=Read<void*>(car,0x18);
+    if (!matrix) return false;
+    const Basis basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+    if (!basis.Valid()) return false;
+    const auto native=doorPosition(car,nodes[door-2]);
+    const Vec origin{native.x,native.y,native.z};
+    if (!Finite(origin)||Length(origin-Position(ped))>2.5f) return false;
+    const float side=door==2||door==4?-1.f:1.f;
+    const Vec outward=basis.right*side;
+    // Bounded doorway search, independent of the car's heading or length.
+    // PositionPedOutOfCollision searches the entire car perimeter/path nodes
+    // when CJ blocks the door and can put the victim behind the boot.
+    for (float distance:{0.f,.25f,.5f}) for (float along:{0.f,.25f,-.25f,.5f,-.5f}) {
+        Vec point=origin+outward*distance+basis.forward*along;
+        GameSymbols::Vec3 ground{point.x,point.y,point.z};
+        if (!groundPosition(&ground)) continue;
+        point={ground.x,ground.y,ground.z};
+        if (!Finite(point)||std::abs(point.z-Position(ped).z)>.75f) continue;
+        bool clear=true;
+        // Two body spheres cover feet-to-head clearance and include CJ, other
+        // peds and this car. Try a nearby point if the player occupies the first.
+        for (float height:{-.35f,.35f}) {
+            const GameSymbols::Vec3 centre{point.x,point.y,point.z+height};
+            if (g.CWorld_TestSphereAgainstWorld(centre,.35f,ped,true,true,true,true,true,false)) {
+                clear=false;break;
+            }
+        }
+        if (!clear) continue;
+        const Vec start=Position(ped);
+        const GameSymbols::Vec3 from{start.x,start.y,start.z},to{point.x,point.y,point.z};
+        alignas(8) std::uint8_t col[0x2c]{};void* hit{};
+        void* previous=*g.CWorld_pIgnoreEntity;
+        *g.CWorld_pIgnoreEntity=car;
+        const bool blocked=g.CWorld_ProcessLineOfSight(&from,&to,col,&hit,
+            true,true,false,true,true,false,false,false);
+        *g.CWorld_pIgnoreEntity=previous;
+        if (blocked) continue;
+        // Keep sector membership current without CPed::Teleport's task flush.
+        worldRemove(ped);
+        if (void* pedMatrix=Read<void*>(ped,0x18)) Write(pedMatrix,0x30,point);
+        else Write(ped,8,point);
+        Write(ped,0x68,Vec{});Write(ped,0x74,Vec{});
+        worldAdd(ped);
+        return true;
+    }
+    return false;
+}
 bool Extract(Hold& h,void* player) {
     const int door=ExitDoor(h.ped,player);
     if (door<0) return false;
-    // Set-out normally follows an animation that already moved the ped outside.
-    // A direct VR pull must perform the collision-safe placement first. These
-    // helpers take component nodes, not damage-manager door indices.
     constexpr int nodes[]={10,8,11,9};
     void* car=Read<void*>(h.ped,0x708);
     const bool wasDriver=Read<void*>(car,0x5a0)==h.ped;
-    if (!placeOutside(h.ped,nodes[door-2],car,true)) return false;
+    if (!PlaceAtDoor(h.ped,car,door)) return false;
     alignas(16) std::uint8_t task[0x30]{};
     outCtor(task,car,nodes[door-2],false);
+    // Retail ProcessPed @646770: m_bWarpingOut +1f skips the automatic
+    // PositionPedOutOfCollision call. The validated doorway point is final.
+    Write<std::uint8_t>(task,0x1f,1);
     const bool done=outProcess(task,h.ped);
     outDtor(task);
     if (!done||Seated(h.ped)) return false;
@@ -206,7 +258,13 @@ bool Extract(Hold& h,void* player) {
     // Fall occupies physical response only; personality responses can queue
     // underneath and run after getting up. The hand releases at extraction.
     if (void* fall=allocate(0x28)) {
-        fallCtor(fall,0,1200);
+        // Treat the fall as a hit from inside the cabin. A fixed direction 0
+        // uses the seated ped's forward heading and falls toward the boot.
+        void* matrix=Read<void*>(car,0x18);
+        const Vec inward=Read<Vec>(matrix,0)*(door==2||door==4?1.f:-1.f);
+        const GameSymbols::Vec2 source{inward.x,inward.y};
+        const int direction=std::clamp(g.CPed_GetLocalDirection(h.ped,&source),0,3);
+        fallCtor(fall,direction,1200);
         setTask(Manager(h.ped),fall,0,false);
     }
     alignas(16) std::uint8_t event[0x30]{};
@@ -280,14 +338,18 @@ void Install(void* handle) {
     RESOLVE(outCtor,"_ZN23CTaskSimpleCarSetPedOutC1EP8CVehicleib");
     RESOLVE(outProcess,"_ZN23CTaskSimpleCarSetPedOut10ProcessPedEP4CPed");
     RESOLVE(outDtor,"_ZN23CTaskSimpleCarSetPedOutD1Ev");
-    RESOLVE(placeOutside,"_ZN4CPed25PositionPedOutOfCollisionEiP8CVehicleb");
+    RESOLVE(doorPosition,"_ZN13CCarEnterExit24GetPositionToOpenCarDoorERK8CVehiclei");
+    RESOLVE(groundPosition,"_ZN13CPedPlacement15FindZCoorForPedEP7CVector");
+    RESOLVE(worldRemove,"_ZN6CWorld6RemoveEP7CEntity");
+    RESOLVE(worldAdd,"_ZN6CWorld3AddEP7CEntity");
     RESOLVE(canOpen,"_ZNK8CVehicle15CanPedOpenLocksEPK4CPed");
     RESOLVE(draggedCtor,"_ZN19CEventDraggedOutCarC1EPK8CVehiclePK4CPedb");
     RESOLVE(draggedDtor,"_ZN19CEventDraggedOutCarD1Ev");
     RESOLVE(addPrimary,"_ZN16CPedIntelligence26AddTaskPrimaryMaybeInGroupEP5CTaskb");
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
-        outCtor&&outProcess&&outDtor&&placeOutside&&canOpen&&g.CPed_GetBonePosition&&
+        outCtor&&outProcess&&outDtor&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
+        canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
         draggedCtor&&draggedDtor&&addPrimary&&g.CEventGroup_Add&&
         g.CWeapon_GenerateDamageEvent&&g.CPed_GetLocalDirection&&
         g.CWorld_ProcessLineOfSight&&g.CVehicle_GetVehicleAppearance&&

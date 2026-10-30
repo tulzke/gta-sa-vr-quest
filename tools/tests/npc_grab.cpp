@@ -38,6 +38,11 @@ alignas(16) char player[0x9c8]{},npc[0x9c8]{},car[0xc68]{},pad[0x200]{},poolData
 alignas(16) char taskMemory[32][0x28]{};
 int allocations{},aggressions{},dragEvents{},dragDestroyed{},primaryReplaced{};
 bool eventDriver{};
+bool firstSpotBlocked{},groundMissing{};
+int removed{},added{},sphereTests{};
+Vec expectedExit{};
+GameSymbols::Vec2 lastDirection{};
+int lastFallDirection{};
 const void* eventPlayer{};const void* eventCar{};
 void* poolPtr=poolData;
 std::uint8_t flags[1]{1};
@@ -53,7 +58,7 @@ bool Los(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,bool
     *hit=wall?player:(carOccludes&&ignoredEntity!=car?car:nullptr);return *hit!=nullptr;
 }
 void* Allocate(std::size_t n) {CHECK(n==0x28);CHECK(allocations<32);return taskMemory[allocations++];}
-void Fall(void*,int direction,int ms) {CHECK(direction==0);timer=ms;++fallCalls;}
+void Fall(void*,int direction,int ms) {CHECK(direction>=0&&direction<=3);lastFallDirection=direction;timer=ms;++fallCalls;}
 void SetTask(void* m,void* t,int slot,bool) {CHECK(slot==0);Write(m,0,t);}
 void Stand(void*,int ms,bool,bool,float) {CHECK(ms==-1||ms==0);++standCalls;}
 void Primary(void* brain,void* task,bool force) {
@@ -70,7 +75,7 @@ void* AddEvent(void* group,void* event,bool valid) {
     CHECK(primaryReplaced==1&&fallCalls==1); // fall + task replacement precede native reaction
     ++dragEvents;return event;
 }
-int Direction(void* ped,const GameSymbols::Vec2*) {CHECK(ped==npc);return 2;}
+int Direction(void* ped,const GameSymbols::Vec2* relative) {CHECK(ped==npc);lastDirection=*relative;return 2;}
 bool Damage(void* victim,void* attacker,int weapon,int damage,int piece,int direction) {
     CHECK(victim==npc&&attacker==player&&weapon==0&&damage==0&&piece==3&&direction==2);
     ++aggressions;return true;
@@ -79,13 +84,30 @@ void NativeVelocity(void* ped) {Write(ped,0x68,Vec{});Write(ped,0x6bc,0.f);Write
 bool IsPlayer(const void* p) {return p==player;}
 bool CanOpen(const void*,const void*) {return !locked;}
 int Appearance(const void*) {return 1;}
-bool Place(void* ped,int node,void* v,bool) {
-    CHECK(ped==npc&&v==car);CHECK(node>=8&&node<=11);
-    if (placementBlocked) return false;
-    placedNode=node;return true;
+GameSymbols::Vec3 DoorPoint(const void* v,int node) {
+    CHECK(v==car&&node>=8&&node<=11);placedNode=node;
+    const float side=node==10||node==11?-1.f:1.f;
+    const Vec right=Read<Vec>(carMatrix,0);
+    expectedExit=Position(npc)+right*(side*.5f);
+    return {expectedExit.x,expectedExit.y,expectedExit.z};
+}
+bool Ground(GameSymbols::Vec3*) {return !groundMissing;}
+void* Sphere(GameSymbols::Vec3 p,float radius,void* ignored,bool buildings,bool vehicles,bool peds,bool objects,bool dummies,bool seeThrough) {
+    CHECK(radius==.35f&&ignored==npc&&buildings&&vehicles&&peds&&objects&&dummies&&!seeThrough);
+    ++sphereTests;
+    if (placementBlocked) return car;
+    if (firstSpotBlocked&&std::hypot(p.x-expectedExit.x,p.y-expectedExit.y)<.18f) return player;
+    return nullptr;
+}
+void Remove(void* ped) {CHECK(ped==npc);++removed;}
+void Add(void* ped) {
+    CHECK(ped==npc&&removed==added+1);++added;
+    const Vec delta=Position(ped)-expectedExit;
+    CHECK(std::hypot(delta.x,delta.y)<=.71f); // no perimeter/boot fallback
 }
 void OutCtor(void*,void* v,int node,bool) {CHECK(v==car);CHECK(node==placedNode);}
-bool Out(void*,void* p) {
+bool Out(void* task,void* p) {
+    CHECK(Read<std::uint8_t>(task,0x1f)==1); // never run automatic placement a second time
     ++exits;Write<std::uint8_t>(p,0x585,0);
     if (Read<void*>(car,0x5a0)==p) Write<void*>(car,0x5a0,nullptr);
     for (int i=0;i<3;++i) if (Read<void*>(car,0x5a8+i*8)==p) Write<void*>(car,0x5a8+i*8,nullptr);
@@ -96,13 +118,15 @@ xr::HandPose hands[2];
 void Setup() {
     Reset();std::memset(npc,0,sizeof(npc));std::memset(car,0,sizeof(car));std::memset(intelligence,0,sizeof(intelligence));
     flags[0]=1;wall=locked=carOccludes=placementBlocked=false;ignoredEntity=nullptr;placedNode=0;
+    firstSpotBlocked=groundMissing=false;removed=added=sphereTests=0;
     allocations=aggressions=dragEvents=dragDestroyed=primaryReplaced=0;eventCar=eventPlayer=nullptr;
     xr::focused=vrcam::active=true;physicalweapon::mask=vehicledoors::mask=0;
     hands[0]={};hands[1]={};hands[1].valid=false;hands[0].gripPos[2]=1;
     Write(npc,0x538,static_cast<void*>(intelligence));Write(npc,0x6ac,100.f);Write(player,0x6ac,100.f);
     Write<void*>(poolData,0,npc);Write(poolData,8,flags);Write(poolData,0x10,1);
     pedPool=&poolPtr;getPed=Lookup;isPlayer=IsPlayer;allocate=Allocate;fallCtor=Fall;standCtor=Stand;calculateVelocity=NativeVelocity;setTask=SetTask;
-    outCtor=OutCtor;outProcess=Out;outDtor=Dtor;placeOutside=Place;canOpen=CanOpen;ready=true;
+    outCtor=OutCtor;outProcess=Out;outDtor=Dtor;doorPosition=DoorPoint;groundPosition=Ground;
+    worldRemove=Remove;worldAdd=Add;g.CWorld_TestSphereAgainstWorld=Sphere;canOpen=CanOpen;ready=true;
     draggedCtor=DragCtor;draggedDtor=DragDtor;addPrimary=Primary;
     g.CEventGroup_Add=AddEvent;g.CPed_GetLocalDirection=Direction;g.CWeapon_GenerateDamageEvent=Damage;
     g.FindPlayerPed=Player;g.FindPlayerVehicle=Vehicle;g.CPad_GetPad=Pad;
@@ -174,6 +198,8 @@ int main() {
         CHECK(Read<void*>(intelligence,8)!=nullptr&&Read<void*>(intelligence,8)!=Read<void*>(intelligence,8+3*8));
         CHECK(!aggressions); // carjack event carries the reaction; no duplicate assault
         constexpr int expectedNode[]={10,8,11,9};CHECK(placedNode==expectedNode[seat+1]);
+        CHECK(Length(Position(npc)-expectedExit)<.0001f&&removed==1&&added==1);
+        CHECK(lastFallDirection==2&&std::abs(lastDirection.x-(seat<0||seat==1?1.f:-1.f))<.001f&&lastDirection.y==0);
         CHECK(!Read<void*>(car,seat<0?0x5a0:0x5a8+seat*8));
         Tick();CHECK(npcgrab::ClaimedHands()==1&&dragEvents==1&&!aggressions); // no follow-up fist attack
         hands[0].grip=0;Tick();CHECK(!npcgrab::ClaimedHands());
@@ -181,5 +207,24 @@ int main() {
     Setup();Seat();Grip();hands[0].grip=0;Tick();CHECK(!exits&&Seated(npc)&&!dragEvents&&!primaryReplaced);
     Setup();Seat();Grip();placementBlocked=true;hands[0].gripPos[0]+=.25f;Tick();
     CHECK(!exits&&Seated(npc)&&!npcgrab::ClaimedHands()&&!dragEvents&&!primaryReplaced&&!fallCalls);
+    CHECK(removed==0&&added==0); // no partial relocation when the doorway is blocked
+    Setup();Seat();Grip();firstSpotBlocked=true;hands[0].gripPos[0]+=.25f;Tick();
+    CHECK(exits==1&&Length(Position(npc)-expectedExit)>.2f&&Length(Position(npc)-expectedExit)<.71f);
+    Setup();Seat();Grip();groundMissing=true;const Vec original=Position(npc);hands[0].gripPos[0]+=.25f;Tick();
+    CHECK(!exits&&Length(Position(npc)-original)==0&&!removed&&!added);
+    Setup();Seat();Grip();wall=true;hands[0].gripPos[0]+=.25f;Tick();
+    CHECK(!exits&&!removed&&!added); // no clear route from the cabin to a candidate
+    // World orientation cannot turn the bounded doorway search into a move
+    // along the rear of the car. Test all seats with a rotated vehicle basis.
+    for (int seat=-1;seat<3;++seat) {
+        Setup();Seat(seat);
+        Write(carMatrix,0,Vec{0,1,0});Write(carMatrix,0x10,Vec{-1,0,0});
+        const float side=seat<0||seat==1?-1.f:1.f;
+        Write(carMatrix,0x30,Vec{0,-side*.6f,0});Write(npc,8,Vec{0,side*.6f,0});
+        hands[0].gripPos[0]=0;hands[0].gripPos[1]=side*.7f;
+        Grip();hands[0].gripPos[1]+=.25f;Tick();
+        CHECK(exits==1&&Length(Position(npc)-expectedExit)<.0001f);
+        CHECK(lastDirection.x==0&&std::abs(lastDirection.y+side)<.001f);
+    }
     std::puts("NPC grab: hold, throw, ownership, interruption, pool lifetime and four vehicle seats passed");
 }
