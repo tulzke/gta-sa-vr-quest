@@ -133,6 +133,7 @@ struct Animation {
     bool synchronized{};
     Vec exitPoint{};
     bool exitChecked{};
+    bool landingPlayed{};
     int doorNode{};
 } animations[4];
 struct TrafficStop { void* car{};double until{}; } stops[4];
@@ -148,12 +149,12 @@ Animation* BeforeHit(void* ped) {
         (a.phase==Phase::Preparing||a.phase==Phase::AwaitHit)) return &a;
     return nullptr;
 }
-struct PausePoint { const char* name;float seconds;std::uint32_t key{};float start{}; } pausePoints[]={
+struct PausePoint { const char* name;float seconds;std::uint32_t key{};float start{},landing{}; } pausePoints[]={
     // INU imports IFP time at fixed 30 fps with frame zero at time zero.
-    {"CAR_jackedLHS",30.f/30.f,0,15.f/30.f},
-    {"CAR_LjackedLHS",45.f/30.f,0,25.f/30.f},
-    {"CAR_LjackedRHS",45.f/30.f,0,26.f/30.f},
-    {"CAR_jackedRHS",45.f/30.f,0,20.f/30.f},
+    {"CAR_jackedLHS",30.f/30.f,0,15.f/30.f,64.f/30.f},
+    {"CAR_LjackedLHS",45.f/30.f,0,25.f/30.f,85.f/30.f},
+    {"CAR_LjackedRHS",45.f/30.f,0,26.f/30.f,85.f/30.f},
+    {"CAR_jackedRHS",45.f/30.f,0,20.f/30.f,78.f/30.f},
 };
 const PausePoint* AnimationPoint(void* anim) {
     void* hierarchy=Read<void*>(anim,0x28);
@@ -538,6 +539,15 @@ void PruneAnimations(const Pool& pool,double now) {
          Length(Position(target.ped)-Position(owner))>3.f||ExitDoor(target.ped,owner)<0)) target={};
     for (auto& a:animations) if (a.target.ped) {
         const bool live=a.target.Live(pool);
+        if (live&&a.car&&a.phase==Phase::Pull&&!a.landingPlayed&&!playerlife::Dead(a.target.ped)) {
+            if (void* anim=VictimAnimation(a.target.ped);anim&&anim==a.ownedAssociation) {
+                const auto* point=AnimationPoint(anim);
+                const float time=Read<float>(anim,0x38);
+                if (point&&std::isfinite(time)&&time>=point->landing) {
+                    SceneAudio(a,59);a.landingPlayed=true;
+                }
+            }
+        }
         if (!live||!a.car||playerlife::Dead(a.target.ped)||!Seated(a.target.ped)) {
             if (live&&a.car&&a.phase==Phase::Pull&&a.exitChecked&&!Seated(a.target.ped)&&
                 !playerlife::Dead(a.target.ped)) {
@@ -548,7 +558,9 @@ void PruneAnimations(const Pool& pool,double now) {
                     if (!OnPlacement(a.target.ped,a.doorNode,a.car,true))
                         originalPlacement(a.target.ped,a.doorNode,a.car,true);
                 }
-                SceneAudio(a,59); // AE_PED_COLLAPSE_AFTER_FALL, never while waiting for grip
+                // Fallback for unreviewed clips or an association removed before
+                // this update. Reviewed clips normally sound at ground contact.
+                if (!a.landingPlayed) SceneAudio(a,59);
             }
             if (live&&(a.phase==Phase::Waiting||a.phase==Phase::AwaitHit)) ResumePose(a);
             ClearAnimation(a);continue;

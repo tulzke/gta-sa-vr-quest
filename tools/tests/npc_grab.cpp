@@ -245,12 +245,12 @@ void ConfirmGrip() {hands[0].grip=1;hands[0].trigger=0;Tick();}
 }
 int main() {
     // Choose by the actual clip hierarchy, not the shared 378/379 animation IDs.
-    struct Clip { const char* name;unsigned key,id;float pause,ready; } clips[]={
-        {"CAR_jackedLHS",1,378,1.f,15.f/30.f},
-        {"CAR_LjackedLHS",2,378,1.5f,25.f/30.f},
-        {"CAR_LjackedRHS",3,379,1.5f,26.f/30.f},
-        {"CAR_jackedRHS",4,379,1.5f,20.f/30.f},
-        {"unreviewed",100,378,.35f,0.f},
+    struct Clip { const char* name;unsigned key,id;float pause,ready,landing; } clips[]={
+        {"CAR_jackedLHS",1,378,1.f,15.f/30.f,64.f/30.f},
+        {"CAR_LjackedLHS",2,378,1.5f,25.f/30.f,85.f/30.f},
+        {"CAR_LjackedRHS",3,379,1.5f,26.f/30.f,85.f/30.f},
+        {"CAR_jackedRHS",4,379,1.5f,20.f/30.f,78.f/30.f},
+        {"unreviewed",100,378,.35f,0.f,0.f},
     };
     CHECK(std::strcmp(pausePoints[0].name,clips[0].name)==0);
     CHECK(std::strcmp(pausePoints[1].name,clips[1].name)==0);
@@ -281,6 +281,12 @@ int main() {
         CHECK(animations[0].waitUntil-Now()>1.9&&animations[0].waitUntil-Now()<=2.0);
         hands[0].grip=hands[0].trigger=0;Tick();ConfirmGrip();
         CHECK(animations[0].phase==Phase::Pull&&Read<float>(reaction,0x3c)==1.f&&dragEvents==1);
+        if (clip.landing>0) {
+            Write(reaction,0x38,clip.landing-.01f);Tick();CHECK(!sceneFalls);
+            Write(reaction,0x38,clip.landing);Tick();CHECK(sceneFalls==1&&Seated(npc));
+            Write(reaction,0x38,clip.landing+.2f);Tick();CHECK(sceneFalls==1);
+            FinishExtraction();Tick();CHECK(sceneFalls==1); // no second cue at animation end
+        }
     }
     Setup();Write<void*>(reaction,0x28,nullptr);CHECK(PauseTime(reaction)==.35f);
     Setup();Seat();foreignLeaf=true;Punch();CHECK(animations[0].task&&animationStarts==0);
