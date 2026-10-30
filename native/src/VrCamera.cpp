@@ -14092,7 +14092,8 @@ void TraceClosePedVisibility(void* entity, int stage, int result) {
     const double now = NowMs();
     if (now - sample.last[stage] < 500.0) return;
     sample.last[stage] = now;
-    LOGI("[npc.close] stage=%s entity=%p model=%d dist=%.2f "
+    __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
+         "[npc.close] stage=%s entity=%p model=%d dist=%.2f "
          "delta=%.2f,%.2f,%.2f result=%d visible=%d rw=%d",
          stage == 0 ? "screen" : (stage == 1 ? "eye0" : "eye1"),
          entity, static_cast<int>(*reinterpret_cast<const std::int16_t*>(bytes + 0x32)),
