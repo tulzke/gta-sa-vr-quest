@@ -266,6 +266,12 @@ int main(){
     SetBodyFrameEnabled(false);gBodyFrameEnabled=true;LoadSettings();CHECK(!BodyFrameEnabled());
     Write("body_frame 99\nstate 0 2\n");LoadSettings();CHECK(!BodyFrameEnabled());CHECK(gPointState[0]==2);
     Write("body_frame 1\nbody_frame 0\n");LoadSettings();CHECK(!BodyFrameEnabled());
+    Write("left_handed 1\np 0 12\np 1 8\np 2 3\np 3 1\n");LoadSettings();
+    CHECK(gLeftHanded);CHECK(gPointSlots[0]==12&&gPointSlots[1]==8);
+    CHECK(gPointSlots[2]==3&&gPointSlots[3]==1);
+    SaveSettingsLocked();gLeftHanded=false;LoadSettings();
+    CHECK(gLeftHanded&&gPointSlots[0]==12&&gPointSlots[1]==8&&gPointSlots[2]==3);
+    Write("p 0 12\np 1 12\n");LoadSettings();CHECK(gPointSlots[0]==12&&gPointSlots[1]==-1);
     std::puts("PASS: production settings old configs, BODY round trip, legacy visibility, invalid values and reset");
 }
 '''

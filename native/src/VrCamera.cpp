@@ -18115,6 +18115,8 @@ void* g_eyeRaster[kEyeSets][2] = {};
 void* g_pendingEyeRaster[kEyeSets][2] = {};
 void* g_retiredEyeRaster[kEyeSets][2] = {};
 void* g_hudRaster[kEyeSets] = {};
+void* g_radialIconRaster[kEyeSets] = {};
+void* g_radialWeaponIcons[64] = {};
 int   g_recordCounter = 0;                    // monotonic; set = counter % kEyeSets
 int   g_eyeRasterW = 0, g_eyeRasterH = 0;    // eye raster (render) size — scaled down
 std::atomic<int> g_stereoBaseW{0};
@@ -20383,6 +20385,66 @@ bool PrepareHudRasterRing() {
     return true;
 }
 
+bool PrepareRadialIconRasters() {
+    if (!g.RwRasterCreate) return false;
+    if (!g_radialIconRaster[0]) {
+        for (int i=0;i<kEyeSets;++i) {
+            g_radialIconRaster[i]=g.RwRasterCreate(512,512,32,5);
+            if (!g_radialIconRaster[i]) {
+                for (int j=0;j<kEyeSets;++j) {
+                    if (g_radialIconRaster[j] && g.RwRasterDestroy)
+                        g.RwRasterDestroy(g_radialIconRaster[j]);
+                    g_radialIconRaster[j]=nullptr;
+                }
+                return false;
+            }
+        }
+        return false;
+    }
+    for (void* raster : g_radialIconRaster)
+        if (!raster || !EyeRasterTexId(raster)) return false;
+    return true;
+}
+
+void RenderRadialIconAtlas(const radialholster::Frame& frame) {
+    if (!g.TextureDatabaseRuntime_GetDatabase || !g.TextureDatabaseRuntime_Register ||
+        !g.RwTextureRead || !g.CSprite2d_Draw ||
+        !g.CWeaponInfo_GetWeaponInfo || !g.CModelInfo_ms_modelInfoPtrs) return;
+    void* db = g.TextureDatabaseRuntime_GetDatabase("gta3");
+    if (!db) return;
+    g.TextureDatabaseRuntime_Register(db);
+    if (g.RwRenderStateSet) {
+        g.RwRenderStateSet(6,nullptr); g.RwRenderStateSet(8,nullptr);
+        g.RwRenderStateSet(12,reinterpret_cast<void*>(1));
+        g.RwRenderStateSet(10,reinterpret_cast<void*>(5));
+        g.RwRenderStateSet(11,reinterpret_cast<void*>(6));
+        g.RwRenderStateSet(20,reinterpret_cast<void*>(1));
+    }
+    const unsigned char color[4]={255,255,255,255};
+    for (int i=0;i<frame.count;++i) {
+        const int type=frame.weaponTypes[i];
+        if (type<=0 || type>=64) continue;
+        if (!g_radialWeaponIcons[type]) {
+            const auto* info=static_cast<const std::uint8_t*>(g.CWeaponInfo_GetWeaponInfo(type,1));
+            if (!info) continue;
+            const int model=*reinterpret_cast<const int*>(info+0xc);
+            if (model<=0 || model>=20000) continue;
+            const auto* mi=static_cast<const char*>(g.CModelInfo_ms_modelInfoPtrs[model]);
+            if (!mi) continue;
+            char name[64]{};
+            std::snprintf(name,sizeof(name),"%.24sicon",mi+0xc);
+            g_radialWeaponIcons[type]=g.RwTextureRead(name,"");
+        }
+        if (!g_radialWeaponIcons[type]) continue;
+        void* sprite=g_radialWeaponIcons[type];
+        const float x=static_cast<float>((i%4)*128), y=static_cast<float>((i/4)*128);
+        const float rect[4]={x,y,x+128,y+128};
+        g.CSprite2d_Draw(&sprite,rect,color);
+    }
+    // Register is idempotent, not reference-counted. Unregister here would
+    // remove an existing game registration; the stock HUD also leaves it set.
+}
+
 // CTouchInterface lays this widget out for the real Android surface during its
 // update pass. RenderGameplayHudPass records into a much smaller 1024x576
 // surface, so calling Draw directly with the cached phone-pixel rectangles
@@ -21129,6 +21191,9 @@ void OnRenderScene(bool underwater) {
     // the steady already-materialised HUD ring remains overlap-safe.
     if (hudNeeded && !g_hudRaster[0]) closeEnginePreFinish();
     const bool hudReady=hudNeeded&&PrepareHudRasterRing();
+    const auto radialMenu = xr::GetRadialHolsterMenu();
+    if (radialMenu.visible && !g_radialIconRaster[0]) closeEnginePreFinish();
+    const bool radialReady = radialMenu.visible && PrepareRadialIconRasters();
     if (hudReady)
         for (int setIndex=0;setIndex<kEyeSets;++setIndex)
             hudTex[setIndex]=EyeRasterTexId(g_hudRaster[setIndex]);
@@ -21861,6 +21926,19 @@ void OnRenderScene(bool underwater) {
                 LOGI("[hud] stock HUD recorded for in-eye alpha composite");
             }
         }
+        if (radialReady) {
+            screenDimensions.Set(512,512);
+            *reinterpret_cast<void**>(scc+0x80)=g_radialIconRaster[set];
+            WriteCam(camU,base);
+            if (g.CCamera_CalculateDerivedValues)
+                g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
+            g_origCopy(g.TheCamera,false);
+            unsigned char transparent[4]={0,0,0,0};
+            if (g.RwCameraClear) g.RwCameraClear(sc,transparent,1|2|4);
+            g.RwCameraBeginUpdate(sc);
+            RenderRadialIconAtlas(radialMenu);
+            g.RwCameraEndUpdate(sc);
+        }
 
     } // restore RsGlobal dimensions before the centre camera and HUD resume
     g_pendingWeaponCount = 0; // don't let any later CClouds::Render pass re-draw weapons
@@ -21895,6 +21973,7 @@ void OnRenderScene(bool underwater) {
     const float tanY = tanX * static_cast<float>(g_eyeRasterH) / static_cast<float>(g_eyeRasterW);
     xr::SetStereoRenderFov(tanX, tanY);
     vehicledoors::PublishMarkers();
+    xr::SetRadialHolsterAtlas(radialReady ? EyeRasterTexId(g_radialIconRaster[set]) : 0);
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex,
                              renderedNear, renderedFar,
                              g_recordCounter, g_eyeRasterW, g_eyeRasterH);

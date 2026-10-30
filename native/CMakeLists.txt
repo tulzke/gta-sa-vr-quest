@@ -69,6 +69,7 @@ add_library(savr SHARED
     src/Swimming.cpp
     src/BoatEntry.cpp
     src/VehicleDoors.cpp
+    src/MissionWeaponGrant.cpp
     src/GraphicsEffects.cpp
     src/Basketball.cpp
     src/MapZoom.cpp

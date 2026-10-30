@@ -12,6 +12,9 @@
 #include "Throwable.h"
 #include "Xr.h"
 #include "VehicleDoors.h"
+#include "RadialHolsterMenu.h"
+#include "MissionWeaponGrant.h"
+#include "Basketball.h"
 
 #include <algorithm>
 #include <chrono>
@@ -90,6 +93,9 @@ int gSupportCalibrationPrimary = -1;
 bool gInteractionsBlocked = true;
 bool gGripLock = false;
 bool gDualHoldEnabled = true;
+int gPendingMissionSlot = -1;
+radialholster::Menu gRadialMenu{};
+bool gRadialTriggerLatched[kHandCount] = {true, true};
 
 xr::HandPose gHands[kHandCount]{};
 V3 gHandVelocity[kHandCount]{};
@@ -311,6 +317,9 @@ void ClearHeldLocked(int hand) {
 
 void ResetRuntimeLocked() {
     gHolsterTrackingReady = false;
+    gRadialMenu.Cancel();
+    gRadialTriggerLatched[0] = gRadialTriggerLatched[1] = true;
+    xr::SetRadialHolsterMenu({});
     for (auto& intent : gReachIntent) intent.Invalidate();
     for (int hand = 0; hand < kHandCount; ++hand) {
         gHeldSlot[hand] = -1;
@@ -332,6 +341,7 @@ void ResetRuntimeLocked() {
     gInteractionsBlocked = true;
     gLastObservedActiveSlot = -1;
     gWasScriptedWeaponCamera = false;
+    gPendingMissionSlot = -1;
 }
 
 bool DroppedPoseAtLocked(int sourceHand, double now, TrackingPose* out) {
@@ -819,15 +829,24 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
 
     ValidateInventoryLocked(ped);
 
+    const int grantedSlot = missionweapon::TakePendingSlot();
+    if (ValidSlot(grantedSlot)) gPendingMissionSlot = grantedSlot;
+    if (ValidSlot(gPendingMissionSlot) && WeaponTypeInSlot(ped,gPendingMissionSlot)) {
+        const int target = holster::LeftHanded() ? holster::WAIST_LEFT : holster::WAIST_RIGHT;
+        const int previous = holster::PointSlot(target);
+        const std::uint32_t occupied = OccupiedSlotMaskLocked();
+        if ((!ValidSlot(previous) || !(occupied & (1u << previous))) &&
+            !(occupied & (1u << gPendingMissionSlot))) {
+            if (holster::SetPointSlot(target,gPendingMissionSlot)) gPendingMissionSlot=-1;
+        }
+    }
+
     if (!interactionsBlocked) {
         const int selectedSlot = CurrentWeaponSlot(ped);
         const int selectedType = WeaponTypeInSlot(ped, selectedSlot);
-        const bool missionGadget = selectedType == 40 || selectedType == 41 ||
-                                   selectedType == 42 || selectedType == 43;
-        const bool newSelection = selectedSlot != gLastObservedActiveSlot;
+        (void)selectedType;
         if (ValidSlot(selectedSlot) && HeldHandForSlotLocked(selectedSlot) < 0 &&
-            ((scriptedGunner && !gWasScriptedWeaponCamera) ||
-             (missionGadget && newSelection))) {
+            (scriptedGunner && !gWasScriptedWeaponCamera)) {
             // Scripts select their supplied camera/extinguisher or mounted gun.
             // Respect that selection once without overwriting the saved loadout.
             const int hand = !ValidSlot(gHeldSlot[1]) ? 1 :
@@ -867,7 +886,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     bool handNearInner[kHandCount]{}, handNearOuter[kHandCount]{};
     const bool bodyAllowed = !inVehicle && vrcam::GroundWalkControlsActive();
     const std::uint32_t previousOccupied = OccupiedSlotMaskLocked();
-    for (int point=0; point<holster::POINT_COUNT; ++point) {
+    for (int point=0; point<holster::PointCount(); ++point) {
         float previous[3]{};
         if (!vrcam::GetHolsterAnchorTracking(point, previous)) continue;
         const int slot = holster::PointSlot(point);
@@ -911,8 +930,90 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         gInteractionsBlocked = true;
     }
 
+    const bool radialUsable = !interactionsBlocked && !inVehicle && bodyAllowed && xr::IsSessionFocused();
+    bool triggerEdge[kHandCount]{};
+    for (int h = 0; h < kHandCount; ++h) {
+        const float trigger = gHands[h].trigger;
+        if (!radialUsable || !gHands[h].valid || !std::isfinite(trigger))
+            gRadialTriggerLatched[h] = true;
+        else if (trigger <= radialholster::kTriggerRelease)
+            gRadialTriggerLatched[h] = false;
+        else if (trigger >= radialholster::kTriggerPress && !gRadialTriggerLatched[h]) {
+            gRadialTriggerLatched[h] = true;
+            triggerEdge[h] = true;
+        }
+    }
+    unsigned int radialHandledHands = 0;
+    if (gRadialMenu.open) {
+        const int h = gRadialMenu.hand;
+        if (ValidHand(h)) radialHandledHands |= 1u << h;
+        const int point = gRadialMenu.point;
+        int selectedSlot = -1;
+        const bool available = radialUsable && ValidHand(h) && gHands[h].valid &&
+            !((doorHands | basketball::HeldHandMask()) & (1u << h)) &&
+            !ValidSlot(gHeldSlot[h]) && !IsSupportHandLocked(h);
+        const auto result = gRadialMenu.Update(ValidHand(h) ? gHands[h].trigger : 0.f,
+            ValidHand(h) && gHands[h].grip >= kGripClose, available, trackingEpoch,
+            ValidHand(h) ? gHands[h].gripPos : nullptr, &selectedSlot);
+        if (result == radialholster::Result::Selected) {
+            const int oldSlot = holster::PointSlot(point);
+            const std::uint32_t occupied = OccupiedSlotMaskLocked();
+            const bool oldBusy = ValidSlot(oldSlot) && (occupied & (1u << oldSlot));
+            const bool newBusy = ValidSlot(selectedSlot) && (occupied & (1u << selectedSlot));
+            const int other = holster::FindPointForSlot(selectedSlot);
+            if (!oldBusy && !newBusy && (selectedSlot < 0 ||
+                (WeaponTypeInSlot(ped, selectedSlot) && (other < 0 || other == point))))
+                holster::SetPointSlot(point, selectedSlot);
+        }
+    }
+    if (!gRadialMenu.open && radialUsable) {
+        for (int h = 0; h < kHandCount; ++h) {
+            if (!triggerEdge[h] || ValidSlot(gHeldSlot[h]) || IsSupportHandLocked(h) ||
+                gHands[h].grip >= kGripOpen || ((doorHands | basketball::HeldHandMask()) & (1u << h))) continue;
+            int nearest = -1;
+            float distance = holster::GrabRadiusMetres();
+            for (int p = 0; p < holster::PointCount(); ++p) {
+                if (!anchorValid[p] || !holster::PointGrabbable(p)) continue;
+                const float d = Distance(GripPosition(gHands[h]), {anchors[p][0], anchors[p][1], anchors[p][2]});
+                if (d < distance) { nearest = p; distance = d; }
+            }
+            if (nearest < 0) continue;
+            int entries[radialholster::kMaxEntries]{};
+            int count = 0;
+            for (int slot = 1; slot < kWeaponSlotCount; ++slot) {
+                if (slot == 10 || slot == 11 || !WeaponTypeInSlot(ped, slot)) continue;
+                const int owner = holster::FindPointForSlot(slot);
+                if (owner >= 0 && owner != nearest) continue;
+                entries[count++] = slot;
+            }
+            entries[count++] = -1;
+            const Q head = NormalizeQ({headOrientation[0],headOrientation[1],headOrientation[2],headOrientation[3]});
+            V3 right = Rotate(head, {1,0,0});
+            right = Normalized({right.x,0,right.z}, {1,0,0});
+            const float axisRight[] = {right.x,right.y,right.z}, axisUp[] = {0,1,0};
+            gRadialMenu.ObserveReleased(0);
+            if (gRadialMenu.Begin(h, nearest, gHands[h].gripPos, axisRight, axisUp,
+                                  entries, count, trackingEpoch)) {
+                radialHandledHands |= 1u << h;
+                xr::TriggerHaptic(h, .2f, 0, 20);
+            }
+            break;
+        }
+    }
+    radialholster::Frame radialFrame{};
+    if (gRadialMenu.open) {
+        radialFrame.visible = true; radialFrame.count = gRadialMenu.count;
+        radialFrame.selected = gRadialMenu.selected; radialFrame.epoch = trackingEpoch;
+        std::memcpy(radialFrame.origin, gRadialMenu.origin, sizeof(radialFrame.origin));
+        std::memcpy(radialFrame.right, gRadialMenu.right, sizeof(radialFrame.right));
+        std::memcpy(radialFrame.up, gRadialMenu.up, sizeof(radialFrame.up));
+        for (int i = 0; i < radialFrame.count; ++i)
+            radialFrame.weaponTypes[i] = WeaponTypeInSlot(ped, gRadialMenu.slots[i]);
+    }
+    xr::SetRadialHolsterMenu(radialFrame);
+
     if (!interactionsBlocked) {
-        std::uint32_t handledHands = doorHands;
+        std::uint32_t handledHands = doorHands | radialHandledHands;
 
         // Keep/release an established support grip first. Releasing only the
         // support side detaches it. Releasing the primary while support remains

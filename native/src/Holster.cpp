@@ -47,6 +47,7 @@ std::atomic<int> gPointSlots[POINT_COUNT] = {4, 2, 3, 1, 8, 7, 5};
 std::atomic<int> gPointState[POINT_COUNT] = {0, 0, 0, 0, 0, 0, 0};
 std::atomic<bool> gGripMarkersEnabled{true};
 std::atomic<bool> gBodyFrameEnabled{false};
+std::atomic<bool> gLeftHanded{false};
 constexpr int kDefaultBodyReachIdleMs = 1200;
 constexpr int kDefaultBodyReachMotionCm = 3;
 std::atomic<int> gBodyReachIdleMs{kDefaultBodyReachIdleMs};
@@ -73,7 +74,7 @@ bool ValidPoint(int point) { return point >= 0 && point < POINT_COUNT; }
 bool SelectableSlot(int slot) {
     // 9 = the gadget slot (spray can, fire extinguisher, camera): mission
     // items land there and must be reachable from a body point.
-    return slot == kEmptySlot || (slot >= 1 && slot <= 7) ||
+    return slot == kEmptySlot || (slot >= 1 && slot <= 8) ||
            slot == 9 || slot == 12;
 }
 int WeaponTypeInSlot(void* ped, int slot);
@@ -88,8 +89,8 @@ void AssignPointSlotLocked(int point, int slot) {
 
     int occupiedPoint = -1;
     if (slot >= 0) {
-        for (int other = 0; other < POINT_COUNT; ++other) {
-            if (other == point || other == CHEST_CENTER) continue;
+        for (int other = 0; other < 2; ++other) {
+            if (other == point) continue;
             if (gPointSlots[other].load(std::memory_order_acquire) == slot) {
                 occupiedPoint = other;
                 break;
@@ -105,17 +106,7 @@ void AssignPointSlotLocked(int point, int slot) {
 }
 
 int DefaultPreviewPoint(int slot) {
-    switch (slot) {
-        case 1: return CHEST_RIGHT;
-        case 2: return WAIST_RIGHT;
-        case 3: return CHEST_LEFT;
-        case 4: return WAIST_LEFT;
-        case 5: return BACK_RIGHT;
-        case 6: return BACK_RIGHT;  // sniper is the one category omitted by defaults
-        case 7: return BACK_LEFT;
-        case 8: return CHEST_CENTER;
-        default: return -1;
-    }
+    return slot >= 1 && slot <= 8 ? WAIST_RIGHT : -1;
 }
 
 int PreviewPointForSlot(int slot) {
@@ -124,8 +115,8 @@ int PreviewPointForSlot(int slot) {
     // An explicitly EMPTY point is the least surprising temporary preview home.
     // If all points are occupied, override the category's conventional point for
     // the preview only; the persistent loadout is never modified.
-    for (int point = 0; point < POINT_COUNT; ++point)
-        if (point != CHEST_CENTER && PointSlot(point) == kEmptySlot) return point;
+    for (int point = 0; point < PointCount(); ++point)
+        if (PointSlot(point) == kEmptySlot) return point;
     return DefaultPreviewPoint(slot);
 }
 
@@ -163,6 +154,7 @@ void LoadSettings() {
     int grabRadiusCm = kDefaultGrabRadiusCm;
     bool gripLock = false;
     bool bodyFrame = false;
+    bool leftHanded = false;
     int bodyReachIdleMs = kDefaultBodyReachIdleMs;
     int bodyReachMotionCm = kDefaultBodyReachMotionCm;
     int state[POINT_COUNT] = {0, 0, 0, 0, 0, 0, 0};
@@ -173,6 +165,9 @@ void LoadSettings() {
         char line[128];
         while (std::fgets(line, sizeof(line), f)) {
             int tuning = 0;
+            if (std::sscanf(line, "left_handed %d", &tuning) == 1) {
+                leftHanded = tuning == 1; continue;
+            }
             if (std::sscanf(line, "body_reach_idle_ms %d", &tuning) == 1) {
                 bodyReachIdleMs = std::clamp(tuning, 0, 10000); continue;
             }
@@ -223,19 +218,17 @@ void LoadSettings() {
         std::fclose(f);
     }
     gBodyFrameEnabled.store(bodyFrame, std::memory_order_release);
+    gLeftHanded.store(leftHanded, std::memory_order_release);
     gBodyReachIdleMs.store(bodyReachIdleMs, std::memory_order_release);
     gBodyReachMotionCm.store(bodyReachMotionCm, std::memory_order_release);
     gGrabRadiusCm.store(grabRadiusCm, std::memory_order_release);
     gGripLockEnabled.store(gripLock, std::memory_order_release);
 
-    // Reject duplicate configured slots deterministically. EMPTY may occur more
-    // than once. The dedicated throwable point is never configurable.
-    // Sized for the highest selectable slot (9, the gadget category).
-    bool used[10] = {};
-    used[kCenterThrowableSlot] = true;
+    // The legacy five assignments are retained on disk for rollback, but only
+    // the two waist points participate in the new loadout.
+    bool used[kWeaponSlotCount] = {};
     proposed[CHEST_CENTER] = kCenterThrowableSlot;
-    for (int point = 0; point < POINT_COUNT; ++point) {
-        if (point == CHEST_CENTER) continue;
+    for (int point = 0; point < 2; ++point) {
         int slot = proposed[point];
         if (!SelectableSlot(slot) || (slot >= 0 && used[slot])) slot = kEmptySlot;
         proposed[point] = slot;
@@ -260,6 +253,7 @@ void SaveSettingsLocked() {
     std::fputs("# vr_holsters v2  p <point 0..6> <SA weapon slot, -1=empty>\n", f);
     std::fprintf(f, "body_frame %d\n",
                  gBodyFrameEnabled.load(std::memory_order_acquire) ? 1 : 0);
+    std::fprintf(f, "left_handed %d\n", gLeftHanded.load(std::memory_order_acquire) ? 1 : 0);
     std::fprintf(f, "body_reach_idle_ms %d\n", gBodyReachIdleMs.load(std::memory_order_acquire));
     std::fprintf(f, "body_reach_motion_cm %d\n", gBodyReachMotionCm.load(std::memory_order_acquire));
     std::fprintf(f, "grip_markers %d\n",
@@ -289,7 +283,7 @@ int WeaponTypeInSlot(void* ped, int slot) {
 
 void Init() { std::call_once(gInitOnce, LoadSettings); }
 
-int PointCount() { return POINT_COUNT; }
+int PointCount() { return 2; }
 
 const PointMetadata* Metadata(int point) {
     return ValidPoint(point) ? &kMetadata[point] : nullptr;
@@ -300,11 +294,11 @@ const char* PointName(int point) {
     return metadata != nullptr ? metadata->name : "UNKNOWN";
 }
 
-bool IsPointFixed(int point) { return point == CHEST_CENTER; }
+bool IsPointFixed(int point) { return point >= PointCount(); }
 
 int PointVisibilityState(int point) {
     Init();
-    return ValidPoint(point)
+    return ValidPoint(point) && point < PointCount()
         ? gPointState[point].load(std::memory_order_acquire)
         : POINT_OFF;
 }
@@ -351,7 +345,7 @@ int PointSlot(int point) {
 int FindPointForSlot(int slot) {
     Init();
     if (slot < 0) return -1;
-    for (int point = 0; point < POINT_COUNT; ++point)
+    for (int point = 0; point < PointCount(); ++point)
         if (PointSlot(point) == slot) return point;
     return -1;
 }
@@ -375,7 +369,7 @@ const char* SlotName(int slot) {
 
 bool SetPointSlot(int point, int slot) {
     Init();
-    if (!ValidPoint(point) || point == CHEST_CENTER || !SelectableSlot(slot)) return false;
+    if (point < 0 || point >= PointCount() || !SelectableSlot(slot)) return false;
 
     std::lock_guard<std::mutex> lock(gSettingsMutex);
     const int previous = gPointSlots[point].load(std::memory_order_acquire);
@@ -383,8 +377,8 @@ bool SetPointSlot(int point, int slot) {
 
     int displacedPoint = -1;
     if (slot >= 0) {
-        for (int other = 0; other < POINT_COUNT; ++other) {
-            if (other != point && other != CHEST_CENTER &&
+        for (int other = 0; other < PointCount(); ++other) {
+            if (other != point &&
                 gPointSlots[other].load(std::memory_order_acquire) == slot) {
                 displacedPoint = other;
                 break;
@@ -404,8 +398,8 @@ bool SetPointSlot(int point, int slot) {
 
 bool SwapPointSlots(int firstPoint, int secondPoint) {
     Init();
-    if (!ValidPoint(firstPoint) || !ValidPoint(secondPoint) ||
-        firstPoint == CHEST_CENTER || secondPoint == CHEST_CENTER) return false;
+    if (firstPoint < 0 || firstPoint >= PointCount() ||
+        secondPoint < 0 || secondPoint >= PointCount()) return false;
     if (firstPoint == secondPoint) return true;
 
     std::lock_guard<std::mutex> lock(gSettingsMutex);
@@ -436,7 +430,7 @@ int CyclePointSlot(int point, int direction) {
     // Start after the current value and stop after one full pass. EMPTY is part
     // of the ring so clearing a point is an explicit, reversible cycle choice;
     // categories assigned to another point are never silently stolen/swapped.
-    static constexpr int kCycle[] = {1, 2, 3, 4, 5, 6, 7, 9, 12, kEmptySlot};
+    static constexpr int kCycle[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 12, kEmptySlot};
     constexpr int kCycleCount = sizeof(kCycle) / sizeof(kCycle[0]);
     int startIndex = step > 0 ? -1 : kCycleCount;
     for (int i = 0; i < kCycleCount; ++i)
@@ -475,6 +469,13 @@ void SetGripMarkersEnabled(bool enabled) {
 void ToggleGripMarkers() { SetGripMarkersEnabled(!GripMarkersEnabled()); }
 
 bool BodyFrameEnabled() { Init(); return gBodyFrameEnabled.load(std::memory_order_acquire); }
+bool LeftHanded() { Init(); return gLeftHanded.load(std::memory_order_acquire); }
+void SetLeftHanded(bool enabled) {
+    Init();
+    if (gLeftHanded.exchange(enabled, std::memory_order_acq_rel) == enabled) return;
+    std::lock_guard<std::mutex> lock(gSettingsMutex);
+    SaveSettingsLocked();
+}
 float BodyReachIdleSeconds() {
     Init(); return gBodyReachIdleMs.load(std::memory_order_acquire) * 0.001f;
 }

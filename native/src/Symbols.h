@@ -283,6 +283,11 @@ struct GameSymbols {
     void* (*TextureDatabaseRuntime_Load)(const char* name, bool preload,
                                          int format);
     void* (*TextureDatabaseRuntime_GetDatabase)(const char* name);
+    void (*TextureDatabaseRuntime_Register)(void* db);
+    void (*TextureDatabaseRuntime_Unregister)(void* db);
+    void* (*RwTextureRead)(const char* name, const char* mask);
+    int (*RwTextureDestroy)(void* texture);
+    void (*CSprite2d_Draw)(void* sprite, const void* rect, const void* color);
     void* TextureDatabaseRuntime_SortEntries;  // hook target, see HdWeapons
     // Cutscene actors: pointer array + count. CJ's actor is the entry whose
     // CEntity::m_nModelIndex (u16 at +0x32) is 0 — the player model.

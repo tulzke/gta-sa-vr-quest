@@ -621,6 +621,9 @@ float                 g_holsterEye[3]{}; // one billboard orientation for both e
 holstermarker::Frame   g_stereoHolsterMarkers[kStereoSets]{};
 vehicledoors::MarkerFrame g_vehicleDoorMarkers{};
 vehicledoors::MarkerFrame g_stereoVehicleDoorMarkers[kStereoSets]{};
+radialholster::Frame g_radialHolsterMenu{};
+radialholster::Frame g_stereoRadialHolsterMenu[kStereoSets]{};
+unsigned int g_radialHolsterAtlas{};
 int                   g_holsterCount = 0;
 // Active weapon object-space geometry (guarded by g_headPoseMutex). Published by
 // the GameThread; the present thread transforms it to the hand pose and draws it.
@@ -5652,6 +5655,21 @@ void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& frame) {
     g_vehicleDoorMarkers=frame;
 }
 
+void SetRadialHolsterMenu(const radialholster::Frame& frame) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_radialHolsterMenu = frame;
+}
+
+radialholster::Frame GetRadialHolsterMenu() {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    return g_radialHolsterMenu;
+}
+
+void SetRadialHolsterAtlas(unsigned int texture) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_radialHolsterAtlas = texture;
+}
+
 void SetHolsterMarkers(const float positions[][3], int count) {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
     g_holsterEpoch = g_trackingRecovery.epoch;
@@ -6207,6 +6225,8 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
             markerFrame.markers[i].kind = g_holsterKind[i];
         }
         g_stereoVehicleDoorMarkers[ws] = g_vehicleDoorMarkers;
+        g_stereoRadialHolsterMenu[ws] = g_radialHolsterMenu;
+        g_stereoRadialHolsterMenu[ws].atlasTexture = g_radialHolsterAtlas;
         g_stereoScopeState[ws] = scopeaim::Snapshot();
         g_stereoDrivingWheelState[ws] = drivingWheel;
         g_stereoBallHandLock[ws] = g_ballHandLock;
@@ -7395,7 +7415,7 @@ void BuildHolsterMenu() {
     PanelText("HOLSTER LOADOUT", cx, 14, 4, 100, 225, 255);
     PanelText("OWNED + UNASSIGNED CATEGORIES ONLY", cx, 48, 2, 150, 190, 210);
     const int sel = g_holsterMenuSel.load(std::memory_order_relaxed);
-    const int rows = holster::PointCount() + 5;
+    const int rows = holster::PointCount() + 6;
     const int top = 74, rowH = 34;
     for (int i = 0; i < rows; ++i) {
         const int y = top + i * rowH;
@@ -7415,6 +7435,8 @@ void BuildHolsterMenu() {
             std::snprintf(row, sizeof(row), "HOLSTER FRAME   < %s >",
                           holster::BodyFrameEnabled() ? "BODY" : "RECENTERED");
         } else if (i == holster::PointCount() + 4) {
+            std::snprintf(row, sizeof(row), "DOMINANT HAND   < %s >", holster::LeftHanded() ? "LEFT" : "RIGHT");
+        } else if (i == holster::PointCount() + 5) {
             std::snprintf(row, sizeof(row), "BACK");
         } else {
             const int slot = holster::PointSlot(i);
@@ -7426,7 +7448,7 @@ void BuildHolsterMenu() {
         PanelText(row, cx, y, 2, c, c, (i == sel) ? 120 : c);
     }
     const char* hint = "L2/R2 CHOOSE   A SHOW/HIDE   B BACK";
-    if (sel >= holster::PointCount() && sel <= holster::PointCount() + 3)
+    if (sel >= holster::PointCount() && sel <= holster::PointCount() + 4)
         hint = "L2/R2 CHANGE   A TOGGLE   B BACK";
     else if (holster::IsPointFixed(sel))
         hint = "THROWABLE IS FIXED   B BACK";
@@ -9720,6 +9742,92 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
     glDepthMask(GL_TRUE);glDisable(GL_BLEND);
 }
 
+void DrawRadialHolsterMenu(const float* mvp, const radialholster::Frame& frame) {
+    if (!frame.visible || frame.count <= 0) return;
+    EnsureMarkerProgram();
+    glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_CULL_FACE); glDepthMask(GL_FALSE);
+    glUseProgram(g_markerProg); glUniformMatrix4fv(g_markerMvpLoc,1,GL_FALSE,mvp);
+    glBindBuffer(GL_ARRAY_BUFFER,g_markerVbo); glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),nullptr);
+    constexpr float tau=6.28318530718f, inner=.055f, outer=.15f;
+    constexpr int pieces=12;
+    const float width=tau/frame.count;
+    for (int sector=0; sector<frame.count; ++sector) {
+        float verts[pieces*6*3]{}; int n=0;
+        const auto vertex=[&](float angle,float radius) {
+            for (int c=0;c<3;++c)
+                verts[n++]=frame.origin[c]+radius*(std::sin(angle)*frame.right[c]+
+                                                  std::cos(angle)*frame.up[c]);
+        };
+        for (int i=0;i<pieces;++i) {
+            const float a=width*(sector-.47f+.94f*i/pieces);
+            const float b=width*(sector-.47f+.94f*(i+1)/pieces);
+            vertex(a,inner); vertex(a,outer); vertex(b,outer);
+            vertex(a,inner); vertex(b,outer); vertex(b,inner);
+        }
+        if (sector==frame.selected) glUniform4f(g_markerColLoc,.15f,.8f,.95f,.9f);
+        else glUniform4f(g_markerColLoc,.12f,.16f,.2f,.78f);
+        glBufferData(GL_ARRAY_BUFFER,sizeof(verts),verts,GL_DYNAMIC_DRAW);
+        glDrawArrays(GL_TRIANGLES,0,pieces*6);
+        if (frame.weaponTypes[sector] == 0) {
+            float cross[12*3]{}; int k=0;
+            const float cx=.105f*std::sin(width*sector), cy=.105f*std::cos(width*sector);
+            const auto point=[&](float x,float y) {
+                for (int c=0;c<3;++c) cross[k++]=frame.origin[c]+(cx+x)*frame.right[c]+(cy+y)*frame.up[c];
+            };
+            constexpr float d=.021f, t=.004f;
+            point(-d,-d-t); point(-d,-d+t); point(d,d+t);
+            point(-d,-d-t); point(d,d+t); point(d,d-t);
+            point(-d,d-t); point(-d,d+t); point(d,-d+t);
+            point(-d,d-t); point(d,-d+t); point(d,-d-t);
+            glUniform4f(g_markerColLoc,.95f,.95f,.95f,.9f);
+            glBufferData(GL_ARRAY_BUFFER,sizeof(cross),cross,GL_DYNAMIC_DRAW);
+            glDrawArrays(GL_TRIANGLES,0,12);
+        }
+    }
+    if (frame.atlasTexture) {
+        static GLuint program=0, vbo=0;
+        static GLint mvpLocation=-1, textureLocation=-1;
+        if (!program) {
+            const char* vs="#version 300 es\nlayout(location=0) in vec3 p; layout(location=1) in vec2 t; uniform mat4 m; out vec2 uv; void main(){uv=t;gl_Position=m*vec4(p,1.0);}";
+            const char* fs="#version 300 es\nprecision mediump float; in vec2 uv; uniform sampler2D image; out vec4 c; void main(){c=texture(image,uv);}";
+            const GLuint v=CompileHandShader(GL_VERTEX_SHADER,vs), f=CompileHandShader(GL_FRAGMENT_SHADER,fs);
+            program=glCreateProgram(); glAttachShader(program,v); glAttachShader(program,f);
+            glLinkProgram(program); glDeleteShader(v); glDeleteShader(f);
+            GLint ok=0; glGetProgramiv(program,GL_LINK_STATUS,&ok);
+            if (!ok) { glDeleteProgram(program); program=0; }
+            else { mvpLocation=glGetUniformLocation(program,"m"); textureLocation=glGetUniformLocation(program,"image"); glGenBuffers(1,&vbo); }
+        }
+        if (program) {
+            glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+            glUseProgram(program); glUniformMatrix4fv(mvpLocation,1,GL_FALSE,mvp);
+            glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,frame.atlasTexture);
+            glUniform1i(textureLocation,0); glBindBuffer(GL_ARRAY_BUFFER,vbo);
+            glEnableVertexAttribArray(0); glEnableVertexAttribArray(1);
+            glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,5*sizeof(float),nullptr);
+            glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,5*sizeof(float),reinterpret_cast<void*>(3*sizeof(float)));
+            for (int i=0;i<frame.count;++i) {
+                if (!frame.weaponTypes[i]) continue;
+                const float a=width*i, cx=.105f*std::sin(a), cy=.105f*std::cos(a), half=.028f;
+                const float u=(i%4)*.25f, v=1.f-(i/4)*.25f;
+                float vertices[30]{}; int n=0;
+                const auto vertex=[&](float x,float y,float s,float t) {
+                    for (int c=0;c<3;++c) vertices[n++]=frame.origin[c]+(cx+x)*frame.right[c]+(cy+y)*frame.up[c];
+                    vertices[n++]=s; vertices[n++]=t;
+                };
+                vertex(-half,-half,u,v-.25f); vertex(half,-half,u+.25f,v-.25f); vertex(half,half,u+.25f,v);
+                vertex(-half,-half,u,v-.25f); vertex(half,half,u+.25f,v); vertex(-half,half,u,v);
+                glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_DYNAMIC_DRAW);
+                glDrawArrays(GL_TRIANGLES,0,6);
+            }
+            glDisableVertexAttribArray(1); glBindTexture(GL_TEXTURE_2D,0);
+        }
+    }
+    glDisableVertexAttribArray(0); glBindBuffer(GL_ARRAY_BUFFER,0); glUseProgram(0);
+    glDepthMask(GL_TRUE); glDisable(GL_BLEND);
+}
+
 // ---- immersive jetpack: handheld-thruster flames ---------------------------
 // In REALISTIC mode the two controllers are jet engines; each pulls fire out of
 // its nozzle (the way it points) scaled by that hand's trigger. Drawn here in
@@ -11110,6 +11218,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const TwoHandVisualState& bakedTwoHand,
                      const holstermarker::Frame& bakedHolsters,
                      const vehicledoors::MarkerFrame& bakedDoors,
+                     const radialholster::Frame& bakedRadial,
                      unsigned int hudSourceTex) {
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
@@ -11141,7 +11250,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                              throwableTrajectory[1].count <= 1)) &&
         !chuteVisuals && !chuteRingVisual &&
         !wristWanted &&
-        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0) return;
+        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && !bakedRadial.visible) return;
     if (haveHands) EnsureHandProgram();
 
     const float sign = (e == 0) ? -1.0f : 1.0f;
@@ -11313,6 +11422,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors);
+    if (!scope.active) DrawRadialHolsterMenu(mvp,bakedRadial);
     // Riser controls are their own world-space interaction. They must remain
     // visible even when the selected hand preset hides general tracked-hand
     // overlays; otherwise the player has no handle to grab under the canopy.
@@ -11518,6 +11628,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     TwoHandVisualState bakedTwoHand{};
     holstermarker::Frame bakedHolsters{};
     vehicledoors::MarkerFrame bakedDoors{};
+    radialholster::Frame bakedRadial{};
     scopeaim::VisualState bakedScope{};
     driving::WheelVisualState drivingWheel{};
     BallHandLock ballHandLock{};
@@ -11537,6 +11648,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         if (!bakedHolsters.Usable(g_headPoseValid, g_trackingRecovery.epoch)) bakedHolsters.count = 0;
         bakedDoors = g_stereoVehicleDoorMarkers[set];
         if (!bakedDoors.Usable(g_headPoseValid,g_trackingRecovery.epoch)) bakedDoors.count=0;
+        bakedRadial = g_stereoRadialHolsterMenu[set];
+        if (!bakedRadial.Usable(g_headPoseValid,g_trackingRecovery.epoch)) bakedRadial.visible=false;
         bakedScope     = g_stereoScopeState[set];
         drivingWheel   = g_stereoDrivingWheelState[set];
         ballHandLock   = g_stereoBallHandLock[set];
@@ -11696,7 +11809,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, hudSource);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedRadial, hudSource);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

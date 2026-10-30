@@ -1,6 +1,6 @@
 #pragma once
 
-// VR holster: seven configurable, body-relative weapon points. The point
+// VR holster: two active waist points; legacy metadata is kept for settings.
 // metadata deliberately contains no game types so the renderer can use it when
 // building the actual weapon matrices.
 namespace savr::holster {
@@ -50,14 +50,12 @@ bool PointGrabbable(int point);        // != OFF
 const char* PointVisibilityName(int point);   // "SHOW" / "HIDE" / "OFF"
 void CyclePointVisibility(int point, int dir);
 
-// Configured SA eWeaponSlot for a body point. -1 means EMPTY. The centre chest
-// point is always slot 8 (THROWABLE), even if an old/malformed file says
-// otherwise.
+// Configured SA eWeaponSlot for a body point. -1 means EMPTY.
 int PointSlot(int point);
 int FindPointForSlot(int slot);
 const char* SlotName(int slot);
 
-// Assigns EMPTY (-1) or an SA weapon category (slots 1..7) to a configurable
+// Assigns EMPTY (-1) or an SA weapon category (slots 1..9 or 12) to a configurable
 // point and persists it. If the requested category already lives on another
 // point, the two point values are swapped in one persisted operation; this keeps the loadout
 // duplicate-free while allowing a weapon to be moved without first clearing
@@ -89,6 +87,8 @@ void ToggleGripMarkers();
 // Legacy configs retain RECENTERED. BODY estimates an upright torso from HMD.
 bool BodyFrameEnabled();
 void SetBodyFrameEnabled(bool enabled);
+bool LeftHanded();
+void SetLeftHanded(bool enabled);
 // Config-only tuning: body_reach_idle_ms (0 disables timeout),
 // body_reach_motion_cm (controller displacement that resets inactivity).
 float BodyReachIdleSeconds();

@@ -23,6 +23,7 @@
 #include "Swimming.h"
 #include "BoatEntry.h"
 #include "VehicleDoors.h"
+#include "MissionWeaponGrant.h"
 #include "PerfTelemetry.h"
 #include "Basketball.h"
 #include "MapZoom.h"
@@ -1327,7 +1328,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         case PG_HOLSTERS: {
             // Points, GRAB REACH, GRIP LOCK, HOLSTER MARKERS, HOLSTER FRAME, BACK — matching
             // BuildHolsterMenu.
-            const int rows = savr::holster::PointCount() + 5;
+            const int rows = savr::holster::PointCount() + 6;
             if (navUp)   holsterSel = (holsterSel - 1 + rows) % rows;
             if (navDown) holsterSel = (holsterSel + 1) % rows;
             if (holsterSel < savr::holster::PointCount()) {
@@ -1349,6 +1350,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 if (minus) savr::holster::SetBodyFrameEnabled(false);
                 if (plus) savr::holster::SetBodyFrameEnabled(true);
                 if (enter) savr::holster::SetBodyFrameEnabled(!savr::holster::BodyFrameEnabled());
+            } else if (holsterSel == savr::holster::PointCount() + 4) {
+                if (minus || plus || enter) savr::holster::SetLeftHanded(!savr::holster::LeftHanded());
             } else if (enter) {
                 menuPage = PG_MAIN;
             }
@@ -1937,7 +1940,6 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         savr::throwable::Update(weaponInteractionsBlocked);
         savr::physicalweapon::EnforceBikeWeaponLimit();
         savr::physicalweapon::AutoEquipParachute();
-        savr::physicalweapon::AutoAssignGadgetPoint();
         savr::cheats::Tick();
         savr::pickups::Tick();
         savr::basketball::Update();
@@ -2569,6 +2571,7 @@ void* WaitForGameLibrary(void*) {
     savr::swimming::Install(handle);
     savr::boatentry::Install(handle);
     savr::vehicledoors::Install(handle);
+    savr::missionweapon::Install(handle);
     savr::braindiag::Install(handle);  // basketball brain-chain diagnostics
     savr::basketball::Install(handle);  // custom immersive basketball
     savr::mapzoom::Install(handle);  // pause-map zoom on the grips
