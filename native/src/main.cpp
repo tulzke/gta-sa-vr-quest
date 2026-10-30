@@ -2135,7 +2135,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
 
     // VR panels own input through the closing frame. Freeze the native map
     // update while cancelling an old touch so its release cannot place a blip.
-    const bool frontendBlocked = inGameplay || anyMenu || menuWasOpen;
+    const bool frontendBlocked = inGameplay || anyMenu || menuWasOpen || !in.flatScreenInputReady;
     savr::mapzoom::SetBlocked(frontendBlocked);
     static bool zoomReleaseRequired=false;
     if (frontendBlocked) zoomReleaseRequired=true;

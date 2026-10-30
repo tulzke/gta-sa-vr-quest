@@ -1,5 +1,6 @@
 #include "Xr.h"
 #include "TrackingRecovery.h"
+#include "TheaterScreen.h"
 
 #include "Appearance.h"
 #include "Basketball.h"
@@ -2084,6 +2085,8 @@ struct State {
     // as a comfortable cinema screen instead.
     Swapchain theater;
     bool      theaterMode{true};
+    theater::Screen theaterScreen;
+    bool theaterInputReady{};
 
     // Head-locked FPS/debug panel (selected only in the VR menu), in the spirit of
     // the Vice City VR port's overlay.
@@ -4703,7 +4706,8 @@ std::atomic<int> g_theaterCropH{0};
 bool RenderTheaterQuad(XrSpace space, XrCompositionLayerQuad& quad,
                        bool fillView = false,
                        TheaterFrameSource source = TheaterFrameSource::GameSurface) {
-    if (s.theater.handle == XR_NULL_HANDLE || s.theater.poisoned) {
+    if ((!fillView && !s.theaterScreen.valid) ||
+        s.theater.handle == XR_NULL_HANDLE || s.theater.poisoned) {
         return false;
     }
     if (source == TheaterFrameSource::GameSurface && !BuildBlitProgram()) {
@@ -4842,6 +4846,14 @@ bool RenderTheaterQuad(XrSpace space, XrCompositionLayerQuad& quad,
     quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
     quad.pose.position    = {0.0f, 0.0f, -kDistanceMeters};
     quad.size             = {kWidthMeters, kWidthMeters / aspect};
+    if (!fillView) {
+        if (!s.theaterScreen.valid) return false;
+        const auto& screen=s.theaterScreen;
+        const float yaw=std::atan2(-screen.forwardX,-screen.forwardZ);
+        quad.pose.orientation={0.0f,std::sin(yaw*0.5f),0.0f,std::cos(yaw*0.5f)};
+        quad.pose.position={screen.x,screen.y,screen.z};
+        quad.size={screen.width,screen.height};
+    }
     return true;
 }
 
@@ -4962,11 +4974,10 @@ bool CreateInput() {
 }
 
 // Cast the right controller's aim ray at the theater screen and store the hit as
-// [0,1] u,v. The screen matches RenderTheaterQuad: centred kTheaterDistance in
-// front, kTheaterWidth wide, facing the user.
+// [0,1] u,v, using exactly the saved LOCAL geometry submitted to OpenXR.
 void UpdatePointer(InputState& in, XrTime displayTime) {
     in.pointerValid = false;
-    if (s.aimSpace == XR_NULL_HANDLE) {
+    if (!s.theaterInputReady || s.aimSpace == XR_NULL_HANDLE) {
         return;
     }
     XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
@@ -4983,28 +4994,7 @@ void UpdatePointer(InputState& in, XrTime displayTime) {
     const float fy = -2.0f * (q.y * q.z - q.w * q.x);
     const float fz = -(1.0f - 2.0f * (q.x * q.x + q.y * q.y));
 
-    constexpr float kTheaterWidth    = 3.2f;
-    constexpr float kTheaterDistance = 2.2f;
-    const float aspect  = static_cast<float>(s.theater.width) / static_cast<float>(s.theater.height);
-    const float height  = kTheaterWidth / aspect;
-    const float planeZ  = -kTheaterDistance;
-
-    if (fz >= -1e-4f) {   // ray points away from the screen
-        return;
-    }
-    const float t = (planeZ - o.z) / fz;
-    if (t <= 0.0f) {
-        return;
-    }
-    const float hx = o.x + t * fx;
-    const float hy = o.y + t * fy;
-    if (std::abs(hx) > kTheaterWidth * 0.5f || std::abs(hy) > height * 0.5f) {
-        return;   // ray misses the screen
-    }
-
-    in.pointerValid   = true;
-    in.pointerU       = hx / kTheaterWidth + 0.5f;   // 0 left, 1 right
-    in.pointerV       = 0.5f - hy / height;          // 0 top,  1 bottom
+    in.pointerValid=s.theaterScreen.Hit(o.x,o.y,o.z,fx,fy,fz,in.pointerU,in.pointerV);
     in.pointerPressed = in.triggers[1] > 0.5f;       // right trigger taps
 }
 
@@ -5042,6 +5032,8 @@ bool ReadBool(XrAction action, XrPath subactionPath = XR_NULL_PATH) {
 }
 
 void SyncInput(XrTime displayTime) {
+    s.input.pointerValid=false;
+    s.input.flatScreenInputReady=false;
     if (s.actionSet == XR_NULL_HANDLE) {
         return;
     }
@@ -5069,6 +5061,10 @@ void SyncInput(XrTime displayTime) {
     in.r3   = ReadBool(s.stickClickAction, s.handPaths[1]);
     in.thumbrest[0] = ReadBool(s.thumbrestAction, s.handPaths[0]);
     in.thumbrest[1] = ReadBool(s.thumbrestAction, s.handPaths[1]);
+    static bool releaseRequired=true;
+    if (!s.theaterInputReady) releaseRequired=true;
+    else if (!in.a && in.triggers[1]<=0.5f) releaseRequired=false;
+    in.flatScreenInputReady=s.theaterInputReady && !releaseRequired;
     UpdatePointer(in, displayTime);
     s.input = in;
 }
@@ -12045,25 +12041,6 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
         return;
     }
 
-    SyncInput(frameState.predictedDisplayTime);
-
-#ifdef SAVR_DEV
-    // Explicit developer vehicle-spawn cheat only. No profiler shortcut;
-    // ordinary gameplay button presses cannot toggle diagnostic overlays.
-    {
-        InputState in{};
-        GetInput(in);
-        const bool chord = in.grip[0] >= 0.75f && in.grip[1] >= 0.75f && in.a;
-        static bool chordDown = false;
-        if (chord && !chordDown && !g_mainMenuActive.load(std::memory_order_relaxed)) {
-            if (savr::cheats::SpawnByButtonEnabled()) {
-                savr::cheats::RequestNextVehicle();
-                LOGI("[vr] grips+A -> spawn next vehicle (dev)");
-            }
-        }
-        chordDown = chord;
-    }
-#endif
 
     // Turn the GameThread frame counter into a rate every half second (using the
     // predicted display time as a monotonic clock in nanoseconds).
@@ -12084,7 +12061,8 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
     // stereo projection once the game thread reports real gameplay. The game
     // thread owns that judgement — it can see the player, the menu and the
     // cutscene manager — so we just follow its call here.
-    s.theaterMode = !vrcam::IsStereoActive();
+    const auto theaterPresentation=vrcam::TheaterPresentation();
+    s.theaterMode = (theaterPresentation & 1u)==0;
     if (s.theaterMode != sLastTheaterMode) {
         // A theater/gameplay edge is a new producer epoch. Do not let a sequence
         // or stale streak from the previous path poison the next one.
@@ -12211,6 +12189,46 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
             publishTrackingPose=true;
         }
     }
+
+    // Capture only after recovery accepted a fresh physical pose. Pitch and
+    // roll never affect the screen: its centre remains at capture eye height.
+    {
+        std::uint64_t epoch;
+        { std::lock_guard<std::mutex> lock(g_headPoseMutex); epoch=g_trackingRecovery.epoch; }
+        const auto& q=nextHead.orientation;
+        const float fx=-2.0f*(q.x*q.z+q.w*q.y);
+        const float fz=-(1.0f-2.0f*(q.x*q.x+q.y*q.y));
+        const bool wasValid=s.theaterScreen.valid;
+        const auto oldOpening=s.theaterScreen.opening, oldEpoch=s.theaterScreen.epoch;
+        s.theaterScreen.Update(publishTrackingPose,s.theaterMode,theaterPresentation>>1,epoch,
+            nextHead.position.x,nextHead.position.y,nextHead.position.z,fx,fz);
+        const int cw=g_theaterCropW.load(std::memory_order_relaxed);
+        const int ch=g_theaterCropH.load(std::memory_order_relaxed);
+        const float aspect=cw>0 && ch>0 ? static_cast<float>(cw)/ch :
+            static_cast<float>(s.theater.width)/std::max(1,s.theater.height);
+        s.theaterScreen.height=s.theaterScreen.width/aspect;
+        s.theaterInputReady=s.theaterScreen.valid && wasValid &&
+            oldOpening==s.theaterScreen.opening && oldEpoch==s.theaterScreen.epoch;
+    }
+    SyncInput(frameState.predictedDisplayTime);
+
+#ifdef SAVR_DEV
+    // Explicit developer vehicle-spawn cheat only. No profiler shortcut;
+    // ordinary gameplay button presses cannot toggle diagnostic overlays.
+    {
+        InputState in{};
+        GetInput(in);
+        const bool chord = in.grip[0] >= 0.75f && in.grip[1] >= 0.75f && in.a;
+        static bool chordDown = false;
+        if (chord && !chordDown && !g_mainMenuActive.load(std::memory_order_relaxed)) {
+            if (savr::cheats::SpawnByButtonEnabled()) {
+                savr::cheats::RequestNextVehicle();
+                LOGI("[vr] grips+A -> spawn next vehicle (dev)");
+            }
+        }
+        chordDown = chord;
+    }
+#endif
 
     // Locate both hands' grip + aim poses (LOCAL space) for the VR hands.
     {

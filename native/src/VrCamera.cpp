@@ -1499,6 +1499,7 @@ constexpr float kVrFovX    = 105.0f;
 constexpr float kVrHalfIpd = 0.032f;   // ~64 mm total; must match the present side
 
 std::atomic<bool> g_stereoActive{false};
+std::atomic<std::uint64_t> g_theaterPresentation{0};
 // True while the freefall head-down dive (right trigger) is held; the camera
 // pitches down with the body so the player looks along the dive. Declared
 // this early because the camera hook consumes it.
@@ -3225,6 +3226,33 @@ bool ShouldRunStereo() {
     return true;
 }
 
+// Called only on GameThread, including while the native frontend is open.
+void PublishTheaterPresentation(bool stereo) {
+    static int previous=-1;
+    static char previousScene[64]{};
+    static std::uint64_t opening=0;
+    int reason=0;
+    const char* scene="";
+    if (!stereo) {
+        if (MobileMenuOpen()) reason=1;
+        else if (g.CCutsceneMgr_ms_running && *g.CCutsceneMgr_ms_running) {
+            reason=2;
+            if (g.CCutsceneMgr_ms_cutsceneName) scene=g.CCutsceneMgr_ms_cutsceneName;
+        } else if (!g.FindPlayerPed || !g.FindPlayerPed(-1)) reason=3;
+        else if (g.CCamera_GetScreenFadeStatus && g.TheCamera &&
+                 g.CCamera_GetScreenFadeStatus(g.TheCamera)==2) reason=4;
+        else if (missionscenes::Theater()) reason=5;
+        else reason=6; // scripted flat camera / shop UI
+    }
+    if (reason!=previous || std::strncmp(scene,previousScene,63)!=0) {
+        ++opening;
+        previous=reason;
+        std::strncpy(previousScene,scene,63);
+        previousScene[63]='\0';
+    }
+    g_theaterPresentation.store((opening<<1)|(stereo?1u:0u),std::memory_order_release);
+}
+
 void UpdateTrafficCarCap(bool liveStereoGameplay) {
     const int requestedCap = ConfiguredTrafficCarCap();
     auto* const maximum = g.CCarCtrl_MaxNumberOfCarsInUse;
@@ -3527,6 +3555,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
     bool stereo = false;
     if (!inHook) {
         stereo = ShouldRunStereo();
+        PublishTheaterPresentation(stereo);
         g_stereoActive.store(stereo, std::memory_order_relaxed);
         UpdateTrafficCarCap(stereo);
     }
@@ -29787,6 +29816,10 @@ bool IsStereoActive() {
     return g_stereoActive.load(std::memory_order_relaxed);
 }
 
+std::uint64_t TheaterPresentation() {
+    return g_theaterPresentation.load(std::memory_order_acquire);
+}
+
 // The camera-copy hook that normally refreshes g_stereoActive stops running
 // the moment the pause menu takes over the frame, so the stale "stereo" value
 // kept the compositor on the frozen eye ring. The per-frame input pump on the
@@ -29797,6 +29830,7 @@ bool RecruitGestureActive() {
 
 void RefreshStereoGate() {
     const bool stereo = ShouldRunStereo();
+    PublishTheaterPresentation(stereo);
     g_stereoActive.store(stereo, std::memory_order_relaxed);
     if (render_diag::Enabled()) {
         // GameThread owns these retail objects. XR reads only the logged values.

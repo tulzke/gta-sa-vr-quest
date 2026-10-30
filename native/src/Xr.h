@@ -43,6 +43,7 @@ struct InputState {
     // pointerValid is false when the ray misses the screen. pointerPressed is the
     // right trigger, used as a tap.
     bool  pointerValid{};
+    bool  flatScreenInputReady{};
     bool  pointerPressed{};
     float pointerU{};
     float pointerV{};

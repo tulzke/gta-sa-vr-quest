@@ -28,6 +28,8 @@ void EndGameFrameTelemetry();
 // and the head-tracked stereo camera is being driven. The render thread reads
 // this to choose the stereo projection layer over the flat theater screen.
 bool IsStereoActive();
+// One atomic snapshot: bit 0 is stereo, upper bits identify the flat opening.
+std::uint64_t TheaterPresentation();
 
 // Refresh the stereo/theater gate each input frame, including native pause menus.
 void RefreshStereoGate();
