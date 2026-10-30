@@ -2,6 +2,7 @@
 #include "BeachDance.h"
 #include "JustBusiness.h"
 #include "Driving.h"
+#include "VehicleDoors.h"
 #include "BikeSteering.h"
 #include "MissionComfort.h"
 
@@ -3881,7 +3882,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     }
     V3 positions[2]{}; bool poseValid[2]{},justGrabbed[2]{};
     // A hand holding the drawn sidearm cannot also grab a vehicle control. The mask is lock-free.
-    const unsigned int weaponHands = physicalweapon::HeldHandMaskRelaxed();
+    const unsigned int weaponHands = physicalweapon::HeldHandMaskRelaxed() | vehicledoors::ClaimedHands();
     for (int hand=0;hand<2;++hand) {
         positions[hand]={poses[hand].gripPos[0],poses[hand].gripPos[1],poses[hand].gripPos[2]};
         poseValid[hand]=poses[hand].valid&&std::isfinite(positions[hand].x)&&

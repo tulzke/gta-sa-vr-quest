@@ -40,6 +40,7 @@ bool IsMobileMenuOpen();
 // weapon/throwable grabs are blocked while the deploy ring owns both hands.
 bool ParachuteWeaponInteractionBlocked();
 bool GroundWalkControlsActive();
+bool VehicleDoorControlsActive();
 bool IsCrouched();
 
 // Preserve the OpenXR-recommended per-eye raster size when the engine's flat

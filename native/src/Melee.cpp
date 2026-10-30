@@ -5,6 +5,7 @@
 #include "Symbols.h"
 #include "VrCamera.h"
 #include "Xr.h"
+#include "VehicleDoors.h"
 
 #include <algorithm>
 #include <chrono>
@@ -227,7 +228,7 @@ void MeleeModelSegment(int type, V3& root, V3& tip) {
 bool BuildSegment(int hand, void* ped, const xr::HandPose hands[2],
                   Segment& out) {
     if (hand < 0 || hand >= physicalweapon::kHandCount ||
-        !hands[hand].valid) {
+        !hands[hand].valid || (vehicledoors::ClaimedHands() & (1u << hand))) {
         return false;
     }
 

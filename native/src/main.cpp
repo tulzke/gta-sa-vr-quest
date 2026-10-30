@@ -22,6 +22,7 @@
 #include "MenuNavigation.h"
 #include "Swimming.h"
 #include "BoatEntry.h"
+#include "VehicleDoors.h"
 #include "PerfTelemetry.h"
 #include "Basketball.h"
 #include "MapZoom.h"
@@ -1944,6 +1945,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     }
     else {
         savr::physicalweapon::ResetTransient();
+        savr::vehicledoors::Reset();
         savr::melee::Reset();
         savr::scopeaim::Reset();
         savr::vrfire::Update(true);
@@ -2566,6 +2568,7 @@ void* WaitForGameLibrary(void*) {
     savr::missionscenes::Install(handle);
     savr::swimming::Install(handle);
     savr::boatentry::Install(handle);
+    savr::vehicledoors::Install(handle);
     savr::braindiag::Install(handle);  // basketball brain-chain diagnostics
     savr::basketball::Install(handle);  // custom immersive basketball
     savr::mapzoom::Install(handle);  // pause-map zoom on the grips

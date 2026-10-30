@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include "HolsterMarker.h"
+#include "VehicleDoorMotion.h"
 
 namespace savr::xr {
 
@@ -298,6 +299,7 @@ bool IsMenuVisible();
 // Markers in LOCAL, published by the GameThread; seven sockets plus support.
 // Position-only publication is retained for the legacy holster update path.
 void SetHolsterMarkers(const float positions[][3], int count);
+void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& frame);
 void SetHolsterMarkerStates(const holstermarker::Marker* markers, int count,
                            std::uint64_t epoch, const float headPosition[3]);
 

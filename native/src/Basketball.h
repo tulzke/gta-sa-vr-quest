@@ -17,6 +17,8 @@ void SpawnBall();
 // Per-gameplay-frame update from the input pump: grab / carry / throw and
 // the hoop score probe.
 void Update();
+// GameThread hand ownership for other physical interactions.
+unsigned int HeldHandMask();
 
 // Bullet notification from the weapon pipeline: a shot from `origin` along
 // `dir` (unit direction when dirIsTarget=false, or an absolute end point

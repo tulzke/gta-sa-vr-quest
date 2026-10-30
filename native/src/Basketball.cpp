@@ -8,6 +8,7 @@
 //   CPhysical move speed @+0x68..0x73, turn speed @+0x74..0x7F
 //   (ApplyForce @0x4a12a8 writes the move vector at +0x68/+0x70)
 #include "Basketball.h"
+#include "VehicleDoors.h"
 
 #include <algorithm>
 #include <atomic>
@@ -640,7 +641,7 @@ void UpdateHandTracking() {
         const bool wasValid = g_handValid[hand];
         const V3 previous = g_handWorld[hand];
         g_handValid[hand] = false;
-        if (!ok || !poses[hand].valid) continue;
+        if (!ok || !poses[hand].valid || (vehicledoors::ClaimedHands() & (1u << hand))) continue;
         float world[3]{};
         if (!vrcam::TrackingPointToWorld(poses[hand].gripPos, world))
             continue;
@@ -685,6 +686,7 @@ V3 PeakHandVelocity(int hand, double window) {
 }
 
 float HandGrip(int hand) {
+    if (vehicledoors::ClaimedHands() & (1u << hand)) return 0.f;
     xr::HandPose poses[2]{};
     if (!physicalweapon::GetHandPosesSnapshot(poses)) return 0.0f;
     return poses[hand].grip;
@@ -1896,4 +1898,7 @@ void Update() {
     xr::SetBallHandLock(carryLock);
 }
 
+unsigned int HeldHandMask() {
+    return g_heldHand<0?0u:g_twoHanded?3u:1u<<g_heldHand;
+}
 } // namespace savr::basketball

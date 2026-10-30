@@ -11,6 +11,7 @@
 #include "VrFire.h"
 #include "Throwable.h"
 #include "Xr.h"
+#include "VehicleDoors.h"
 
 #include <algorithm>
 #include <chrono>
@@ -770,6 +771,10 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     const bool headValid = xr::GetTrackingSnapshot(headPosition, headOrientation, latest, &trackingEpoch);
     const double now = NowSeconds();
 
+    // Door ownership wins before fresh weapon grabs, using the same XR sample.
+    // Run outside gMutex: the door module queries existing weapon/support owners.
+    vehicledoors::Update(interactionsBlocked, latest, headValid, trackingEpoch);
+    const unsigned int doorHands = vehicledoors::ClaimedHands();
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));
     interactionsBlocked = interactionsBlocked || !headValid ||
@@ -907,7 +912,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     }
 
     if (!interactionsBlocked) {
-        std::uint32_t handledHands = 0;
+        std::uint32_t handledHands = doorHands;
 
         // Keep/release an established support grip first. Releasing only the
         // support side detaches it. Releasing the primary while support remains

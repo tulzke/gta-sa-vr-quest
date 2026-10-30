@@ -619,6 +619,8 @@ holstermarker::Kind    g_holsterKind[8]{};
 std::uint64_t         g_holsterEpoch{};
 float                 g_holsterEye[3]{}; // one billboard orientation for both eyes
 holstermarker::Frame   g_stereoHolsterMarkers[kStereoSets]{};
+vehicledoors::MarkerFrame g_vehicleDoorMarkers{};
+vehicledoors::MarkerFrame g_stereoVehicleDoorMarkers[kStereoSets]{};
 int                   g_holsterCount = 0;
 // Active weapon object-space geometry (guarded by g_headPoseMutex). Published by
 // the GameThread; the present thread transforms it to the hand pose and draws it.
@@ -5645,6 +5647,11 @@ void SetMobileColorState(const MobileColorState& state) {
     }
 }
 
+void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& frame) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_vehicleDoorMarkers=frame;
+}
+
 void SetHolsterMarkers(const float positions[][3], int count) {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
     g_holsterEpoch = g_trackingRecovery.epoch;
@@ -6199,6 +6206,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
             std::memcpy(markerFrame.markers[i].position, g_holsterPos[i], sizeof(g_holsterPos[i]));
             markerFrame.markers[i].kind = g_holsterKind[i];
         }
+        g_stereoVehicleDoorMarkers[ws] = g_vehicleDoorMarkers;
         g_stereoScopeState[ws] = scopeaim::Snapshot();
         g_stereoDrivingWheelState[ws] = drivingWheel;
         g_stereoBallHandLock[ws] = g_ballHandLock;
@@ -9688,6 +9696,30 @@ void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
     glBindBuffer(GL_ARRAY_BUFFER,0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 }
 
+void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& frame) {
+    if (frame.count<=0) return;
+    EnsureMarkerProgram();
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE); // translucent hints never hide the hand/world
+    glDisable(GL_CULL_FACE);
+    glUseProgram(g_markerProg);
+    glUniformMatrix4fv(g_markerMvpLoc,1,GL_FALSE,mvp);
+    glBindBuffer(GL_ARRAY_BUFFER,g_markerVbo);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),nullptr);
+    for (int i=0;i<frame.count;++i) {
+        const auto& marker=frame.markers[i];
+        const auto mesh=vehicledoors::Arrow(marker);
+        static_assert(sizeof(vehicledoors::Vec)==3*sizeof(float));
+        glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.72f:.45f);
+        glBufferData(GL_ARRAY_BUFFER,sizeof(mesh),mesh.data(),GL_DYNAMIC_DRAW);
+        glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(mesh.size()));
+    }
+    glDisableVertexAttribArray(0);glBindBuffer(GL_ARRAY_BUFFER,0);glUseProgram(0);
+    glDepthMask(GL_TRUE);glDisable(GL_BLEND);
+}
+
 // ---- immersive jetpack: handheld-thruster flames ---------------------------
 // In REALISTIC mode the two controllers are jet engines; each pulls fire out of
 // its nozzle (the way it points) scaled by that hand's trigger. Drawn here in
@@ -11077,6 +11109,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const HandPose bakedHands[2],
                      const TwoHandVisualState& bakedTwoHand,
                      const holstermarker::Frame& bakedHolsters,
+                     const vehicledoors::MarkerFrame& bakedDoors,
                      unsigned int hudSourceTex) {
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
@@ -11108,7 +11141,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                              throwableTrajectory[1].count <= 1)) &&
         !chuteVisuals && !chuteRingVisual &&
         !wristWanted &&
-        tracerCount <= 0 && objectiveMarkerCount <= 0) return;
+        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0) return;
     if (haveHands) EnsureHandProgram();
 
     const float sign = (e == 0) ? -1.0f : 1.0f;
@@ -11279,6 +11312,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawWeaponForEye(mvp);     // active weapon mesh pinned to the hand (Stage 1)
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
+    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors);
     // Riser controls are their own world-space interaction. They must remain
     // visible even when the selected hand preset hides general tracked-hand
     // overlays; otherwise the player has no handle to grab under the canopy.
@@ -11483,6 +11517,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     LaserRay bakedLaser{};
     TwoHandVisualState bakedTwoHand{};
     holstermarker::Frame bakedHolsters{};
+    vehicledoors::MarkerFrame bakedDoors{};
     scopeaim::VisualState bakedScope{};
     driving::WheelVisualState drivingWheel{};
     BallHandLock ballHandLock{};
@@ -11500,6 +11535,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedTwoHand   = g_stereoTwoHandVisualState[set];
         bakedHolsters = g_stereoHolsterMarkers[set];
         if (!bakedHolsters.Usable(g_headPoseValid, g_trackingRecovery.epoch)) bakedHolsters.count = 0;
+        bakedDoors = g_stereoVehicleDoorMarkers[set];
+        if (!bakedDoors.Usable(g_headPoseValid,g_trackingRecovery.epoch)) bakedDoors.count=0;
         bakedScope     = g_stereoScopeState[set];
         drivingWheel   = g_stereoDrivingWheelState[set];
         ballHandLock   = g_stereoBallHandLock[set];
@@ -11659,7 +11696,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, hudSource);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, hudSource);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

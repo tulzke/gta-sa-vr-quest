@@ -30,6 +30,7 @@
 #include "PhysicalWeapon.h"
 #include "VrCamera.h"
 #include "Xr.h"
+#include "VehicleDoors.h"
 
 namespace savr::pickups {
 namespace {
@@ -150,7 +151,8 @@ bool OnPickupUpdate(void* self, void* player, void* vehicle, int playerId) {
         reinterpret_cast<std::uint8_t*>(objMat) + kMatrixPos);
     int grabHand = -1;
     for (int hand = 0; hand < 2 && grabHand < 0; ++hand) {
-        if (!hands[hand].valid || hands[hand].grip < kGrabGrip) continue;
+        if (!hands[hand].valid || hands[hand].grip < kGrabGrip ||
+            (vehicledoors::ClaimedHands() & (1u << hand))) continue;
         float world[3]{};
         if (!vrcam::TrackingPointToWorld(hands[hand].gripPos, world)) break;
         const float hx = world[0] - objT[0];

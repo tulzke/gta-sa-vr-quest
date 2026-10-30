@@ -106,7 +106,25 @@ them does not steer. Wheelie/forward-lean gestures and throttle are unchanged.
 The default speed blend spans 0.04–0.12 in GTA velocity units; it only applies
 while moving forwards. Quest handling and comfort still need a riding check.
 
+## Hand-operated car doors (prototype)
+
+The hand-operated car-door prototype is enabled on foot and from the driver's
+seat of an ordinary car. Approach an
+unlocked, nearly stationary car: translucent yellow arrows appear near its
+door handles. With an empty hand, squeeze grip within about 23 cm of an arrow's
+root, then pull or push while holding grip. Release to let go. Either controller
+works; a grip already held while walking past a car does not grab it.
+
+This version handles ordinary vertical-hinge car doors, one door at a
+time. It does not automatically seat the player. Handle positions are estimated
+from the loaded door frames and need headset checks across models. See
+[VEHICLE_DOORS_IMPLEMENTATION.md](VEHICLE_DOORS_IMPLEMENTATION.md) for limits and
+the Quest verification checklist.
+
 ## Developer tests
+
+Run `python tools/test-vehicle-doors.py` for the production door solver and
+engine-adapter host tests (fake engine memory, real selection/state logic).
 
 Developers can run `python tools/test-holsters.py` for host tests of the body,
 marker geometry, production grab/return branches, camera transforms and settings.

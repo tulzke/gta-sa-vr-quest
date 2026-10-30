@@ -31,6 +31,7 @@
 #include "Catalyst.h"
 #include "Swimming.h"
 #include "BoatEntry.h"
+#include "VehicleDoors.h"
 #include "StereoSurfacePolicy.h"
 #include "Symbols.h"
 #include "TrafficCensus.h"
@@ -21893,6 +21894,7 @@ void OnRenderScene(bool underwater) {
     const float tanX = std::tan(kVrFovX * 0.5f * 3.14159265f / 180.0f);
     const float tanY = tanX * static_cast<float>(g_eyeRasterH) / static_cast<float>(g_eyeRasterW);
     xr::SetStereoRenderFov(tanX, tanY);
+    vehicledoors::PublishMarkers();
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex,
                              renderedNear, renderedFar,
                              g_recordCounter, g_eyeRasterW, g_eyeRasterH);
@@ -29982,16 +29984,19 @@ bool GetHolsterAnchorTracking(int point, float positionOut[3]) {
 }
 
 bool IsCrouched(){return g_duckLatched;}
-bool GroundWalkControlsActive() {
+bool VehicleDoorControlsActive() {
     if(!ShouldRunStereo() || CutsceneCameraControlsActiveInternal() ||
        beachdance::Active() || catalyst::Active() || vrfire::IsScriptedWeaponCamera() ||
        jetpack::IsActive() || ParachuteStateActive() || missioncontrols::IsSwimming() ||
        driving::GetRemoteControlledVehicle() || driving::IsCraneControlActive())return false;
     void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
-    if(!ped || (g.CPed_IsAlive && !g.CPed_IsAlive(ped)) ||
-       (g.FindPlayerVehicle && g.FindPlayerVehicle(-1,false)))return false;
+    if(!ped || (g.CPed_IsAlive && !g.CPed_IsAlive(ped)))return false;
     void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
     return pad && *reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(pad)+0x110)==0;
+}
+bool GroundWalkControlsActive() {
+    return VehicleDoorControlsActive() &&
+        !(g.FindPlayerVehicle && g.FindPlayerVehicle(-1,false));
 }
 
 void RequestRecenter() {
