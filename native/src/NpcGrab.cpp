@@ -33,9 +33,13 @@ bool (*outProcess)(void*,void*){};
 void (*outDtor)(void*){};
 bool (*placeOutside)(void*,int,void*,bool){};
 bool (*canOpen)(const void*,const void*){};
+void (*draggedCtor)(void*,const void*,const void*,bool){};
+void (*draggedDtor)(void*){};
+void (*addPrimary)(void*,void*,bool){};
 std::atomic<unsigned> claimed{};
 GripEdge edges[2];
 bool intent[2]{};
+bool extracted[2]{};
 std::uint64_t previousEpoch{};
 double updated{};
 bool ready{};
@@ -71,6 +75,7 @@ struct Hold {
     bool seated{};
     Vec command{};
     double until{};
+    bool aggression{};
     bool Live(const Pool& p) const {
         return ped&&p.identity==pool&&p.objects==objects&&ref>=0&&(ref>>8)<p.size&&
             p.flags[ref>>8]==(ref&255)&&!(p.flags[ref>>8]&128)&&getPed(ref)==ped;
@@ -89,6 +94,17 @@ bool OwnTask(const Hold& h) {
 Vec Bone(void* ped,int bone) {
     GameSymbols::Vec3 p{};g.CPed_GetBonePosition(ped,&p,bone,true);
     return {p.x,p.y,p.z};
+}
+void Aggression(Hold& h,void* player) {
+    if (h.aggression||!player||playerlife::Dead(h.ped)) return;
+    h.aggression=true;
+    const Vec relative=Position(player)-Position(h.ped);
+    const GameSymbols::Vec2 direction{relative.x,relative.y};
+    // The vanilla unarmed damage event reports the player as the attacker and
+    // lets the native personality/crime/proof rules decide the response. Zero
+    // damage avoids turning a shove into repeated artificial health damage.
+    g.CWeapon_GenerateDamageEvent(h.ped,player,0,0,3,
+        std::clamp(g.CPed_GetLocalDirection(h.ped,&direction),0,3));
 }
 void Release(Hold& h,const Pool& pool,bool throwing) {
     if (h.Live(pool)&&h.task&&OwnTask(h)) {
@@ -109,6 +125,7 @@ void Release(Hold& h,const Pool& pool,bool throwing) {
             } else setTask(Manager(h.ped),nullptr,0,false);
         } else setTask(Manager(h.ped),nullptr,0,false);
         if (!playerlife::Dead(h.ped)) Write(h.ped,0x68,velocity*.02f);
+        if (throwing&&Length(velocity)>=.6f) Aggression(h,owner);
     }
     h={};
 }
@@ -170,12 +187,33 @@ bool Extract(Hold& h,void* player) {
     // helpers take component nodes, not damage-manager door indices.
     constexpr int nodes[]={10,8,11,9};
     void* car=Read<void*>(h.ped,0x708);
+    const bool wasDriver=Read<void*>(car,0x5a0)==h.ped;
     if (!placeOutside(h.ped,nodes[door-2],car,true)) return false;
     alignas(16) std::uint8_t task[0x30]{};
     outCtor(task,car,nodes[door-2],false);
     const bool done=outProcess(task,h.ped);
     outDtor(task);
-    return done&&!Seated(h.ped);
+    if (!done||Seated(h.ped)) return false;
+    void* intelligence=Read<void*>(h.ped,0x538);
+    // The normal F/carjack path replaces the victim's primary car task using
+    // AddTaskPrimaryMaybeInGroup, then adds DraggedOutCar to intelligence+c8
+    // (EnterCar::CreateNextSubTask @635f1c). Merely clearing bInVehicle leaves
+    // CarDrive/EnterCar underneath and sends the NPC straight back to the seat.
+    if (void* idle=allocate(0x28)) {
+        standCtor(idle,0,false,false,8.f);
+        addPrimary(intelligence,idle,true);
+    }
+    // Fall occupies physical response only; personality responses can queue
+    // underneath and run after getting up. The hand releases at extraction.
+    if (void* fall=allocate(0x28)) {
+        fallCtor(fall,0,1200);
+        setTask(Manager(h.ped),fall,0,false);
+    }
+    alignas(16) std::uint8_t event[0x30]{};
+    draggedCtor(event,car,player,wasDriver);
+    g.CEventGroup_Add(static_cast<char*>(intelligence)+0xc8,event,true);
+    draggedDtor(event); // Add clones the event and owns its entity references.
+    return true;
 }
 
 void OnCalculateVelocity(void* ped) {
@@ -244,9 +282,14 @@ void Install(void* handle) {
     RESOLVE(outDtor,"_ZN23CTaskSimpleCarSetPedOutD1Ev");
     RESOLVE(placeOutside,"_ZN4CPed25PositionPedOutOfCollisionEiP8CVehicleb");
     RESOLVE(canOpen,"_ZNK8CVehicle15CanPedOpenLocksEPK4CPed");
+    RESOLVE(draggedCtor,"_ZN19CEventDraggedOutCarC1EPK8CVehiclePK4CPedb");
+    RESOLVE(draggedDtor,"_ZN19CEventDraggedOutCarD1Ev");
+    RESOLVE(addPrimary,"_ZN16CPedIntelligence26AddTaskPrimaryMaybeInGroupEP5CTaskb");
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
         outCtor&&outProcess&&outDtor&&placeOutside&&canOpen&&g.CPed_GetBonePosition&&
+        draggedCtor&&draggedDtor&&addPrimary&&g.CEventGroup_Add&&
+        g.CWeapon_GenerateDamageEvent&&g.CPed_GetLocalDirection&&
         g.CWorld_ProcessLineOfSight&&g.CVehicle_GetVehicleAppearance&&
         HookVelocity(dlsym(handle,"_ZN4CPed20CalculateNewVelocityEv"));
     LOGI("[npcgrab] available=%d",ready);
@@ -257,6 +300,7 @@ void Reset() {
     for (auto& h:holds) Release(h,pool,false);
     for (auto& edge:edges) edge.latched=true;
     for (auto& active:intent) active=false;
+    for (auto& released:extracted) released=false;
     for (auto& flight:flights) flight={};
     claimed.store(0,std::memory_order_relaxed);
 }
@@ -292,6 +336,12 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const bool fresh=edges[hand].Step(hands[hand].grip,good);
         if (fresh) intent[hand]=true;
         if (!good||hands[hand].grip<=.35f) intent[hand]=false;
+        if (extracted[hand]) {
+            // Finish the same grab gesture before returning the hand to melee
+            // or holsters; otherwise the extraction sweep becomes a punch.
+            if (good&&hands[hand].grip>.35f) { mask|=1u<<hand;continue; }
+            extracted[hand]=false;
+        }
         if (h.ped) {
             if (!h.Live(pool)||!good||playerlife::Dead(h.ped)||Length(p-h.previous)>.6f||
                 !Finite(Position(h.ped))||Length(Position(h.ped)-Position(player))>3.f||
@@ -303,8 +353,11 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             if (h.seated) {
                 if (!Seated(h.ped)||ExitDoor(h.ped,player)<0) { Release(h,pool,false);continue; }
                 if (Length(p-h.start)>.22f) {
-                    if (!Extract(h,player)||!StartHold(h)) { Release(h,pool,false);continue; }
-                    h.seated=false;
+                    if (Extract(h,player)) {
+                        h={};extracted[hand]=true;mask|=1u<<hand;
+                    }
+                    else Release(h,pool,false);
+                    continue;
                 }
             }
             if (!h.seated) {
@@ -318,6 +371,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 const Vec speed=Limit((p-anchor)*10.f+h.velocity*.65f+Vec{0,0,.4f},6.f);
                 h.command=speed*.02f;
                 Write(h.ped,0x68,h.command);
+                if (Length(p-h.start)>.12f&&Length(h.velocity)>.6f) Aggression(h,player);
             }
         } else if (intent[hand]&&hands[hand].grip>=.65f&&good) {
             float best=.35f;

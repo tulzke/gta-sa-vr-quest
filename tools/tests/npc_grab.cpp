@@ -35,6 +35,10 @@ using namespace savr::npcgrab;
 using savr::vehicledoors::Vec;
 namespace {
 alignas(16) char player[0x9c8]{},npc[0x9c8]{},car[0xc68]{},pad[0x200]{},poolData[0x20]{},intelligence[0x100]{},fall[0x28]{},carMatrix[0x40]{};
+alignas(16) char taskMemory[32][0x28]{};
+int allocations{},aggressions{},dragEvents{},dragDestroyed{},primaryReplaced{};
+bool eventDriver{};
+const void* eventPlayer{};const void* eventCar{};
 void* poolPtr=poolData;
 std::uint8_t flags[1]{1};
 bool wall{},locked{},carOccludes{},placementBlocked{};int fallCalls{},standCalls{},exits{},timer{},placedNode{};void* ignoredEntity{};
@@ -48,10 +52,29 @@ void BonePos(void* ped,GameSymbols::Vec3* out,unsigned int,bool) {
 bool Los(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,bool,bool,bool,bool,bool,bool,bool,bool) {
     *hit=wall?player:(carOccludes&&ignoredEntity!=car?car:nullptr);return *hit!=nullptr;
 }
-void* Allocate(std::size_t n) {CHECK(n==0x28);return fall;}
+void* Allocate(std::size_t n) {CHECK(n==0x28);CHECK(allocations<32);return taskMemory[allocations++];}
 void Fall(void*,int direction,int ms) {CHECK(direction==0);timer=ms;++fallCalls;}
 void SetTask(void* m,void* t,int slot,bool) {CHECK(slot==0);Write(m,0,t);}
-void Stand(void*,int ms,bool,bool,float) {CHECK(ms==-1);++standCalls;}
+void Stand(void*,int ms,bool,bool,float) {CHECK(ms==-1||ms==0);++standCalls;}
+void Primary(void* brain,void* task,bool force) {
+    CHECK(brain==intelligence&&force);CHECK(!Seated(npc));
+    ++primaryReplaced;Write(brain,8+3*8,task);
+}
+void DragCtor(void*,const void* vehicle,const void* attacker,bool driver) {
+    eventCar=vehicle;eventPlayer=attacker;eventDriver=driver;
+}
+void DragDtor(void*) {++dragDestroyed;}
+void* AddEvent(void* group,void* event,bool valid) {
+    CHECK(group==intelligence+0xc8&&valid);
+    CHECK(eventCar==car&&eventPlayer==player&&!Seated(npc));
+    CHECK(primaryReplaced==1&&fallCalls==1); // fall + task replacement precede native reaction
+    ++dragEvents;return event;
+}
+int Direction(void* ped,const GameSymbols::Vec2*) {CHECK(ped==npc);return 2;}
+bool Damage(void* victim,void* attacker,int weapon,int damage,int piece,int direction) {
+    CHECK(victim==npc&&attacker==player&&weapon==0&&damage==0&&piece==3&&direction==2);
+    ++aggressions;return true;
+}
 void NativeVelocity(void* ped) {Write(ped,0x68,Vec{});Write(ped,0x6bc,0.f);Write(ped,0x6c0,0.f);}
 bool IsPlayer(const void* p) {return p==player;}
 bool CanOpen(const void*,const void*) {return !locked;}
@@ -73,12 +96,15 @@ xr::HandPose hands[2];
 void Setup() {
     Reset();std::memset(npc,0,sizeof(npc));std::memset(car,0,sizeof(car));std::memset(intelligence,0,sizeof(intelligence));
     flags[0]=1;wall=locked=carOccludes=placementBlocked=false;ignoredEntity=nullptr;placedNode=0;
+    allocations=aggressions=dragEvents=dragDestroyed=primaryReplaced=0;eventCar=eventPlayer=nullptr;
     xr::focused=vrcam::active=true;physicalweapon::mask=vehicledoors::mask=0;
     hands[0]={};hands[1]={};hands[1].valid=false;hands[0].gripPos[2]=1;
     Write(npc,0x538,static_cast<void*>(intelligence));Write(npc,0x6ac,100.f);Write(player,0x6ac,100.f);
     Write<void*>(poolData,0,npc);Write(poolData,8,flags);Write(poolData,0x10,1);
     pedPool=&poolPtr;getPed=Lookup;isPlayer=IsPlayer;allocate=Allocate;fallCtor=Fall;standCtor=Stand;calculateVelocity=NativeVelocity;setTask=SetTask;
     outCtor=OutCtor;outProcess=Out;outDtor=Dtor;placeOutside=Place;canOpen=CanOpen;ready=true;
+    draggedCtor=DragCtor;draggedDtor=DragDtor;addPrimary=Primary;
+    g.CEventGroup_Add=AddEvent;g.CPed_GetLocalDirection=Direction;g.CWeapon_GenerateDamageEvent=Damage;
     g.FindPlayerPed=Player;g.FindPlayerVehicle=Vehicle;g.CPad_GetPad=Pad;
     g.CWorld_pIgnoreEntity=&ignoredEntity;g.CPed_GetBonePosition=BonePos;g.CWorld_ProcessLineOfSight=Los;g.CVehicle_GetVehicleAppearance=Appearance;
     previousEpoch=1;updated=1;fallCalls=standCalls=exits=0;
@@ -116,7 +142,11 @@ int main() {
     for (auto& flight:flights) flight.until=updated-1;
     OnCalculateVelocity(npc);CHECK(Length(Read<Vec>(npc,0x68))==0); // bounded override expires
     Setup();Grip();hands[0].grip=0;Tick();
-    CHECK(!npcgrab::ClaimedHands()&&!fallCalls&&!Read<void*>(intelligence,8)); // gentle release stays standing
+    CHECK(!npcgrab::ClaimedHands()&&!fallCalls&&!Read<void*>(intelligence,8)&&!aggressions); // gentle release stays standing
+    Setup();Grip();CHECK(!aggressions);
+    hands[0].gripPos[0]=.18f;Tick();CHECK(aggressions==1);
+    hands[0].gripPos[0]=.25f;Tick();CHECK(aggressions==1); // one event per continuous hold
+    hands[0].grip=0;Tick();CHECK(aggressions==1); // release does not duplicate aggression
     Setup();hands[0].grip=1;Tick();CHECK(!npcgrab::ClaimedHands()); // interruption requires reopening
     Setup();hands[0].gripPos[0]=.8f;Grip();CHECK(!npcgrab::ClaimedHands());
     hands[0].gripPos[0]=0;Tick();CHECK(npcgrab::ClaimedHands()==1&&fallCalls==0); // early squeeze reaches contact
@@ -137,13 +167,19 @@ int main() {
     Setup();Seat();Write(carMatrix,0x30,Vec{-.6f,0,0});Grip();CHECK(!npcgrab::ClaimedHands()); // opposite side
     for (int seat=-1;seat<3;++seat) {
         Setup();Seat(seat);Grip();CHECK(npcgrab::ClaimedHands()==1&&!exits&&!fallCalls&&standCalls==0);
-        hands[0].gripPos[0]+=.25f;Tick();CHECK(exits==1&&fallCalls==0&&standCalls==1&&!Seated(npc));
+        Write<void*>(intelligence,8+3*8,car); // stale CarDrive/EnterCar task
+        hands[0].gripPos[0]+=.25f;Tick();CHECK(exits==1&&fallCalls==1&&standCalls==1&&!Seated(npc));
+        CHECK(npcgrab::ClaimedHands()==1&&!holds[0].ped&&timer==1200&&dragEvents==1&&dragDestroyed==1);
+        CHECK(eventDriver==(seat<0)&&primaryReplaced==1&&Read<void*>(intelligence,8+3*8)!=car);
+        CHECK(Read<void*>(intelligence,8)!=nullptr&&Read<void*>(intelligence,8)!=Read<void*>(intelligence,8+3*8));
+        CHECK(!aggressions); // carjack event carries the reaction; no duplicate assault
         constexpr int expectedNode[]={10,8,11,9};CHECK(placedNode==expectedNode[seat+1]);
         CHECK(!Read<void*>(car,seat<0?0x5a0:0x5a8+seat*8));
+        Tick();CHECK(npcgrab::ClaimedHands()==1&&dragEvents==1&&!aggressions); // no follow-up fist attack
         hands[0].grip=0;Tick();CHECK(!npcgrab::ClaimedHands());
     }
-    Setup();Seat();Grip();hands[0].grip=0;Tick();CHECK(!exits&&Seated(npc));
+    Setup();Seat();Grip();hands[0].grip=0;Tick();CHECK(!exits&&Seated(npc)&&!dragEvents&&!primaryReplaced);
     Setup();Seat();Grip();placementBlocked=true;hands[0].gripPos[0]+=.25f;Tick();
-    CHECK(!exits&&Seated(npc)&&!npcgrab::ClaimedHands());
+    CHECK(!exits&&Seated(npc)&&!npcgrab::ClaimedHands()&&!dragEvents&&!primaryReplaced&&!fallCalls);
     std::puts("NPC grab: hold, throw, ownership, interruption, pool lifetime and four vehicle seats passed");
 }
