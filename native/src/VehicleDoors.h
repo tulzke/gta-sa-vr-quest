@@ -9,4 +9,5 @@ void Reset();
 // Rebase world hints after the centre camera has advanced for this stereo pair.
 void PublishMarkers();
 unsigned int ClaimedHands();
+bool DebugEditActive();
 } // namespace savr::vehicledoors

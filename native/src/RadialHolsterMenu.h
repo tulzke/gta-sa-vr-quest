@@ -15,6 +15,12 @@ constexpr float kSectorHysteresis = 0.12f; // radians
 
 enum class Result { None, Cancelled, Selected };
 
+struct AtlasCell { float left, top, right, bottom; };
+inline AtlasCell IconCell(int index) {
+    const float x=(index%4)*.25f, y=(index/4)*.25f;
+    return {x,y,x+.25f,y+.25f};
+}
+
 struct Frame {
     bool visible{};
     int count{};
@@ -41,7 +47,7 @@ struct Menu {
     int selected = -1;
     int slots[kMaxEntries]{};
     float origin[3]{};
-    // Orthonormal, fixed at opening in the same tracking space as the hand.
+    // Orthonormal axes in tracking space, refreshed with the headset pose.
     float right[3]{};
     float up[3]{};
     std::uint64_t epoch = 0;
@@ -76,6 +82,18 @@ struct Menu {
     void ObserveReleased(float trigger) {
         if (!open && std::isfinite(trigger) && trigger <= kTriggerRelease)
             triggerLatched = false;
+    }
+
+    bool SetAxes(const float axisRight[3], const float axisUp[3]) {
+        if (!open || !axisRight || !axisUp) return false;
+        float rr=0, uu=0, ru=0;
+        for (int i=0;i<3;++i) {
+            if (!std::isfinite(axisRight[i]) || !std::isfinite(axisUp[i])) return false;
+            rr+=axisRight[i]*axisRight[i]; uu+=axisUp[i]*axisUp[i]; ru+=axisRight[i]*axisUp[i];
+        }
+        if (std::abs(rr-1.f)>.01f || std::abs(uu-1.f)>.01f || std::abs(ru)>.01f) return false;
+        for (int i=0;i<3;++i) { right[i]=axisRight[i]; up[i]=axisUp[i]; }
+        return true;
     }
 
     Result Update(float trigger, bool grip, bool valid, std::uint64_t currentEpoch,

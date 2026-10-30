@@ -1,5 +1,9 @@
 #include "VehicleDoorMotion.h"
 #include "VehicleDoors.h"
+#include "VehicleDebugDrag.h"
+#include "Driving.h"
+#include <map>
+#include <array>
 #include "Symbols.h"
 #include <atomic>
 #include <chrono>
@@ -14,10 +18,11 @@
 namespace savr {
 GameSymbols g{};
 namespace xr {
-struct HandPose { bool valid{true};float gripPos[3]{};float grip{}; };
+struct HandPose { bool valid{true};float gripPos[3]{};float grip{};float trigger{}; };
 vehicledoors::MarkerFrame published;
 void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& f) { published=f; }
 void TriggerHaptic(int,float,float,float) {}
+bool focused=true;bool IsSessionFocused() {return focused;}
 }
 namespace physicalweapon {
 unsigned mask{},support{};
@@ -26,9 +31,35 @@ bool IsSupportHand(int h) { return (support&(1u<<h))!=0; }
 }
 namespace basketball { unsigned held{};unsigned HeldHandMask() { return held; } }
 namespace driving {
-struct WheelVisualState { bool grabbed[2]{}; };
+int debugMode{},saves{};
+std::map<int,std::array<float,24>> corrections;
+int GetVehicleDebugMode() {return debugMode;}
+void GetDoorCalibration(int model,int door,bool inside,float out[3]) {
+    for(int a=0;a<3;++a) out[a]=corrections[model][(door-2)*6+inside*3+a];
+}
+void SetDoorCalibration(int model,int door,bool inside,const float in[3]) {
+    for(int a=0;a<3;++a) corrections[model][(door-2)*6+inside*3+a]=in[a];
+}
+void SaveDebugCalibration() {++saves;}
+int GetActiveVehicleType() {return VEHICLE_CAR;}
+int GetModeForVehicleType(int) {return MODE_IMMERSIVE;}
+int GetActiveSeatSideCm() {return 0;}
+int GetActiveSeatForwardCm() {return 0;}
+int GetActiveSeatHeightCm() {return 0;}
+int GetCurrentModelSeatSideCm(int) {return 0;}
+int GetCurrentModelSeatForwardCm(int) {return 0;}
+int GetCurrentModelSeatHeightCm(int) {return 0;}
+int GetWheelCalibrationValue(int) {return 0;}
+int radiusValue{},radiusWrites{};
+void SetDebugWheelRadius(int,int value) {radiusValue=value;++radiusWrites;}
+int positions[3]{},positionWrites{};
+void SetDebugPosition(int,int,bool,const int value[3]) { std::copy_n(value,3,positions);++positionWrites; }
+
 unsigned grabbed{};
-void GetWheelVisualState(WheelVisualState* out) { for(int i=0;i<2;++i)out->grabbed[i]=(grabbed&(1u<<i))!=0; }
+bool GetWheelVisualState(WheelVisualState* out) {
+    for(int i=0;i<2;++i)out->grabbed[i]=(grabbed&(1u<<i))!=0;
+    out->dashAnchorValid=true;out->modelId=400;out->radius=.2f;out->center[0]=-.4f;out->center[1]=.2f;out->center[2]=1.f;return true;
+}
 }
 namespace vrcam {
 bool ground=true,tracking=true;
@@ -41,6 +72,7 @@ bool WorldPointToTracking(const float in[3],float out[3]) {
 }
 bool TrackingPointToWorld(const float in[3],float out[3]) { std::memcpy(out,in,12);return tracking; }
 bool GetHeadWorldRay(float out[3],float[3]) { std::memcpy(out,&eye,12);return tracking; }
+bool GetNeutralVehicleEyeWorld(float out[3]) { const float p[]{-.4f,.2f,1.4f};std::memcpy(out,p,12);return tracking; }
 }
 }
 // PRODUCTION_ADAPTER
@@ -116,7 +148,7 @@ void Setup() {
     g_status=FakeStatus;g_setStatus=FakeSetStatus;g_frameLtm=FakeLtm;
     locked=busy=wall=entering=paused=false;vrcam::ground=vrcam::tracking=true;
     physicalweapon::mask=physicalweapon::support=basketball::held=0;
-    driving::grabbed=0;seated=nullptr;
+    driving::grabbed=0;driving::debugMode=0;driving::corrections.clear();driving::saves=0;xr::focused=true;seated=nullptr;
     writes=nativeSwings=invalidWrites=0;
     vrcam::eye={-1.7f,-.3f,1.3f};
     vrcam::rebase={};
@@ -182,6 +214,17 @@ int main() {
     CHECK(b.Valid());const Vec p{-.9f,.2f,.7f};CHECK(Length(b.Local(b.Point(p))-p)<1e-5f);
     const auto arrow=Arrow({{}, {1,0,0},{0,0,1},false});
     CHECK(arrow.size()==54);for (auto v:arrow) CHECK(Finite(v)&&v.x>=0&&v.x<=.181f);
+    const auto reverse=ReverseArrow({{}, {1,0,0},{0,0,1},false});
+    CHECK(std::abs(reverse.position.x-.18f)<1e-5f&&reverse.direction.x==-1);
+    for (auto v:Arrow(reverse)) CHECK(v.x>=-.001f&&v.x<=.181f);
+    for (float sign:{-1.f,1.f}) {
+        ReleasedMotion thrown{sign*1.2f,0,sign*1.2f,-sign*.9f,true,false};
+        for(int i=0;i<100&&!thrown.Done();++i) thrown.Step(.02f);
+        CHECK(thrown.Done()&&thrown.angle==0);
+        ReleasedMotion held{sign*.5f,0,sign*1.2f,sign*.5f,false,true};
+        for(int i=0;i<200;++i) held.Step(.02f);
+        CHECK(!held.Done()&&std::abs(held.angle)>.5f&&held.velocity==0);
+    }
     MarkerFrame f;f.count=1;f.epoch=3;CHECK(f.Usable(true,3)&&!f.Usable(true,4)&&!f.Usable(false,3));
     GripEdge edge;CHECK(!edge.Step(1,true));CHECK(!edge.Step(0,true));CHECK(edge.Step(1,true));
     CHECK(!edge.Step(0,false)&&!edge.Step(1,true));
@@ -248,11 +291,38 @@ int main() {
     Setup();seated=vehicle;vrcam::eye={-.35f,-.3f,1.3f};hands[0]={};hands[1]={};
     const Vec inner{-1.f+.34f,.6f-1.2f*.82f,.7f};
     std::memcpy(hands[0].gripPos,&inner,12);Tick();CHECK(xr::published.count==1);
-    CHECK(xr::published.markers[0].direction.x>.9f); // arrow points into the cabin
+    CHECK(xr::published.markers[0].direction.x<-.9f); // arrow points toward the door
+    CHECK(Length(xr::published.markers[0].position-(inner+Vec{.18f,0,0}))<1e-5f);
     driving::grabbed=1;hands[0].grip=1;Tick();CHECK(ClaimedHands()==0);
     driving::grabbed=0;hands[0].grip=0;Tick();
     hands[0].gripPos[2]+=.3f;hands[0].grip=1;Tick();CHECK(ClaimedHands()==1); // larger seated reach
     seated=nullptr;Tick();CHECK(ClaimedHands()==0); // do not retain a grab across seat exit
+    // A released interior door remains open even if the game overwrites its angle.
+    Setup();seated=vehicle;vrcam::eye={-.35f,-.3f,1.3f};hands[0]={};hands[1]={};
+    std::memcpy(hands[0].gripPos,&inner,12);Tick();hands[0].grip=1;Tick();
+    const Vec innerHinge{-1,.6f,.4f};
+    for(int i=1;i<=4;++i) {
+        const Vec opened=innerHinge+Rotate(inner-innerHinge,-.1f*i);
+        std::memcpy(hands[0].gripPos,&opened,12);Tick();
+    }
+    hands[0].grip=0;Tick();
+    CHECK(g_release.active&&g_release.inside);
+    Write<float>(vehicle,0x770+2*0x18+0xc,0);OnSwing(vehicle,10,2);
+    CHECK(Read<float>(vehicle,0x770+2*0x18+0xc)<-.3f);
+    seated=nullptr;Tick();CHECK(!g_release.active);
+    // A closing throw from the fully open stop reaches and latches the door.
+    Setup();hands[0]={};hands[1]={};Write<float>(vehicle,0x770+2*0x18+0xc,-1.2f);
+    status[2]=1;RefreshFrames();
+    const Vec openHand=hinge+Rotate(hand-hinge,-1.2f);
+    std::memcpy(hands[0].gripPos,&openHand,12);Tick();hands[0].grip=1;Tick();
+    CHECK(ClaimedHands()==1);
+    for(int i=1;i<=4;++i) {
+        const Vec closing=hinge+Rotate(hand-hinge,-1.2f+.06f*i);
+        std::memcpy(hands[0].gripPos,&closing,12);Tick();
+    }
+    hands[0].grip=0;Tick();CHECK(g_release.active&&g_release.motion.slam);
+    for(int i=0;i<100&&g_release.active;++i) Tick();
+    CHECK(!g_release.active&&Read<float>(vehicle,0x770+2*0x18+0xc)==0&&status[2]==0);
     // A real release writes signed momentum; cancellation never does.
     Setup();GrabIt();
     for (int i=1;i<=5;++i) {
@@ -263,5 +333,78 @@ int main() {
     CHECK(ClaimedHands()==0&&Read<float>(vehicle,0x770+2*0x18+0x14)<-.02f);
     Setup();GrabIt();g_grab.motion.velocity=-4;Tick(true);
     CHECK(Read<float>(vehicle,0x770+2*0x18+0x14)==0);
+    // Editor: either trigger edits a panel-local point without opening the door,
+    // persists once at release, and never transfers angular momentum.
+    for(int h=0;h<2;++h) {
+        Setup();driving::debugMode=1;Ready(h);
+        hands[h].trigger=1;Tick();CHECK(g_edit.hand==h&&writes==0);
+        hands[h].gripPos[2]+=.1f;Tick();
+        CHECK(std::abs(driving::corrections[400][2]-.1f)<1e-4f&&driving::saves==0);
+        hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&driving::saves==1&&writes==0);
+        // Correction follows panel rotation, and only this door/model/side changes.
+        Write<float>(vehicle,0x770+2*0x18+0xc,-.5f);RefreshFrames();
+        Door d;Target t{vehicle,poolMemory,vehicles.data(),flags,0,2,10,flags[0]};
+        CHECK(ReadDoor(t,pedMemory,d));
+        CHECK(std::abs(d.panel.Local(d.handle).z-.4f)<1e-4f);
+        CHECK(driving::corrections[400][5]==0&&driving::corrections[412][2]==0);
+    }
+    Setup();driving::debugMode=1;Ready();hands[0].trigger=1;Tick();
+    hands[0].gripPos[2]+=.1f;Tick();Tick(true);
+    CHECK(g_edit.hand<0&&driving::saves==1&&writes==0);
+    Tick();CHECK(g_edit.hand<0); // held trigger cannot reacquire after cancellation
+    hands[0].trigger=0;Tick();hands[0].trigger=1;Tick();CHECK(g_edit.hand==0);
+    Tick(false,6);CHECK(g_edit.hand<0&&writes==0);
+    Setup();driving::debugMode=1;Ready();hands[0].trigger=1;Tick();
+    flags[0]=0x80;Tick();CHECK(g_edit.hand<0&&invalidWrites==0);
+    Setup();driving::debugMode=1;Ready();hands[0].trigger=1;Tick();
+    xr::focused=false;Tick();CHECK(g_edit.hand<0);
+    // OFF returns to ordinary grip opening; held triggers cannot leak.
+    Setup();driving::debugMode=1;Ready();hands[0].trigger=1;Tick();
+    driving::debugMode=0;Tick();CHECK(ClaimedHands()==0&&g_edit.hand<0);
+    hands[0].grip=0;Tick();hands[0].grip=1;Tick();CHECK(ClaimedHands()==1);
+    // Ordinary door grip works while debug is enabled.
+    Setup();driving::debugMode=1;Ready();hands[0].grip=1;Tick();
+    CHECK(g_grab.hand==0&&ClaimedHands()==1);
+    hands[0].grip=0;Tick();CHECK(g_grab.hand<0);
+    // Wheel edits apply live; seat previews commit only on release.
+    for(int editMode:{2,3}) for(int h:{0,1}) {
+        Setup();driving::debugMode=1;seated=vehicle;
+        driving::positionWrites=0;
+        g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* p,unsigned int,bool) { *p={-.4f,.2f,1.4f}; };
+        hands[0]={};hands[1]={};
+        hands[h].gripPos[0]=-.4f;hands[h].gripPos[1]=.2f;hands[h].gripPos[2]=editMode==3?1.4f:1.f;
+        Tick();CHECK(xr::published.count>=2);
+        bool seatVisible=false,wheelVisible=false;
+        for(int i=0;i<xr::published.count;++i) {
+            const Vec p=xr::published.markers[i].position;
+            seatVisible|=Length(p-Vec{-.4f,.2f,1.4f})<.001f;
+            wheelVisible|=Length(p-Vec{-.4f,.2f,1.f})<.001f;
+        }
+        CHECK(seatVisible&&wheelVisible);
+        hands[h].trigger=1;Tick();CHECK(g_edit.hand==h);
+        hands[h].gripPos[0]+=.12f;Tick();
+        CHECK(editMode==3?driving::positionWrites==0:driving::positions[0]==12);
+        hands[h].trigger=0;Tick();
+        CHECK(driving::positions[0]==12&&driving::saves==1&&g_edit.hand<0&&writes==0);
+    }
+    Setup();driving::debugMode=1;seated=vehicle;driving::positionWrites=0;
+    hands[0]={};hands[1]={};hands[0].gripPos[0]=-.4f;hands[0].gripPos[1]=.2f;hands[0].gripPos[2]=1.4f;
+    Tick();hands[0].trigger=1;Tick();hands[0].gripPos[0]+=.12f;Tick();
+    Tick(true);CHECK(driving::positionWrites==0&&driving::saves==0&&g_edit.hand<0);
+    // A second trigger on the opposite side resizes; releasing it returns to
+    // translation without a position jump. Releasing the primary persists.
+    Setup();driving::debugMode=1;seated=vehicle;driving::positionWrites=0;driving::radiusWrites=0;
+    hands[0]={};hands[1]={};
+    hands[0].gripPos[0]=-.5f;hands[0].gripPos[1]=.2f;hands[0].gripPos[2]=1.f;
+    hands[1].gripPos[0]=-.2f;hands[1].gripPos[1]=.2f;hands[1].gripPos[2]=1.f;
+    Tick();hands[0].trigger=1;Tick();CHECK(g_editKind==2&&g_edit.hand==0);
+    hands[1].trigger=1;Tick();CHECK(g_secondHand==1&&ClaimedHands()==3);
+    hands[1].gripPos[0]+=.1f;Tick();CHECK(driving::radiusValue==5&&driving::radiusWrites>0);
+    hands[1].trigger=0;Tick();CHECK(g_secondHand<0&&driving::positions[0]==0);
+    hands[0].trigger=0;Tick();CHECK(g_edit.hand<0&&driving::saves==1);
+    DebugDrag drag;CHECK(drag.Begin(1,b.Local(b.Point({.1f,.2f,.3f}))));
+    CHECK(drag.Step(b.Local(b.Point({.2f,.3f,.4f}))));
+    CHECK(Length(drag.delta-Vec{.1f,.1f,.1f})<1e-4f);
+    CHECK(!drag.Step({NAN,0,0})&&!drag.Step({9,0,0}));
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

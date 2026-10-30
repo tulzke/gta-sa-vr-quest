@@ -12,6 +12,7 @@
 #include "Throwable.h"
 #include "Xr.h"
 #include "VehicleDoors.h"
+#include "VehicleTestArea.h"
 #include "RadialHolsterMenu.h"
 #include "MissionWeaponGrant.h"
 #include "Basketball.h"
@@ -783,11 +784,13 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
 
     // Door ownership wins before fresh weapon grabs, using the same XR sample.
     // Run outside gMutex: the door module queries existing weapon/support owners.
-    vehicledoors::Update(interactionsBlocked, latest, headValid, trackingEpoch);
+    const bool navigationClaimed=testarea::UpdateNavigation(interactionsBlocked,latest,
+        headPosition,headOrientation,headValid,trackingEpoch);
+    vehicledoors::Update(interactionsBlocked||navigationClaimed, latest, headValid, trackingEpoch);
     const unsigned int doorHands = vehicledoors::ClaimedHands();
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));
-    interactionsBlocked = interactionsBlocked || !headValid ||
+    interactionsBlocked = interactionsBlocked || navigationClaimed || driving::GetVehicleDebugMode()!=0 || !headValid ||
                           !gHolsterTrackingReady || trackingEpoch != gInteractionEpoch;
     if (!headValid || !gHolsterTrackingReady || trackingEpoch != gInteractionEpoch) {
         for (auto& intent : gReachIntent) intent.Invalidate();
@@ -944,12 +947,17 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         }
     }
     unsigned int radialHandledHands = 0;
+    const Q radialHead = NormalizeQ({headOrientation[0],headOrientation[1],headOrientation[2],headOrientation[3]});
+    const V3 radialRight = Rotate(radialHead,{1,0,0});
+    const V3 radialUp = Rotate(radialHead,{0,1,0});
+    const float axisRight[] = {radialRight.x,radialRight.y,radialRight.z};
+    const float axisUp[] = {radialUp.x,radialUp.y,radialUp.z};
     if (gRadialMenu.open) {
         const int h = gRadialMenu.hand;
         if (ValidHand(h)) radialHandledHands |= 1u << h;
         const int point = gRadialMenu.point;
         int selectedSlot = -1;
-        const bool available = radialUsable && ValidHand(h) && gHands[h].valid &&
+        const bool available = radialUsable && gRadialMenu.SetAxes(axisRight,axisUp) && ValidHand(h) && gHands[h].valid &&
             !((doorHands | basketball::HeldHandMask()) & (1u << h)) &&
             !ValidSlot(gHeldSlot[h]) && !IsSupportHandLocked(h);
         const auto result = gRadialMenu.Update(ValidHand(h) ? gHands[h].trigger : 0.f,
@@ -987,10 +995,6 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 entries[count++] = slot;
             }
             entries[count++] = -1;
-            const Q head = NormalizeQ({headOrientation[0],headOrientation[1],headOrientation[2],headOrientation[3]});
-            V3 right = Rotate(head, {1,0,0});
-            right = Normalized({right.x,0,right.z}, {1,0,0});
-            const float axisRight[] = {right.x,right.y,right.z}, axisUp[] = {0,1,0};
             gRadialMenu.ObserveReleased(0);
             if (gRadialMenu.Begin(h, nearest, gHands[h].gripPos, axisRight, axisUp,
                                   entries, count, trackingEpoch)) {

@@ -154,7 +154,10 @@ enum MenuItem {
     MENU_PLANE_INVERT_PITCH,
     MENU_BIKE_BLOCK_WHEELIE,
     MENU_BIKE_LEAN_STEERING,
-    MENU_BIKE_LEAN_SENSITIVITY
+    MENU_BIKE_LEAN_SENSITIVITY,
+    MENU_VEHICLE_DEBUG,
+    MENU_VEHICLE_TEST_AREA,
+    MENU_VEHICLE_TEST_PAGE
 };
 
 enum ControlCalibrationField {
@@ -184,6 +187,17 @@ enum WheelCalibrationField {
     WHEEL_CAL_FIELD_COUNT
 };
 
+// Session-only switch: 0 off, 1 enables all vehicle calibration handles.
+// Geometry is shared with normal interaction. Setters update memory only;
+// the editor saves on release/cancellation rather than writing each frame.
+int GetVehicleDebugMode();
+void CycleVehicleDebugMode(int direction);
+const char* VehicleDebugModeName();
+void GetDoorCalibration(int model,int door,bool inside,float out[3]);
+void SetDoorCalibration(int model,int door,bool inside,const float value[3]);
+void SetDebugPosition(int model,int mode,bool seat,const int value[3]);
+void SetDebugWheelRadius(int model,int value);
+void SaveDebugCalibration();
 void Init();
 void ResetDefaultPreset();
 

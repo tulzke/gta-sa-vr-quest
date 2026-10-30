@@ -56,6 +56,7 @@ int AxisLeftRight() { return 91; }
 void* seated=nullptr;
 int appearance=0;
 bool allowed=true, immersive=false;
+int debugMode{};int GetVehicleDebugMode() {return debugMode;}
 void* FindVehicle(int, bool) { return seated; }
 int Appearance(const void*) { return appearance; }
 void* activePad=nullptr;
@@ -245,6 +246,12 @@ int main() {
     Check(OnGetAccelerate(pad)==127,"boat R2 gives proportional thrust");
     xr::input.triggers[1]=0; xr::input.triggers[0]=0.75f;
     Check(OnGetBrake(pad)==191,"boat L2 gives proportional brake/reverse");
+    debugMode=1;
+    Check(OnGetAccelerate(pad)==0&&OnGetBrake(pad)==0,"editor owns triggers");
+    g_visual.steering=0.5f;
+    Check(OnGetSteering(pad)==-64,"editor preserves physical steering");
+    debugMode=0;
+    Check(OnGetBrake(pad)==191,"normal brake restored after editor");
     g_visual.steering=0.5f; xr::input.leftStick[0]=-1;
     Check(OnGetSteering(pad)==-64,"boat physical helm drives retail steering despite stick drift");
     g_visual.steering=-0.5f;
@@ -320,9 +327,14 @@ def main():
 
     msvc = Path(os.environ.get("VCToolsInstallDir", ""))
     if not (msvc / "include").is_dir():
-        base = Path("C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC")
+        base = Path(subprocess.check_output([
+        str(Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"),
+        "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+        "-property", "installationPath"], text=True).strip()) / "VC/Tools/MSVC"
         msvc = sorted(base.iterdir())[-1]
-    sdk = Path("C:/Program Files (x86)/Windows Kits/10")
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows Kits\Installed Roots") as key:
+        sdk = Path(winreg.QueryValueEx(key, "KitsRoot10")[0])
     version = sorted((sdk / "Include").iterdir())[-1].name
     env = os.environ.copy()
     env["INCLUDE"] = ";".join(str(p) for p in [msvc / "include", *[

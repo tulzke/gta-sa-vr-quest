@@ -40,6 +40,7 @@ bool IsMobileMenuOpen();
 // weapon/throwable grabs are blocked while the deploy ring owns both hands.
 bool ParachuteWeaponInteractionBlocked();
 bool GroundWalkControlsActive();
+bool GetNeutralVehicleEyeWorld(float out[3]);
 bool VehicleDoorControlsActive();
 bool IsCrouched();
 

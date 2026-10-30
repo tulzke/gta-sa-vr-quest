@@ -301,6 +301,7 @@ bool IsMenuVisible();
 // Position-only publication is retained for the legacy holster update path.
 void SetHolsterMarkers(const float positions[][3], int count);
 void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& frame);
+void SetVehicleTestMarkers(const vehicledoors::MarkerFrame& frame);
 void SetRadialHolsterMenu(const radialholster::Frame& frame);
 radialholster::Frame GetRadialHolsterMenu();
 void SetRadialHolsterAtlas(unsigned int texture);

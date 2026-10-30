@@ -9,6 +9,7 @@
 //   (ApplyForce @0x4a12a8 writes the move vector at +0x68/+0x70)
 #include "Basketball.h"
 #include "VehicleDoors.h"
+#include "Driving.h"
 
 #include <algorithm>
 #include <atomic>

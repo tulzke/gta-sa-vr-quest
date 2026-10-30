@@ -93,7 +93,7 @@ struct Motion {
 
 struct Marker { Vec position{},direction{},up{}; bool held{}; };
 struct MarkerFrame {
-    static constexpr int kCapacity=4;
+    static constexpr int kCapacity=6;
     std::array<Marker,kCapacity> markers{};
     int count{};
     std::uint64_t epoch{};
@@ -119,4 +119,26 @@ inline std::array<Vec,54> Arrow(const Marker& m) {
     }
     return mesh;
 }
+// Reverse the geometry around its existing endpoints without moving the
+// calibrated grab point or the visible segment.
+inline Marker ReverseArrow(Marker m) {
+    m.position=m.position+m.direction*.18f;
+    m.direction=m.direction*-1.f;
+    return m;
+}
+struct ReleasedMotion {
+    float angle{},closed{},open{},velocity{};
+    bool slam{},holdOpen{};
+    void Step(float dt) {
+        if (!std::isfinite(dt)||dt<=0||dt>.15f) return;
+        angle=std::clamp(angle+velocity*dt,std::min(closed,open),std::max(closed,open));
+        if (slam && std::abs(angle-closed)<.012f) { angle=closed;velocity=0;return; }
+        if (angle==open || angle==closed) velocity=0;
+        if (!slam) {
+            velocity*=std::exp(-3.f*dt);
+            if (std::abs(velocity)<.05f) velocity=0;
+        }
+    }
+    bool Done() const { return angle==closed || (!holdOpen && velocity==0); }
+};
 } // namespace savr::vehicledoors

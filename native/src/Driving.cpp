@@ -262,7 +262,9 @@ bool g_bicycleTriggerDown{};
 float g_bicycleTriggerPulse{};
 double g_bicycleTriggerPreviousTime{};
 
+std::atomic<int> g_vehicleDebugMode{};
 struct ModelCalibration {
+    int door[4][2][3]{};
     int seatSide[MODE_COUNT]{};
     int seatForward[MODE_COUNT]{};
     int seatHeight[MODE_COUNT]{};
@@ -503,6 +505,8 @@ void Save() {
         for (const auto& entry : g_modelCalibration) {
             const int model = entry.first;
             const ModelCalibration& calibration = entry.second;
+            for(int door=0;door<4;++door) for(int inside=0;inside<2;++inside) for(int axis=0;axis<3;++axis)
+                std::fprintf(file,"DoorCalib.%d.%d.%d.%d=%d\n",model,door,inside,axis,calibration.door[door][inside][axis]);
             for (int mode = 0; mode < MODE_COUNT; ++mode) {
                 std::fprintf(file, "ModelSeat.%d.%d.SideCm=%d\n",
                              model, mode, calibration.seatSide[mode]);
@@ -526,22 +530,16 @@ void Save() {
         }
     }
     const bool wrote = std::fflush(file) == 0;
-    std::fclose(file);
-    if (!wrote) {
+    const bool closed = std::fclose(file) == 0;
+    if (!wrote || !closed) {
         LOGW("[driving] write failed, keeping previous %s", kPath);
         std::remove(tmpPath);
         return;
     }
     if (std::rename(tmpPath, kPath) != 0) {
-        // Extremely defensive: if rename is refused, drop the old entry first
-        // (the directory is ours) and retry once before giving up.
-        std::remove(kPath);
-        if (std::rename(tmpPath, kPath) != 0) {
-            LOGW("[driving] could not replace %s - settings will not persist",
-                 kPath);
-            std::remove(tmpPath);
-            return;
-        }
+        LOGW("[driving] could not replace %s; keeping previous settings",kPath);
+        std::remove(tmpPath);
+        return;
     }
     LOGI("[driving] settings saved");
 }
@@ -672,6 +670,12 @@ void Load() {
                 boatCameraTilt=value;
             else {
                 int model = -1, mode = -1, hand = -1;
+                int door=-1,inside=-1,axis=-1;
+                if(std::sscanf(line,"DoorCalib.%d.%d.%d.%d=%d",&model,&door,&inside,&axis,&value)==5 &&
+                   model>=400&&model<=611&&door>=0&&door<4&&inside>=0&&inside<2&&axis>=0&&axis<3) {
+                    g_modelCalibration[model].door[door][inside][axis]=std::clamp(value,-200,200);
+                    continue;
+                }
                 if (std::sscanf(line, "ModelSeat.%d.%d.SideCm=%d",
                                 &model, &mode, &value)==3 &&
                     model >= 0 && mode >= 0 && mode < MODE_COUNT) {
@@ -1942,6 +1946,7 @@ void OnFlyingControl(void* vehicle,int model,float skid,float pitch,float roll,f
 }
 
 int OnGetAccelerate(void* pad) {
+    if(GetVehicleDebugMode()) return 0;
     if (VrGameplayInputAllowed()&&GetControlledVehicle()) {
         xr::InputState input{}; xr::GetInput(input);
         const int appearance=GetRemoteControlledVehicle()?0:GetActiveVehicleAppearance();
@@ -1972,6 +1977,7 @@ int OnGetAccelerate(void* pad) {
     return g_origAccelerate?g_origAccelerate(pad):0;
 }
 int OnGetBrake(void* pad) {
+    if(GetVehicleDebugMode()) return 0;
     if (VrGameplayInputAllowed()&&GetControlledVehicle()) {
         xr::InputState input{}; xr::GetInput(input);
         // Likewise Square/X cannot compete with the authoritative L2 brake.
@@ -3045,14 +3051,15 @@ constexpr int kDefaultBikeItems[] = {
     MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE,
     MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM, MENU_RESET, MENU_BACK
+    MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_INTERIOR_GLASS, MENU_DRIVEBY_AIM, MENU_RESET, MENU_BACK
+    MENU_INTERIOR_GLASS, MENU_DRIVEBY_AIM, MENU_VEHICLE_DEBUG,
+    MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE, MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveBikeItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3062,7 +3069,7 @@ constexpr int kImmersiveBikeItems[] = {
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
     MENU_BIKE_LEAN_STEERING, MENU_BIKE_LEAN_SENSITIVITY,
     MENU_BIKE_HAND_TILT, MENU_BIKE_BLOCK_WHEELIE, MENU_LOCAL_HORIZON, MENU_BIKE_VISUAL_LEAN,
-    MENU_KEEP_RIDER_ON_FLIPS, MENU_RESET, MENU_BACK
+    MENU_KEEP_RIDER_ON_FLIPS, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3070,14 +3077,15 @@ constexpr int kImmersiveCarItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS, MENU_RESET, MENU_BACK
+    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS, MENU_VEHICLE_DEBUG,
+    MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE, MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultPlaneItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_PLANE_INVERT_PITCH,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_INTERIOR_GLASS, MENU_RESET, MENU_BACK
+    MENU_INTERIOR_GLASS, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
 };
 constexpr int kImmersivePlaneItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3086,14 +3094,14 @@ constexpr int kImmersivePlaneItems[] = {
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_YOKE_SENSITIVITY,
     MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS, MENU_RESET, MENU_BACK
+    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultBoatItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_BOAT_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_RESET, MENU_BACK
+    MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveBoatItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3101,7 +3109,7 @@ constexpr int kImmersiveBoatItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_RESET, MENU_BACK
+    MENU_WHEEL_VISIBLE, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
 };
 
 void MenuTableForType(int vehicleType, const int** items, int* count) {
@@ -3227,6 +3235,43 @@ void AdjustGlobalSeatSideCm(int vehicleType,int direction) {
         field, g_value[field].load()+(direction<0?-1:1)));
     Save();
 }
+
+int GetVehicleDebugMode() { return g_vehicleDebugMode.load(); }
+const char* VehicleDebugModeName() {
+    static const char* names[]={"OFF","ON - TRIGGER"};
+    return names[GetVehicleDebugMode()];
+}
+void CycleVehicleDebugMode(int direction) {
+    (void)direction;
+    g_vehicleDebugMode.store(GetVehicleDebugMode()?0:1);
+    vehicledoors::Reset(); ResetInteraction();
+}
+void GetDoorCalibration(int model,int door,bool inside,float out[3]) {
+    EnsureInit(); std::fill_n(out,3,0.f);
+    if(door<2||door>5) return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const auto it=g_modelCalibration.find(model);
+    if(it!=g_modelCalibration.end()) for(int a=0;a<3;++a) out[a]=it->second.door[door-2][inside][a]/100.f;
+}
+void SetDoorCalibration(int model,int door,bool inside,const float value[3]) {
+    if(model<400||model>611||door<2||door>5) return;
+    for(int a=0;a<3;++a) if(!std::isfinite(value[a])) return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    for(int a=0;a<3;++a) g_modelCalibration[model].door[door-2][inside][a]=std::lround(std::clamp(value[a],-2.f,2.f)*100.f);
+}
+void SetDebugPosition(int model,int mode,bool seat,const int value[3]) {
+    if(model<400||model>611||mode<0||mode>=MODE_COUNT) return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    auto& c=g_modelCalibration[model];
+    if(seat) { c.seatSide[mode]=ClampModelSeat(false,value[0]); c.seatForward[mode]=ClampModelSeat(false,value[1]); c.seatHeight[mode]=ClampModelSeat(true,value[2]); }
+    else for(int a=0;a<3;++a) c.wheel[a]=ClampWheelCalibration(a,value[a]);
+}
+void SetDebugWheelRadius(int model,int value) {
+    if(model<400||model>611) return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    g_modelCalibration[model].wheel[WHEEL_CAL_RADIUS]=ClampWheelCalibration(WHEEL_CAL_RADIUS,value);
+}
+void SaveDebugCalibration() { Save(); }
 
 int GetCurrentModelSeatSideCm(int vehicleType) {
     if (!HasCurrentModelForType(vehicleType)) return 0;

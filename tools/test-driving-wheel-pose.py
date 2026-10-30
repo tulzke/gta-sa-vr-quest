@@ -170,6 +170,27 @@ void TestPersistence() {
 }
 } // namespace savr::driving
 int main() {
+    {
+        using namespace savr::driving;
+        const float v[]={.12f,-.34f,.56f};SetDoorCalibration(411,2,false,v);
+        float out[3]{};GetDoorCalibration(411,2,false,out);CHECK(Near(out[1],-.34f));
+        GetDoorCalibration(412,2,false,out);CHECK(Near(out[1],0));
+        GetDoorCalibration(411,2,true,out);CHECK(Near(out[1],0));
+        const int wheel[]={17,-22,31};SetDebugPosition(411,MODE_IMMERSIVE,false,wheel);
+        CHECK(g_modelCalibration[411].wheel[1]==-22);
+        SetDebugPosition(411,MODE_DEFAULT,true,wheel);
+        CHECK(g_modelCalibration[411].seatForward[MODE_DEFAULT]==-22);
+        CHECK(g_modelCalibration[411].seatForward[MODE_IMMERSIVE]==0);
+        FILE* f=std::tmpfile();CHECK(f);WriteDoorLines(f,411,g_modelCalibration[411]);
+        std::rewind(f);g_modelCalibration.clear();char line[128];
+        while(std::fgets(line,sizeof(line),f)) ReadDoorLine(line);
+        std::fclose(f);GetDoorCalibration(411,2,false,out);CHECK(Near(out[2],.56f));
+        ReadDoorLine("DoorCalib.411.0.0.0=99999");
+        GetDoorCalibration(411,2,false,out);CHECK(Near(out[0],2.f));
+        ReadDoorLine("DoorCalib.411.99.0.0=1");
+        const float bad[]={NAN,0,0};SetDoorCalibration(411,2,false,bad);
+        GetDoorCalibration(411,2,false,out);CHECK(Near(out[0],2.f));
+    }
     savr::driving::TestPose();
     savr::driving::TestProfiles();
     savr::driving::TestPersistence();
@@ -185,7 +206,8 @@ def main():
     math = SOURCE[SOURCE.index("struct V3 {"):SOURCE.index("double MonotonicSeconds()")]
     math += function("V3 RotateAroundAxis(")
     pose = SOURCE[SOURCE.index("struct ModelCalibration {"):SOURCE.index("int ClampField(")]
-    accessors = function("int GetWheelCalibrationValue(")
+    accessors = function("int ClampModelSeat(") + function("void GetDoorCalibration(") + function("void SetDoorCalibration(") + function("void SetDebugPosition(")
+    accessors += function("int GetWheelCalibrationValue(")
     accessors += function("void AdjustWheelCalibrationValue(")
     accessors += function("void ResetVehiclePreset(")
     save_start = SOURCE.index("            for (int field = 0; field < WHEEL_CAL_FIELD_COUNT; ++field) {")
@@ -196,6 +218,12 @@ def main():
     load_end = SOURCE.index("} else {", load_start)
     persistence += "void ReadWheelLine(const char* line) { int model=0,mode=0,value=0,hand=0; if(false) {} "
     persistence += SOURCE[load_start:load_end] + "}\n}\n"
+    door_save_start = SOURCE.index("            for(int door=0;door<4;")
+    door_save_end = SOURCE.index("            for (int mode", door_save_start)
+    persistence += "void WriteDoorLines(FILE* file,int model,const ModelCalibration& calibration) {\n" + SOURCE[door_save_start:door_save_end] + "}\n"
+    door_load_start = SOURCE.index('                if(std::sscanf(line,"DoorCalib.')
+    door_load_end = SOURCE.index('                if (std::sscanf(line, "ModelSeat.', door_load_start)
+    persistence += "void ReadDoorLine(const char* line) { int model=-1,door=-1,inside=-1,axis=-1,value=0; do {\n" + SOURCE[door_load_start:door_load_end] + "} while(false); }\n"
     source = PRELUDE + math + pose + r"""
 bool IsBicycleModel(int) {return false;}
 bool GetActivePlayerBike(void** vehicle,void*) {static char fake[2048]{};std::uint16_t model=411;std::memcpy(fake+0x32,&model,2);*vehicle=fake;return true;}
@@ -203,8 +231,13 @@ bool ReadScaledBikeLeanFrame(void*,V3* right,V3* forward,V3* up,V3* origin) {*ri
 bool WorldPointToTracking(V3 p,V3* out) {*out=p;return true;}
 """ + function("bool BuildBikeTracking(") + function("int ClampControlValue(") + function("void FillHandleVisuals(") + function("bool IsControlCalibrationAvailable(") + function("int GetControlCalibrationValue(") + function("void AdjustControlCalibrationValue(") + accessors + persistence + HARNESS
 
-    msvc = sorted(Path("C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC").iterdir())[-1]
-    sdk = Path("C:/Program Files (x86)/Windows Kits/10")
+    msvc = sorted((Path(subprocess.check_output([
+        str(Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"),
+        "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+        "-property", "installationPath"], text=True).strip()) / "VC/Tools/MSVC").iterdir())[-1]
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows Kits\Installed Roots") as key:
+        sdk = Path(winreg.QueryValueEx(key, "KitsRoot10")[0])
     version = sorted((sdk / "Include").iterdir())[-1].name
     env = os.environ.copy()
     env["INCLUDE"] = ";".join(str(p) for p in [msvc / "include", *[sdk / "Include" / version / n for n in ("ucrt", "shared", "um")]])

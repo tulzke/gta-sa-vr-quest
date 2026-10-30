@@ -32,6 +32,7 @@
 #include "Swimming.h"
 #include "BoatEntry.h"
 #include "VehicleDoors.h"
+#include "VehicleTestArea.h"
 #include "StereoSurfacePolicy.h"
 #include "Symbols.h"
 #include "TrafficCensus.h"
@@ -20425,6 +20426,11 @@ void RenderRadialIconAtlas(const radialholster::Frame& frame) {
         const int type=frame.weaponTypes[i];
         if (type<=0 || type>=64) continue;
         if (!g_radialWeaponIcons[type]) {
+            // These HUD textures have uppercase names in gta3.
+            if (type == 34) g_radialWeaponIcons[type]=g.RwTextureRead("SNIPERicon","");
+            if (type == 41) g_radialWeaponIcons[type]=g.RwTextureRead("SPRAYCANicon","");
+        }
+        if (!g_radialWeaponIcons[type]) {
             const auto* info=static_cast<const std::uint8_t*>(g.CWeaponInfo_GetWeaponInfo(type,1));
             if (!info) continue;
             const int model=*reinterpret_cast<const int*>(info+0xc);
@@ -21973,6 +21979,7 @@ void OnRenderScene(bool underwater) {
     const float tanY = tanX * static_cast<float>(g_eyeRasterH) / static_cast<float>(g_eyeRasterW);
     xr::SetStereoRenderFov(tanX, tanY);
     vehicledoors::PublishMarkers();
+    testarea::PublishMarkers();
     xr::SetRadialHolsterAtlas(radialReady ? EyeRasterTexId(g_radialIconRaster[set]) : 0);
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex,
                              renderedNear, renderedFar,
@@ -29944,6 +29951,14 @@ bool TrackingPointToWorld(const float trackingPoint[3], float worldPoint[3]) {
     worldPoint[0] = world.x;
     worldPoint[1] = world.y;
     worldPoint[2] = world.z;
+    return true;
+}
+
+bool GetNeutralVehicleEyeWorld(float out[3]) {
+    if (!out || !g_vrBaseValid || !g_origin.valid ||
+        !g.FindPlayerVehicle || !g.FindPlayerVehicle(-1,false) ||
+        !Finite(g_vrBase.pos)) return false;
+    out[0]=g_vrBase.pos.x; out[1]=g_vrBase.pos.y; out[2]=g_vrBase.pos.z;
     return true;
 }
 

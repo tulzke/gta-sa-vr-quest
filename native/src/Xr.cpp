@@ -8,6 +8,7 @@
 #include "AnimatedTextures.h"
 #include "Cheats.h"
 #include "Driving.h"
+#include "VehicleTestArea.h"
 #include "FrameTarget.h"
 #include "HdWeapons.h"
 #include "ModelSets.h"
@@ -621,6 +622,8 @@ float                 g_holsterEye[3]{}; // one billboard orientation for both e
 holstermarker::Frame   g_stereoHolsterMarkers[kStereoSets]{};
 vehicledoors::MarkerFrame g_vehicleDoorMarkers{};
 vehicledoors::MarkerFrame g_stereoVehicleDoorMarkers[kStereoSets]{};
+vehicledoors::MarkerFrame g_vehicleTestMarkers{};
+vehicledoors::MarkerFrame g_stereoVehicleTestMarkers[kStereoSets]{};
 radialholster::Frame g_radialHolsterMenu{};
 radialholster::Frame g_stereoRadialHolsterMenu[kStereoSets]{};
 unsigned int g_radialHolsterAtlas{};
@@ -5654,6 +5657,10 @@ void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& frame) {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
     g_vehicleDoorMarkers=frame;
 }
+void SetVehicleTestMarkers(const vehicledoors::MarkerFrame& frame) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_vehicleTestMarkers=frame;
+}
 
 void SetRadialHolsterMenu(const radialholster::Frame& frame) {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
@@ -6225,6 +6232,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
             markerFrame.markers[i].kind = g_holsterKind[i];
         }
         g_stereoVehicleDoorMarkers[ws] = g_vehicleDoorMarkers;
+        g_stereoVehicleTestMarkers[ws] = g_vehicleTestMarkers;
         g_stereoRadialHolsterMenu[ws] = g_radialHolsterMenu;
         g_stereoRadialHolsterMenu[ws].atlasTexture = g_radialHolsterAtlas;
         g_stereoScopeState[ws] = scopeaim::Snapshot();
@@ -7615,8 +7623,8 @@ void BuildDrivingMenu() {
     const int sel = g_drivingSel.load(std::memory_order_relaxed);
     const int vehicleType=g_drivingVehicleType.load(std::memory_order_relaxed);
     const int rowCount=driving::GetMenuItemCount(vehicleType);
-    char rows[24][96]{};
-    bool available[24]{};
+    char rows[32][96]{};
+    bool available[32]{};
     const bool haveModel=driving::HasCurrentModelForType(vehicleType);
     for (int row=0;row<rowCount;++row) {
         const int item=driving::GetMenuItemForRow(vehicleType,row);
@@ -7707,6 +7715,15 @@ void BuildDrivingMenu() {
                     std::snprintf(rows[row],sizeof(rows[row]),
                         "THIS MODEL HEIGHT   < ENTER %s >",
                         driving::VehicleTypeName(vehicleType));
+                break;
+            case driving::MENU_VEHICLE_DEBUG:
+                std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE DEBUG < %s >",driving::VehicleDebugModeName());
+                break;
+            case driving::MENU_VEHICLE_TEST_AREA:
+                std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE TEST AREA < %s >",testarea::MenuLabel());
+                break;
+            case driving::MENU_VEHICLE_TEST_PAGE:
+                std::snprintf(rows[row],sizeof(rows[row]),"TEST PAGE < %s >",testarea::PageLabel());
                 break;
             case driving::MENU_CONTROL_CALIBRATION:
                 std::snprintf(rows[row],sizeof(rows[row]),
@@ -9718,7 +9735,7 @@ void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
     glBindBuffer(GL_ARRAY_BUFFER,0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 }
 
-void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& frame) {
+void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& frame,bool navigation=false) {
     if (frame.count<=0) return;
     EnsureMarkerProgram();
     glEnable(GL_BLEND);
@@ -9734,7 +9751,8 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
         const auto& marker=frame.markers[i];
         const auto mesh=vehicledoors::Arrow(marker);
         static_assert(sizeof(vehicledoors::Vec)==3*sizeof(float));
-        glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.72f:.45f);
+        if(navigation)glUniform4f(g_markerColLoc,.10f,1.f,.22f,marker.held?.95f:.75f);
+        else glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.72f:.45f);
         glBufferData(GL_ARRAY_BUFFER,sizeof(mesh),mesh.data(),GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(mesh.size()));
     }
@@ -9791,7 +9809,7 @@ void DrawRadialHolsterMenu(const float* mvp, const radialholster::Frame& frame) 
         static GLint mvpLocation=-1, textureLocation=-1;
         if (!program) {
             const char* vs="#version 300 es\nlayout(location=0) in vec3 p; layout(location=1) in vec2 t; uniform mat4 m; out vec2 uv; void main(){uv=t;gl_Position=m*vec4(p,1.0);}";
-            const char* fs="#version 300 es\nprecision mediump float; in vec2 uv; uniform sampler2D image; out vec4 c; void main(){c=texture(image,uv);}";
+            const char* fs="#version 300 es\nprecision mediump float; in vec2 uv; uniform sampler2D image; out vec4 c; void main(){vec4 s=texture(image,uv); float a=smoothstep(0.008,0.055,max(s.r,max(s.g,s.b))); c=vec4(s.rgb*a,s.a*a);}";
             const GLuint v=CompileHandShader(GL_VERTEX_SHADER,vs), f=CompileHandShader(GL_FRAGMENT_SHADER,fs);
             program=glCreateProgram(); glAttachShader(program,v); glAttachShader(program,f);
             glLinkProgram(program); glDeleteShader(v); glDeleteShader(f);
@@ -9810,14 +9828,14 @@ void DrawRadialHolsterMenu(const float* mvp, const radialholster::Frame& frame) 
             for (int i=0;i<frame.count;++i) {
                 if (!frame.weaponTypes[i]) continue;
                 const float a=width*i, cx=.105f*std::sin(a), cy=.105f*std::cos(a), half=.028f;
-                const float u=(i%4)*.25f, v=1.f-(i/4)*.25f;
+                const auto cell=radialholster::IconCell(i);
                 float vertices[30]{}; int n=0;
                 const auto vertex=[&](float x,float y,float s,float t) {
                     for (int c=0;c<3;++c) vertices[n++]=frame.origin[c]+(cx+x)*frame.right[c]+(cy+y)*frame.up[c];
                     vertices[n++]=s; vertices[n++]=t;
                 };
-                vertex(-half,-half,u,v-.25f); vertex(half,-half,u+.25f,v-.25f); vertex(half,half,u+.25f,v);
-                vertex(-half,-half,u,v-.25f); vertex(half,half,u+.25f,v); vertex(-half,half,u,v);
+                vertex(-half,-half,cell.left,cell.top); vertex(half,-half,cell.right,cell.top); vertex(half,half,cell.right,cell.bottom);
+                vertex(-half,-half,cell.left,cell.top); vertex(half,half,cell.right,cell.bottom); vertex(-half,half,cell.left,cell.bottom);
                 glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_DYNAMIC_DRAW);
                 glDrawArrays(GL_TRIANGLES,0,6);
             }
@@ -11218,6 +11236,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const TwoHandVisualState& bakedTwoHand,
                      const holstermarker::Frame& bakedHolsters,
                      const vehicledoors::MarkerFrame& bakedDoors,
+                     const vehicledoors::MarkerFrame& bakedTestArea,
                      const radialholster::Frame& bakedRadial,
                      unsigned int hudSourceTex) {
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
@@ -11250,7 +11269,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                              throwableTrajectory[1].count <= 1)) &&
         !chuteVisuals && !chuteRingVisual &&
         !wristWanted &&
-        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && !bakedRadial.visible) return;
+        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && bakedTestArea.count<=0 && !bakedRadial.visible) return;
     if (haveHands) EnsureHandProgram();
 
     const float sign = (e == 0) ? -1.0f : 1.0f;
@@ -11422,6 +11441,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors);
+    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,true);
     if (!scope.active) DrawRadialHolsterMenu(mvp,bakedRadial);
     // Riser controls are their own world-space interaction. They must remain
     // visible even when the selected hand preset hides general tracked-hand
@@ -11628,6 +11648,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     TwoHandVisualState bakedTwoHand{};
     holstermarker::Frame bakedHolsters{};
     vehicledoors::MarkerFrame bakedDoors{};
+    vehicledoors::MarkerFrame bakedTestArea{};
     radialholster::Frame bakedRadial{};
     scopeaim::VisualState bakedScope{};
     driving::WheelVisualState drivingWheel{};
@@ -11648,6 +11669,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         if (!bakedHolsters.Usable(g_headPoseValid, g_trackingRecovery.epoch)) bakedHolsters.count = 0;
         bakedDoors = g_stereoVehicleDoorMarkers[set];
         if (!bakedDoors.Usable(g_headPoseValid,g_trackingRecovery.epoch)) bakedDoors.count=0;
+        bakedTestArea = g_stereoVehicleTestMarkers[set];
+        if (!bakedTestArea.Usable(g_headPoseValid,g_trackingRecovery.epoch)||IsMenuVisible()) bakedTestArea.count=0;
         bakedRadial = g_stereoRadialHolsterMenu[set];
         if (!bakedRadial.Usable(g_headPoseValid,g_trackingRecovery.epoch)) bakedRadial.visible=false;
         bakedScope     = g_stereoScopeState[set];
@@ -11809,7 +11832,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedRadial, hudSource);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedTestArea, bakedRadial, hudSource);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

@@ -23,6 +23,7 @@
 #include "Swimming.h"
 #include "BoatEntry.h"
 #include "VehicleDoors.h"
+#include "VehicleTestArea.h"
 #include "MissionWeaponGrant.h"
 #include "PerfTelemetry.h"
 #include "Basketball.h"
@@ -1402,6 +1403,12 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::AdjustCurrentModelSeatForwardCm(drivingVehicleType,step);
             } else if (item==savr::driving::MENU_MODEL_HEIGHT&&step&&available) {
                 savr::driving::AdjustCurrentModelSeatHeightCm(drivingVehicleType,step);
+            } else if (item==savr::driving::MENU_VEHICLE_DEBUG&&(enter||step)) {
+                savr::driving::CycleVehicleDebugMode(step?step:1);
+            } else if (item==savr::driving::MENU_VEHICLE_TEST_AREA&&(enter||step)) {
+                savr::testarea::RequestToggle();
+            } else if (item==savr::driving::MENU_VEHICLE_TEST_PAGE&&(enter||step)) {
+                savr::testarea::RequestPage(step?step:1);
             } else if (item==savr::driving::MENU_CONTROL_CALIBRATION&&enter&&available) {
                 menuPage=PG_DRIVING_CALIB;
                 drivingCalibSel=0;
@@ -1923,6 +1930,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     // Physical ownership keeps running while on foot so throws can expire and
     // respawn. Menus/open chords only block transitions and firing; they do not
     // silently return an already-held weapon to its socket.
+    savr::testarea::Tick(inGameplay,anyMenu);
     if (inGameplay) {
         float trackingPosition[3]{},trackingOrientation[4]{};
         const bool trackingReady=xr::GetHeadPose(trackingPosition,trackingOrientation);
@@ -1934,10 +1942,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             weaponInteractionsBlocked,
             menuPage == PG_HOLSTER_CALIB && savr::holster::GripMarkersEnabled(),
             menuPage == PG_CALIB);
-        savr::melee::Update(weaponInteractionsBlocked);
-        savr::scopeaim::Update(weaponInteractionsBlocked);
-        savr::vrfire::Update(weaponInteractionsBlocked);
-        savr::throwable::Update(weaponInteractionsBlocked);
+        savr::melee::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
+        savr::scopeaim::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
+        savr::vrfire::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
+        savr::throwable::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::physicalweapon::EnforceBikeWeaponLimit();
         savr::physicalweapon::AutoEquipParachute();
         savr::cheats::Tick();
@@ -2571,6 +2579,7 @@ void* WaitForGameLibrary(void*) {
     savr::swimming::Install(handle);
     savr::boatentry::Install(handle);
     savr::vehicledoors::Install(handle);
+    savr::testarea::Install(handle);
     savr::missionweapon::Install(handle);
     savr::braindiag::Install(handle);  // basketball brain-chain diagnostics
     savr::basketball::Install(handle);  // custom immersive basketball
