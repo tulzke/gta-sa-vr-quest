@@ -21,6 +21,11 @@ void* (*g_taskAlloc)(std::size_t){};
 void (*g_driveCtor)(void*,void*){};
 void (*g_driveDelete)(void*){};
 void (*g_setTask)(void*,void*,int,bool){};
+void (*g_passCtor)(void*,void*,int,void*){};
+bool (*g_passProcess)(void*,void*){};
+void (*g_passDtor)(void*){};
+void (*g_removeDriver)(void*,bool){};
+void (*g_removePassenger)(void*,void*){};
 bool (*g_vehicleHealthy)(void*){};
 bool (*g_pedHealthy)(void*){};
 bool (*g_canOpenLocks)(void*,void*){};
@@ -105,6 +110,11 @@ void* FindReachableBoat(void* ped,Vec eye,Vec gaze,float& distance) {
 
 void Install(void* handle) {
     if (!handle) return;
+    g_passCtor=reinterpret_cast<decltype(g_passCtor)>(dlsym(handle,"_ZN33CTaskSimpleCarSetPedInAsPassengerC1EP8CVehicleiP28CTaskUtilityLineUpPedWithCar"));
+    g_passProcess=reinterpret_cast<decltype(g_passProcess)>(dlsym(handle,"_ZN33CTaskSimpleCarSetPedInAsPassenger10ProcessPedEP4CPed"));
+    g_passDtor=reinterpret_cast<decltype(g_passDtor)>(dlsym(handle,"_ZN33CTaskSimpleCarSetPedInAsPassengerD1Ev"));
+    g_removeDriver=reinterpret_cast<decltype(g_removeDriver)>(dlsym(handle,"_ZN8CVehicle12RemoveDriverEb"));
+    g_removePassenger=reinterpret_cast<decltype(g_removePassenger)>(dlsym(handle,"_ZN8CVehicle15RemovePassengerEP4CPed"));
     // Use the native seating task but not SetPedInCarDirect: its driver branch
     // always assigns CarDriveWander, which takes over the helm with AI inputs.
     g_seatCtor=reinterpret_cast<void (*)(void*,void*,void*)>(dlsym(handle,
@@ -126,6 +136,30 @@ void Install(void* handle) {
         dlsym(handle,"_ZN13CCarEnterExit12IsPedHealthyERK4CPed"));
     g_canOpenLocks=reinterpret_cast<bool (*)(void*,void*)>(
         dlsym(handle,"_ZNK8CVehicle15CanPedOpenLocksEPK4CPed"));
+}
+
+bool SeatPlayer(void* vehicle,int passenger) {
+    if (passenger>0||passenger < -1||!vehicle||!g_passCtor||!g_passProcess||!g_passDtor||!g_removeDriver||!g_removePassenger||!g_seatCtor||!g_taskAlloc||!g_driveCtor||!g_setTask||!g_seatProcess||!g_seatDtor||!g_driveDelete) return false;
+    void* ped=g.FindPlayerPed(-1);
+    if (!ped||!g_vehicleHealthy||!g_pedHealthy||!g_canOpenLocks||!g_vehicleHealthy(vehicle)||!g_pedHealthy(ped)||!g_canOpenLocks(vehicle,ped)||Read<void*>(vehicle,passenger<0?0x5a0:0x5a8+passenger*8)) return false;
+    void* intelligence=Read<void*>(ped,0x538);
+    if (!intelligence) return false;
+    void* drive=g_taskAlloc(0x38);if(!drive)return false;
+    g_driveCtor(drive,vehicle);
+    if (g.FindPlayerVehicle(-1,false)==vehicle) {
+        if(Read<void*>(vehicle,0x5a0)==ped) g_removeDriver(vehicle,false);
+        else g_removePassenger(vehicle,ped);
+    }
+    // Retail ARM64 passenger task is 0x40, warp byte +0x38;
+    // driver task is 0x38, warp byte +0x30 (SetPedInCarDirect disassembly).
+    alignas(16) std::uint8_t seat[0x40]{};
+    if(passenger<0) {g_seatCtor(seat,vehicle,nullptr);seat[0x30]=1;g_seatProcess(seat,ped);g_seatDtor(seat);}
+    else {g_passCtor(seat,vehicle,8,nullptr);seat[0x38]=1;g_passProcess(seat,ped);g_passDtor(seat);}
+    const bool seated=Read<void*>(vehicle,passenger<0?0x5a0:0x5a8+passenger*8)==ped;
+    // Passenger ProcessPed installs its own secondary CarDrive task. Preserve
+    // mission primary tasks, matching the native passenger direct-seat path.
+    if(seated&&passenger<0)g_setTask(static_cast<char*>(intelligence)+8,drive,3,false);else g_driveDelete(drive);
+    return seated;
 }
 
 bool TryEnter() {

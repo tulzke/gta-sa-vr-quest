@@ -1,3 +1,4 @@
+#include "VehicleEntry.h"
 #include "Tbone.h"
 #include "BeachDance.h"
 #include "MissionScenes.h"
@@ -2038,6 +2039,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::locomotion::TransformMoveStick(
                     localHeadYaw,&gameMoveX,&gameMoveY);
         }
+        if (savr::vehicleentry::ConsumesMove()) gameMoveX=gameMoveY=0;
         // Thumbrest D-pad mode: the provider must not see the raw right
         // stick while it acts as the D-pad.
         const auto scope = savr::scopeaim::Snapshot();

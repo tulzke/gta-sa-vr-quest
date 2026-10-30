@@ -1,3 +1,4 @@
+#include "VehicleEntry.h"
 #include "PlayerLife.h"
 #include "MissionHud.h"
 #include "Tbone.h"
@@ -3717,6 +3718,11 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                 static V3 cachedSeatLocal{};
                 static tracking::SeatLatch seatLatch;
                 bool& cachedSeatLocalValid=seatLatch.valid;
+                static bool cachedFrontPassenger=false;
+                const bool frontPassenger=vehicle &&
+                    *reinterpret_cast<void**>(static_cast<char*>(vehicle)+0x5a8)==ped;
+                if(frontPassenger!=cachedFrontPassenger) seatLatch.vehicle=nullptr;
+                cachedFrontPassenger=frontPassenger;
                 const bool resetSeat=seatLatch.Begin(enteringVehicle?nullptr:vehicle,
                     g_cameraResetSerial,NowMs());
                 if (vehicle != cachedSeatVehicle || resetSeat) {
@@ -3727,7 +3733,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
 
                 const bool rearPassenger=justbusiness::Active();
                 const bool seatedDriver = vehicle &&
-                    (rearPassenger || !g.CVehicle_IsDriver || g.CVehicle_IsDriver(vehicle, ped));
+                    (rearPassenger || frontPassenger || !g.CVehicle_IsDriver || g.CVehicle_IsDriver(vehicle, ped));
                 if (thirdPersonView && vehiclePositionValid) {
                     // Chase view: anchor directly on the game's own camera.
                     // No seated-head capture, no suspension smoothing — the
@@ -5057,6 +5063,7 @@ void OnUpdatePads() {
 
     float moveX=mappedMoveX,moveY=mappedMoveY;
     locomotion::TransformMoveStick(CurrentLocalHeadYaw(),&moveX,&moveY);
+    if(vehicleentry::ConsumesMove()) moveX=moveY=0;
     ns[0] = static_cast<int16_t>(std::clamp(moveX,-1.0f,1.0f) *  127.0f);
     ns[1] = static_cast<int16_t>(std::clamp(moveY,-1.0f,1.0f) * -127.0f);
 

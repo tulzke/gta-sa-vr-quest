@@ -1,4 +1,5 @@
 #include "VehicleDoors.h"
+#include "VehicleEntry.h"
 #include "NpcGrab.h"
 #include "VehicleDoorMotion.h"
 #include "VehicleDebugDrag.h"
@@ -276,6 +277,7 @@ void Publish(const MarkerFrame& frame) {
 } // namespace
 
 void Install(void* handle) {
+    vehicleentry::Install(handle);
     if (!handle||g_ready) return;
     g_open=reinterpret_cast<OpenFn>(dlsym(handle,"_ZN11CAutomobile8OpenDoorEP4CPedi6eDoorsfb"));
     g_canOpen=reinterpret_cast<decltype(g_canOpen)>(dlsym(handle,"_ZNK8CVehicle15CanPedOpenLocksEPK4CPed"));
@@ -295,9 +297,11 @@ void Install(void* handle) {
 unsigned ClaimedHands() { return g_claimed.load(std::memory_order_relaxed); }
 bool DebugEditActive() { return g_edit.hand>=0; }
 void PublishMarkers() {
-    MarkerFrame frame;frame.epoch=g_worldMarkers.epoch;
-    for (int i=0;i<g_worldMarkers.count;++i) {
-        const auto& world=g_worldMarkers.markers[i];Marker m;Vec tip,up;
+    MarkerFrame worldFrame=g_worldMarkers;
+    vehicleentry::Append(worldFrame);
+    MarkerFrame frame;frame.epoch=worldFrame.epoch;
+    for (int i=0;i<worldFrame.count;++i) {
+        const auto& world=worldFrame.markers[i];Marker m=world;Vec tip,up;
         if (!ToTracking(world.position,m.position)||!ToTracking(world.position+world.direction,tip)||
             !ToTracking(world.position+world.up,up)) continue;
         m.direction=tip-m.position;m.up=up-m.position;m.held=world.held;
@@ -337,6 +341,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         fresh[h]=g_edges[h].Step(hands[h].grip,usable&&hands[h].valid);
         editFresh[h]=g_editEdges[h].Step(hands[h].trigger,editMode&&usable&&hands[h].valid);
     }
+    vehicleentry::Update(usable,epoch);
     Pool pool;
     Vec eye{};float origin[3]{},forward[3]{};
     if (!usable||!pool.ReadCurrent()||!vrcam::GetHeadWorldRay(origin,forward)) { Reset();return; }

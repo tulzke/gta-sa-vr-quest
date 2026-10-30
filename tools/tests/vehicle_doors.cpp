@@ -20,6 +20,7 @@ int stopsRequested{};unsigned claimedHands{};
 void OnDoorOpening(void*) {++stopsRequested;}
 unsigned ClaimedHands() {return claimedHands;}
 }
+namespace savr::vehicleentry { void Update(bool,std::uint64_t) {} void Append(vehicledoors::MarkerFrame&) {} }
 namespace savr {
 GameSymbols g{};
 namespace xr {

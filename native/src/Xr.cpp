@@ -9753,6 +9753,33 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
     glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),nullptr);
     for (int i=0;i<frame.count;++i) {
         const auto& marker=frame.markers[i];
+        if(marker.seatIcon) {
+            using vehicledoors::Vec;
+            const Vec r=vehicledoors::Cross(marker.direction,marker.up),u=marker.up;
+            const auto draw=[&](const std::vector<Vec>& v,float alpha){
+                glUniform4f(g_markerColLoc,1.f,.86f+.14f*marker.highlight,.08f+.82f*marker.highlight,alpha);
+                glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(Vec),v.data(),GL_DYNAMIC_DRAW);
+                glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()));
+            };
+            const auto point=[&](float x,float y){return marker.position+r*x+u*y;};
+            const auto ring=[&](float radius,float thickness,int segments){
+                std::vector<Vec> v;
+                for(int n=0;n<segments;++n){
+                    const float a=6.2831853f*n/64,b=6.2831853f*(n+1)/64;
+                    Vec p=point(std::sin(a)*radius,std::cos(a)*radius),q=point(std::sin(b)*radius,std::cos(b)*radius);
+                    Vec t=point(std::sin(a)*(radius-thickness),std::cos(a)*(radius-thickness)),w=point(std::sin(b)*(radius-thickness),std::cos(b)*(radius-thickness));
+                    v.insert(v.end(),{p,q,t,t,q,w});
+                }return v;
+            };
+            draw(ring(.13f,.012f,64),.25f);
+            draw(ring(.13f,.012f,int(marker.progress*64)),.95f);
+            const auto bar=[&](float x,float y,float dx,float dy){
+                draw({point(x,y),point(x+dx,y),point(x,y+dy),point(x,y+dy),point(x+dx,y),point(x+dx,y+dy)},.85f);
+            };
+            if(marker.seatIcon==1){draw(ring(.075f,.009f,64),.85f);bar(-.067f,-.005f,.134f,.01f);bar(-.005f,-.067f,.01f,.067f);}
+            else {bar(-.04f,-.025f,.018f,.09f);bar(-.04f,-.04f,.09f,.018f);bar(.032f,-.075f,.018f,.05f);}
+            continue;
+        }
         const auto arrow=vehicledoors::Arrow(marker);
         auto styled=marker;
         styled.direction=styled.direction*marker.scale;styled.up=styled.up*marker.scale;

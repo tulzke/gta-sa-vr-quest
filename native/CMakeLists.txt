@@ -68,6 +68,7 @@ add_library(savr SHARED
     src/GestureMove.cpp
     src/Swimming.cpp
     src/BoatEntry.cpp
+    src/VehicleEntry.cpp
     src/VehicleDoors.cpp
     src/VehicleTestArea.cpp
     src/MissionWeaponGrant.cpp
