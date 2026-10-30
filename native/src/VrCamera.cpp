@@ -14071,6 +14071,37 @@ void* OnAtomicDefaultRender(void* atomic) {
 constexpr char kStereoDispatchCullProperty[] =
     "debug.savr.stereo_dispatch_cull";
 
+// Temporary close-ped witness for backlog 11. Separate stage/eye timers let
+// the log show a ped surviving the scan but missing from an eye's dispatch.
+// Fixed storage and rate limiting keep a crowd from flooding logcat.
+void TraceClosePedVisibility(void* entity, int stage, int result) {
+    if (!entity || !g.TheCamera || stage < 0 || stage > 2) return;
+    const auto* bytes = static_cast<const std::uint8_t*>(entity);
+    if ((bytes[0x5a] & 7u) != 3u ||
+        (g.FindPlayerPed && entity == g.FindPlayerPed(-1))) return;
+    V3 pos{};
+    if (!ReadEntityWorldPosition(entity, &pos)) return;
+    const V3 camera = ReadV3(reinterpret_cast<std::uintptr_t>(g.TheCamera), kOffPos);
+    const V3 delta = pos - camera;
+    const float distSq = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+    if (!std::isfinite(distSq) || distSq > 5.0f * 5.0f) return;
+    struct Sample { void* entity{}; double last[3]{}; };
+    static thread_local Sample samples[64]{};
+    Sample& sample = samples[(reinterpret_cast<std::uintptr_t>(entity) >> 4u) % 64u];
+    if (sample.entity != entity) sample = {entity, {}};
+    const double now = NowMs();
+    if (now - sample.last[stage] < 500.0) return;
+    sample.last[stage] = now;
+    LOGI("[npc.close] stage=%s entity=%p model=%d dist=%.2f "
+         "delta=%.2f,%.2f,%.2f result=%d visible=%d rw=%d",
+         stage == 0 ? "screen" : (stage == 1 ? "eye0" : "eye1"),
+         entity, static_cast<int>(*reinterpret_cast<const std::int16_t*>(bytes + 0x32)),
+         static_cast<double>(std::sqrt(distSq)), static_cast<double>(delta.x),
+         static_cast<double>(delta.y), static_cast<double>(delta.z), result,
+         (bytes[0x28] & 0x80u) ? 1 : 0,
+         *reinterpret_cast<void* const*>(bytes + 0x20) ? 1 : 0);
+}
+
 bool StereoDispatchCullRequested() {
     // Default ON for the scoped A/B candidate.  A process-start property keeps
     // a fail-safe escape hatch without adding a hot-path property lookup.
@@ -14109,6 +14140,7 @@ bool StereoDispatchVisibleForCurrentEye(void* entity) {
     g_stereoDispatchExactFrustumContext = true;
     const bool visible = g_origGetIsOnScreen(entity);
     g_stereoDispatchExactFrustumContext = saved;
+    TraceClosePedVisibility(entity, eye + 1, visible ? 1 : 0);
 
     StereoDispatchCullWindow& window = g_stereoDispatchCullWindow;
     ++window.probes[eye];
@@ -23156,6 +23188,7 @@ bool OnGetIsOnScreen(void* entity) {
                 else        ++g_profCull.dynamicFallbackCulled;
             }
         }
+        if (entityType == 3) TraceClosePedVisibility(entity, 0, result ? 1 : 0);
         if (result && profileCull) {
             ++g_profCull.dynamicVisible;
             if (fdot < 0.0f) ++g_profCull.dynamicBehindVisible;
