@@ -69,6 +69,7 @@ add_library(savr SHARED
     src/Swimming.cpp
     src/BoatEntry.cpp
     src/PassengerReaction.cpp
+    src/VehicleExit.cpp
     src/VehicleEntry.cpp
     src/VehicleDoors.cpp
     src/VehicleTestArea.cpp

@@ -13,6 +13,7 @@ namespace xr { struct HandPose {bool valid{};float trigger{},gripPos[3]{};};Hand
 namespace driving { int debug{},saves{};float calibration[4][3]{};int GetVehicleDebugMode(){return debug;}void SaveDebugCalibration(){++saves;} void GetEntryCalibration(int,int seat,float* out){for(int i=0;i<3;++i)out[i]=calibration[seat][i];}void SetEntryCalibration(int,int seat,const float* in){for(int i=0;i<3;++i)calibration[seat][i]=in[i];} }
 namespace locomotion { void MapGameplaySticks(float x,float y,float,float,float* mx,float* my,float*,float*){*mx=x;*my=y;} }
 namespace vrcam { int exits{};void RequestVehicleExit(){++exits;}bool TrackingPointToWorld(const float* in,float* out){for(int i=0;i<3;++i)out[i]=in[i];return true;} bool GetHeadWorldRay(float* o,float* f){o[0]=eyeX;o[1]=0;o[2]=.6f;f[0]=0;f[1]=1;f[2]=0;return true;} }
+namespace vehicleexit { bool TryExit(void*,int,vehicledoors::Vec){++vrcam::exits;return true;} }
 namespace boatentry {int calls{},seat{};bool success=true;bool SeatPlayer(void*,int s){++calls;seat=s;return success;} }
 }
 // PRODUCTION_ENTRY
@@ -74,6 +75,15 @@ int main(){
  Tick();xr::handPoses[0].trigger=1;Tick();CHECK(ClaimedHands()==1);
  xr::handPoses[0].gripPos[0]+=.1f;Tick();CHECK(driving::calibration[0][0]>.09f);
  xr::handPoses[0].trigger=0;Tick();CHECK(ClaimedHands()==0&&driving::saves==1);
+ // Debug mode still permits entry, transfer and exit when not dragging an icon.
+ xr::handPoses[0].valid=false;driving::debug=1;eyeX=1.3f;Put(doorMatrix,0x30,Vec{1,.35f,.4f});
+ Put(cars,0x5a8+2*8,static_cast<void*>(nullptr));Put(cars,0x77c+3*0x18,1.f);
+ xr::input.leftStick[0]=0;Tick();xr::input.leftStick[0]=-1;
+ const int beforeDebug=boatentry::calls;for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==beforeDebug+1&&boatentry::seat==0);
+ current=cars;Put(cars,0x5a8,static_cast<void*>(ped));xr::input.leftStick[0]=0;
+ for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=-1;for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==beforeDebug+2&&boatentry::seat==-1);
+ xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=1;
+ const int beforeExit=vrcam::exits;for(int i=0;i<17;++i)Tick();CHECK(vrcam::exits==beforeExit+1);
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

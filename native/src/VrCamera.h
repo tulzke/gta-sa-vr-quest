@@ -167,5 +167,3 @@ unsigned int GetPedLifecycleOverrideCount();
 float GetBuildingDetailFloorMeters();
 
 } // namespace savr::vrcam
-
-namespace savr::vrcam { void RequestVehicleExit(); }

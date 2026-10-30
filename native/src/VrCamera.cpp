@@ -4406,7 +4406,6 @@ using ExitVehicleJustDownFn = bool (*)(void*, bool, void*, bool,
                                        const GameSymbols::Vec3*);
 ExitVehicleJustDownFn g_origExitVehicleJustDown = nullptr;
 std::atomic<bool> g_vrEnterExitJustDown{false};
-std::atomic<bool> g_requestedVehicleExit{false};
 
 // Set by the input layer while a VR menu is open: the stick then drives the menu,
 // not the player, so we leave CPad::NewState as the game built it (neutral).
@@ -4981,8 +4980,7 @@ void OnUpdatePads() {
         !remoteControl && !craneControl && !vrfire::IsScriptedWeaponCamera();
     const bool boatPress=vehicleButtonAllowed && yJustDown && enterOnFoot &&
                          boatentry::TryEnter();
-    const bool iconExit=g_requestedVehicleExit.exchange(false,std::memory_order_acq_rel)&&!enterOnFoot;
-    g_vrEnterExitJustDown.store(vehicleButtonAllowed && (yJustDown||iconExit) && !boatPress,
+    g_vrEnterExitJustDown.store(vehicleButtonAllowed && yJustDown && !boatPress,
                                 std::memory_order_release);
 
     if (boatPress) {
@@ -30157,7 +30155,6 @@ bool GetHolsterAnchorTracking(int point, float positionOut[3]) {
 }
 
 bool IsCrouched(){return g_duckLatched;}
-void RequestVehicleExit() { g_requestedVehicleExit.store(true,std::memory_order_release); }
 bool VehicleDoorControlsActive() {
     if(!ShouldRunStereo() || CutsceneCameraControlsActiveInternal() ||
        beachdance::Active() || catalyst::Active() || vrfire::IsScriptedWeaponCamera() ||

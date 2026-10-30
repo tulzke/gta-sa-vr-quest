@@ -1,4 +1,5 @@
 #include "VehicleEntry.h"
+#include "VehicleExit.h"
 #include "PassengerReaction.h"
 #include "BoatEntry.h"
 #include "Symbols.h"
@@ -53,6 +54,7 @@ int SeatIndex(void* car,void* ped){
 }
 unsigned ClaimedHands(){return claimed;}
 void Install(void* h){
+ vehicleexit::Install(h);
  frameLtm=reinterpret_cast<decltype(frameLtm)>(dlsym(h,"_Z13RwFrameGetLTMP7RwFrame"));
  canOpen=reinterpret_cast<decltype(canOpen)>(dlsym(h,"_ZNK8CVehicle15CanPedOpenLocksEPK4CPed"));
  healthy=reinterpret_cast<decltype(healthy)>(dlsym(h,"_ZN13CCarEnterExit12IsPedHealthyERK4CPed"));
@@ -68,10 +70,11 @@ void Update(bool usable,std::uint64_t epoch){
  void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
  void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
  const bool editing=driving::GetVehicleDebugMode()!=0;
+ if(!editing&&editHand>=0)EndEdit();
  float o[3]{},f[3]{};
  const bool valid=usable&&epoch==trackingEpoch&&now-last<.15&&frameLtm&&canOpen&&healthy&&ped&&pad&&
  !Read<std::uint16_t>(pad,0x110)&&!Read<std::uint8_t>(pad,0x12d)&&healthy(ped)&&
- (editing||!driving::GetVehicleDebugMode())&&vrcam::GetHeadWorldRay(o,f);
+ vrcam::GetHeadWorldRay(o,f);
  trackingEpoch=epoch;last=now;
  if(!valid){target=nullptr;started=0;flashUntil=0;released=false;EndEdit();return;}
  if(now<flashUntil){visible=true;marker.highlight=float((flashUntil-now)/.2);icons.markers[icons.count++]=marker;return;}
@@ -102,7 +105,8 @@ void Update(bool usable,std::uint64_t epoch){
   for(int index=0;index<4;++index){
    const int seat=index-1;const bool exit=seated&&seat==currentSeat;
    if(seated&&currentSeat<-1)continue;
-   if(!editing&&!exit&&Read<void*>(car,seat<0?0x5a0:0x5a8+seat*8))continue;
+   bool actionable=exit||!Read<void*>(car,seat<0?0x5a0:0x5a8+seat*8);
+   if(!editing&&!actionable)continue;
    // A row is a pair: no front/rear teleports, including through empty places.
    if(seated&&!exit&&((index<2)!=(currentSeat<1)))continue;
    void* frame=Read<void*>(car,0x800+nodes[index]*8);if(!frame)continue;
@@ -112,14 +116,9 @@ void Update(bool usable,std::uint64_t epoch){
    float correction[3]{};driving::GetEntryCalibration(model,index,correction);
    Vec local={hinge.x*.5f+correction[0],hinge.y-.35f+correction[1],hinge.z+.2f+correction[2]};
    Vec p=b.Point(local);
-   if(!seated&&!editing){
-    if(!DoorOpen(car,index)||Dot(eye-b.position,b.right)*side<.2f)continue;
-    if(Length(eye-b.Point({hinge.x,hinge.y-.35f,hinge.z}))>1.5f)continue;
-   }
-   if(exit&&!editing){
-    if(Length(speed)>.02f||!DoorOpen(car,index)||!canStepOut||!canStepOut(car,false))continue;
-    p=b.Point({hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f});
-    if(!ClearExit(eye,p,car))continue;
+   if(!seated){
+    if(!DoorOpen(car,index)||Dot(eye-b.position,b.right)*side<.2f)actionable=false;
+    if(Length(eye-b.Point({hinge.x,hinge.y-.35f,hinge.z}))>1.5f)actionable=false;
    }
    if(Length(p-eye)>2.5f)continue;
    if(editing){
@@ -134,9 +133,17 @@ void Update(bool usable,std::uint64_t epoch){
      }
     }
    }
-   Marker m{p,forward,{0,0,1}};m.seatIcon=exit&&!editing?3:(seat<0?1:2);
+   if(exit){
+    if(editing&&icons.count<icons.kCapacity){Marker calibration{p,forward,{0,0,1}};calibration.seatIcon=seat<0?1:2;icons.markers[icons.count++]=calibration;}
+    if(Length(speed)>.02f||!DoorOpen(car,index)||!canStepOut||!canStepOut(car,false))actionable=false;
+    p=b.Point({hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f});
+    if(!ClearExit(eye,p,car))actionable=false;
+   }
+   if(!editing&&!actionable)continue;
+   Marker m{p,forward,{0,0,1}};m.seatIcon=exit?3:(seat<0?1:2);
    if(icons.count>=icons.kCapacity)continue;
    const int icon=icons.count;icons.markers[icons.count++]=m;
+   if(!actionable)continue;
    Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
    const float direction=distance>.05f?Dot(move,delta)/distance:-1;
    if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
@@ -144,7 +151,8 @@ void Update(bool usable,std::uint64_t epoch){
    }
   }
  }
- if(editing){started=0;if(editHand>=0&&!editContinued)EndEdit();visible=icons.count>0;return;}
+ if(editHand>=0&&!editContinued)EndEdit();
+ if(editHand>=0){started=0;visible=icons.count>0;return;}
  if(!released||!bestCar){target=nullptr;started=0;return;}
  if(target!=bestCar||targetSeat!=bestSeat||generation!=bestGeneration){started=0;target=bestCar;targetSeat=bestSeat;generation=bestGeneration;}
  const bool holding=std::isfinite(x)&&std::isfinite(y)&&Length(move)>.65f&&bestDirection>.55f;
@@ -153,7 +161,7 @@ void Update(bool usable,std::uint64_t epoch){
  icons.markers[bestIcon]=marker;visible=true;
  if(marker.progress>=1){
   bool success=false;
-  if(bestSeat==3){vrcam::RequestVehicleExit();success=true;}
+  if(bestSeat==3)success=vehicleexit::TryExit(bestCar,currentSeat,point);
   else success=boatentry::SeatPlayer(bestCar,bestSeat);
   if(success){marker.highlight=1;flashUntil=now+.2;xr::TriggerHaptic(0,.3f,0,35);}
   released=false;started=0;
