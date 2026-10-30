@@ -97,6 +97,12 @@ struct Target {
             slot>=0&&slot<kPoolSize&&p.flags[slot]==generation&&(generation&0x80)==0;
     }
 };
+struct OpenDetent { Target target{};bool latched{}; };
+OpenDetent g_openDetents[kPoolSize*4]{};
+void LatchOpen(const Target& t) {
+    if(t.slot>=0&&t.slot<kPoolSize&&t.door>=2&&t.door<=5)
+        g_openDetents[t.slot*4+t.door-2]={t,true};
+}
 Target g_editTarget{};
 bool g_editInside{};
 struct Grab { Target target{}; Motion motion{}; int hand{-1}; bool inside{}; } g_grab;
@@ -213,6 +219,28 @@ void OnSwing(void* vehicle,int node,int door) {
             ApplyDoor(g_release.target,std::clamp((m.angle-m.closed)/(m.open-m.closed),0.f,1.f));return;
         }
         g_release={};
+    }
+    Pool pool;
+    if(pool.ReadCurrent()&&door>=2&&door<=5) {
+        const auto address=reinterpret_cast<std::uintptr_t>(vehicle),base=reinterpret_cast<std::uintptr_t>(pool.objects);
+        if(address>=base&&address-base<kPoolSize*kStride&&(address-base)%kStride==0) {
+            auto& detent=g_openDetents[((address-base)/kStride)*4+door-2];
+            if(!detent.target.Live(pool)||detent.target.vehicle!=vehicle)detent={};
+            if(detent.target.vehicle) {
+                const auto status=g_status(static_cast<char*>(vehicle)+0x758,door);
+                const float open=Read<float>(vehicle,0x770+door*0x18);
+                if(status>3||!std::isfinite(open)||std::abs(open)<.3f)detent={};
+                else {
+                    if(detent.latched){ApplyDoor(detent.target,1.f);return;}
+                    const float angle=Read<float>(vehicle,0x77c+door*0x18);
+                    const bool opening=Read<float>(vehicle,0x784+door*0x18)*open>=0;
+                    if(opening&&angle/open>=.985f){detent.latched=true;ApplyDoor(detent.target,1.f);return;}
+                    g_swing(vehicle,node,door);
+                    if(opening&&Read<float>(vehicle,0x77c+door*0x18)/open>=.985f){detent.latched=true;ApplyDoor(detent.target,1.f);}
+                    return;
+                }
+            }
+        }
     }
     g_swing(vehicle,node,door);
 }
@@ -355,6 +383,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         else {
             auto& m=g_release.motion;m.Step(dt);
             ApplyDoor(g_release.target,std::clamp((m.angle-m.closed)/(m.open-m.closed),0.f,1.f));
+            if ((m.angle-m.closed)/(m.open-m.closed)>=.985f) {LatchOpen(g_release.target);m.angle=m.open;m.velocity=0;}
             if (m.Done()) g_release={};
         }
     }
@@ -382,6 +411,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const bool keep=grab.inside&&seated==grab.target.vehicle&&grab.target.Live(pool)&&
                 ReadDoor(grab.target,ped,d,true)&&grab.motion.Ratio()>0;
             Reset();
+            if(grab.motion.Ratio()>=.985f&&grab.target.Live(pool))LatchOpen(grab.target);
             if (keep) {
                 g_release.target=grab.target;g_release.inside=true;g_release.active=true;
                 g_release.motion={grab.motion.angle,grab.motion.closed,grab.motion.open,0.f,false,true};
@@ -395,6 +425,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const auto target=g_grab.target;const auto motion=g_grab.motion;const bool inside=g_grab.inside;
             const bool slam=motion.velocity*(motion.open-motion.closed)<0&&std::abs(motion.velocity)>=.6f&&motion.Ratio()>0;
             Reset();
+            if(motion.Ratio()>=.985f&&!slam){LatchOpen(target);ApplyDoor(target,1.f);return;}
             if ((inside&&motion.Ratio()>0)||slam) {
                 g_release.target=target;g_release.inside=inside;g_release.active=true;
                 // A slow closing movement stops where it is released; only a
@@ -597,6 +628,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     if (chosenHand>=0&&g_grab.motion.Begin(chosenDoor.hinge,chosenDoor.car.Local(world[chosenHand]),
                                          chosenDoor.angle,chosenDoor.closed,chosenDoor.open)) {
         if (g_release.active&&g_release.target.vehicle==chosen.vehicle&&g_release.target.door==chosen.door) g_release={};
+        g_openDetents[chosen.slot*4+chosen.door-2]={chosen,false};
         g_grab.target=chosen;g_grab.hand=chosenHand;
         g_grab.inside=seated!=nullptr;
         if (!g_grab.inside&&g_grab.motion.Ratio()<.5f) npcgrab::OnDoorOpening(chosen.vehicle);

@@ -127,6 +127,7 @@ bool FakeLos(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,
     *hit=wall?static_cast<void*>(pedMemory):vehicle;return true;
 }
 void Setup() {
+    for(auto& detent:g_openDetents)detent={};
     Reset();g_epoch=5;g_updated=Now()-.02;g_ready=true;
     std::memset(flags,0x80,sizeof(flags));flags[0]=3;
     std::memset(vehicle,0,0xc68);std::memset(status,0,sizeof(status));
@@ -445,5 +446,15 @@ int main() {
     CHECK(drag.Step(b.Local(b.Point({.2f,.3f,.4f}))));
     CHECK(Length(drag.delta-Vec{.1f,.1f,.1f})<1e-4f);
     CHECK(!drag.Step({NAN,0,0})&&!drag.Step({9,0,0}));
+    // Full-open is a stable detent outside as well as inside the car.
+    Setup();GrabIt();g_grab.motion.angle=g_grab.motion.open;g_grab.motion.velocity=0;
+    hands[0].grip=0;Tick();CHECK(g_openDetents[0].latched);
+    const float full=Read<float>(vehicle,0x770+2*0x18);
+    const int swings=nativeSwings;OnSwing(vehicle,10,2);OnSwing(vehicle,10,2);
+    CHECK(nativeSwings==swings&&std::abs(Read<float>(vehicle,0x77c+2*0x18)-full)<1e-5f);
+    // A fresh hand grab unlocks the open detent for closing.
+    Door fullyOpen;CHECK(ReadDoor(g_openDetents[0].target,pedMemory,fullyOpen));
+    std::memcpy(hands[0].gripPos,&fullyOpen.handle,12);
+    hands[0].grip=0;Tick();hands[0].grip=1;Tick();CHECK(ClaimedHands()==1&&!g_openDetents[0].latched);
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

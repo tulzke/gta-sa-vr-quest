@@ -1,4 +1,4 @@
-"""Host-test production vehicle entry using fake game memory and a deterministic clock."""
+"""Host-test passenger reactions, speech warnings and delays with a deterministic clock."""
 from pathlib import Path
 import os
 import re
@@ -12,6 +12,7 @@ source=(ROOT / 'native/src/PassengerReaction.cpp').read_text(encoding='utf8')
 start=source.index('void Install(')
 end=source.index('void OnBoard(',start)
 source=source[:start]+source[end:]
+source=re.sub(r'double Now\(\)\{[^\n]*\}', 'double Now(){return testNow;}', source)
 source='\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness=(ROOT / 'tools/tests/passenger_reaction.cpp').read_text(encoding='utf8')
 generated=OUT / 'passenger_reaction.cpp'

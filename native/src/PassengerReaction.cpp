@@ -19,7 +19,9 @@ void (*registerRef)(void*,void**){};
 void (*cleanRef)(void*,void**){};
 void* (*getGroup)(const void*){};
 unsigned (*pedFlag)(int){};
-struct Reaction {void* driver{};void* car{};void* player{};void* task{};int phase{},seat{-2};bool flee{};double deadline{};} state;
+std::uint16_t (*say)(void*,unsigned short,unsigned,float,unsigned char,unsigned char,unsigned char){};
+bool (*talking)(void*){};
+struct Reaction {void* driver{};void* car{};void* player{};void* task{};int phase{},seat{-2};bool flee{};double deadline{},warningUntil{},speechLimit{},lastUpdate{};} state;
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 void Clear(){for(void** p:{&state.driver,&state.car,&state.player})if(*p)cleanRef(*p,p);state={};}
 void* Manager(void* ped){void* i=Read<void*>(ped,0x538);return i?static_cast<char*>(i)+8:nullptr;}
@@ -32,6 +34,7 @@ bool Friendly(void* driver,void* player){
 }
 void Install(void* h){
 #define LOAD(v,n) v=reinterpret_cast<decltype(v)>(dlsym(h,n))
+ LOAD(say,"_ZN4CPed3SayEtjfhhh");LOAD(talking,"_ZN4CPed13GetPedTalkingEv");
  LOAD(allocate,"_ZN5CTasknwEm");LOAD(setTask,"_ZN12CTaskManager7SetTaskEP5CTaskib");
  LOAD(leaveCtor,"_ZN20CTaskComplexLeaveCarC1EP8CVehicleiibb");
  LOAD(dragCtor,"_ZN26CTaskComplexDragPedFromCarC1EP4CPedi");
@@ -47,16 +50,22 @@ void OnBoard(void* car,void* player){
  if(!driver||driver==player||playerlife::Dead(driver)||Read<unsigned char>(driver,0x548)!=1||Friendly(driver,player))return;
  void* manager=Manager(driver);if(!manager)return;
  void* stats=Read<void*>(driver,0x728);if(!stats)return;
- void* task=allocate(0x50);if(!task)return;
  Clear();state.driver=driver;state.car=car;state.player=player;
  for(void** p:{&state.driver,&state.car,&state.player})registerRef(*p,p);
  // Retail CPedStats: fear +0x24, temper +0x25, populated by LoadPedStats.
  state.flee=Read<unsigned char>(stats,0x24)>Read<unsigned char>(stats,0x25);
- state.phase=1;state.deadline=Now()+25;state.task=task;
- leaveCtor(task,car,0,0,true,false);setTask(manager,task,3,false);
+ const double now=Now();state.phase=3;state.deadline=now+30;state.lastUpdate=now;
+ state.warningUntil=now+2;state.speechLimit=now+4.5;state.task=Read<void*>(manager,3*8);
+ // Global speech contexts: JACKED_CAR (118), JACKING_GENERIC (124).
+ // Native voice selection and repeat limits remain intact; no forced speech.
+ if(say&&say(driver,state.flee?118:124,0,1.f,0,0,0)==0xffff)
+  say(driver,state.flee?69:20,0,1.f,0,0,0); // CRIMINAL_PLEAD / ATTACK_PLAYER fallback
+
 }
 void Update(bool usable){
  if(!state.phase)return;
+ const double now=Now();const double elapsed=std::max(0.0,now-state.lastUpdate);state.lastUpdate=now;
+ if(!usable){state.deadline+=elapsed;state.warningUntil+=elapsed;state.speechLimit+=elapsed;}
  if(!state.driver||!state.car||!state.player||playerlife::Dead(state.driver)||playerlife::Dead(state.player)||Now()>state.deadline){Clear();return;}
  if(!usable)return;
  if(Read<unsigned char>(state.driver,0x548)!=1){Clear();return;}
@@ -64,6 +73,14 @@ void Update(bool usable){
  void* active=Read<void*>(manager,3*8);
  if(active&&active!=state.task){Clear();return;} // a new script/event owns the actor
  const int playerSeat=vehicleentry::SeatIndex(state.car,state.player);
+ if(state.phase==3){
+  if(playerSeat==-2||vehicleentry::SeatIndex(state.car,state.driver)!=-1){Clear();return;}
+  if(now<state.warningUntil||(now<state.speechLimit&&talking&&talking(state.driver)))return;
+  void* task=allocate(0x50);if(!task){Clear();return;}
+  state.phase=1;state.task=task;
+  leaveCtor(task,state.car,0,0,true,false);setTask(manager,task,3,false);return;
+ }
+
  if(state.phase==1){
   if(vehicleentry::SeatIndex(state.car,state.driver)>=-1)return;
   if(state.flee){
