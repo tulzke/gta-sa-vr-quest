@@ -619,6 +619,7 @@ float                 g_chuteRingForward[3]{0.0f, 0.0f, -1.0f};
 bool                  g_chuteRingGrabbed{false};
 bool                  g_chuteRingVisible{false};
 holstermarker::Kind    g_holsterKind[8]{};
+bool g_holsterUnavailable[8]{};
 std::uint64_t         g_holsterEpoch{};
 float                 g_holsterEye[3]{}; // one billboard orientation for both eyes
 holstermarker::Frame   g_stereoHolsterMarkers[kStereoSets]{};
@@ -5686,6 +5687,7 @@ void SetHolsterMarkers(const float positions[][3], int count) {
     g_holsterCount = count > 8 ? 8 : (count < 0 ? 0 : count);
     for (int i = 0; i < g_holsterCount; ++i) {
         g_holsterKind[i] = holstermarker::Kind::Grab;
+        g_holsterUnavailable[i]=false;
         g_holsterPos[i][0] = positions[i][0];
         g_holsterPos[i][1] = positions[i][1];
         g_holsterPos[i][2] = positions[i][2];
@@ -5701,6 +5703,7 @@ void SetHolsterMarkerStates(const holstermarker::Marker* markers, int count,
     for (int i=0; i<g_holsterCount; ++i) {
         std::memcpy(g_holsterPos[i], markers[i].position, sizeof(g_holsterPos[i]));
         g_holsterKind[i] = markers[i].kind;
+        g_holsterUnavailable[i]=markers[i].unavailable;
     }
 }
 
@@ -6233,6 +6236,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         for (int i=0; i<markerFrame.count; ++i) {
             std::memcpy(markerFrame.markers[i].position, g_holsterPos[i], sizeof(g_holsterPos[i]));
             markerFrame.markers[i].kind = g_holsterKind[i];
+            markerFrame.markers[i].unavailable=g_holsterUnavailable[i];
         }
         g_stereoVehicleDoorMarkers[ws] = g_vehicleDoorMarkers;
         g_stereoNpcGrabMarkers[ws] = g_npcGrabMarkers;
@@ -9725,7 +9729,17 @@ void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
         glDrawElements(GL_TRIANGLES,indexCount,GL_UNSIGNED_SHORT,nullptr);
     };
     glUniform4f(g_markerColLoc,30/255.0f,205/255.0f,245/255.0f,1);
-    if (ic) draw(g_markerVerts,vc,g_markerIdx,ic);
+    if (ic) {
+        glBufferData(GL_ARRAY_BUFFER,vc*3*sizeof(float),g_markerVerts,GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER,ic*sizeof(unsigned short),g_markerIdx,GL_DYNAMIC_DRAW);
+        int offset=0;
+        for(int m=0;m<count;++m) {
+            if(markers[m].kind==holstermarker::Kind::Return)continue;
+            if(markers[m].unavailable)glUniform4f(g_markerColLoc,.65f,.29f,.27f,1);
+            else glUniform4f(g_markerColLoc,30/255.f,205/255.f,245/255.f,1);
+            glDrawElements(GL_TRIANGLES,36,GL_UNSIGNED_SHORT,reinterpret_cast<void*>(offset*sizeof(unsigned short)));offset+=36;
+        }
+    }
     const bool cull=glIsEnabled(GL_CULL_FACE);
     glDisable(GL_CULL_FACE); // flat return geometry must be visible from either side
     glUniform4f(g_markerColLoc,1.0f,0.75f,0.25f,1);
@@ -9777,6 +9791,7 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
                 draw({point(x,y),point(x+dx,y),point(x,y+dy),point(x,y+dy),point(x+dx,y),point(x+dx,y+dy)},.85f);
             };
             if(marker.seatIcon==1){draw(ring(.075f,.009f,64),.85f);bar(-.067f,-.005f,.134f,.01f);bar(-.005f,-.067f,.01f,.067f);}
+            else if(marker.seatIcon==3) {bar(-.07f,-.07f,.012f,.14f);bar(-.07f,.058f,.07f,.012f);bar(-.07f,-.07f,.07f,.012f);bar(-.025f,-.006f,.1f,.012f);bar(.05f,-.025f,.012f,.05f);}
             else {bar(-.04f,-.025f,.018f,.09f);bar(-.04f,-.04f,.09f,.018f);bar(.032f,-.075f,.018f,.05f);}
             continue;
         }
@@ -9821,7 +9836,8 @@ void DrawRadialHolsterMenu(const float* mvp, const radialholster::Frame& frame) 
             vertex(a,inner); vertex(a,outer); vertex(b,outer);
             vertex(a,inner); vertex(b,outer); vertex(b,inner);
         }
-        if (sector==frame.selected) glUniform4f(g_markerColLoc,.15f,.8f,.95f,.9f);
+        if (frame.unavailable[sector]) glUniform4f(g_markerColLoc,.52f,.24f,.23f,sector==frame.selected?.9f:.7f);
+        else if (sector==frame.selected) glUniform4f(g_markerColLoc,.15f,.8f,.95f,.9f);
         else glUniform4f(g_markerColLoc,.12f,.16f,.2f,.78f);
         glBufferData(GL_ARRAY_BUFFER,sizeof(verts),verts,GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLES,0,pieces*6);

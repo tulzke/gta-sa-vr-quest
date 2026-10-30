@@ -97,7 +97,7 @@ struct Marker {
     int seatIcon{};float progress{};
 };
 struct MarkerFrame {
-    static constexpr int kCapacity=6;
+    static constexpr int kCapacity=12;
     std::array<Marker,kCapacity> markers{};
     int count{};
     std::uint64_t epoch{};

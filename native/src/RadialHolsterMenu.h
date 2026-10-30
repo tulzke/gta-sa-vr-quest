@@ -27,6 +27,7 @@ struct Frame {
     int selected{-1};
     unsigned int atlasTexture{};
     int weaponTypes[kMaxEntries]{};
+    bool unavailable[kMaxEntries]{};
     float origin[3]{};
     float right[3]{};
     float up[3]{};

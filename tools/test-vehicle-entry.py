@@ -1,6 +1,7 @@
 """Host-test production vehicle entry using fake game memory and a deterministic clock."""
 from pathlib import Path
 import os
+import re
 import shutil
 import subprocess
 
@@ -11,9 +12,7 @@ source = (ROOT / 'native/src/VehicleEntry.cpp').read_text(encoding='utf8')
 start=source.index('void Install(')
 end=source.index('bool ConsumesMove()',start)
 source=source[:start]+source[end:]
-start=source.index('double Now()')
-end=source.index('\n}',start)
-source=source[:start]+'double Now(){return testNow;}'+source[end:]
+source=re.sub(r'double Now\(\)\{[^\n]*\}', 'double Now(){return testNow;}', source)
 source='\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness=(ROOT / 'tools/tests/vehicle_entry.cpp').read_text(encoding='utf8')
 generated=OUT / 'vehicle_entry.cpp'

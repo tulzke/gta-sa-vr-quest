@@ -346,7 +346,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     Vec eye{};float origin[3]{},forward[3]{};
     if (!usable||!pool.ReadCurrent()||!vrcam::GetHeadWorldRay(origin,forward)) { Reset();return; }
     eye={origin[0],origin[1],origin[2]};
-    unsigned occupied=physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands();
+    unsigned occupied=physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands()|vehicleentry::ClaimedHands();
     void* seated=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
     if (g_release.active) {
         Door d;
@@ -372,7 +372,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     if (g_grab.hand>=0) {
         const int h=g_grab.hand;Door d;
         if (!g_grab.target.Live(pool)||!valid[h]||(occupied&(1u<<h))||
-            (g_grab.inside ? seated!=g_grab.target.vehicle : seated!=nullptr)||
+            (g_grab.inside ? (seated!=g_grab.target.vehicle||g_grab.target.door!=vehicleentry::SeatIndex(seated,ped)+3) : seated!=nullptr)||
             !ReadDoor(g_grab.target,ped,d,g_grab.inside)||Length(d.handle-world[h])>.7f||
             !Visible(eye,d.handle,g_grab.target.vehicle)||
             !g_grab.motion.Step(d.car.Local(world[h]),dt)) {
@@ -551,7 +551,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     for (int slot=0;slot<kPoolSize;++slot) {
         if (pool.flags[slot]&0x80) continue;
         void* vehicle=pool.objects+slot*kStride;
-        if (seated && (vehicle!=seated || !g.CVehicle_IsDriver || !g.CVehicle_IsDriver(vehicle,ped))) continue;
+        if (seated && vehicle!=seated) continue;
         if ((Read<std::uint8_t>(vehicle,0x5a)&7)!=2||g.CVehicle_GetVehicleAppearance(vehicle)!=1) continue;
         void* matrix=Read<void*>(vehicle,0x18);
         if (!matrix) continue;
@@ -560,7 +560,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         for (int i=0;i<4;++i) {
             const Target t{vehicle,pool.identity,pool.objects,pool.flags,slot,i+2,kNodes[i],pool.flags[slot]};
             Door d;
-            if (seated && i!=0) continue;
+            if (seated && i!=vehicleentry::SeatIndex(seated,ped)+1) continue;
             if (!ReadDoor(t,ped,d,seated!=nullptr)) continue;
             const float side=(i==0||i==2)?-1.f:1.f;
             if (!seated && Dot(eye-d.car.position,d.car.right)*side<-.12f) continue;
@@ -571,7 +571,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     if (nearestSlot>=0) for (int i=0;i<4;++i) {
         const int slot=nearestSlot;
         Target t{pool.objects+slot*kStride,pool.identity,pool.objects,pool.flags,slot,i+2,kNodes[i],pool.flags[slot]};
-        if (seated && i!=0) continue;
+        if (seated && i!=vehicleentry::SeatIndex(seated,ped)+1) continue;
         Door d;
         if (!ReadDoor(t,ped,d,seated!=nullptr)||Length(eye-d.handle)>2.2f||
             (!seated && Dot(eye-d.car.position,d.car.right)*((i==0||i==2)?-1.f:1.f)<-.12f)||

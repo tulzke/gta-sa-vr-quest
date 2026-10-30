@@ -12,6 +12,8 @@
 #include "Throwable.h"
 #include "Xr.h"
 #include "VehicleDoors.h"
+#include "VehicleEntry.h"
+#include "VehicleWeaponPolicy.h"
 #include "NpcGrab.h"
 #include "VehicleTestArea.h"
 #include "RadialHolsterMenu.h"
@@ -553,17 +555,10 @@ void ChooseFiringHandLocked(void* ped) {
 // City "immersive vehicle sidearm" rule. Two-handed longarms, melee and
 // throwables stay holstered until back on foot.
 bool VehicleSidearmWeaponType(int weaponType) {
-    switch (weaponType) {
-        case 22: // pistol
-        case 23: // silenced
-        case 24: // deagle
-        case 26: // sawn-off
-        case 28: // micro uzi
-        case 32: // tec9
-            return true;
-        default:
-            return false;
-    }
+ void* car=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+ void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+ const bool passenger=car&&vehicleentry::SeatIndex(car,ped)>=0;
+ return vehicleweapon::Allowed(weaponType,passenger);
 }
 
 int ClosestAvailableHolsterSlotLocked(
@@ -789,7 +784,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         headPosition,headOrientation,headValid,trackingEpoch);
     npcgrab::Update(interactionsBlocked||navigationClaimed||driving::GetVehicleDebugMode()!=0, latest, headValid, trackingEpoch);
     vehicledoors::Update(interactionsBlocked||navigationClaimed, latest, headValid, trackingEpoch);
-    const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands();
+    const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands() | vehicleentry::ClaimedHands();
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));
     interactionsBlocked = interactionsBlocked || navigationClaimed || driving::GetVehicleDebugMode()!=0 || !headValid ||
@@ -833,6 +828,8 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     }
 
     ValidateInventoryLocked(ped);
+    if(inVehicle&&!scriptedGunner)for(int h=0;h<kHandCount;++h)
+        if(ValidSlot(gHeldSlot[h])&&!VehicleSidearmWeaponType(WeaponTypeInSlot(ped,gHeldSlot[h]))) {ClearHeldLocked(h);SelectCurrentSlot(ped,0);gGripLatched[h]=true;}
 
     const int grantedSlot = missionweapon::TakePendingSlot();
     if (ValidSlot(grantedSlot)) gPendingMissionSlot = grantedSlot;
@@ -935,7 +932,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         gInteractionsBlocked = true;
     }
 
-    const bool radialUsable = !interactionsBlocked && !inVehicle && bodyAllowed && xr::IsSessionFocused();
+    const bool radialUsable = !interactionsBlocked && (bodyAllowed || vehicleImmersive) && xr::IsSessionFocused();
     bool triggerEdge[kHandCount]{};
     for (int h = 0; h < kHandCount; ++h) {
         const float trigger = gHands[h].trigger;
@@ -972,7 +969,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             const bool newBusy = ValidSlot(selectedSlot) && (occupied & (1u << selectedSlot));
             const int other = holster::FindPointForSlot(selectedSlot);
             if (!oldBusy && !newBusy && (selectedSlot < 0 ||
-                (WeaponTypeInSlot(ped, selectedSlot) && (other < 0 || other == point))))
+                (WeaponTypeInSlot(ped, selectedSlot) && (!inVehicle || VehicleSidearmWeaponType(WeaponTypeInSlot(ped, selectedSlot))) && (other < 0 || other == point))))
                 holster::SetPointSlot(point, selectedSlot);
         }
     }
@@ -1013,8 +1010,10 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         std::memcpy(radialFrame.origin, gRadialMenu.origin, sizeof(radialFrame.origin));
         std::memcpy(radialFrame.right, gRadialMenu.right, sizeof(radialFrame.right));
         std::memcpy(radialFrame.up, gRadialMenu.up, sizeof(radialFrame.up));
-        for (int i = 0; i < radialFrame.count; ++i)
+        for (int i = 0; i < radialFrame.count; ++i) {
             radialFrame.weaponTypes[i] = WeaponTypeInSlot(ped, gRadialMenu.slots[i]);
+            radialFrame.unavailable[i]=inVehicle && radialFrame.weaponTypes[i] && !VehicleSidearmWeaponType(radialFrame.weaponTypes[i]);
+        }
     }
     xr::SetRadialHolsterMenu(radialFrame);
 
@@ -1262,7 +1261,8 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 const bool drawable = !vehicleImmersive || scriptedGunner ||
                     VehicleSidearmWeaponType(WeaponTypeInSlot(ped, slot));
                 if (!holstermarker::Visible(holster::GripMarkersEnabled(), holsterCalibrationMarkers,
-                        holster::PointVisible(point), owned, held, dropped, drawable)) continue;
+                        holster::PointVisible(point), owned, held, dropped, true)) continue;
+                markers[markerCount].unavailable=!drawable;
                 markers[markerCount].kind = holsterCalibrationMarkers ? holstermarker::Kind::Preview :
                     held ? holstermarker::Kind::Return : holstermarker::Kind::Grab;
                 std::memcpy(markers[markerCount].position, anchors[point],

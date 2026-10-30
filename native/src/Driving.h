@@ -349,3 +349,5 @@ bool GetGrabbedHandVisual(int hand, float position[3], float right[3],
                           float up[3], float forward[3]);
 
 } // namespace savr::driving
+
+namespace savr::driving { void GetEntryCalibration(int model,int seat,float out[3]); void SetEntryCalibration(int model,int seat,const float value[3]); }

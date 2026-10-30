@@ -3,6 +3,7 @@
 #include "JustBusiness.h"
 #include "Driving.h"
 #include "VehicleDoors.h"
+#include "VehicleEntry.h"
 #include "BikeSteering.h"
 #include "MissionComfort.h"
 
@@ -265,6 +266,7 @@ double g_bicycleTriggerPreviousTime{};
 std::atomic<int> g_vehicleDebugMode{};
 struct ModelCalibration {
     int door[4][2][3]{};
+    int entry[4][3]{};
     int seatSide[MODE_COUNT]{};
     int seatForward[MODE_COUNT]{};
     int seatHeight[MODE_COUNT]{};
@@ -505,6 +507,8 @@ void Save() {
         for (const auto& entry : g_modelCalibration) {
             const int model = entry.first;
             const ModelCalibration& calibration = entry.second;
+            for(int seat=0;seat<4;++seat) for(int axis=0;axis<3;++axis)
+                std::fprintf(file,"EntryCalib.%d.%d.%d=%d\n",model,seat,axis,calibration.entry[seat][axis]);
             for(int door=0;door<4;++door) for(int inside=0;inside<2;++inside) for(int axis=0;axis<3;++axis)
                 std::fprintf(file,"DoorCalib.%d.%d.%d.%d=%d\n",model,door,inside,axis,calibration.door[door][inside][axis]);
             for (int mode = 0; mode < MODE_COUNT; ++mode) {
@@ -671,6 +675,10 @@ void Load() {
             else {
                 int model = -1, mode = -1, hand = -1;
                 int door=-1,inside=-1,axis=-1;
+                if(std::sscanf(line,"EntryCalib.%d.%d.%d=%d",&model,&door,&axis,&value)==4 &&
+                   model>=400&&model<=611&&door>=0&&door<4&&axis>=0&&axis<3) {
+                    g_modelCalibration[model].entry[door][axis]=std::clamp(value,-200,200);continue;
+                }
                 if(std::sscanf(line,"DoorCalib.%d.%d.%d.%d=%d",&model,&door,&inside,&axis,&value)==5 &&
                    model>=400&&model<=611&&door>=0&&door<4&&inside>=0&&inside<2&&axis>=0&&axis<3) {
                     g_modelCalibration[model].door[door][inside][axis]=std::clamp(value,-200,200);
@@ -3246,6 +3254,18 @@ void CycleVehicleDebugMode(int direction) {
     g_vehicleDebugMode.store(GetVehicleDebugMode()?0:1);
     vehicledoors::Reset(); ResetInteraction();
 }
+void GetEntryCalibration(int model,int seat,float out[3]) {
+    EnsureInit();std::fill_n(out,3,0.f);if(seat<0||seat>=4)return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const auto it=g_modelCalibration.find(model);
+    if(it!=g_modelCalibration.end())for(int a=0;a<3;++a)out[a]=it->second.entry[seat][a]*.01f;
+}
+void SetEntryCalibration(int model,int seat,const float value[3]) {
+    if(model<400||model>611||seat<0||seat>=4)return;
+    for(int a=0;a<3;++a)if(!std::isfinite(value[a]))return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    for(int a=0;a<3;++a)g_modelCalibration[model].entry[seat][a]=std::lround(std::clamp(value[a],-2.f,2.f)*100);
+}
 void GetDoorCalibration(int model,int door,bool inside,float out[3]) {
     EnsureInit(); std::fill_n(out,3,0.f);
     if(door<2||door>5) return;
@@ -3558,12 +3578,15 @@ void ToggleDrivebyAimImmersive() {
 }
 bool VehicleWeaponsImmersive() {
     EnsureInit();
+    void* car=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+    if(vehicleentry::SeatIndex(car,g.FindPlayerPed?g.FindPlayerPed(-1):nullptr)>=0)return true;
     return GetMode()==MODE_IMMERSIVE ||
            g_drivebyImmersive.load(std::memory_order_acquire);
 }
 bool ShouldUseTrackedHands() {
     EnsureInit();
     if (!HasPlayerVehicle()) return true;
+    if(vehicleentry::SeatIndex(g.FindPlayerVehicle(-1,false),g.FindPlayerPed(-1))>=0)return true;
     return ModeForAppearance(GetActiveVehicleAppearance(false))==MODE_IMMERSIVE;
 }
 void SetMenuPreview(bool active,int calibrationHand) {

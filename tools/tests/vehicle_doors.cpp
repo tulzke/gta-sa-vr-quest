@@ -20,7 +20,7 @@ int stopsRequested{};unsigned claimedHands{};
 void OnDoorOpening(void*) {++stopsRequested;}
 unsigned ClaimedHands() {return claimedHands;}
 }
-namespace savr::vehicleentry { void Update(bool,std::uint64_t) {} void Append(vehicledoors::MarkerFrame&) {} }
+namespace savr::vehicleentry { int SeatIndex(void* car,void* ped){ if(!car||!ped)return -2;void* v{};std::memcpy(&v,static_cast<char*>(car)+0x5a0,8);if(v==ped)return -1;for(int i=0;i<3;++i){std::memcpy(&v,static_cast<char*>(car)+0x5a8+i*8,8);if(v==ped)return i;}return -2;} unsigned ClaimedHands(){return 0;} void Update(bool,std::uint64_t) {} void Append(vehicledoors::MarkerFrame&) {} }
 namespace savr {
 GameSymbols g{};
 namespace xr {
@@ -134,6 +134,7 @@ void Setup() {
     Write(poolMemory,0,vehicle);Write(poolMemory,8,static_cast<const std::uint8_t*>(flags));
     Write(poolMemory,0x10,110);Write<std::uint8_t>(poolMemory,0x18,1);
     StoreBasis(matrix,{});Write(vehicle,0x18,static_cast<void*>(matrix));
+    Write(vehicle,0x5a0,static_cast<void*>(pedMemory));
     Write<std::uint8_t>(vehicle,0x5a,2|(4<<3));Write<std::uint16_t>(vehicle,0x32,400);
     for (int i=0;i<4;++i) {
         Write(vehicle,0x800+kNodes[i]*8,static_cast<void*>(frames[i]));

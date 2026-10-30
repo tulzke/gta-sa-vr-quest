@@ -1,3 +1,4 @@
+#include "VehicleEntry.h"
 #include "JustBusiness.h"
 #include "VrFire.h"
 #include "Catalyst.h"
@@ -255,7 +256,7 @@ bool GetPhysicalTrigger(void* ped, int& weaponType, int& hand, float& level) {
     xr::GetInput(input);
     // In a vehicle the triggers ARE accelerator/brake, so — like the Vice
     // City port — the held weapon fires with B instead.
-    level = inVehicle && !scriptedGunner
+    level = inVehicle && vehicleentry::SeatIndex(g.FindPlayerVehicle(-1,false),ped)<0 && !scriptedGunner
         ? (input.b ? 1.0f : 0.0f) : input.triggers[hand];
     if (!std::isfinite(level)) return false;
     level = std::clamp(level, 0.0f, 1.0f);

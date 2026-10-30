@@ -3718,11 +3718,11 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                 static V3 cachedSeatLocal{};
                 static tracking::SeatLatch seatLatch;
                 bool& cachedSeatLocalValid=seatLatch.valid;
-                static bool cachedFrontPassenger=false;
-                const bool frontPassenger=vehicle &&
-                    *reinterpret_cast<void**>(static_cast<char*>(vehicle)+0x5a8)==ped;
-                if(frontPassenger!=cachedFrontPassenger) seatLatch.vehicle=nullptr;
-                cachedFrontPassenger=frontPassenger;
+                static int cachedPassengerSeat=-2;
+                const int passengerSeat=vehicleentry::SeatIndex(vehicle,ped);
+                const bool seatedPassenger=passengerSeat>=0;
+                if(passengerSeat!=cachedPassengerSeat) seatLatch.vehicle=nullptr;
+                cachedPassengerSeat=passengerSeat;
                 const bool resetSeat=seatLatch.Begin(enteringVehicle?nullptr:vehicle,
                     g_cameraResetSerial,NowMs());
                 if (vehicle != cachedSeatVehicle || resetSeat) {
@@ -3733,7 +3733,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
 
                 const bool rearPassenger=justbusiness::Active();
                 const bool seatedDriver = vehicle &&
-                    (rearPassenger || frontPassenger || !g.CVehicle_IsDriver || g.CVehicle_IsDriver(vehicle, ped));
+                    (rearPassenger || seatedPassenger || !g.CVehicle_IsDriver || g.CVehicle_IsDriver(vehicle, ped));
                 if (thirdPersonView && vehiclePositionValid) {
                     // Chase view: anchor directly on the game's own camera.
                     // No seated-head capture, no suspension smoothing — the
@@ -4406,6 +4406,7 @@ using ExitVehicleJustDownFn = bool (*)(void*, bool, void*, bool,
                                        const GameSymbols::Vec3*);
 ExitVehicleJustDownFn g_origExitVehicleJustDown = nullptr;
 std::atomic<bool> g_vrEnterExitJustDown{false};
+std::atomic<bool> g_requestedVehicleExit{false};
 
 // Set by the input layer while a VR menu is open: the stick then drives the menu,
 // not the player, so we leave CPad::NewState as the game built it (neutral).
@@ -4980,7 +4981,8 @@ void OnUpdatePads() {
         !remoteControl && !craneControl && !vrfire::IsScriptedWeaponCamera();
     const bool boatPress=vehicleButtonAllowed && yJustDown && enterOnFoot &&
                          boatentry::TryEnter();
-    g_vrEnterExitJustDown.store(vehicleButtonAllowed && yJustDown && !boatPress,
+    const bool iconExit=g_requestedVehicleExit.exchange(false,std::memory_order_acq_rel)&&!enterOnFoot;
+    g_vrEnterExitJustDown.store(vehicleButtonAllowed && (yJustDown||iconExit) && !boatPress,
                                 std::memory_order_release);
 
     if (boatPress) {
@@ -30155,6 +30157,7 @@ bool GetHolsterAnchorTracking(int point, float positionOut[3]) {
 }
 
 bool IsCrouched(){return g_duckLatched;}
+void RequestVehicleExit() { g_requestedVehicleExit.store(true,std::memory_order_release); }
 bool VehicleDoorControlsActive() {
     if(!ShouldRunStereo() || CutsceneCameraControlsActiveInternal() ||
        beachdance::Active() || catalyst::Active() || vrfire::IsScriptedWeaponCamera() ||
