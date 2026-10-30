@@ -47,8 +47,6 @@ void (*setAnimationTime)(void*,float){};
 bool (*vehicleAI)(void*,unsigned*){};
 void (*vehicleControl)(void*){};
 void (*vehicleRails)(void*){};
-void (*lineUpPed)(void*,void*,void*,void*){};
-void (*seatPosition)(void*){};
 void (*realPhysics)(void*){};
 std::atomic<unsigned> claimed{};
 GripEdge edges[2];
@@ -130,6 +128,9 @@ struct Animation {
     void* task{};
     void* pausedAssociation{};
     bool synchronized{};
+    Vec exitPoint{};
+    bool exitChecked{};
+    int doorNode{};
 } animations[4];
 struct TrafficStop { void* car{};double until{}; } stops[4];
 double Now() {
@@ -219,29 +220,12 @@ bool OnVehicleAI(void* car,unsigned* flags) {
     return result;
 }
 void OnVehicleControl(void* car) {
-    if (StopCar(car,Now())) {
-        Write(car,0x68,Vec{});Write(car,0x74,Vec{});
-        return; // no propulsion/integration while this NPC scene owns the car
-    }
+    StopCar(car,Now());
     vehicleControl(car);
+    StopCar(car,Now()); // keep doors, suspension, collisions and passenger updates alive
 }
 void OnVehicleRails(void* car) {
     if (!StopCar(car,Now())) vehicleRails(car);
-}
-void* Manager(void* ped);
-bool Seated(void* ped);
-void OnLineUpPed(void* utility,void* ped,void* car,void* anim) {
-    Pool pool;
-    if (pool.Load()) for (const auto& a:animations) if (a.target.ped==ped&&a.car==car&&
-        a.phase!=Phase::Pull&&a.target.Live(pool)&&Seated(ped)) {
-        void* manager=Manager(ped);
-        if (!manager||Read<void*>(manager,3*8)!=a.task) break;
-        void* leaf=simplestTask(a.task);
-        if (leaf&&Read<void*>(leaf,0)==draggedAnimationVtable&&Read<void*>(leaf,0x30)==utility) {
-            seatPosition(ped);return; // recoil stays in the original seat until the grip
-        }
-    }
-    lineUpPed(utility,ped,car,anim);
 }
 void ClearAnimation(Animation& animation) {
     if (animation.car) cleanReference(animation.car,&animation.car);
@@ -358,7 +342,8 @@ bool FindDoorExit(void* ped,void* car,int door,Vec& destination) {
     if (!basis.Valid()) return false;
     const auto native=doorPosition(car,nodes[door-2]);
     const Vec origin{native.x,native.y,native.z};
-    if (!Finite(origin)||Length(origin-Position(ped))>2.5f) return false;
+    const Vec carPosition=Position(car);
+    if (!Finite(origin)||!Finite(carPosition)||Length(origin-carPosition)>3.f) return false;
     const float side=door==2||door==4?-1.f:1.f;
     const Vec outward=basis.right*side;
     // Bounded doorway search, independent of the car's heading or length.
@@ -369,7 +354,9 @@ bool FindDoorExit(void* ped,void* car,int door,Vec& destination) {
         GameSymbols::Vec3 ground{point.x,point.y,point.z};
         if (!groundPosition(&ground)) continue;
         point={ground.x,ground.y,ground.z};
-        if (!Finite(point)||std::abs(point.z-Position(ped).z)>.75f) continue;
+        // A broken animation root must not turn an otherwise safe doorway into
+        // an invalid exit. Validate terrain against the car, not the fallen ped.
+        if (!Finite(point)||std::abs(point.z-origin.z)>1.5f) continue;
         bool clear=true;
         // Two body spheres cover feet-to-head clearance and include CJ, other
         // peds and this car. Try a nearby point if the player occupies the first.
@@ -380,7 +367,7 @@ bool FindDoorExit(void* ped,void* car,int door,Vec& destination) {
             }
         }
         if (!clear) continue;
-        const Vec start=Position(ped);
+        const Vec start=carPosition;
         const GameSymbols::Vec3 from{start.x,start.y,start.z},to{point.x,point.y,point.z};
         alignas(8) std::uint8_t col[0x2c]{};void* hit{};
         void* previous=*g.CWorld_pIgnoreEntity;
@@ -441,6 +428,7 @@ bool BeginHit(Hold& h,bool preparing=false) {
     if (!task) return false;
     dragTaskCtor(task,car,nodes[door-2]);
     pending->target=h;pending->car=car;pending->until=updated+8.0;
+    pending->doorNode=nodes[door-2];
     pending->phase=preparing?Phase::Preparing:Phase::Hit;
     pending->punchAfter=updated+.35;
     registerReference(car,&pending->car);
@@ -500,6 +488,7 @@ bool ContinuePull(Animation& pending,void* player) {
     const int door=ExitDoor(pending.target.ped,player);
     Vec destination{};
     if (door<0||!FindDoorExit(pending.target.ped,pending.car,door,destination)) return false;
+    pending.exitPoint=destination;pending.exitChecked=true;
     ResumePose(pending);
     ActionFeedback(pending.target.ped,false);
     pending.phase=Phase::Pull;pending.until=updated+8.0;
@@ -527,6 +516,16 @@ void PruneAnimations(const Pool& pool,double now) {
     for (auto& a:animations) if (a.target.ped) {
         const bool live=a.target.Live(pool);
         if (!live||!a.car||playerlife::Dead(a.target.ped)||!Seated(a.target.ped)) {
+            if (live&&a.car&&a.phase==Phase::Pull&&a.exitChecked&&!Seated(a.target.ped)&&
+                !playerlife::Dead(a.target.ped)) {
+                const Vec position=Position(a.target.ped);
+                // FindZCoorForPed returns ground + 1 m. A lying ped can be
+                // lower than that without being underground; leave it alone.
+                if (Finite(position)&&position.z<a.exitPoint.z-1.05f) {
+                    if (!OnPlacement(a.target.ped,a.doorNode,a.car,true))
+                        originalPlacement(a.target.ped,a.doorNode,a.car,true);
+                }
+            }
             if (live&&(a.phase==Phase::Waiting||a.phase==Phase::AwaitHit)) ResumePose(a);
             ClearAnimation(a);continue;
         }
@@ -641,12 +640,11 @@ void Install(void* handle) {
     RESOLVE(association,"_Z30RpAnimBlendClumpGetAssociationP7RpClumpj");
     RESOLVE(setAnimationTime,"_ZN21CAnimBlendAssociation14SetCurrentTimeEf");
     RESOLVE(realPhysics,"_ZN8CCarCtrl26SwitchVehicleToRealPhysicsEP8CVehicle");
-    RESOLVE(seatPosition,"_ZN4CPed19SetPedPositionInCarEv");
     auto nameKey=reinterpret_cast<std::uint32_t(*)(const char*)>(dlsym(handle,"_ZN7CKeyGen15GetUppercaseKeyEPKc"));
     if (nameKey) for (auto& point:pausePoints) point.key=nameKey(point.name);
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
-        simplestTask&&startDraggedAnimation&&draggedAnimationVtable&&seatPosition&&
+        simplestTask&&startDraggedAnimation&&draggedAnimationVtable&&
         dragTaskCtor&&registerReference&&cleanReference&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
         canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
         draggedCtor&&draggedDtor&&association&&setAnimationTime&&realPhysics&&nameKey&&g.CEventGroup_Add&&
@@ -674,12 +672,6 @@ void Install(void* handle) {
             ready=Hook(dlsym(handle,"_ZN11CAutomobile14ProcessControlEv"),control,
                 reinterpret_cast<void*>(&OnVehicleControl),original);
             vehicleControl=reinterpret_cast<decltype(vehicleControl)>(original);
-        }
-        if (ready) {
-            constexpr std::uint32_t lineup[]={0x6db73bef,0x6d0133ed,0x6d022beb,0x6d0323e9};
-            ready=Hook(dlsym(handle,"_ZN28CTaskUtilityLineUpPedWithCar10ProcessPedEP4CPedP8CVehicleP21CAnimBlendAssociation"),lineup,
-                reinterpret_cast<void*>(&OnLineUpPed),original);
-            lineUpPed=reinterpret_cast<decltype(lineUpPed)>(original);
         }
         if (ready) {
             constexpr std::uint32_t rails[]={0xd10343ff,0x6d082beb,0x6d0923e9,0xa90a7bfd};

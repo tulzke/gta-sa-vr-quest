@@ -47,13 +47,14 @@ bool eventDriver{};
 bool firstSpotBlocked{},groundMissing{};
 int removed{},added{},sphereTests{};
 Vec expectedExit{};
+Vec seatLocal{};
 GameSymbols::Vec2 lastDirection{};
 int lastFallDirection{};
 alignas(16) char reaction[0x60]{};
 alignas(16) char animationHierarchy[0x28]{};
 alignas(16) char animationLeaf[0x38]{},animationVtable[0x60]{};
 char lineupUtility[0x20]{};
-int controls{},railsCalls{},lineupCalls{},seatCalls{};
+int controls{},railsCalls{};
 unsigned animationId=378;
 int animationStarts{},physicsConversions{};
 bool foreignLeaf{},expectBrakedAI{};
@@ -111,8 +112,6 @@ void StartAnimation(void* leaf,const void* ped) {
 void Physics(void* v) {Write<std::uint8_t>(v,0x5a,3<<3);++physicsConversions;}
 void NativeControl(void* v) {++controls;Write(v,0x68,Vec{.3f,0,0});}
 void NativeRails(void* v) {++railsCalls;Write(v,0x68,Vec{.4f,0,0});}
-void NativeLineup(void*,void*,void*,void*) {++lineupCalls;}
-void SeatPosition(void* p) {CHECK(p==npc);++seatCalls;}
 bool NativeAI(void* v,unsigned*) {
     if (expectBrakedAI) {
         CHECK((Read<std::uint8_t>(v,0x5a)>>3)!=2);
@@ -128,7 +127,8 @@ GameSymbols::Vec3 DoorPoint(const void* v,int node) {
     CHECK(v==car&&node>=8&&node<=11);placedNode=node;
     const float side=node==10||node==11?-1.f:1.f;
     const Vec right=Read<Vec>(carMatrix,0);
-    expectedExit=Position(npc)+right*(side*.5f);
+    const Basis basis{right,Read<Vec>(carMatrix,0x10),Read<Vec>(carMatrix,0x20),Read<Vec>(carMatrix,0x30)};
+    expectedExit=basis.Point(seatLocal)+right*(side*.5f);
     return {expectedExit.x,expectedExit.y,expectedExit.z};
 }
 bool Ground(GameSymbols::Vec3*) {return !groundMissing;}
@@ -177,7 +177,7 @@ void Setup() {
     std::memset(reaction,0,sizeof(reaction));Write(reaction,0x3c,1.f);Write(npc,0x6ac,100.f);Write(player,0x6ac,100.f);
     animationId=378;std::memset(animationHierarchy,0,sizeof(animationHierarchy));
     std::memset(animationLeaf,0,sizeof(animationLeaf));Write<void*>(animationLeaf,0,animationVtable);
-    Write<void*>(animationLeaf,0x30,lineupUtility);controls=railsCalls=lineupCalls=seatCalls=0;
+    Write<void*>(animationLeaf,0x30,lineupUtility);controls=railsCalls=0;
     animationStarts=physicsConversions=0;foreignLeaf=expectBrakedAI=false;aiSpeed=.02f;
     Write<void*>(reaction,0x28,animationHierarchy);
     for (unsigned i=0;i<4;++i) pausePoints[i].key=i+1; // fake engine name hashes
@@ -187,7 +187,7 @@ void Setup() {
     worldRemove=Remove;worldAdd=Add;g.CWorld_TestSphereAgainstWorld=Sphere;canOpen=CanOpen;ready=true;
     draggedCtor=DragCtor;draggedDtor=DragDtor;association=Assoc;setAnimationTime=AnimTime;realPhysics=Physics;vehicleAI=NativeAI;
     simplestTask=Simplest;startDraggedAnimation=StartAnimation;draggedAnimationVtable=animationVtable;
-    vehicleControl=NativeControl;vehicleRails=NativeRails;lineUpPed=NativeLineup;seatPosition=SeatPosition;
+    vehicleControl=NativeControl;vehicleRails=NativeRails;
     g.CEventGroup_Add=AddEvent;g.CPed_GetLocalDirection=Direction;g.CWeapon_GenerateDamageEvent=Damage;
     g.FindPlayerPed=Player;g.FindPlayerVehicle=Vehicle;g.CPad_GetPad=Pad;
     g.CWorld_pIgnoreEntity=&ignoredEntity;g.CPed_GetBonePosition=BonePos;g.CWorld_ProcessLineOfSight=Los;g.CVehicle_GetVehicleAppearance=Appearance;
@@ -209,6 +209,8 @@ void Seat(int passenger=-1) {
     Write<void*>(car,0x18,carMatrix);
     Write(carMatrix,0,Vec{1,0,0});Write(carMatrix,0x10,Vec{0,1,0});
     Write(carMatrix,0x20,Vec{0,0,1});Write(carMatrix,0x30,Vec{-side*.6f,0,0});
+    const Basis basis{Read<Vec>(carMatrix,0),Read<Vec>(carMatrix,0x10),Read<Vec>(carMatrix,0x20),Read<Vec>(carMatrix,0x30)};
+    seatLocal=basis.Local(Position(npc));
 }
 void Punch() {
     const float side=hands[0].gripPos[0]<0?-1.f:1.f;
@@ -430,18 +432,33 @@ int main() {
     Tick();npcgrab::PublishMarkers();CHECK(!xr::markers.count);
     WaitForGrip();ConfirmGrip();npcgrab::PublishMarkers();
     CHECK(xr::markers.count==1&&!xr::markers.markers[0].fist&&xr::markers.markers[0].highlight>.9f);
-    // Every scene phase blocks both physical control and on-rails movement.
+    // Every phase preserves native control (doors/collisions) while braking,
+    // and prevents SIMPLE traffic from moving independently on rails.
     for (auto phase:{Phase::Preparing,Phase::AwaitHit,Phase::Hit,Phase::Waiting,Phase::Pull}) {
         Setup();Seat();Tick();animations[0].phase=phase;
         Write(car,0x68,Vec{.4f,.2f,0});Write(car,0x74,Vec{0,0,.1f});
         OnVehicleControl(car);OnVehicleRails(car);
-        CHECK(!controls&&!railsCalls&&Length(Read<Vec>(car,0x68))==0&&Length(Read<Vec>(car,0x74))==0);
-        OnLineUpPed(lineupUtility,npc,car,reaction);
-        CHECK(seatCalls==(phase==Phase::Pull?0:1)&&lineupCalls==(phase==Phase::Pull?1:0));
-        OnLineUpPed(nullptr,npc,car,reaction);CHECK(lineupCalls==(phase==Phase::Pull?2:1));
-        Write<void*>(car,0x5a0,player);OnVehicleControl(car);CHECK(controls==1);
-        OnVehicleControl(otherCar);OnVehicleRails(otherCar);CHECK(controls==2&&railsCalls==1);
+        CHECK(controls==1&&!railsCalls&&Length(Read<Vec>(car,0x68))==0);
+        Write<void*>(car,0x5a0,player);OnVehicleControl(car);CHECK(controls==2);
+        OnVehicleControl(otherCar);OnVehicleRails(otherCar);CHECK(controls==3&&railsCalls==1);
     }
+    // Bad animated roots do not invalidate a safe door point or leave the ped
+    // below terrain after the engine removes it from the seat and deletes its task.
+    for (int seat=-1;seat<3;++seat) {
+        Setup();Seat(seat);Punch();WaitForGrip();ConfirmGrip();
+        CHECK(animations[0].exitChecked);
+        const Vec safe=animations[0].exitPoint;
+        Write(npc,8,Vec{safe.x,safe.y,safe.z-4.f});
+        CHECK(OnPlacement(npc,animatedNode,car,true));
+        CHECK(std::abs(Position(npc).z-safe.z)<.001f);
+        Write(npc,8,Vec{safe.x,safe.y,safe.z-4.f});
+        Write<std::uint8_t>(npc,0x585,0);Write<void*>(intelligence,8+3*8,nullptr);
+        Tick();CHECK(std::abs(Position(npc).z-safe.z)<.001f&&!animations[0].target.ped);
+    }
+    Setup();Seat();Punch();WaitForGrip();ConfirmGrip();
+    const Vec safe=animations[0].exitPoint;
+    Write(npc,8,Vec{safe.x,safe.y,safe.z-.6f});Write<std::uint8_t>(npc,0x585,0);
+    Tick();CHECK(!removed&&!added); // normal low falling/lying pose is never lifted
     const auto palm=npcgrab::Palm({{}, {1,0,0}, {0,1,0}, false});
     const auto fist=npcgrab::Fist({{}, {1,0,0}, {0,1,0}, false,true});
     CHECK(palm.count>60&&palm.count<=120&&fist.count>24&&fist.count<=120);
