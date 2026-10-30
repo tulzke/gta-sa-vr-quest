@@ -34,12 +34,14 @@ bool GetHeadWorldRay(float out[3],float[3]) {out[0]=0;out[1]=0;out[2]=1;return t
 }
 }
 // PRODUCTION_ADAPTER
+// PRODUCTION_MELEE_FILTER
 using namespace savr;
 using namespace savr::npcgrab;
 using savr::vehicledoors::Vec;
 namespace {
 alignas(16) char player[0x9c8]{},npc[0x9c8]{},car[0xc68]{},pad[0x200]{},poolData[0x20]{},intelligence[0x100]{},fall[0x28]{},carMatrix[0x40]{};
 alignas(16) char taskMemory[32][0x28]{};
+alignas(16) char otherCar[0xc68]{};
 int allocations{},aggressions{},dragEvents{},dragDestroyed{},primaryReplaced{},animatedNode{},refAdds{},refRemoves{},nativePlacements{};
 bool eventDriver{};
 bool firstSpotBlocked{},groundMissing{};
@@ -143,6 +145,7 @@ void Setup() {
     xr::focused=vrcam::active=true;physicalweapon::mask=vehicledoors::mask=0;
     hands[0]={};hands[1]={};hands[1].valid=false;hands[0].gripPos[2]=1;
     Write(npc,0x20,static_cast<void*>(npc));Write(npc,0x538,static_cast<void*>(intelligence));
+    Write<std::uint8_t>(car,0x5a,2);Write<std::uint8_t>(otherCar,0x5a,2);Write<std::uint8_t>(npc,0x5a,3);
     std::memset(reaction,0,sizeof(reaction));Write(reaction,0x3c,1.f);Write(npc,0x6ac,100.f);Write(player,0x6ac,100.f);
     Write<void*>(poolData,0,npc);Write(poolData,8,flags);Write(poolData,0x10,1);
     pedPool=&poolPtr;getPed=Lookup;isPlayer=IsPlayer;allocate=Allocate;fallCtor=Fall;standCtor=Stand;calculateVelocity=NativeVelocity;setTask=SetTask;
@@ -241,6 +244,20 @@ int main() {
         hands[0].grip=0;Tick();CHECK(!npcgrab::ClaimedHands());
     }
     Setup();Seat();Grip();CHECK(!animatedNode&&!npcgrab::ClaimedHands()); // no hit from a grip alone
+    Setup();Seat();hands[0].grip=hands[0].trigger=1;Tick();
+    CHECK(!animatedNode&&BlocksVehicleInteraction(car,0)); // approach is protected before reaching the face
+    CHECK(!melee_filter::Damageable(car,player,0,0)&&!melee_filter::Damageable(car,player,1,0));
+    CHECK(melee_filter::Damageable(otherCar,player,0,0)&&melee_filter::Damageable(car,player,2,0));
+    CHECK(melee_filter::Damageable(npc,player,0,0)); // world/NPC collision stays enabled
+    hands[0].grip=hands[0].trigger=0;Tick();CHECK(!BlocksVehicleInteraction(car,0));
+    CHECK(melee_filter::Damageable(car,player,0,0)); // normal vehicle punches restored after the gesture
+    Setup();Seat();hands[0].grip=hands[0].trigger=0;Tick();
+    hands[0].grip=hands[0].trigger=1;hands[0].gripPos[0]+=.014f;Tick();CHECK(animatedNode); // same threshold as physical fists
+    CHECK(BlocksVehicleInteraction(car,0)&&BlocksVehicleInteraction(car,1));
+    WaitForGrip();CHECK(BlocksVehicleInteraction(car,0)&&BlocksVehicleInteraction(car,1));
+    physicalweapon::mask=1;CHECK(!BlocksVehicleInteraction(car,0)&&BlocksVehicleInteraction(car,1));
+    physicalweapon::mask=0;ConfirmGrip();CHECK(BlocksVehicleInteraction(car,1));
+    FinishExtraction();Tick();CHECK(!BlocksVehicleInteraction(car,0)&&!BlocksVehicleInteraction(car,1));
     Setup();Seat();Punch();WaitForGrip();
     animations[0].waitUntil=updated-1;Tick();
     CHECK(Seated(npc)&&!Read<void*>(intelligence,8+3*8)&&aggressions==1&&!dragEvents);
@@ -260,10 +277,12 @@ int main() {
     Tick(true);npcgrab::PublishMarkers();CHECK(xr::markers.count==0);
     Setup();Seat();locked=true;Tick();npcgrab::PublishMarkers();CHECK(xr::markers.count==0);
     Setup();Seat();physicalweapon::mask=3;Tick();npcgrab::PublishMarkers();CHECK(xr::markers.count==0);
-    // Low-speed opening stops traffic for 1.5 s even after AI chooses to accelerate.
+    // Low-speed opening stops traffic for 3 s even after AI chooses to accelerate.
     Setup();Seat();Write(car,0x68,Vec{.07f,0,0});OnDoorOpening(car);
     CHECK(Read<Vec>(car,0x68).x==0&&Read<float>(car,0x608)==0&&Read<float>(car,0x60c)==1);
     unsigned flagsAI{};CHECK(OnVehicleAI(car,&flagsAI));CHECK(Read<float>(car,0x608)==0);
+    CHECK(stops[0].until-Now()>2.9&&stops[0].until-Now()<=3.0);
+    stops[0].until=Now()+1.4;OnVehicleAI(car,&flagsAI);CHECK(Read<float>(car,0x608)==0);
     stops[0].until=Now()-1;OnVehicleAI(car,&flagsAI);CHECK(Read<float>(car,0x608)==1);
     Setup();Seat();Write(car,0x68,Vec{.2f,0,0});OnDoorOpening(car);CHECK(!stops[0].car&&Read<Vec>(car,0x68).x==.2f);
     Setup();Seat();Write<void*>(car,0x5a0,player);OnDoorOpening(car);CHECK(!stops[0].car);

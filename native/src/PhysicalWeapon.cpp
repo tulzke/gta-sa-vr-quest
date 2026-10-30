@@ -783,12 +783,12 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     const bool headValid = xr::GetTrackingSnapshot(headPosition, headOrientation, latest, &trackingEpoch);
     const double now = NowSeconds();
 
-    // Door ownership wins before fresh weapon grabs, using the same XR sample.
+    // NPC punch corridors and door ownership resolve before fresh weapon grabs.
     // Run outside gMutex: the door module queries existing weapon/support owners.
     const bool navigationClaimed=testarea::UpdateNavigation(interactionsBlocked,latest,
         headPosition,headOrientation,headValid,trackingEpoch);
-    vehicledoors::Update(interactionsBlocked||navigationClaimed, latest, headValid, trackingEpoch);
     npcgrab::Update(interactionsBlocked||navigationClaimed||driving::GetVehicleDebugMode()!=0, latest, headValid, trackingEpoch);
+    vehicledoors::Update(interactionsBlocked||navigationClaimed, latest, headValid, trackingEpoch);
     const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands();
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));

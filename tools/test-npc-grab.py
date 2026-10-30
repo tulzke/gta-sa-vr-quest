@@ -25,6 +25,20 @@ source = remove_function(source, 'bool Hook(void* target')
 source = remove_function(source, 'void Install(void* handle)')
 source = '\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness = (ROOT / 'tools/tests/npc_grab.cpp').read_text(encoding='utf8')
+melee = (ROOT / 'native/src/Melee.cpp').read_text(encoding='utf8')
+def function(text, signature):
+    start = text.index(signature)
+    brace = text.index('{', start)
+    end, depth = brace + 1, 1
+    while depth:
+        depth += (text[end] == '{') - (text[end] == '}')
+        end += 1
+    return text[start:end]
+filter_code = ('namespace savr::melee_filter {\n'
+               'constexpr int kEntityTypeOffset=0x5a,kEntityPed=3,kEntityVehicle=2,kEntityObject=4;\n'
+               + function(melee, 'int EntityType(void* entity)') + '\n'
+               + function(melee, 'bool Damageable(void* entity, void* player') + '\n}\n')
+harness = harness.replace('// PRODUCTION_MELEE_FILTER', filter_code)
 generated = OUT / 'npc_grab.cpp'
 generated.write_text(harness.replace('// PRODUCTION_ADAPTER', source), encoding='utf8')
 exe = OUT / ('npc_grab.exe' if os.name == 'nt' else 'npc_grab')

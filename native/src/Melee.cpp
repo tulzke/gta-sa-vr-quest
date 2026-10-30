@@ -290,9 +290,10 @@ bool ProcessLine(V3 from, V3 to, ColPoint& contact, void*& entity) {
         true, true, true, true, true, false, false, false);
 }
 
-bool Damageable(void* entity, void* player) {
+bool Damageable(void* entity, void* player,int weaponType,int hand) {
     if (!entity || entity == player) return false;
     const int type = EntityType(entity);
+    if (type==kEntityVehicle&&weaponType<=1&&npcgrab::BlocksVehicleInteraction(entity,hand)) return false;
     if (type == kEntityObject) {
         // Props (gym punching bags first of all) only become melee targets
         // when the object response symbols resolved; otherwise a swing near
@@ -326,7 +327,7 @@ float ProbeRadius(int weaponType) {
     return radius;
 }
 
-bool FindContact(void* player, int weaponType,
+bool FindContact(void* player, int weaponType,int hand,
                  V3 rootStart, V3 rootEnd, V3 tipStart, V3 tipEnd,
                  void*& target, ColPoint& targetContact) {
     target = nullptr;
@@ -362,7 +363,7 @@ bool FindContact(void* player, int weaponType,
             void* sphereEntity = g.CWorld_TestSphereAgainstWorld(
                 ToGame(point), probeRadius, player,
                 false, true, true, true, false, false);
-            if (Damageable(sphereEntity, player)) {
+            if (Damageable(sphereEntity, player,weaponType,hand)) {
                 ColPoint sphereContact{};
                 std::memcpy(sphereContact.bytes, g.gaTempSphereColPoints,
                             kColPointSize);
@@ -377,7 +378,7 @@ bool FindContact(void* player, int weaponType,
             ColPoint sweptContact{};
             void* sweptEntity = nullptr;
             if (ProcessLine(previousPoint, point, sweptContact, sweptEntity) &&
-                Damageable(sweptEntity, player) &&
+                Damageable(sweptEntity, player,weaponType,hand) &&
                 VisibleFromHandle(root, sweptEntity)) {
                 target = sweptEntity;
                 targetContact = sweptContact;
@@ -389,7 +390,7 @@ bool FindContact(void* player, int weaponType,
         ColPoint shaftContact{};
         void* shaftEntity = nullptr;
         if (ProcessLine(root, tip, shaftContact, shaftEntity) &&
-            Damageable(shaftEntity, player)) {
+            Damageable(shaftEntity, player,weaponType,hand)) {
             target = shaftEntity;
             targetContact = shaftContact;
             *g.CWorld_pIgnoreEntity = savedIgnore;
@@ -725,7 +726,7 @@ void Update(bool interactionsBlocked) {
                 ToWorld(segment.tip, tipEnd)) {
                 void* target = nullptr;
                 ColPoint contact{};
-                if (FindContact(player, segment.weaponType,
+                if (FindContact(player, segment.weaponType,hand,
                                 rootStart, rootEnd, tipStart, tipEnd,
                                 target, contact)) {
                     ApplyContact(player, hand, segment.weaponType,

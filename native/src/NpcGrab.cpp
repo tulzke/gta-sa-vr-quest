@@ -90,6 +90,7 @@ struct Hold {
             p.flags[ref>>8]==(ref&255)&&!(p.flags[ref>>8]&128)&&getPed(ref)==ped;
     }
 } holds[2];
+Hold approach[2];
 Hold flights[4];
 unsigned nextFlight{};
 enum class Phase { Hit,Waiting,Pull };
@@ -363,6 +364,22 @@ bool PunchAtSeat(const Pool& pool,void* player,Vec eye,Vec p,Vec previous) {
             }
     return struck.ped&&BeginHit(struck);
 }
+Hold ApproachAtSeat(const Pool& pool,void* player,Vec eye,Vec hand) {
+    Hold target{};float nearest=.95f;
+    for (int slot=0;slot<pool.size;++slot) {
+        if (pool.flags[slot]&128) continue;
+        const int ref=(slot<<8)|pool.flags[slot];void* ped=getPed(ref);
+        if (!ped||ped==player||isPlayer(ped)||playerlife::Dead(ped)||!Seated(ped)) continue;
+        if (!Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f) continue;
+        const int door=ExitDoor(ped,player);if (door<0) continue;
+        const Vec head=Bone(ped,5);const float distance=Length(head-hand);
+        if (Finite(head)&&distance<nearest&&SeatReachable(ped,door,eye,hand)&&
+            Visible(eye,head,ped,Read<void*>(ped,0x708))) {
+            nearest=distance;target={ped,pool.identity,pool.objects,nullptr,ref,5};
+        }
+    }
+    return target;
+}
 bool ContinuePull(Animation& pending,void* player) {
     if (pending.phase!=Phase::Waiting) return false;
     const int door=ExitDoor(pending.target.ped,player);
@@ -528,10 +545,20 @@ void OnDoorOpening(void* car) {
     if (!chosen) for (auto& stop:stops) if (!stop.car) { chosen=&stop;break; }
     if (!chosen) return;
     if (!chosen->car) { chosen->car=car;registerReference(car,&chosen->car); }
-    chosen->until=Now()+1.5;
+    chosen->until=Now()+3.0;
     StopCar(car,Now());
 }
 unsigned ClaimedHands() { return claimed.load(std::memory_order_relaxed); }
+bool BlocksVehicleInteraction(void* car,int hand) {
+    if (!car||hand<0||hand>1||!ready||Now()-updated>.2||
+        (physicalweapon::HeldHandMaskRelaxed()&(1u<<hand))||physicalweapon::IsSupportHand(hand)) return false;
+    Pool pool;
+    if (!pool.Load()) return false;
+    for (const auto& a:animations)
+        if (a.car==car&&a.target.Live(pool)) return true;
+    const auto& target=approach[hand];
+    return target.Live(pool)&&Seated(target.ped)&&Read<void*>(target.ped,0x708)==car;
+}
 void PublishMarkers() {
     MarkerFrame frame{};frame.epoch=worldMarkers.epoch;
     for (int i=0;i<worldMarkers.count;++i) {
@@ -555,6 +582,7 @@ void Reset() {
     for (auto& active:intent) active=false;
     for (auto& released:extracted) released=false;
     for (auto& motion:handMotion) motion={};
+    for (auto& target:approach) target={};
     Pool current;current.Load();
     for (auto& a:animations) if (a.target.Live(current)&&a.phase!=Phase::Pull) CancelHit(a,false);
     for (auto& flight:flights) flight={};
@@ -591,6 +619,10 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             vrcam::TrackingPointToWorld(hands[hand].gripPos,world);
         const Vec p{world[0],world[1],world[2]};
         const bool good=valid&&Finite(p)&&Finite(eye)&&Length(p-eye)<1.6f;
+        // Reserve the punch corridor before the ordinary melee sweep reaches
+        // a door/window collider, not only once the fist reaches the face.
+        approach[hand]=good&&hands[hand].grip>=.65f&&hands[hand].trigger>=.45f?
+            ApproachAtSeat(pool,player,eye,p):Hold{};
         const Vec previous=handMotion[hand].previous;
         const bool haveMotion=handMotion[hand].valid&&good&&Length(p-previous)<.6f;
         const float handSpeed=haveMotion?Length(p-previous)/dt:0.f;
@@ -626,7 +658,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 Write(h.ped,0x68,h.command);
                 if (Length(p-h.start)>.12f&&Length(h.velocity)>.6f) Aggression(h,player);
             }
-        } else if (good&&haveMotion&&Length(p-previous)>=.02f&&hands[hand].grip>=.65f&&hands[hand].trigger>=.45f&&handSpeed>=1.8f&&
+        } else if (good&&haveMotion&&Length(p-previous)>=.01f&&hands[hand].grip>=.65f&&hands[hand].trigger>=.45f&&handSpeed>=1.25f&&
                    PunchAtSeat(pool,player,eye,p,previous)) {
             intent[hand]=false;extracted[hand]=true;mask|=1u<<hand;
             xr::TriggerHaptic(hand,.6f,80.f,45.f);
