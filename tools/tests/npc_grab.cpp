@@ -59,6 +59,14 @@ unsigned animationId=378;
 int animationStarts{},physicsConversions{};
 bool foreignLeaf{},expectBrakedAI{};
 float aiSpeed=.02f;
+alignas(16) char soundTemplate[0x100]{},soundPool[8][0x100]{};
+std::uint32_t gameTime=10000;
+int soundRequests{},soundUpdates{},soundStops{};
+void* NativeRequestSound(void*,void* source) {
+    void* result=soundPool[soundRequests++%8];std::memcpy(result,source,0x100);return result;
+}
+void NativeUpdateSound(void* sound,short) {++soundUpdates;Write(sound,0x28,1.f);Write(sound,0x70,1.f);}
+void NativeStopSound(void*) {++soundStops;}
 const void* eventPlayer{};const void* eventCar{};
 void* poolPtr=poolData;
 std::uint8_t flags[1]{1};
@@ -167,6 +175,7 @@ void Setup() {
     Reset();for (auto& a:animations) ClearAnimation(a);for (auto& stop:stops) ClearStop(stop);std::memset(npc,0,sizeof(npc));std::memset(car,0,sizeof(car));std::memset(intelligence,0,sizeof(intelligence));
     std::memset(player,0,sizeof(player));
     for (auto& target:preparationBlocked) target={};
+    for (auto& sound:sceneSounds) sound={};soundRequests=soundUpdates=soundStops=0;
     flags[0]=1;wall=locked=carOccludes=placementBlocked=false;ignoredEntity=nullptr;placedNode=0;
     firstSpotBlocked=groundMissing=false;removed=added=sphereTests=0;
     allocations=aggressions=dragEvents=dragDestroyed=primaryReplaced=animatedNode=refAdds=refRemoves=nativePlacements=0;eventCar=eventPlayer=nullptr;
@@ -188,6 +197,8 @@ void Setup() {
     draggedCtor=DragCtor;draggedDtor=DragDtor;association=Assoc;setAnimationTime=AnimTime;realPhysics=Physics;vehicleAI=NativeAI;
     simplestTask=Simplest;startDraggedAnimation=StartAnimation;draggedAnimationVtable=animationVtable;
     vehicleControl=NativeControl;vehicleRails=NativeRails;
+    requestSound=NativeRequestSound;updateSound=NativeUpdateSound;stopSound=NativeStopSound;
+    g.CTimer_m_snTimeInMilliseconds=&gameTime;
     g.CEventGroup_Add=AddEvent;g.CPed_GetLocalDirection=Direction;g.CWeapon_GenerateDamageEvent=Damage;
     g.FindPlayerPed=Player;g.FindPlayerVehicle=Vehicle;g.CPad_GetPad=Pad;
     g.CWorld_pIgnoreEntity=&ignoredEntity;g.CPed_GetBonePosition=BonePos;g.CWorld_ProcessLineOfSight=Los;g.CVehicle_GetVehicleAppearance=Appearance;
@@ -279,13 +290,13 @@ int main() {
     Setup();Seat();Write<void*>(animationLeaf,0,nullptr);Punch();CHECK(animationStarts==0);
     Setup();Seat();Tick();Tick();CHECK(animations[0].phase==Phase::AwaitHit);
     Write(car,0x770+2*0x18+0xc,0.f);Tick();
-    CHECK(!animations[0].target.ped&&!aggressions&&Read<float>(reaction,0x3c)==1.f);
+    CHECK(!animations[0].target.ped&&!aggressions&&dragEvents==1&&Read<float>(reaction,0x3c)==0.f);
     Setup();Seat();Tick();Tick();Write(player,8,Vec{10,0,0});Tick();
-    CHECK(!animations[0].target.ped&&!aggressions);
+    CHECK(!animations[0].target.ped&&!aggressions&&dragEvents==1);
     Setup();Seat();Tick();Tick();wall=true;Tick();
-    CHECK(!animations[0].target.ped&&!aggressions&&Read<float>(reaction,0x3c)==1.f);
+    CHECK(animations[0].phase==Phase::AwaitHit&&!aggressions&&!dragEvents); // occlusion does not abort an acquired scene
     Setup();Seat();Tick();Tick();Tick(true);
-    CHECK(!animations[0].target.ped&&!aggressions&&Read<float>(reaction,0x3c)==1.f);
+    CHECK(!animations[0].target.ped&&!aggressions&&dragEvents==1&&Read<float>(reaction,0x3c)==0.f);
     Setup();Grip();CHECK(npcgrab::ClaimedHands()==1&&fallCalls==0&&standCalls==1);
     hands[0].gripPos[0]=.04f;Tick();CHECK(Read<Vec>(npc,0x68).x>0);
     const Vec heldSpeed=Read<Vec>(npc,0x68);
@@ -358,10 +369,10 @@ int main() {
     FinishExtraction();Tick();CHECK(!BlocksVehicleInteraction(car,0)&&!BlocksVehicleInteraction(car,1));
     Setup();Seat();Punch();WaitForGrip();
     animations[0].waitUntil=updated-1;Tick();
-    CHECK(Seated(npc)&&!Read<void*>(intelligence,8+3*8)&&aggressions==1&&!dragEvents);
-    CHECK(Read<float>(reaction,0x3c)==1&&!animations[0].target.ped); // no frozen animation or driving lock
+    CHECK(Seated(npc)&&!Read<void*>(intelligence,8+3*8)&&!aggressions&&dragEvents==1);
+    CHECK(Read<float>(reaction,0x3c)==0&&!animations[0].target.ped); // aborted layer is stopped, not resumed without its task
     Setup();Seat();Punch();WaitForGrip();Tick(true);
-    CHECK(!Read<void*>(intelligence,8+3*8)&&!aggressions&&Read<float>(reaction,0x3c)==1); // menu cancels safely
+    CHECK(!Read<void*>(intelligence,8+3*8)&&!aggressions&&dragEvents==1&&Read<float>(reaction,0x3c)==0); // menu cancels the layer safely
     Setup();Seat();placementBlocked=true;Punch();WaitForGrip();ConfirmGrip();
     CHECK(animations[0].phase==Phase::Waiting&&!dragEvents&&!removed&&!added);
     Setup();Seat();groundMissing=true;Punch();WaitForGrip();ConfirmGrip();
@@ -459,6 +470,47 @@ int main() {
     const Vec safe=animations[0].exitPoint;
     Write(npc,8,Vec{safe.x,safe.y,safe.z-.6f});Write<std::uint8_t>(npc,0x585,0);
     Tick();CHECK(!removed&&!added); // normal low falling/lying pose is never lifted
+    // Walking outside the small acquisition zone keeps the existing scene.
+    for (auto phase:{Phase::Preparing,Phase::AwaitHit,Phase::Hit,Phase::Waiting}) {
+        Setup();Seat();Tick();Tick();animations[0].phase=phase;
+        Write(animationHierarchy,0,1u);Write(reaction,0x38,.1f);
+        animations[0].waitUntil=Now()+2;
+        Write(player,8,Vec{4.5f,0,0});wall=true;hands[0].valid=false;Tick();
+        CHECK(animations[0].target.ped&&animations[0].phase==phase&&!dragEvents);
+        Write(player,8,Vec{8,0,0});Tick();
+        CHECK(!animations[0].target.ped&&dragEvents==1&&!Read<void*>(intelligence,8+3*8));
+        CHECK(Read<float>(reaction,0x3c)==0&&Read<float>(reaction,0x34)==-1000.f);
+        CHECK(!(Read<std::uint16_t>(reaction,0x46)&1)&&(Read<std::uint16_t>(reaction,0x46)&4));
+        Tick();CHECK(dragEvents==1); // no repeated reaction or orphaned layer
+    }
+    const auto makeSound=[&](int event,float due,bool scene=true) {
+        std::memset(soundTemplate,0,sizeof(soundTemplate));
+        Write<void*>(soundTemplate,8,(scene?npc:player)+0x198);
+        Write(soundTemplate,0x18,event);Write(soundTemplate,0x1c,float(gameTime)+due*1000.f);
+        Write(soundTemplate,0x28,1.f);Write(soundTemplate,0x70,1.f);
+        return OnRequestSound(nullptr,soundTemplate);
+    };
+    Setup();Seat();Write(animationHierarchy,0,1u);Tick();
+    void* hitSound=makeSound(69,.5f);void* fallSound=makeSound(69,2.133f);
+    CHECK(hitSound&&fallSound&&Read<float>(hitSound,0x28)==0&&Read<float>(soundTemplate,0x28)==1);
+    Write(reaction,0x38,.4f);OnUpdateSound(hitSound,0);CHECK(Read<float>(hitSound,0x28)==0);
+    animations[0].phase=Phase::AwaitHit;Write(reaction,0x38,.5f);
+    OnUpdateSound(hitSound,0);CHECK(Read<float>(hitSound,0x70)==0);
+    animations[0].phase=Phase::Hit;OnUpdateSound(hitSound,20);OnUpdateSound(fallSound,0);
+    CHECK(Read<float>(hitSound,0x28)==1&&Read<float>(fallSound,0x28)==0);
+    animations[0].phase=Phase::Waiting;OnUpdateSound(hitSound,100);
+    CHECK(Read<float>(hitSound,0x28)==0&&Read<float>(hitSound,0x70)==0);
+    void* unrelated=makeSound(69,0,false);OnUpdateSound(unrelated,0);
+    CHECK(Read<float>(unrelated,0x28)==1); // other peds are never paused
+    animations[0].phase=Phase::Pull;Write(reaction,0x38,2.2f);OnUpdateSound(fallSound,10);
+    CHECK(Read<float>(fallSound,0x28)==1);
+    CancelHit(animations[0],true);OnUpdateSound(hitSound,100);OnUpdateSound(fallSound,10);
+    CHECK(soundStops==2&&dragEvents==1);
+    Setup();Seat();Tick();void* finished=makeSound(70,0);
+    ClearAnimation(animations[0]);OnUpdateSound(finished,20);
+    CHECK(!soundStops&&Read<float>(finished,0x28)==1); // natural completion lets the last piece finish
+    Setup();Seat();Tick();void* recycled=makeSound(69,0);CancelHit(animations[0],true);
+    Write<void*>(recycled,8,player+0x198);OnUpdateSound(recycled,0);CHECK(!soundStops);
     const auto palm=npcgrab::Palm({{}, {1,0,0}, {0,1,0}, false});
     const auto fist=npcgrab::Fist({{}, {1,0,0}, {0,1,0}, false,true});
     CHECK(palm.count>60&&palm.count<=120&&fist.count>24&&fist.count<=120);

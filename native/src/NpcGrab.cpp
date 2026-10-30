@@ -47,6 +47,9 @@ void (*setAnimationTime)(void*,float){};
 bool (*vehicleAI)(void*,unsigned*){};
 void (*vehicleControl)(void*){};
 void (*vehicleRails)(void*){};
+void* (*requestSound)(void*,void*){};
+void (*updateSound)(void*,short){};
+void (*stopSound)(void*){};
 void (*realPhysics)(void*){};
 std::atomic<unsigned> claimed{};
 GripEdge edges[2];
@@ -127,11 +130,19 @@ struct Animation {
     float speed{1.f};
     void* task{};
     void* pausedAssociation{};
+    void* ownedAssociation{};
     bool synchronized{};
     Vec exitPoint{};
     bool exitChecked{};
     int doorNode{};
+    unsigned audioSerial{};
+    std::uint32_t audioStart{};
 } animations[4];
+unsigned nextAudioSerial{};
+struct SceneSound {
+    void* sound{};void* entity{};int event{};float stamp{},due{};
+    unsigned serial{};bool cancelled{};
+} sceneSounds[32];
 struct TrafficStop { void* car{};double until{}; } stops[4];
 double Now() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -180,6 +191,50 @@ void ResumePose(Animation& a) {
         Write<std::uint16_t>(anim,0x46,(flags&~0x20u)|(a.synchronized?0x20u:0u));
     }
     a.pausedAssociation=nullptr;
+}
+Animation* SoundScene(void* entity) {
+    for (auto& a:animations) if (a.target.ped&&
+        static_cast<char*>(a.target.ped)+0x198==entity) return &a;
+    return nullptr;
+}
+void* OnRequestSound(void* manager,void* sound) {
+    const int event=Read<int>(sound,0x18);
+    auto* a=event>=69&&event<=73?SoundScene(Read<void*>(sound,8)):nullptr;
+    if (!a) return requestSound(manager,sound);
+    SceneSound* track=nullptr;
+    for (auto& s:sceneSounds) if (!s.sound) { track=&s;break; }
+    if (!track) return nullptr; // never create an untracked full-scene sound
+    const float stamp=Read<float>(sound,0x1c);
+    const float speed=Read<float>(sound,0x28),frequency=Read<float>(sound,0x70);
+    Write(sound,0x28,0.f);Write(sound,0x70,0.f);
+    void* live=requestSound(manager,sound);
+    Write(sound,0x28,speed);Write(sound,0x70,frequency);
+    if (live) {
+        for (auto& old:sceneSounds) if (old.sound==live) old={};
+        *track={live,Read<void*>(sound,8),event,stamp,
+            std::max(0.f,(stamp-float(a->audioStart))*.001f),a->audioSerial,false};
+    }
+    return live;
+}
+void OnUpdateSound(void* sound,short position) {
+    updateSound(sound,position);
+    for (auto& s:sceneSounds) if (s.sound==sound) {
+        if (position<0||Read<void*>(sound,8)!=s.entity||Read<int>(sound,0x18)!=s.event||
+            Read<float>(sound,0x1c)!=s.stamp) { s={};return; }
+        if (s.cancelled) { stopSound(sound);s={};return; }
+        auto* a=SoundScene(s.entity);
+        if (!a||a->audioSerial!=s.serial) { s={};return; } // natural exit: let its last sound finish
+        Pool pool;
+        if (!pool.Load()||!a->target.Live(pool)) { stopSound(sound);s={};return; }
+        void* anim=VictimAnimation(a->target.ped);
+        const float time=anim?Read<float>(anim,0x38):0.f;
+        const bool playing=(a->phase==Phase::Hit||a->phase==Phase::Pull)&&
+            std::isfinite(time)&&time>=s.due;
+        // Retail delayed jacking SFX already use speed zero before their due
+        // time. Use the same mechanism for both pauses, including virtual time.
+        Write(sound,0x28,playing?1.f:0.f);Write(sound,0x70,playing?1.f:0.f);
+        return;
+    }
 }
 void PausePose(Animation& a,void* anim,float time) {
     a.speed=Read<float>(anim,0x3c);
@@ -399,9 +454,10 @@ bool OnPlacement(void* ped,int node,void* car,bool search) {
     return originalPlacement(ped,node,car,search);
 }
 void ReportCarjack(Animation& pending,void* player) {
+    void* brain=Read<void*>(pending.target.ped,0x538);
+    if (!brain||!player||!pending.car) return;
     alignas(16) std::uint8_t event[0x30]{};
     draggedCtor(event,pending.car,player,Read<void*>(pending.car,0x5a0)==pending.target.ped);
-    void* brain=Read<void*>(pending.target.ped,0x538);
     g.CEventGroup_Add(static_cast<char*>(brain)+0xc8,event,true);
     draggedDtor(event);
 }
@@ -429,6 +485,8 @@ bool BeginHit(Hold& h,bool preparing=false) {
     dragTaskCtor(task,car,nodes[door-2]);
     pending->target=h;pending->car=car;pending->until=updated+8.0;
     pending->doorNode=nodes[door-2];
+    pending->audioSerial=++nextAudioSerial;
+    pending->audioStart=g.CTimer_m_snTimeInMilliseconds?*g.CTimer_m_snTimeInMilliseconds:0;
     pending->phase=preparing?Phase::Preparing:Phase::Hit;
     pending->punchAfter=updated+.35;
     registerReference(car,&pending->car);
@@ -446,6 +504,7 @@ bool BeginHit(Hold& h,bool preparing=false) {
     void* leaf=simplestTask(task);
     if (leaf&&Read<void*>(leaf,0)==draggedAnimationVtable) {
         if (!Read<void*>(leaf,0x18)) startDraggedAnimation(leaf,h.ped);
+        pending->ownedAssociation=Read<void*>(leaf,0x18);
     }
     return true;
 }
@@ -496,13 +555,20 @@ bool ContinuePull(Animation& pending,void* player) {
     return true;
 }
 void CancelHit(Animation& a,bool react) {
-    ResumePose(a);
+    for (auto& sound:sceneSounds) if (sound.serial==a.audioSerial) sound.cancelled=true;
+    // The task destructor only detaches its finish callback. It does not stop
+    // the association, which otherwise keeps moving a seated ped after abort.
+    void* anim=VictimAnimation(a.target.ped);
+    if (anim&&anim==a.ownedAssociation) {
+        Write(anim,0x3c,0.f);Write(anim,0x40,0.f);Write(anim,0x34,-1000.f);Write(anim,0x30,0.f);
+        const auto flags=Read<std::uint16_t>(anim,0x46);
+        Write<std::uint16_t>(anim,0x46,(flags&~(1u|0x20u))|4u);
+    }
+    a.pausedAssociation=nullptr;
     if (void* manager=Manager(a.target.ped)) {
         if (a.task&&Read<void*>(manager,3*8)==a.task) setTask(manager,nullptr,3,false);
     }
-    // No carjack happened. Native unarmed aggression chooses leaving to fight
-    // or escaping in the car, with the victim still seated at this point.
-    if (react) Aggression(a.target,owner);
+    if (react&&owner&&!playerlife::Dead(a.target.ped)) ReportCarjack(a,owner);
     // Do not immediately start a new preparation over the native reaction.
     // Walking away or closing the door permits automatic preparation again.
     preparationBlocked[nextPreparationBlocked++%4]=a.target;
@@ -534,12 +600,14 @@ void PruneAnimations(const Pool& pool,double now) {
             continue;
         }
         void* manager=Manager(a.target.ped);
-        if (!manager||Read<void*>(manager,3*8)!=a.task||now>=a.until) { CancelHit(a,false);continue; }
+        if (!manager||Read<void*>(manager,3*8)!=a.task||now>=a.until) { CancelHit(a,true);continue; }
+        if (!a.ownedAssociation) a.ownedAssociation=VictimAnimation(a.target.ped);
+        if (!owner||!Finite(Position(a.car))||!Finite(Position(owner))||
+            Length(Position(a.car)-Position(owner))>6.f) { CancelHit(a,true);continue; }
         if (a.phase==Phase::Preparing||a.phase==Phase::AwaitHit) {
             StopCar(a.car,now);
-            if (!owner||!Finite(Position(a.target.ped))||Length(Position(a.target.ped)-Position(owner))>3.f||
-                ExitDoor(a.target.ped,owner)<0) { CancelHit(a,false);continue; }
-            a.until=now+8.0; // stay ready while the player remains at the open door
+            if (ExitDoor(a.target.ped,owner)<0) { CancelHit(a,true);continue; }
+            a.until=now+8.0; // wider scene radius; reach/visibility gates only acquire actions
             if (a.phase==Phase::Preparing) if (void* anim=VictimAnimation(a.target.ped)) {
                 const auto* point=AnimationPoint(anim);
                 const float time=Read<float>(anim,0x38),pause=point?point->start:0.f;
@@ -640,11 +708,12 @@ void Install(void* handle) {
     RESOLVE(association,"_Z30RpAnimBlendClumpGetAssociationP7RpClumpj");
     RESOLVE(setAnimationTime,"_ZN21CAnimBlendAssociation14SetCurrentTimeEf");
     RESOLVE(realPhysics,"_ZN8CCarCtrl26SwitchVehicleToRealPhysicsEP8CVehicle");
+    RESOLVE(stopSound,"_ZN8CAESound18StopSoundAndForgetEv");
     auto nameKey=reinterpret_cast<std::uint32_t(*)(const char*)>(dlsym(handle,"_ZN7CKeyGen15GetUppercaseKeyEPKc"));
     if (nameKey) for (auto& point:pausePoints) point.key=nameKey(point.name);
 #undef RESOLVE
     ready=pedPool&&getPed&&isPlayer&&allocate&&fallCtor&&standCtor&&setTask&&
-        simplestTask&&startDraggedAnimation&&draggedAnimationVtable&&
+        simplestTask&&startDraggedAnimation&&draggedAnimationVtable&&stopSound&&g.CTimer_m_snTimeInMilliseconds&&
         dragTaskCtor&&registerReference&&cleanReference&&doorPosition&&groundPosition&&worldRemove&&worldAdd&&
         canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
         draggedCtor&&draggedDtor&&association&&setAnimationTime&&realPhysics&&nameKey&&g.CEventGroup_Add&&
@@ -678,6 +747,18 @@ void Install(void* handle) {
             ready=Hook(dlsym(handle,"_ZN8CCarCtrl16UpdateCarOnRailsEP8CVehicle"),rails,
                 reinterpret_cast<void*>(&OnVehicleRails),original);
             vehicleRails=reinterpret_cast<decltype(vehicleRails)>(original);
+        }
+        if (ready) {
+            constexpr std::uint32_t request[]={0xfc1c0fe8,0xa9017bfd,0xa90257f6,0xa9034ff4};
+            ready=Hook(dlsym(handle,"_ZN15CAESoundManager15RequestNewSoundEP8CAESound"),request,
+                reinterpret_cast<void*>(&OnRequestSound),original);
+            requestSound=reinterpret_cast<decltype(requestSound)>(original);
+        }
+        if (ready) {
+            constexpr std::uint32_t update[]={0xa9be7bfd,0xa9014ff4,0x910003fd,0x7940c408};
+            ready=Hook(dlsym(handle,"_ZN8CAESound16UpdateParametersEs"),update,
+                reinterpret_cast<void*>(&OnUpdateSound),original);
+            updateSound=reinterpret_cast<decltype(updateSound)>(original);
         }
     }
     LOGI("[npcgrab] available=%d",ready);
@@ -741,7 +822,8 @@ void Reset() {
     for (auto& target:approach) target={};
     for (auto& effect:feedback) effect={};
     Pool current;current.Load();
-    for (auto& a:animations) if (a.target.Live(current)&&a.phase!=Phase::Pull) CancelHit(a,false);
+    for (auto& a:animations) if (a.target.Live(current)&&a.phase!=Phase::Pull)
+        CancelHit(a,owner&&g.FindPlayerPed&&g.FindPlayerPed(-1)==owner);
     for (auto& flight:flights) flight={};
     claimed.store(0,std::memory_order_relaxed);
     worldMarkers={};xr::SetNpcGrabMarkers({});
@@ -768,15 +850,6 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     float eyeRaw[3]{},forward[3]{};
     if (!vrcam::GetHeadWorldRay(eyeRaw,forward)) { Reset();return; }
     const Vec eye{eyeRaw[0],eyeRaw[1],eyeRaw[2]};
-    unsigned preparationHands=~occupied&3u;
-    for (int hand=0;hand<2;++hand) if (!hands[hand].valid||physicalweapon::IsSupportHand(hand))
-        preparationHands&=~(1u<<hand);
-    for (auto& a:animations) if (a.target.ped&&BeforeHit(a.target.ped)) {
-        const int door=ExitDoor(a.target.ped,player);
-        const Vec head=Bone(a.target.ped,5);
-        if (!preparationHands||door<0||!Finite(head)||!SeatReachable(a.target.ped,door,eye,head)||
-            !Visible(eye,head,a.target.ped,a.car)) CancelHit(a,false);
-    }
     for (int hand=0;hand<2;++hand) {
         auto& h=holds[hand];
         float world[3]{};
