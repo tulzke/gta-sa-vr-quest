@@ -51,7 +51,11 @@ GameSymbols::Vec2 lastDirection{};
 int lastFallDirection{};
 alignas(16) char reaction[0x60]{};
 alignas(16) char animationHierarchy[0x28]{};
+alignas(16) char animationLeaf[0x38]{},animationVtable[0x60]{};
 unsigned animationId=378;
+int animationStarts{},physicsConversions{};
+bool foreignLeaf{},expectBrakedAI{};
+float aiSpeed=.02f;
 const void* eventPlayer{};const void* eventCar{};
 void* poolPtr=poolData;
 std::uint8_t flags[1]{1};
@@ -92,10 +96,24 @@ bool Damage(void* victim,void* attacker,int weapon,int damage,int piece,int dire
     CHECK(victim==npc&&attacker==player&&weapon==0&&damage==0&&piece==3&&direction==2);
     ++aggressions;return true;
 }
-void* Assoc(void* clump,unsigned id) {return clump==npc&&id==animationId&&Read<void*>(intelligence,8+3*8)?reaction:nullptr;}
+void* Assoc(void* clump,unsigned id) {return clump==npc&&id==animationId&&Read<void*>(animationLeaf,0x18)&&Read<void*>(intelligence,8+3*8)?reaction:nullptr;}
 void AnimTime(void* anim,float t) {Write(anim,0x38,t);}
-void Physics(void*) {}
-bool NativeAI(void* v,unsigned*) {Write(v,0x608,1.f);Write(v,0x60c,0.f);Write(v,0x68,Vec{.02f,0,0});return true;}
+void* Simplest(void* task) {
+    CHECK(task==Read<void*>(intelligence,8+3*8));
+    return foreignLeaf?nullptr:animationLeaf;
+}
+void StartAnimation(void* leaf,const void* ped) {
+    CHECK(leaf==animationLeaf&&ped==npc&&Read<void*>(intelligence,8+3*8));
+    CHECK(!Read<void*>(leaf,0x18));Write<void*>(leaf,0x18,reaction);++animationStarts;
+}
+void Physics(void* v) {Write<std::uint8_t>(v,0x5a,3<<3);++physicsConversions;}
+bool NativeAI(void* v,unsigned*) {
+    if (expectBrakedAI) {
+        CHECK((Read<std::uint8_t>(v,0x5a)>>3)!=2);
+        CHECK(Read<float>(v,0x608)==0&&Read<float>(v,0x60c)==1&&Read<Vec>(v,0x68).x==0);
+    }
+    Write(v,0x608,1.f);Write(v,0x60c,0.f);Write(v,0x68,Vec{aiSpeed,0,0});return true;
+}
 void NativeVelocity(void* ped) {Write(ped,0x68,Vec{});Write(ped,0x6bc,0.f);Write(ped,0x6c0,0.f);}
 bool IsPlayer(const void* p) {return p==player;}
 bool CanOpen(const void*,const void*) {return !locked;}
@@ -141,6 +159,8 @@ void FinishExtraction() {
 xr::HandPose hands[2];
 void Setup() {
     Reset();for (auto& a:animations) ClearAnimation(a);for (auto& stop:stops) ClearStop(stop);std::memset(npc,0,sizeof(npc));std::memset(car,0,sizeof(car));std::memset(intelligence,0,sizeof(intelligence));
+    std::memset(player,0,sizeof(player));
+    for (auto& target:preparationBlocked) target={};
     flags[0]=1;wall=locked=carOccludes=placementBlocked=false;ignoredEntity=nullptr;placedNode=0;
     firstSpotBlocked=groundMissing=false;removed=added=sphereTests=0;
     allocations=aggressions=dragEvents=dragDestroyed=primaryReplaced=animatedNode=refAdds=refRemoves=nativePlacements=0;eventCar=eventPlayer=nullptr;
@@ -150,6 +170,8 @@ void Setup() {
     Write<std::uint8_t>(car,0x5a,2);Write<std::uint8_t>(otherCar,0x5a,2);Write<std::uint8_t>(npc,0x5a,3);
     std::memset(reaction,0,sizeof(reaction));Write(reaction,0x3c,1.f);Write(npc,0x6ac,100.f);Write(player,0x6ac,100.f);
     animationId=378;std::memset(animationHierarchy,0,sizeof(animationHierarchy));
+    std::memset(animationLeaf,0,sizeof(animationLeaf));Write<void*>(animationLeaf,0,animationVtable);
+    animationStarts=physicsConversions=0;foreignLeaf=expectBrakedAI=false;aiSpeed=.02f;
     Write<void*>(reaction,0x28,animationHierarchy);
     for (unsigned i=0;i<4;++i) pausePoints[i].key=i+1; // fake engine name hashes
     Write<void*>(poolData,0,npc);Write(poolData,8,flags);Write(poolData,0x10,1);
@@ -157,6 +179,7 @@ void Setup() {
     dragTaskCtor=DragTask;registerReference=Register;cleanReference=Clean;originalPlacement=NativePlace;doorPosition=DoorPoint;groundPosition=Ground;
     worldRemove=Remove;worldAdd=Add;g.CWorld_TestSphereAgainstWorld=Sphere;canOpen=CanOpen;ready=true;
     draggedCtor=DragCtor;draggedDtor=DragDtor;association=Assoc;setAnimationTime=AnimTime;realPhysics=Physics;vehicleAI=NativeAI;
+    simplestTask=Simplest;startDraggedAnimation=StartAnimation;draggedAnimationVtable=animationVtable;
     g.CEventGroup_Add=AddEvent;g.CPed_GetLocalDirection=Direction;g.CWeapon_GenerateDamageEvent=Damage;
     g.FindPlayerPed=Player;g.FindPlayerVehicle=Vehicle;g.CPad_GetPad=Pad;
     g.CWorld_pIgnoreEntity=&ignoredEntity;g.CPed_GetBonePosition=BonePos;g.CWorld_ProcessLineOfSight=Los;g.CVehicle_GetVehicleAppearance=Appearance;
@@ -186,7 +209,7 @@ void Punch() {
 }
 void WaitForGrip() {
     CHECK(animations[0].phase==Phase::Hit);
-    Write<std::uint16_t>(reaction,0x46,0x21);Write(reaction,0x38,.4f);Tick();
+    Write<std::uint16_t>(reaction,0x46,0x21);Write(reaction,0x38,PauseTime(reaction)+.05f);Tick();
     CHECK(animations[0].phase==Phase::Waiting&&Read<float>(reaction,0x3c)==0);
     CHECK((Read<std::uint16_t>(reaction,0x46)&0x20)==0);
     hands[0].grip=hands[0].trigger=0;Tick();
@@ -196,19 +219,34 @@ void ConfirmGrip() {hands[0].grip=1;hands[0].trigger=0;Tick();}
 }
 int main() {
     // Choose by the actual clip hierarchy, not the shared 378/379 animation IDs.
-    struct Clip { const char* name;unsigned key,id;float pause; } clips[]={
-        {"CAR_jackedLHS",1,378,1.f},
-        {"CAR_LjackedLHS",2,378,1.5f},
-        {"CAR_LjackedRHS",3,379,1.5f},
-        {"CAR_jackedRHS",4,379,1.5f},
-        {"unreviewed",100,378,.35f},
+    struct Clip { const char* name;unsigned key,id;float pause,ready; } clips[]={
+        {"CAR_jackedLHS",1,378,1.f,15.f/30.f},
+        {"CAR_LjackedLHS",2,378,1.5f,25.f/30.f},
+        {"CAR_LjackedRHS",3,379,1.5f,26.f/30.f},
+        {"CAR_jackedRHS",4,379,1.5f,20.f/30.f},
+        {"unreviewed",100,378,.35f,0.f},
     };
     CHECK(std::strcmp(pausePoints[0].name,clips[0].name)==0);
     CHECK(std::strcmp(pausePoints[1].name,clips[1].name)==0);
     CHECK(std::strcmp(pausePoints[2].name,clips[2].name)==0);
     CHECK(std::strcmp(pausePoints[3].name,clips[3].name)==0);
     for (const auto& clip:clips) {
-        Setup();Seat();Punch();animationId=clip.id;Write(animationHierarchy,0,clip.key);
+        Setup();Seat();animationId=clip.id;Write(animationHierarchy,0,clip.key);Tick();
+        CHECK(animationStarts==1&&animations[0].phase==Phase::Preparing);
+        CHECK(Read<float>(reaction,0x38)==0.f&&!aggressions&&!npcgrab::ClaimedHands());
+        if (clip.ready>0) {
+            Write(reaction,0x38,clip.ready-.01f);Tick();
+            CHECK(animations[0].phase==Phase::Preparing&&Read<float>(reaction,0x3c)==1.f);
+        }
+        Write<std::uint16_t>(reaction,0x46,0x21);
+        Write(reaction,0x38,clip.ready+.02f);Tick();
+        CHECK(animations[0].phase==Phase::AwaitHit&&Read<float>(reaction,0x38)==clip.ready);
+        CHECK(Read<float>(reaction,0x3c)==0&&Seated(npc)&&!aggressions&&!dragEvents);
+        Tick();CHECK(animations[0].phase==Phase::AwaitHit); // no attack timeout before the punch
+        Punch();
+        CHECK(animations[0].phase==Phase::Hit&&animationStarts==1&&primaryReplaced==1);
+        CHECK(Read<float>(reaction,0x38)==clip.ready&&Read<float>(reaction,0x3c)==1.f);
+        CHECK((Read<std::uint16_t>(reaction,0x46)&0x20)!=0);
         Write(reaction,0x38,clip.pause-.01f);Tick();
         CHECK(animations[0].phase==Phase::Hit&&Read<float>(reaction,0x3c)==1.f);
         Write(reaction,0x38,clip.pause+.02f);Tick();
@@ -219,6 +257,18 @@ int main() {
         CHECK(animations[0].phase==Phase::Pull&&Read<float>(reaction,0x3c)==1.f&&dragEvents==1);
     }
     Setup();Write<void*>(reaction,0x28,nullptr);CHECK(PauseTime(reaction)==.35f);
+    Setup();Seat();foreignLeaf=true;Punch();CHECK(animations[0].task&&animationStarts==0);
+    // A different leaf type must stay entirely under its native lifecycle.
+    Setup();Seat();Write<void*>(animationLeaf,0,nullptr);Punch();CHECK(animationStarts==0);
+    Setup();Seat();Tick();Tick();CHECK(animations[0].phase==Phase::AwaitHit);
+    Write(car,0x770+2*0x18+0xc,0.f);Tick();
+    CHECK(!animations[0].target.ped&&!aggressions&&Read<float>(reaction,0x3c)==1.f);
+    Setup();Seat();Tick();Tick();Write(player,8,Vec{10,0,0});Tick();
+    CHECK(!animations[0].target.ped&&!aggressions);
+    Setup();Seat();Tick();Tick();wall=true;Tick();
+    CHECK(!animations[0].target.ped&&!aggressions&&Read<float>(reaction,0x3c)==1.f);
+    Setup();Seat();Tick();Tick();Tick(true);
+    CHECK(!animations[0].target.ped&&!aggressions&&Read<float>(reaction,0x3c)==1.f);
     Setup();Grip();CHECK(npcgrab::ClaimedHands()==1&&fallCalls==0&&standCalls==1);
     hands[0].gripPos[0]=.04f;Tick();CHECK(Read<Vec>(npc,0x68).x>0);
     const Vec heldSpeed=Read<Vec>(npc,0x68);
@@ -272,14 +322,14 @@ int main() {
         FinishExtraction();Tick();CHECK(!Animating(npc)&&refRemoves==1);
         hands[0].grip=0;Tick();CHECK(!npcgrab::ClaimedHands());
     }
-    Setup();Seat();Grip();CHECK(!animatedNode&&!npcgrab::ClaimedHands()); // no hit from a grip alone
+    Setup();Seat();Grip();CHECK(BeforeHit(npc)&&!npcgrab::ClaimedHands()&&!aggressions); // grip alone leaves preparation awaiting a punch
     Setup();Seat();hands[0].grip=hands[0].trigger=1;Tick();
-    CHECK(!animatedNode&&BlocksVehicleInteraction(car,0)); // approach is protected before reaching the face
+    CHECK(BeforeHit(npc)&&BlocksVehicleInteraction(car,0)); // approach is protected before reaching the face
     CHECK(!melee_filter::Damageable(car,player,0,0)&&!melee_filter::Damageable(car,player,1,0));
     CHECK(melee_filter::Damageable(otherCar,player,0,0)&&melee_filter::Damageable(car,player,2,0));
     CHECK(melee_filter::Damageable(npc,player,0,0)); // world/NPC collision stays enabled
-    hands[0].grip=hands[0].trigger=0;Tick();CHECK(!BlocksVehicleInteraction(car,0));
-    CHECK(melee_filter::Damageable(car,player,0,0)); // normal vehicle punches restored after the gesture
+    hands[0].grip=hands[0].trigger=0;Write(car,0x770+2*0x18+0xc,0.f);Tick();CHECK(!BlocksVehicleInteraction(car,0));
+    CHECK(melee_filter::Damageable(car,player,0,0)); // normal vehicle punches restored after preparation is cancelled
     Setup();Seat();hands[0].grip=hands[0].trigger=0;Tick();
     hands[0].grip=hands[0].trigger=1;hands[0].gripPos[0]+=.014f;Tick();CHECK(animatedNode); // same threshold as physical fists
     CHECK(BlocksVehicleInteraction(car,0)&&BlocksVehicleInteraction(car,1));
@@ -317,6 +367,28 @@ int main() {
     Setup();Seat();Write<void*>(car,0x5a0,player);OnDoorOpening(car);CHECK(!stops[0].car);
     Setup();Seat();Punch();WaitForGrip();OnVehicleAI(car,&flagsAI);
     CHECK(Seated(npc)&&Read<float>(car,0x608)==0&&Read<Vec>(car,0x68).x==0); // waiting driver cannot flee early
+    for (int seat=-1;seat<3;++seat) {
+        Setup();Seat(seat);Punch();
+        stops[0].until=Now()-1; // the door timer is independent of the scene
+        expectBrakedAI=true;aiSpeed=.3f;
+        for (int phase=0;phase<3;++phase) {
+            Write<std::uint8_t>(car,0x5a,2<<3); // traffic re-enters SIMPLE mode
+            Write(car,0x68,Vec{.4f,0,.2f}); // acceleration/impact exceeds door-stop limit
+            CHECK(OnVehicleAI(car,&flagsAI));
+            CHECK(Read<float>(car,0x608)==0&&Read<float>(car,0x60c)==1&&Read<Vec>(car,0x68).x==0);
+            if (phase==0) WaitForGrip();
+            if (phase==1) ConfirmGrip();
+        }
+        CHECK(physicsConversions>=3&&animations[0].phase==Phase::Pull);
+        // Even an empty driver's seat does not release a passenger's active scene.
+        Write<void*>(car,0x5a0,nullptr);CHECK(StopCar(car,Now()));
+        Write<void*>(car,0x5a0,player);CHECK(!StopCar(car,Now()));
+        Write<void*>(car,0x5a0,nullptr);FinishExtraction();Tick();
+        expectBrakedAI=false;CHECK(OnVehicleAI(car,&flagsAI));
+        CHECK(Read<float>(car,0x608)==1&&Read<Vec>(car,0x68).x==aiSpeed);
+    }
+    Setup();Seat();Write(car,0x68,Vec{.07f,0,0});OnDoorOpening(car);
+    Write(car,0x68,Vec{.2f,0,0});CHECK(!StopCar(car,Now())); // door-only guard retained
     const auto palm=npcgrab::Palm({{}, {1,0,0}, {0,1,0}, false});
     const auto fist=npcgrab::Fist({{}, {1,0,0}, {0,1,0}, false,true});
     CHECK(palm.count>60&&palm.count<=120&&fist.count>24&&fist.count<=120);
