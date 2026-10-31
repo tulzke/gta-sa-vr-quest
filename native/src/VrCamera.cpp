@@ -30253,7 +30253,14 @@ void OnRoomPlayerControl(void* ped) {
     const Q orientation{hq[0],hq[1],hq[2],hq[3]};
     const V3 localForward = Rotate(inv, Rotate(orientation,{0.0f,0.0f,-1.0f}));
     const V3 forward = TrackingToGame(g_vrBase, localForward);
-    if (g_roomOrientation && Finite(forward) && std::hypot(forward.x,forward.y)>0.1f) {
+    // The retail on-foot task steers movement by turning the ped. Forcing
+    // both current and target yaw during a stick/gesture input cancels that
+    // steering, leaving only forward movement. Let the task own orientation
+    // while its movement axes are active; resume head-follow at rest.
+    const auto* movePad = g.CPad_GetPad ? static_cast<const std::int16_t*>(g.CPad_GetPad(0)) : nullptr;
+    const bool moving = movePad && (std::abs(static_cast<int>(movePad[0])) > 20 ||
+                                    std::abs(static_cast<int>(movePad[1])) > 20);
+    if (!moving && g_roomOrientation && Finite(forward) && std::hypot(forward.x,forward.y)>0.1f) {
         const float yaw = std::atan2(-forward.x,forward.y);
         g_roomOrientation(ped,0.0f,0.0f,yaw);
         std::memcpy(static_cast<char*>(ped)+0x6c4,&yaw,sizeof(yaw));
