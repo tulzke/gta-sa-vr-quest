@@ -96,12 +96,57 @@ void Update(bool usable,std::uint64_t epoch){
   if(flags[slot]&0x80)continue;
   void* car=objects+slot*0xc68;
   if(seated&&seated!=car)continue;
-  if((Read<std::uint8_t>(car,0x5a)&7)!=2||!g.CVehicle_GetVehicleAppearance||g.CVehicle_GetVehicleAppearance(car)!=1||!canOpen(car,ped))continue;
+  if((Read<std::uint8_t>(car,0x5a)&7)!=2||!g.CVehicle_GetVehicleAppearance||!canOpen(car,ped))continue;
+  const int appearance=g.CVehicle_GetVehicleAppearance(car);
+  if(appearance!=1&&appearance!=2)continue;
   const Vec speed=Read<Vec>(car,0x68);if(!Finite(speed)||(!seated&&Length(speed)>.02f))continue;
   const int model=Read<std::uint16_t>(car,0x32);if(model==431||model==437||model==432||model==539)continue;
   void* matrix=Read<void*>(car,0x18);if(!matrix)continue;
   Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
   if(!b.Valid()||Length(eye-b.position)>4.5f)continue;
+  if(appearance==2){
+   // Motorcycles only; bicycles and the quad need their own seat geometry.
+   if(model==481||model==509||model==510||model==471||b.up.z<.94f||Length(speed)>.02f)continue;
+   if(seated&&currentSeat!= -1&&currentSeat!=0)continue;
+   for(int index=0;index<2;++index){
+    const bool exit=seated!=nullptr;
+    const int seat=exit?currentSeat:index-1;
+    bool actionable=exit?canStepOut&&canStepOut(car,false):
+      !Read<void*>(car,seat<0?0x5a0:0x5a8);
+    if(!exit&&seat==0&&Read<std::uint8_t>(car,0x5ec)==0)actionable=false;
+    float correction[3]{};driving::GetEntryCalibration(model,index,correction);
+    const float side=index==0?-1.f:1.f;
+    Vec local=exit?Vec{side*.85f,0,.6f}:
+      Vec{correction[0],(index==0?.20f:-.55f)+correction[1],.85f+correction[2]};
+    Vec p=b.Point(local);
+    if(Length(p-eye)>1.8f)continue;
+    if(!exit&&editing){
+     for(int h=0;h<2;++h){
+      float w[3]{};if(!hands[h].valid||!vrcam::TrackingPointToWorld(hands[h].gripPos,w))continue;
+      Vec hand=b.Local({w[0],w[1],w[2]});
+      if(editHand<0&&editFresh[h]&&Length(hand-local)<.23f){editHand=h;editModel=model;editSeat=index;editStart=hand;editBase={correction[0],correction[1],correction[2]};target=car;generation=flags[slot];}
+      if(editHand==h&&editModel==model&&editSeat==index&&target==car&&generation==flags[slot]){
+       editContinued=true;claimed=1u<<h;Vec value=editBase+hand-editStart;
+       const float c[]={value.x,value.y,value.z};driving::SetEntryCalibration(model,index,c);
+       p=b.Point(local+(value-Vec{correction[0],correction[1],correction[2]}));
+       if(hands[h].trigger<.35f)EndEdit();
+      }
+     }
+    }
+    if(!ClearExit(eye,p,car))actionable=false;
+    if(!editing&&!actionable)continue;
+    Marker m{p,forward,{0,0,1}};m.seatIcon=exit?3:(seat<0?1:2);
+    if(icons.count>=icons.kCapacity)continue;
+    const int icon=icons.count;icons.markers[icons.count++]=m;
+    if(!actionable)continue;
+    Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
+    const float direction=distance>.05f?Dot(move,delta)/distance:-1;
+    if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
+     bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=exit?3:seat;point=p;bestGeneration=flags[slot];bestIcon=icon;
+    }
+   }
+   continue;
+  }
   for(int index=0;index<4;++index){
    const int seat=index-1;const bool exit=seated&&seat==currentSeat;
    if(seated&&currentSeat<-1)continue;

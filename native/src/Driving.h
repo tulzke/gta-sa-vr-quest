@@ -194,6 +194,7 @@ int GetVehicleDebugMode();
 void CycleVehicleDebugMode(int direction);
 const char* VehicleDebugModeName();
 void GetDoorCalibration(int model,int door,bool inside,float out[3]);
+void GetBikeBarCalibration(int model,float out[3],float* halfWidth);
 void SetDoorCalibration(int model,int door,bool inside,const float value[3]);
 void SetDebugPosition(int model,int mode,bool seat,const int value[3]);
 void SetDebugWheelRadius(int model,int value);

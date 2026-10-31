@@ -34,9 +34,12 @@ bool TryExit(void* car,int seat,Vec hint){
  void* ped=g.FindPlayerPed(-1);void* pad=g.CPad_GetPad(0);
  if(!ped||!pad||g.FindPlayerVehicle(-1,false)!=car||vehicleentry::SeatIndex(car,ped)!=seat||Read<std::uint16_t>(pad,0x110)||Read<std::uint8_t>(pad,0x12d)||!healthy(ped)||!canStepOut(car,false))return false;
  const Vec speed=Read<Vec>(car,0x68);if(!Finite(speed)||Length(speed)>.02f)return false;
+ const bool bike=g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2;
  const int door=seat+3;
+ if(!bike){
  const float open=Read<float>(car,0x770+door*0x18),angle=Read<float>(car,0x77c+door*0x18);
  if(Read<std::uint8_t>(car,0x758+9+door)!=4&&(!std::isfinite(open)||!std::isfinite(angle)||std::abs(open)<.3f||angle/open<.45f))return false;
+ }
  void* intelligence=Read<void*>(ped,0x538);if(!intelligence)return false;
  GameSymbols::Vec3 destination{hint.x,hint.y,hint.z};
  if(!ground(&destination)||!Finite({destination.x,destination.y,destination.z})||std::abs(destination.z-hint.z)>1.5f)return false;

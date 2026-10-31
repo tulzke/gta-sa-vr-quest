@@ -35,5 +35,7 @@ int main(){
  Setup(-1);wall=true;CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0);
  Setup(-1);terrain=false;CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0);
  Setup(-1);Put(car,0x68,Vec{1,0,0});CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0);
+ for(int seat:{-1,0}){Setup(seat);g.CVehicle_GetVehicleAppearance=[](const void*){return 2;};
+  Put(car,0x770+(seat+3)*0x18,0.f);CHECK(TryExit(car,seat,{2,0,1}));}
  std::puts("instant exit: four seats, direct detach, on-foot handoff, placement, unchanged door angle, script/control and obstacle gates passed");
 }

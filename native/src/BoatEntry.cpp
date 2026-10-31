@@ -144,6 +144,9 @@ bool SeatPlayer(void* vehicle,int passenger) {
     if (passenger>2||passenger < -1||!vehicle||!g_passCtor||!g_passProcess||!g_passDtor||!g_removeDriver||!g_removePassenger||!g_seatCtor||!g_taskAlloc||!g_driveCtor||!g_setTask||!g_seatProcess||!g_seatDtor||!g_driveDelete) return false;
     void* ped=g.FindPlayerPed(-1);
     if (!ped||!g_vehicleHealthy||!g_pedHealthy||!g_canOpenLocks||!g_vehicleHealthy(vehicle)||!g_pedHealthy(ped)||!g_canOpenLocks(vehicle,ped)||Read<void*>(vehicle,passenger<0?0x5a0:0x5a8+passenger*8)) return false;
+    if(passenger>=0&&g.CVehicle_GetVehicleAppearance&&
+       g.CVehicle_GetVehicleAppearance(vehicle)==2&&
+       (passenger!=0||Read<std::uint8_t>(vehicle,0x5ec)==0))return false;
     const bool wasSeated=g.FindPlayerVehicle(-1,false)!=nullptr;
     void* intelligence=Read<void*>(ped,0x538);
     if (!intelligence) return false;
@@ -162,7 +165,8 @@ bool SeatPlayer(void* vehicle,int passenger) {
     // Passenger ProcessPed installs its own secondary CarDrive task. Preserve
     // mission primary tasks, matching the native passenger direct-seat path.
     if(seated&&passenger<0)g_setTask(static_cast<char*>(intelligence)+8,drive,3,false);else g_driveDelete(drive);
-    if(seated&&passenger>=0&&!wasSeated)passengerreaction::OnBoard(vehicle,ped);
+    if(seated&&passenger>=0&&!wasSeated&&g.CVehicle_GetVehicleAppearance&&
+       g.CVehicle_GetVehicleAppearance(vehicle)==1)passengerreaction::OnBoard(vehicle,ped);
     return seated;
 }
 

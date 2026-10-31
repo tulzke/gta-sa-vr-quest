@@ -37,6 +37,7 @@ bool IsSupportHand(int h) { return (support&(1u<<h))!=0; }
 }
 namespace basketball { unsigned held{};unsigned HeldHandMask() { return held; } }
 namespace driving {
+void GetBikeBarCalibration(int,float out[3],float* width){out[0]=out[1]=out[2]=0;*width=.31f;}
 int debugMode{},saves{};
 std::map<int,std::array<float,24>> corrections;
 int GetVehicleDebugMode() {return debugMode;}
@@ -458,5 +459,26 @@ int main() {
     Door fullyOpen;CHECK(ReadDoor(g_openDetents[0].target,pedMemory,fullyOpen));
     std::memcpy(hands[0].gripPos,&fullyOpen.handle,12);
     hands[0].grip=0;Tick();hands[0].grip=1;Tick();CHECK(ClaimedHands()==1&&!g_openDetents[0].latched);
+    // Motorcycle grip: either bar claims one hand, applies bounded physics,
+    // and tracking loss releases ownership without retaining a stale target.
+    for(int hand:{0,1}) {
+        Setup();hands[0]={};hands[1]={};
+        g.CVehicle_GetVehicleAppearance=[](const void*){return 2;};
+        g.CBike_IsComponentPresent=[](const void*,int){return true;};
+        g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* out){*out={0,.5f,.8f};};
+        int forceCalls=0;static int* forceCounter;forceCounter=&forceCalls;
+        g.CPhysical_ApplyForce=[](void*,float,float,float z,float,float,float,bool){CHECK(std::isfinite(z)&&std::abs(z)<=7.1f);++*forceCounter;};
+        Write<std::uint16_t>(vehicle,0x32,461);Write<float>(vehicle,0xb0,200.f);Write<void*>(vehicle,0x5a0,nullptr);
+        vrcam::eye={0,-.5f,1.f};hands[hand].gripPos[0]=hand? .31f:-.31f;
+        hands[hand].gripPos[1]=.5f;hands[hand].gripPos[2]=.8f;
+        Tick();CHECK(xr::published.count>=2);hands[hand].grip=1;Tick();CHECK(ClaimedHands()==(1u<<hand));
+        hands[hand].gripPos[2]+=.1f;Tick();CHECK(forceCalls>0);
+        if(hand==0){
+            hands[hand].grip=0;Tick();CHECK(ClaimedHands()==0&&g_bikeStable.vehicle==vehicle);
+            Tick();CHECK(forceCalls>1);
+            Write<Vec>(vehicle,0x68,{.1f,0,0});Tick();CHECK(!g_bikeStable.vehicle);
+        } else {Tick(false,5,false);CHECK(ClaimedHands()==0&&g_bikeGrab.hand<0);}
+        g.CBike_IsComponentPresent=nullptr;g.CBike_GetComponentWorldPosition=nullptr;g.CPhysical_ApplyForce=nullptr;
+    }
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

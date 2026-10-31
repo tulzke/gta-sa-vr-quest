@@ -5,14 +5,14 @@
 #include <cstdio>
 #include <cstdlib>
 using savr::vehicledoors::Vec;
-double testNow=1;float eyeX=-1.3f;
+double testNow=1;float eyeX=-1.3f,eyeY=0;int vehicleAppearance=1;
 namespace savr {
 GameSymbols g{};
 namespace passengerreaction { void Update(bool){} }
 namespace xr { struct HandPose {bool valid{};float trigger{},gripPos[3]{};};HandPose handPoses[2]{};void GetHandPoses(HandPose* out){out[0]=handPoses[0];out[1]=handPoses[1];} struct InputState {float leftStick[2]{},rightStick[2]{};};InputState input;void GetInput(InputState& out){out=input;}void TriggerHaptic(int,float,float,float){} }
 namespace driving { int debug{},saves{};float calibration[4][3]{};int GetVehicleDebugMode(){return debug;}void SaveDebugCalibration(){++saves;} void GetEntryCalibration(int,int seat,float* out){for(int i=0;i<3;++i)out[i]=calibration[seat][i];}void SetEntryCalibration(int,int seat,const float* in){for(int i=0;i<3;++i)calibration[seat][i]=in[i];} }
 namespace locomotion { void MapGameplaySticks(float x,float y,float,float,float* mx,float* my,float*,float*){*mx=x;*my=y;} }
-namespace vrcam { int exits{};void RequestVehicleExit(){++exits;}bool TrackingPointToWorld(const float* in,float* out){for(int i=0;i<3;++i)out[i]=in[i];return true;} bool GetHeadWorldRay(float* o,float* f){o[0]=eyeX;o[1]=0;o[2]=.6f;f[0]=0;f[1]=1;f[2]=0;return true;} }
+namespace vrcam { int exits{};void RequestVehicleExit(){++exits;}bool TrackingPointToWorld(const float* in,float* out){for(int i=0;i<3;++i)out[i]=in[i];return true;} bool GetHeadWorldRay(float* o,float* f){o[0]=eyeX;o[1]=eyeY;o[2]=.6f;f[0]=0;f[1]=1;f[2]=0;return true;} }
 namespace vehicleexit { bool TryExit(void*,int,vehicledoors::Vec){++vrcam::exits;return true;} }
 namespace boatentry {int calls{},seat{};bool success=true;bool SeatPlayer(void*,int s){++calls;seat=s;return success;} }
 }
@@ -34,7 +34,7 @@ int main(){
  g.CPools_ms_pVehiclePool=&poolPtr;g.CWorld_ProcessLineOfSight=&Ray;
  canStepOut=[](const void*,bool){return true;};
  g.FindPlayerPed=[](int)->void*{return ped;};g.FindPlayerVehicle=[](int,bool)->void*{return current;};
- g.CPad_GetPad=[](int)->void*{return pad;};g.CVehicle_GetVehicleAppearance=[](const void*){return 1;};
+ g.CPad_GetPad=[](int)->void*{return pad;};g.CVehicle_GetVehicleAppearance=[](const void*){return vehicleAppearance;};
  canOpen=[](const void*,const void*){return true;};healthy=[](const void*){return true;};frameLtm=[](void* p){return p;};
  Tick();Tick();xr::input.leftStick[0]=1;Tick();CHECK(started>0);Tick();Tick();CHECK(boatentry::calls==0);
  xr::input.leftStick[0]=-1;Tick();CHECK(started==0);
@@ -85,6 +85,18 @@ int main(){
  for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=-1;for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==beforeDebug+2&&boatentry::seat==-1);
  xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=1;
  const int beforeExit=vrcam::exits;for(int i=0;i<17;++i)Tick();CHECK(vrcam::exits==beforeExit+1);
+ // Motorcycle icons respect actual passenger capacity and occupied seats.
+ driving::debug=0;vehicleAppearance=2;current=nullptr;eyeX=-1.3f;
+ Put(cars,0x32,std::uint16_t(461));Put(cars,0x5a0,static_cast<void*>(nullptr));
+ Put(cars,0x5a8,static_cast<void*>(nullptr));Put(cars,0x5ec,std::uint8_t(1));
+ xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
+ CHECK(icons.count==2);Put(cars,0x5ec,std::uint8_t(0));Tick();CHECK(icons.count==1);
+ Put(cars,0x5ec,std::uint8_t(1));Put(cars,0x5a8,static_cast<void*>(ped));Tick();CHECK(icons.count==1);
+ Put(cars,0x5a8,static_cast<void*>(nullptr));xr::input.leftStick[0]=1;
+ const int beforeBike=boatentry::calls;for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==beforeBike+1);
+ CHECK(boatentry::seat==-1);
+ for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=0;eyeY=-.55f;Tick();xr::input.leftStick[0]=1;
+ for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==beforeBike+2&&boatentry::seat==0);
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

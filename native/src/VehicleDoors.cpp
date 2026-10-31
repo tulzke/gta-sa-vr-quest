@@ -106,6 +106,8 @@ void LatchOpen(const Target& t) {
 Target g_editTarget{};
 bool g_editInside{};
 struct Grab { Target target{}; Motion motion{}; int hand{-1}; bool inside{}; } g_grab;
+struct BikeGrab { Target target{}; int hand{-1}; float side{}; Vec offset{}; } g_bikeGrab;
+Target g_bikeStable{};
 struct Release { Target target{}; ReleasedMotion motion{}; bool active{},inside{}; } g_release;
 struct Door {
     Basis car{},panel{};
@@ -346,7 +348,7 @@ void EndDebugEdit() {
 }
 void Reset() {
     EndDebugEdit();
-    g_grab={};g_release={};g_claimed.store(0,std::memory_order_relaxed);
+    g_grab={};g_bikeGrab={};g_bikeStable={};g_release={};g_claimed.store(0,std::memory_order_relaxed);
     for (auto& edge:g_edges) edge.latched=true;
     g_worldMarkers={};
     xr::SetVehicleDoorMarkers({});
@@ -397,6 +399,85 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     Vec world[2]{};bool valid[2]{};
     for (int h=0;h<2;++h) valid[h]=hands[h].valid&&ToWorld(hands[h].gripPos,world[h]);
     MarkerFrame markers;markers.epoch=epoch;
+    // A pedestrian can pull a stationary, unoccupied motorcycle by either bar.
+    // All forces go through the native physics system; never rotate its matrix.
+    if(!seated&&g.CBike_GetComponentWorldPosition&&g.CBike_IsComponentPresent&&g.CPhysical_ApplyForce){
+        if(g_bikeStable.vehicle){
+            void* bike=g_bikeStable.vehicle;
+            if(!g_bikeStable.Live(pool)||Read<void*>(bike,0x5a0)||Read<void*>(bike,0x5a8)||
+               !Finite(Read<Vec>(bike,0x68))||Length(Read<Vec>(bike,0x68))>.02f)g_bikeStable={};
+            else {
+                void* matrix=Read<void*>(bike,0x18);const Basis b=matrix?Matrix(matrix):Basis{};
+                const float mass=Read<float>(bike,0xb0);
+                if(!matrix||!b.Valid()||b.up.z<.985f||!std::isfinite(mass)||mass<=1.f||mass>=2000.f)
+                    g_bikeStable={};
+                else {
+                    const float force=mass*std::clamp(-b.right.z*.08f,-.014f,.014f)*std::clamp(dt*60.f,0.f,2.f);
+                    const Vec arm=b.right*.5f;
+                    g.CPhysical_ApplyForce(bike,0,0,force,arm.x,arm.y,arm.z,true);
+                }
+            }
+        }
+        auto bikePoint=[&](void* bike,float side,Vec& point,Vec& origin)->bool {
+            void* matrix=Read<void*>(bike,0x18);if(!matrix)return false;
+            const Basis basis=Matrix(matrix);if(!basis.Valid())return false;
+            if(!g.CBike_IsComponentPresent(bike,7))return false;
+            GameSymbols::Vec3 centre{};g.CBike_GetComponentWorldPosition(bike,7,&centre);
+            float correction[3]{},width{};
+            driving::GetBikeBarCalibration(Read<std::uint16_t>(bike,0x32),correction,&width);
+            origin=basis.position;point=Vec{centre.x,centre.y,centre.z}+
+                basis.right*(side*width+correction[0])+basis.forward*correction[1]+basis.up*correction[2];
+            return Finite(point)&&Length(point-origin)<5.f;
+        };
+        if(g_bikeGrab.hand>=0){
+            const int h=g_bikeGrab.hand;void* bike=g_bikeGrab.target.vehicle;Vec point{},origin{};
+            const bool ok=g_bikeGrab.target.Live(pool)&&valid[h]&&!(occupied&(1u<<h))&&
+                hands[h].grip>.35f&&!Read<void*>(bike,0x5a0)&&!Read<void*>(bike,0x5a8)&&
+                Finite(Read<Vec>(bike,0x68))&&Length(Read<Vec>(bike,0x68))<.05f&&
+                bikePoint(bike,g_bikeGrab.side,point,origin)&&Length(world[h]-point)<.8f&&
+                Visible(eye,point,bike)&&dt>0&&dt<.15f;
+            if(!ok){
+                if(valid[h]&&hands[h].grip<=.35f&&g_bikeGrab.target.Live(pool)&&!seated){
+                    void* matrix=Read<void*>(bike,0x18);
+                    if(matrix){const Basis b=Matrix(matrix);if(b.Valid()&&b.up.z>=.985f)g_bikeStable=g_bikeGrab.target;}
+                }
+                g_bikeGrab={};g_claimed.store(0);
+            }
+            else {
+                const float mass=Read<float>(bike,0xb0);
+                if(std::isfinite(mass)&&mass>1.f&&mass<2000.f){
+                    const float error=(world[h]-g_bikeGrab.offset-point).z;
+                    const float vz=Read<Vec>(bike,0x68).z;
+                    const float force=mass*std::clamp(error*.08f-vz*.25f,-.035f,.035f);
+                    const Vec arm=point-origin;
+                    g.CPhysical_ApplyForce(bike,0,0,force,arm.x,arm.y,arm.z,true);
+                }
+                g_claimed.store(1u<<h,std::memory_order_relaxed);
+                Marker m{point,{0,0,1},{0,1,0},true};m.doorGrab=true;markers.markers[markers.count++]=m;
+                Publish(markers);return;
+            }
+        }
+        float best=2.f;Target target{};Vec point{},origin{};float chosenSide{};int chosenHand=-1;
+        for(int slot=0;slot<kPoolSize;++slot){
+            if(pool.flags[slot]&0x80)continue;void* bike=pool.objects+slot*kStride;
+            if((Read<std::uint8_t>(bike,0x5a)&7)!=2||g.CVehicle_GetVehicleAppearance(bike)!=2||
+               Read<void*>(bike,0x5a0)||Read<void*>(bike,0x5a8))continue;
+            const int model=Read<std::uint16_t>(bike,0x32);
+            if(model==481||model==509||model==510||model==471)continue;
+            const Vec speed=Read<Vec>(bike,0x68);if(!Finite(speed)||Length(speed)>.02f)continue;
+            for(float side:{-1.f,1.f}){
+                Vec candidate{},base{};if(!bikePoint(bike,side,candidate,base)||Length(candidate-eye)>1.8f||!Visible(eye,candidate,bike))continue;
+                if(markers.count<MarkerFrame::kCapacity){Marker m{candidate,{0,0,1},{0,1,0}};m.doorGrab=true;markers.markers[markers.count++]=m;}
+                for(int h=0;h<2;++h)if(valid[h]&&fresh[h]&&!(occupied&(1u<<h))){
+                    const float distance=Length(world[h]-candidate);
+                    if(distance<.2f&&distance<best){best=distance;target={bike,pool.identity,pool.objects,pool.flags,slot,0,0,pool.flags[slot]};point=candidate;origin=base;chosenSide=side;chosenHand=h;}
+                }
+            }
+        }
+        if(chosenHand>=0){g_bikeStable={};g_bikeGrab={target,chosenHand,chosenSide,world[chosenHand]-point};
+            g_claimed.store(1u<<chosenHand,std::memory_order_relaxed);xr::TriggerHaptic(chosenHand,.25f,0,30);
+            Publish(markers);return;}
+    } else {g_bikeStable={};if(g_bikeGrab.hand>=0){g_bikeGrab={};g_claimed.store(0);}}
     // A normal grip remains authoritative in debug mode. Trigger editing and
     // grip manipulation are distinct gestures.
     if (g_grab.hand>=0) {
