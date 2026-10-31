@@ -38,7 +38,8 @@ int main(){
  canOpen=[](const void*,const void*){return true;};healthy=[](const void*){return true;};frameLtm=[](void* p){return p;};
  Tick();Tick();xr::input.leftStick[0]=1;Tick();CHECK(started>0);Tick();Tick();CHECK(boatentry::calls==0);
  xr::input.leftStick[0]=-1;Tick();CHECK(started==0);
- xr::input.leftStick[0]=1;for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==1);CHECK(boatentry::seat==-1);
+ xr::input.leftStick[0]=1;Tick();for(int i=0;i<7;++i)Tick();CHECK(boatentry::calls==0);
+ for(int i=0;i<2;++i)Tick();CHECK(boatentry::calls==1);CHECK(boatentry::seat==-1);
  for(int i=0;i<10;++i)Tick();CHECK(boatentry::calls==1);
  xr::input.leftStick[0]=0;Tick();xr::input.leftStick[0]=1;Tick();CHECK(started>0);
  Put(cars,0x5a0,static_cast<void*>(ped));Tick();CHECK(!visible&&started==0);
@@ -53,10 +54,10 @@ int main(){
  current=cars;Put(cars,0x5a8,static_cast<void*>(ped));Put(cars,0x77c+2*0x18,0.f);
  for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=0;Tick();xr::input.leftStick[0]=-1;
  for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==3&&boatentry::seat==-1);
- // Exit must wait 1.5 seconds and requires an open door.
+ // Exit must wait 1 second and requires an open door.
  for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=0;Tick();xr::input.leftStick[0]=1;
- for(int i=0;i<12;++i)Tick();CHECK(vrcam::exits==0);
- for(int i=0;i<5;++i)Tick();CHECK(vrcam::exits==1);
+ for(int i=0;i<10;++i)Tick();CHECK(vrcam::exits==0);
+ for(int i=0;i<2;++i)Tick();CHECK(vrcam::exits==1);
  for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=0;Tick();Put(cars,0x77c+3*0x18,0.f);xr::input.leftStick[0]=1;
  for(int i=0;i<20;++i)Tick();CHECK(vrcam::exits==1);
  // Rear passenger cannot teleport into the front row.

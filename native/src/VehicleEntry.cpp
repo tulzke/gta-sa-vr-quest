@@ -157,7 +157,7 @@ void Update(bool usable,std::uint64_t epoch){
  if(target!=bestCar||targetSeat!=bestSeat||generation!=bestGeneration){started=0;target=bestCar;targetSeat=bestSeat;generation=bestGeneration;}
  const bool holding=std::isfinite(x)&&std::isfinite(y)&&Length(move)>.65f&&bestDirection>.55f;
  if(!holding)started=0;else if(!started)started=now;
- marker=icons.markers[bestIcon];marker.progress=started?std::clamp(float((now-started)/(bestSeat==3?1.5:1.0)),0.f,1.f):0;
+ marker=icons.markers[bestIcon];marker.progress=started?std::clamp(float((now-started)/(bestSeat==3?1.0:0.8)),0.f,1.f):0;
  icons.markers[bestIcon]=marker;visible=true;
  if(marker.progress>=1){
   bool success=false;
