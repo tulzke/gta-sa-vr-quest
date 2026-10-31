@@ -13996,6 +13996,8 @@ int OnSetupMapEntityVisibility(void* entity, void* modelInfo,
     return result;
 }
 
+void TraceClosePedVisibility(void* entity, int stage, int result);
+
 void* OnAtomicDefaultRender(void* atomic) {
     if (!g_origAtomicDefaultRender) return atomic;
     void* const entity = g_visibilityCurrentRenderEntity;
@@ -14058,6 +14060,9 @@ void* OnAtomicDefaultRender(void* atomic) {
             slot->lastAtomicMs = nowMs;
         }
     }
+    // Backlog 11: this witness is reached only after the entity-level renderer
+    // and RenderPedCB have actually submitted an atomic for the current eye.
+    TraceClosePedVisibility(entity, 3, 1);
     void* const rendered = g_origAtomicDefaultRender(atomic);
     if (rendered == atomic)
         MarkAircraftOrdinaryAtomicDispatch(entity);
@@ -14078,11 +14083,11 @@ void* OnAtomicDefaultRender(void* atomic) {
 constexpr char kStereoDispatchCullProperty[] =
     "debug.savr.stereo_dispatch_cull";
 
-// Temporary close-ped witness for backlog 11. Separate stage/eye timers let
-// the log show a ped surviving the scan but missing from an eye's dispatch.
+// Temporary close-ped witness for backlog 11. Separate stage/eye timers show
+// the complete chain from the shared scan through eye dispatch to atomic submit.
 // Fixed storage and rate limiting keep a crowd from flooding logcat.
 void TraceClosePedVisibility(void* entity, int stage, int result) {
-    if (!entity || !g.TheCamera || stage < 0 || stage > 2) return;
+    if (!entity || !g.TheCamera || stage < 0 || stage > 3) return;
     const auto* bytes = static_cast<const std::uint8_t*>(entity);
     if ((bytes[0x5a] & 7u) != 3u ||
         (g.FindPlayerPed && entity == g.FindPlayerPed(-1))) return;
@@ -14094,7 +14099,7 @@ void TraceClosePedVisibility(void* entity, int stage, int result) {
     if (!std::isfinite(distSq) || distSq > 5.0f * 5.0f) return;
     struct Sample {
         void* entity{};
-        double last[3]{};
+        double last[4]{};
         double observedMs{};
         int visible{-1};
         int stage{-1};
@@ -14125,15 +14130,15 @@ void TraceClosePedVisibility(void* entity, int stage, int result) {
     sample.stage = stage;
     if (now - sample.last[stage] < 500.0) return;
     sample.last[stage] = now;
+    static constexpr const char* kStageNames[]{"screen", "eye0", "eye1", "atomic"};
     __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
          "[npc.close] stage=%s entity=%p model=%d dist=%.2f "
-         "delta=%.2f,%.2f,%.2f result=%d visible=%d rw=%d",
-         stage == 0 ? "screen" : (stage == 1 ? "eye0" : "eye1"),
-         entity, model,
+         "delta=%.2f,%.2f,%.2f result=%d visible=%d rw=%d render58c=%02x eye=%d",
+         kStageNames[stage], entity, model,
          static_cast<double>(std::sqrt(distSq)), static_cast<double>(delta.x),
          static_cast<double>(delta.y), static_cast<double>(delta.z), result,
-         visible,
-         *reinterpret_cast<void* const*>(bytes + 0x20) ? 1 : 0);
+         visible, *reinterpret_cast<void* const*>(bytes + 0x20) ? 1 : 0,
+         static_cast<unsigned>(bytes[0x58c]), g_renderingStereoEyeIndex);
 }
 
 bool StereoDispatchCullRequested() {

@@ -139,6 +139,8 @@ void TraceNearbyPedPool(const Pool& pool, void* player, double now) {
         std::uint64_t flags{};
         double lastLog{};
         double lastSeen{};
+        std::uint8_t renderFlags{};
+        bool rw{};
         bool active{};
     };
     static Sample samples[1024]{};
@@ -162,26 +164,38 @@ void TraceNearbyPedPool(const Pool& pool, void* player, double now) {
             continue;
         }
         const std::uint64_t flags = Read<std::uint64_t>(ped, 0x28);
+        // CPed::Render returns immediately when bit 1 of byte +0x58c is set,
+        // independently of CEntity::IsVisible and the render-list dispatch.
+        const std::uint8_t renderFlags = Read<std::uint8_t>(ped, 0x58c);
+        const bool rw = Read<void*>(ped, 0x20) != nullptr;
         const bool fresh = !sample.active || sample.pool != pool.identity ||
             sample.ref != ref || now - sample.lastSeen > 0.5;
         const std::uint64_t changed = fresh ? 0 : sample.flags ^ flags;
-        if (fresh || (changed & 0x80u) || now - sample.lastLog >= 0.5) {
+        const std::uint8_t renderChanged = fresh
+            ? 0 : sample.renderFlags ^ renderFlags;
+        const bool stateChanged = (changed & 0x80u) != 0 ||
+            (renderChanged & 0x02u) != 0 || (!fresh && sample.rw != rw);
+        if (fresh || stateChanged || now - sample.lastLog >= 0.5) {
             __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
                 "[npc.pool] %s entity=%p ref=%x model=%d dist=%.2f "
-                "pos=%.2f,%.2f,%.2f flags=%llx changed=%llx visible=%d rw=%d vehicle=%p gap_ms=%.1f",
-                fresh ? "enter" : (changed ? "change" : "sample"), ped, ref,
+                "pos=%.2f,%.2f,%.2f flags=%llx changed=%llx visible=%d "
+                "rw=%d render58c=%02x render_changed=%02x vehicle=%p gap_ms=%.1f",
+                fresh ? "enter" : (stateChanged ? "change" : "sample"), ped, ref,
                 static_cast<int>(Read<std::int16_t>(ped, 0x32)),
                 static_cast<double>(distance), static_cast<double>(position.x),
                 static_cast<double>(position.y), static_cast<double>(position.z),
                 static_cast<unsigned long long>(flags),
                 static_cast<unsigned long long>(changed), (flags & 0x80u) ? 1 : 0,
-                Read<void*>(ped, 0x20) ? 1 : 0, Read<void*>(ped, 0x708),
+                rw ? 1 : 0, static_cast<unsigned>(renderFlags),
+                static_cast<unsigned>(renderChanged), Read<void*>(ped, 0x708),
                 fresh ? 0.0 : (now - sample.lastSeen) * 1000.0);
             sample.lastLog = now;
         }
         sample.pool = pool.identity;
         sample.ref = ref;
         sample.flags = flags;
+        sample.renderFlags = renderFlags;
+        sample.rw = rw;
         sample.lastSeen = now;
         sample.active = true;
     }
