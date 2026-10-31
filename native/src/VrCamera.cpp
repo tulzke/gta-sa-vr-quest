@@ -30186,6 +30186,81 @@ void RememberCutsceneCamera() {
          g_cutsceneCameraScene, g_cutsceneCameraIndex);
 }
 
+// Room-scale input enters after the player's control task has produced its
+// normal velocity and before CWorld runs the collision pass. The injected
+// velocity is removed on the next control update so it cannot accumulate.
+using PlayerControlFn = void (*)(void*);
+PlayerControlFn g_roomOriginalControl{};
+using RoomOrientationFn = void (*)(void*, float, float, float);
+RoomOrientationFn g_roomOrientation{};
+struct RoomMotionState {
+    void* ped{};
+    V3 lastHead{};
+    V3 injected{};
+    std::uint64_t epoch{};
+    std::uint64_t serial{};
+    bool valid{};
+};
+RoomMotionState g_roomMotion{};
+
+void OnRoomPlayerControl(void* ped) {
+    auto* speed = reinterpret_cast<V3*>(static_cast<char*>(ped) + 0x68);
+    if (g_roomMotion.ped == ped && Finite(*speed)) {
+        // Collision may have reduced the old impulse. Remove only the part
+        // still present in the same direction; never reverse a blocked ped.
+        const V3 old = g_roomMotion.injected;
+        const float length2 = old.x*old.x + old.y*old.y;
+        if (length2 > 1e-9f) {
+            const float scale = std::clamp((speed->x*old.x + speed->y*old.y)/length2, 0.0f, 1.0f);
+            speed->x -= old.x*scale; speed->y -= old.y*scale;
+        }
+    }
+    g_roomMotion.injected = {};
+    g_roomOriginalControl(ped);
+
+    float hp[3]{}, hq[4]{}; std::uint64_t epoch{};
+    const bool active = ShouldRunStereo() && !g_inputBlocked.load(std::memory_order_relaxed) &&
+        GroundWalkControlsActive() && !(g.PlayerIsEnteringCar && g.PlayerIsEnteringCar()) &&
+        !ScriptedCutsceneRunning() && !jetpack::IsActive() && !ParachuteStateActive() &&
+        !g_duckLatched && g_origin.valid && g_vrBaseValid &&
+        xr::GetHeadPose(hp,hq,&epoch);
+    if (!active) { g_roomMotion = {}; return; }
+    const V3 head{hp[0],hp[1],hp[2]};
+    const float step = g.CTimer_ms_fTimeStep ? *g.CTimer_ms_fTimeStep : 0.0f;
+    if (!Finite(head) || !std::isfinite(step) || step < 0.05f || step > 3.0f) {
+        g_roomMotion = {}; return;
+    }
+    if (!g_roomMotion.valid || g_roomMotion.ped != ped || g_roomMotion.epoch != epoch ||
+        g_roomMotion.serial != g_cameraResetSerial) {
+        g_roomMotion = {ped, head, {}, epoch, g_cameraResetSerial, true};
+        return;
+    }
+    V3 delta = head - g_roomMotion.lastHead;
+    g_roomMotion.lastHead = head;
+    delta.y = 0.0f;
+    const float distance = std::hypot(delta.x,delta.z);
+    if (!std::isfinite(distance) || distance > 0.20f) return;
+    // Remove physical translation from the camera origin as it is handed to
+    // the ped; otherwise the same step moves both the ped and the camera.
+    const Q inv{-g_origin.ori.x,-g_origin.ori.y,-g_origin.ori.z,g_origin.ori.w};
+    const V3 world = TrackingToGame(g_vrBase, Rotate(inv,delta));
+    if (Finite(world) && Finite(*speed)) {
+        const V3 impulse{world.x/step,world.y/step,0.0f};
+        speed->x += impulse.x; speed->y += impulse.y;
+        g_roomMotion.injected = impulse;
+        g_origin.pos.x += delta.x; g_origin.pos.z += delta.z;
+    }
+    const Q orientation{hq[0],hq[1],hq[2],hq[3]};
+    const V3 localForward = Rotate(inv, Rotate(orientation,{0.0f,0.0f,-1.0f}));
+    const V3 forward = TrackingToGame(g_vrBase, localForward);
+    if (g_roomOrientation && Finite(forward) && std::hypot(forward.x,forward.y)>0.1f) {
+        const float yaw = std::atan2(-forward.x,forward.y);
+        g_roomOrientation(ped,0.0f,0.0f,yaw);
+        std::memcpy(static_cast<char*>(ped)+0x6c4,&yaw,sizeof(yaw));
+        std::memcpy(static_cast<char*>(ped)+0x6c8,&yaw,sizeof(yaw));
+    }
+}
+
 bool Install() {
     // Resolve-thread I/O: keep the first RenderScene hook free of settings-file
     // access even when the Graphics page has never been opened.
@@ -30206,6 +30281,15 @@ bool Install() {
         return false;
     }
     LOGI("[vr] head-tracked camera hook installed on CopyCameraMatrixToRWCam");
+    if (g.LoadBase) {
+        auto* control = reinterpret_cast<void*>(g.LoadBase + 0x5b69acu);
+        constexpr std::uint32_t expected[]{0xd10243ffu,0x6d0223e9u,0xa9037bfdu,0xa9046ffcu};
+        if (std::memcmp(control,expected,sizeof(expected))==0) {
+            g_roomOrientation = reinterpret_cast<RoomOrientationFn>(g.LoadBase + 0x415fbcu);
+            g_roomOriginalControl = reinterpret_cast<PlayerControlFn>(InstallTrampoline(control,reinterpret_cast<void*>(&OnRoomPlayerControl)));
+        }
+        LOGI("[room] player control hook installed=%d",g_roomOriginalControl!=nullptr);
+    }
     constexpr std::uint32_t photoPrologue[]{0xd10603ffu,0x6d0e3befu,0x6d0f33edu,0x6d102bebu};
     if(g.ProcessCommands2000To2099 &&
        std::memcmp(g.ProcessCommands2000To2099,photoPrologue,sizeof(photoPrologue))==0) {
