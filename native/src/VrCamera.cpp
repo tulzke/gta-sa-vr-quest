@@ -30196,6 +30196,7 @@ RoomOrientationFn g_roomOrientation{};
 struct RoomMotionState {
     void* ped{};
     V3 lastHead{};
+    V3 neutralHead{};
     V3 injected{};
     std::uint64_t epoch{};
     std::uint64_t serial{};
@@ -30232,14 +30233,27 @@ void OnRoomPlayerControl(void* ped) {
     }
     if (!g_roomMotion.valid || g_roomMotion.ped != ped || g_roomMotion.epoch != epoch ||
         g_roomMotion.serial != g_cameraResetSerial) {
-        g_roomMotion = {ped, head, {}, epoch, g_cameraResetSerial, true};
+        g_roomMotion = {ped, head, head, {}, epoch, g_cameraResetSerial, true};
         return;
     }
-    V3 delta = head - g_roomMotion.lastHead;
+    V3 sampleDelta = head - g_roomMotion.lastHead;
     g_roomMotion.lastHead = head;
-    delta.y = 0.0f;
+    const float sampleDistance = std::hypot(sampleDelta.x,sampleDelta.z);
+    if (!std::isfinite(sampleDistance) || sampleDistance > 0.20f) {
+        g_roomMotion.neutralHead = head;
+        return;
+    }
+    // Allow the player to lean/reach around the collision body. Only the
+    // amount outside this circle follows through the game's physics.
+    constexpr float kRoomRadius = 0.30f;
+    V3 delta{head.x-g_roomMotion.neutralHead.x,0.0f,
+             head.z-g_roomMotion.neutralHead.z};
     const float distance = std::hypot(delta.x,delta.z);
-    if (!std::isfinite(distance) || distance > 0.20f) return;
+    if (distance > kRoomRadius) {
+        delta = delta * ((distance-kRoomRadius)/distance);
+    } else {
+        delta = {};
+    }
     // Remove physical translation from the camera origin as it is handed to
     // the ped; otherwise the same step moves both the ped and the camera.
     const Q inv{-g_origin.ori.x,-g_origin.ori.y,-g_origin.ori.z,g_origin.ori.w};
@@ -30249,6 +30263,7 @@ void OnRoomPlayerControl(void* ped) {
         speed->x += impulse.x; speed->y += impulse.y;
         g_roomMotion.injected = impulse;
         g_origin.pos.x += delta.x; g_origin.pos.z += delta.z;
+        g_roomMotion.neutralHead.x += delta.x; g_roomMotion.neutralHead.z += delta.z;
     }
     const Q orientation{hq[0],hq[1],hq[2],hq[3]};
     const V3 localForward = Rotate(inv, Rotate(orientation,{0.0f,0.0f,-1.0f}));
