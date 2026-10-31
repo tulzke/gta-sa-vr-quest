@@ -5058,6 +5058,25 @@ void SyncInput(XrTime displayTime) {
     in.grip[1] = ReadFloat(s.gripAction, s.handPaths[1]);
     in.a    = ReadBool(s.aAction);
     in.b    = ReadBool(s.bAction);
+    // Backlog 11: mark an observed NPC disappearance without consuming B.
+    // Require three distinct presses, with no more than 700 ms between them.
+    static bool markerBWasDown = false;
+    static int markerPresses = 0;
+    static double markerLastPressMs = 0.0;
+    if (in.b && !markerBWasDown) {
+        const double nowMs = perf::MonotonicMs();
+        markerPresses = (nowMs - markerLastPressMs <= 700.0)
+            ? markerPresses + 1 : 1;
+        markerLastPressMs = nowMs;
+        if (markerPresses == 3) {
+            __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
+                                "[npc.marker] triple B");
+            TriggerHaptic(1, 0.6f, 0.0f, 100.0f);
+            markerPresses = 0;
+            markerLastPressMs = 0.0;
+        }
+    }
+    markerBWasDown = in.b;
     in.x    = ReadBool(s.xAction);
     in.y    = ReadBool(s.yAction);
     in.menu = ReadBool(s.menuAction);
