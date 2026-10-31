@@ -19,7 +19,7 @@ $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (!$BuildRoot) { $BuildRoot = Join-Path $repo 'build\quest-deploy' }
 if (!$SeedBuild) { $SeedBuild = Join-Path $repo 'build\vehicle-test-area' }
 if (!$Keystore) {
-    $Keystore = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'AppData\Local\GTASAVRBuilder\signing\savr.keystore'
+    $Keystore = 'D:\development\SAVRBuild\signing\savr.keystore'
 }
 $BuildRoot = [IO.Path]::GetFullPath($BuildRoot)
 $cfg = Get-Content -Raw -LiteralPath $ToolsFile | ConvertFrom-Json

@@ -707,6 +707,8 @@ function Get-PersistentKeystorePath {
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [Parameter(Mandatory = $true)][string]$ResolvedWorkDir
     )
+    $sharedKey = 'D:\development\SAVRBuild\signing\savr.keystore'
+    if (Test-Path -LiteralPath $sharedKey -PathType Leaf) { return $sharedKey }
     $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
     if ([string]::IsNullOrWhiteSpace($localAppData)) { $localAppData = $env:LOCALAPPDATA }
     if ([string]::IsNullOrWhiteSpace($localAppData)) { throw 'LOCALAPPDATA is unavailable; cannot place the persistent signing key safely.' }

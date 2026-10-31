@@ -19,7 +19,7 @@ device. `-NoBackup` is an explicit opt-out from the automatic backup.
 The first fast run seeds APK templates and the HLOD pack from the existing
 `build/vehicle-test-area` build; use `-SeedBuild <prepared-build-directory>` to
 specify another compatible personal build before initializing the cache.
-The existing key is reused from `%USERPROFILE%\AppData\Local\GTASAVRBuilder\signing`;
+The existing key is reused from `D:\development\SAVRBuild\signing\savr.keystore`;
 `-Keystore` overrides its path. No key is generated and no uninstall is attempted.
 
 Use `./tools/deploy-quest.ps1 -Full` for initial/full installation or changes to
@@ -67,9 +67,10 @@ The audio input must match `tools/audio-reference.json`. Only validated audio
 files are copied. Aircraft HLOD is generated locally from the supplied game
 assets during the build.
 
-Keep the signing key at `%LOCALAPPDATA%\GTASAVRBuilder\signing` on Windows,
-or `$XDG_DATA_HOME/gtasavr-builder/signing` (`~/.local/share/gtasavr-builder/signing`
-by default) on Linux/macOS. Updates require the same key as the installed build.
+On this Windows setup, keep the signing key at `D:\development\SAVRBuild\signing\savr.keystore`.
+The full builder falls back to `%LOCALAPPDATA%\GTASAVRBuilder\signing` when that key is absent.
+On Linux/macOS the key is stored in `$XDG_DATA_HOME/gtasavr-builder/signing`
+(`~/.local/share/gtasavr-builder/signing` by default). Updates require the same key as the installed build.
 
 ## Developer build
 
