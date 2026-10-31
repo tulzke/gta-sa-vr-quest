@@ -1204,6 +1204,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                     xr::CycleProfilerMode();
                 }
 #endif
+                else if (mainSel == N - 2) savr::driving::CycleVehicleDebugMode(1);
                 else if (mainSel == N - 1) menuPage = PG_NONE;
             }
             if (back) menuPage = PG_NONE;

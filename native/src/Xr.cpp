@@ -7360,6 +7360,7 @@ void BuildMainMenu() {
         GetProfilerMode()==PROFILER_FPS ? "PROFILER   < FPS ONLY >" :
         GetProfilerMode()==PROFILER_DETAILED ? "PROFILER   < DETAILED >" : "PROFILER   < OFF >",
 #endif
+        driving::GetVehicleDebugMode() ? "VEHICLE DEBUG   < ON >" : "VEHICLE DEBUG   < OFF >",
         "CLOSE"
     };
     constexpr int N = sizeof(kItems) / sizeof(kItems[0]);

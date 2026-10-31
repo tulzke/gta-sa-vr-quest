@@ -445,7 +445,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     if(editMode && seated && g_edit.hand<0 && g.CVehicle_IsDriver && g.CVehicle_IsDriver(seated,ped)) {
         driving::WheelVisualState wheel{}; driving::GetWheelVisualState(&wheel);
         Vec wheelPoint{}; float seatEye[3]{};
-        const bool wheelReady=wheel.dashAnchorValid&&!wheel.bike&&ToWorld(wheel.center,wheelPoint);
+        const bool wheelReady=wheel.dashAnchorValid&&ToWorld(wheel.center,wheelPoint);
         const bool seatReady=vrcam::GetNeutralVehicleEyeWorld(seatEye);
         void* matrix=Read<void*>(seated,0x18);
         const Basis car=matrix?Matrix(matrix):Basis{};
@@ -487,7 +487,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const int type=driving::GetActiveVehicleType();
         const int mode=driving::GetModeForVehicleType(type);
         Vec point{};
-        if(!car.Valid()||!wheel.dashAnchorValid||wheel.modelId!=model||wheel.bike||
+        if(!car.Valid()||!wheel.dashAnchorValid||wheel.modelId!=model||
            !ToWorld(wheel.center,point)) { Reset();return; }
         if(cockpitKind==3) {
             float neutral[3]{};

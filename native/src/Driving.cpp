@@ -1480,6 +1480,16 @@ bool BuildBikeTracking(WheelVisualState* visual) {
             usedModelHandle=true;
         }
     }
+    int wheelCalibration[WHEEL_CAL_FIELD_COUNT]{};
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        const auto it=g_modelCalibration.find(modelId);
+        if(it!=g_modelCalibration.end())
+            std::copy_n(it->second.wheel,WHEEL_CAL_FIELD_COUNT,wheelCalibration);
+    }
+    worldCenter=worldCenter+vr*(wheelCalibration[WHEEL_CAL_SIDE]/100.0f)+
+        vf*(wheelCalibration[WHEEL_CAL_FORWARD]/100.0f)+
+        vu*(wheelCalibration[WHEEL_CAL_HEIGHT]/100.0f);
     V3 center,pointRight,pointForward,pointUp;
     if (!WorldPointToTracking(worldCenter,&center)||
         !WorldPointToTracking(worldCenter+vr,&pointRight)||
@@ -1506,7 +1516,8 @@ bool BuildBikeTracking(WheelVisualState* visual) {
     // On a bike this is the second axis of the horizontal steering plane.
     visual->up[0]=forward.x; visual->up[1]=forward.y; visual->up[2]=forward.z;
     visual->normal[0]=normal.x; visual->normal[1]=normal.y; visual->normal[2]=normal.z;
-    visual->radius=static_cast<float>(g_value[F_BIKE_HALF_WIDTH].load())/100.0f;
+    visual->radius=std::max(0.01f,(g_value[F_BIKE_HALF_WIDTH].load()+
+        wheelCalibration[WHEEL_CAL_RADIUS])/100.0f);
     // Android 2.11 arm64 CPhysical::GetSpeed reads m_vecMoveSpeed at +0x68.
     // CBike's constructor stores tHandlingData* at +0x4a8; the converted
     // cTransmission::m_MaxFlatVelocity is at +0x88 in that handling record.
@@ -3059,14 +3070,14 @@ constexpr int kDefaultBikeItems[] = {
     MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE,
     MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
+    MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM, MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_INTERIOR_GLASS, MENU_DRIVEBY_AIM, MENU_VEHICLE_DEBUG,
+    MENU_INTERIOR_GLASS, MENU_DRIVEBY_AIM,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE, MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveBikeItems[] = {
@@ -3077,7 +3088,7 @@ constexpr int kImmersiveBikeItems[] = {
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
     MENU_BIKE_LEAN_STEERING, MENU_BIKE_LEAN_SENSITIVITY,
     MENU_BIKE_HAND_TILT, MENU_BIKE_BLOCK_WHEELIE, MENU_LOCAL_HORIZON, MENU_BIKE_VISUAL_LEAN,
-    MENU_KEEP_RIDER_ON_FLIPS, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
+    MENU_KEEP_RIDER_ON_FLIPS, MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3085,7 +3096,7 @@ constexpr int kImmersiveCarItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS, MENU_VEHICLE_DEBUG,
+    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE, MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultPlaneItems[] = {
@@ -3093,7 +3104,7 @@ constexpr int kDefaultPlaneItems[] = {
     MENU_PLANE_INVERT_PITCH,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_INTERIOR_GLASS, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
+    MENU_INTERIOR_GLASS, MENU_RESET, MENU_BACK
 };
 constexpr int kImmersivePlaneItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3102,14 +3113,14 @@ constexpr int kImmersivePlaneItems[] = {
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_YOKE_SENSITIVITY,
     MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
+    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS, MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultBoatItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_BOAT_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
+    MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveBoatItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3117,7 +3128,7 @@ constexpr int kImmersiveBoatItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_VEHICLE_DEBUG, MENU_RESET, MENU_BACK
+    MENU_WHEEL_VISIBLE, MENU_RESET, MENU_BACK
 };
 
 void MenuTableForType(int vehicleType, const int** items, int* count) {

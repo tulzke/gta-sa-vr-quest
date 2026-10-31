@@ -409,9 +409,9 @@ void SetCalibPage(bool active, int selection, int hand, int weaponType);
 // at a time; the GameThread publishes whichever is current each frame.
 void SetMainMenu(bool active, int selection);
 #ifdef SAVR_DEV
-inline constexpr int kMainMenuItemCount = 15;
+inline constexpr int kMainMenuItemCount = 16;
 #else
-inline constexpr int kMainMenuItemCount = 14;
+inline constexpr int kMainMenuItemCount = 15;
 #endif
 enum ProfilerMode { PROFILER_OFF=0, PROFILER_FPS=1, PROFILER_DETAILED=2 };
 void CycleProfilerMode();

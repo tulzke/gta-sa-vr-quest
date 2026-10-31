@@ -147,6 +147,13 @@ void TestBars() {
     g_value[F_BIKE_DISTANCE]=30;g_value[F_BIKE_HEIGHT]=82;g_value[F_BIKE_HALF_WIDTH]=32;
     WheelVisualState built{};CHECK(BuildBikeTracking(&built));CHECK(Near(built.radius,.32f));
     CheckVector({built.center[0],built.center[1],built.center[2]},{1,2,3});
+    g_modelCalibration[411].wheel[WHEEL_CAL_SIDE]=10;
+    g_modelCalibration[411].wheel[WHEEL_CAL_FORWARD]=-20;
+    g_modelCalibration[411].wheel[WHEEL_CAL_HEIGHT]=30;
+    g_modelCalibration[411].wheel[WHEEL_CAL_RADIUS]=5;
+    CHECK(BuildBikeTracking(&built));CHECK(Near(built.radius,.37f));
+    CheckVector({built.center[0],built.center[1],built.center[2]},{1.1f,1.8f,3.3f});
+    g_modelCalibration.clear();
     g.CBike_IsComponentPresent=nullptr;CHECK(BuildBikeTracking(&built));
     CheckVector({built.center[0],built.center[1],built.center[2]},{0,.30f,.82f});
     g.CBike_IsComponentPresent=ComponentPresent;
