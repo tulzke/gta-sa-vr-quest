@@ -14,12 +14,6 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#if defined(__ANDROID__)
-#include <cerrno>
-#include <linux/hw_breakpoint.h>
-#include <linux/perf_event.h>
-#include <sys/syscall.h>
-#endif
 
 namespace savr::npcgrab {
 namespace {
@@ -103,103 +97,6 @@ struct Pool {
         return size>0&&size<=1024&&objects&&flags;
     }
 };
-
-// Backlog 11: sample the live ped pool independently of visibility scans.
-// Slot generation identifies reuse; never dereference a previously stored ped.
-void TraceNearbyPedPool(const Pool& pool, void* player, double now) {
-#if defined(__ANDROID__)
-    // Feasibility probe only: a disabled, short-lived watchpoint on our own
-    // stack. It does not monitor game memory or install a signal handler.
-    static bool watchpointProbed = false;
-    if (!watchpointProbed) {
-        watchpointProbed = true;
-        alignas(8) std::uint64_t target = 0;
-        perf_event_attr attr{};
-        attr.type = PERF_TYPE_BREAKPOINT;
-        attr.size = sizeof(attr);
-        attr.bp_type = HW_BREAKPOINT_W;
-        attr.bp_addr = reinterpret_cast<std::uintptr_t>(&target);
-        attr.bp_len = HW_BREAKPOINT_LEN_8;
-        attr.disabled = 1;
-        attr.exclude_kernel = 1;
-        attr.exclude_hv = 1;
-        errno = 0;
-        const int fd = static_cast<int>(syscall(__NR_perf_event_open, &attr,
-                                                0, -1, -1, 0));
-        const int error = fd < 0 ? errno : 0;
-        if (fd >= 0) close(fd);
-        __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
-            "[npc.watchprobe] perf_event_open=%s errno=%d",
-            fd >= 0 ? "ok" : "failed", error);
-    }
-#endif
-    struct Sample {
-        void* pool{};
-        int ref{-1};
-        std::uint64_t flags{};
-        double lastLog{};
-        double lastSeen{};
-        std::uint8_t renderFlags{};
-        bool rw{};
-        bool active{};
-    };
-    static Sample samples[1024]{};
-    static double nextScan{};
-    if (!player || !getPed || !pool.identity || !pool.flags ||
-        pool.size <= 0 || pool.size > 1024 || now < nextScan) return;
-    nextScan = now + 0.05;
-    const Vec origin = Position(player);
-    if (!Finite(origin)) return;
-    for (int slot = 0; slot < pool.size; ++slot) {
-        Sample& sample = samples[slot];
-        const unsigned char generation = pool.flags[slot];
-        if (generation & 0x80u) { sample.active = false; continue; }
-        const int ref = (slot << 8) | generation;
-        void* ped = getPed(ref);
-        if (!ped || ped == player) { sample.active = false; continue; }
-        const Vec position = Position(ped);
-        const float distance = Length(position - origin);
-        if (!Finite(position) || !std::isfinite(distance) || distance > 8.f) {
-            sample.active = false;
-            continue;
-        }
-        const std::uint64_t flags = Read<std::uint64_t>(ped, 0x28);
-        // CPed::Render returns immediately when bit 1 of byte +0x58c is set,
-        // independently of CEntity::IsVisible and the render-list dispatch.
-        const std::uint8_t renderFlags = Read<std::uint8_t>(ped, 0x58c);
-        const bool rw = Read<void*>(ped, 0x20) != nullptr;
-        const bool fresh = !sample.active || sample.pool != pool.identity ||
-            sample.ref != ref || now - sample.lastSeen > 0.5;
-        const std::uint64_t changed = fresh ? 0 : sample.flags ^ flags;
-        const std::uint8_t renderChanged = fresh
-            ? 0 : sample.renderFlags ^ renderFlags;
-        const bool stateChanged = (changed & 0x80u) != 0 ||
-            (renderChanged & 0x02u) != 0 || (!fresh && sample.rw != rw);
-        if (fresh || stateChanged || now - sample.lastLog >= 0.5) {
-            __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
-                "[npc.pool] %s entity=%p ref=%x model=%d dist=%.2f "
-                "pos=%.2f,%.2f,%.2f flags=%llx changed=%llx visible=%d "
-                "rw=%d render58c=%02x render_changed=%02x vehicle=%p gap_ms=%.1f",
-                fresh ? "enter" : (stateChanged ? "change" : "sample"), ped, ref,
-                static_cast<int>(Read<std::int16_t>(ped, 0x32)),
-                static_cast<double>(distance), static_cast<double>(position.x),
-                static_cast<double>(position.y), static_cast<double>(position.z),
-                static_cast<unsigned long long>(flags),
-                static_cast<unsigned long long>(changed), (flags & 0x80u) ? 1 : 0,
-                rw ? 1 : 0, static_cast<unsigned>(renderFlags),
-                static_cast<unsigned>(renderChanged), Read<void*>(ped, 0x708),
-                fresh ? 0.0 : (now - sample.lastSeen) * 1000.0);
-            sample.lastLog = now;
-        }
-        sample.pool = pool.identity;
-        sample.ref = ref;
-        sample.flags = flags;
-        sample.renderFlags = renderFlags;
-        sample.rw = rw;
-        sample.lastSeen = now;
-        sample.active = true;
-    }
-}
 struct Hold {
     void* ped{};void* pool{};void* objects{};void* task{};
     int ref{-1},bone{};Vec previous{},velocity{},start{};
@@ -842,11 +739,8 @@ void Install(void* handle) {
         0xd10203ff,0xfd0013e8,0xa902fbfd,0xf9001ffb,
     };
     void* cameraPedsOriginal{};
-    const bool cameraPedsDisabled=Hook(
-        dlsym(handle,"_ZN10CCollision24CheckCameraCollisionPedsEiiP7CVectorS1_Pf"),
+    Hook(dlsym(handle,"_ZN10CCollision24CheckCameraCollisionPedsEiiP7CVectorS1_Pf"),
         cameraPeds,reinterpret_cast<void*>(&OnCheckCameraCollisionPeds),cameraPedsOriginal);
-    LOGI("[npc.visibility] camera_near_clip_hiding=%s",
-         cameraPedsDisabled?"disabled":"unavailable");
     LOGI("[npcgrab] available=%d",ready);
 }
 void OnDoorOpening(void* car) {
@@ -921,7 +815,6 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     if (player!=owner) { Reset();owner=player; }
     void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
     Pool pool;pool.Load();
-    TraceNearbyPedPool(pool, player, now);
     PruneAnimations(pool,now);
     const bool usable=ready&&!blocked&&trackingValid&&epoch==previousEpoch&&
         dt>0&&dt<=.15f&&xr::IsSessionFocused()&&player&&!playerlife::Dead(player)&&pad&&
