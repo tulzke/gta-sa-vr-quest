@@ -97,6 +97,14 @@ int main(){
  CHECK(boatentry::seat==-1);
  for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=0;eyeY=-.55f;Tick();xr::input.leftStick[0]=1;
  for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==beforeBike+2&&boatentry::seat==0);
+ // All pedal bikes and the automobile-derived quad expose rider boarding.
+ for(int model:{481,509,510,471}){
+  xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
+  Put(cars,0x32,std::uint16_t(model));Put(cars,0x5ec,std::uint8_t(0));
+  vehicleAppearance=model==471?1:2;eyeY=.2f;Tick();CHECK(icons.count==1);
+  xr::input.leftStick[0]=1;const int before=boatentry::calls;
+  for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==before+1&&boatentry::seat==-1);
+ }
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

@@ -104,9 +104,8 @@ void Update(bool usable,std::uint64_t epoch){
   void* matrix=Read<void*>(car,0x18);if(!matrix)continue;
   Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
   if(!b.Valid()||Length(eye-b.position)>4.5f)continue;
-  if(appearance==2){
-   // Motorcycles only; bicycles and the quad need their own seat geometry.
-   if(model==481||model==509||model==510||model==471||b.up.z<.94f||Length(speed)>.02f)continue;
+  if(appearance==2||model==471){
+   if(b.up.z<.94f||Length(speed)>.02f)continue;
    if(seated&&currentSeat!= -1&&currentSeat!=0)continue;
    for(int index=0;index<2;++index){
     const bool exit=seated!=nullptr;

@@ -122,15 +122,22 @@ Basis Matrix(void* matrix) {
     return {Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
 }
 bool BikeBarFrame(void* bike,Basis& frame,Vec& centre) {
-    void* matrix=Read<void*>(bike,0x18);if(!matrix||!g_frameLtm||!g.CBike_IsComponentPresent||
-       !g.CBike_GetComponentWorldPosition||!g.CBike_IsComponentPresent(bike,7))return false;
+    void* matrix=Read<void*>(bike,0x18);if(!matrix||!g_frameLtm)return false;
     const Basis body=Matrix(matrix);if(!body.Valid())return false;
-    void* node=Read<void*>(bike,0x758+7*8);if(!node)return false;
+    const int model=Read<std::uint16_t>(bike,0x32);
+    const bool quad=model==471;
+    const int handleNode=(model==481||model==509||model==510)?6:7;
+    if(!quad&&(!g.CBike_IsComponentPresent||!g.CBike_GetComponentWorldPosition||
+               !g.CBike_IsComponentPresent(bike,handleNode)))return false;
+    // CQuadBike::PreRender rotates its steering frame at +0x888. It is an
+    // automobile subclass, so CBike component methods must never receive it.
+    void* node=Read<void*>(bike,quad?0x888:0x758+handleNode*8);if(!node)return false;
     void* ltm=g_frameLtm(node);if(!ltm)return false;
     frame=Matrix(ltm);if(!frame.Valid())return false;
-    GameSymbols::Vec3 p{};g.CBike_GetComponentWorldPosition(bike,7,&p);
-    float correction[3]{},width{};driving::GetBikeBarCalibration(Read<std::uint16_t>(bike,0x32),correction,&width);
-    centre=Vec{p.x,p.y,p.z}+body.Vector({correction[0],correction[1],correction[2]});
+    Vec position=frame.position;
+    if(!quad){GameSymbols::Vec3 p{};g.CBike_GetComponentWorldPosition(bike,handleNode,&p);position={p.x,p.y,p.z};}
+    float correction[3]{},width{};driving::GetBikeBarCalibration(model,correction,&width);
+    centre=position+body.Vector({correction[0],correction[1],correction[2]});
     frame.position=body.position;
     return Finite(centre)&&Length(centre-body.position)<5.f;
 }
@@ -143,6 +150,7 @@ bool BikeGripPoint(void* bike,int grip,Basis& frame,Vec& point) {
 }
 bool ReadDoor(const Target& t,void* ped,Door& d,bool inside=false) {
     if (!g.CVehicle_GetVehicleAppearance||g.CVehicle_GetVehicleAppearance(t.vehicle)!=1||
+        Read<std::uint16_t>(t.vehicle,0x32)==471||
         !g_canOpen(t.vehicle,ped)||g_inUse(t.vehicle,t.node,0)) return false;
     const auto kind=Read<std::uint8_t>(t.vehicle,0x5a);
     if ((kind&7)!=2||(kind>>3)==5) return false; // no wrecks / other classes
@@ -544,10 +552,9 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         float best=2.f,editBest=.2f;Target target{},editTarget{};Vec point{},origin{},editPoint{};float chosenSide{},editSide{};int chosenHand=-1,editHand=-1;
         for(int slot=0;slot<kPoolSize;++slot){
             if(pool.flags[slot]&0x80)continue;void* bike=pool.objects+slot*kStride;
-            if((Read<std::uint8_t>(bike,0x5a)&7)!=2||g.CVehicle_GetVehicleAppearance(bike)!=2||
-               Read<void*>(bike,0x5a0)||Read<void*>(bike,0x5a8))continue;
             const int model=Read<std::uint16_t>(bike,0x32);
-            if(model==481||model==509||model==510||model==471)continue;
+            if((Read<std::uint8_t>(bike,0x5a)&7)!=2||(g.CVehicle_GetVehicleAppearance(bike)!=2&&model!=471)||
+               Read<void*>(bike,0x5a0)||Read<void*>(bike,0x5a8))continue;
             const Vec speed=Read<Vec>(bike,0x68);if(!Finite(speed)||Length(speed)>.02f)continue;
             void* matrix=Read<void*>(bike,0x18);if(!matrix)continue;
             const Basis body=Matrix(matrix);if(!body.Valid()||body.up.z>=kBikeStableUp)continue;

@@ -34,7 +34,8 @@ bool TryExit(void* car,int seat,Vec hint){
  void* ped=g.FindPlayerPed(-1);void* pad=g.CPad_GetPad(0);
  if(!ped||!pad||g.FindPlayerVehicle(-1,false)!=car||vehicleentry::SeatIndex(car,ped)!=seat||Read<std::uint16_t>(pad,0x110)||Read<std::uint8_t>(pad,0x12d)||!healthy(ped)||!canStepOut(car,false))return false;
  const Vec speed=Read<Vec>(car,0x68);if(!Finite(speed)||Length(speed)>.02f)return false;
- const bool bike=g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2;
+ const bool bike=Read<std::uint16_t>(car,0x32)==471||
+     (g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2);
  const int door=seat+3;
  if(!bike){
  const float open=Read<float>(car,0x770+door*0x18),angle=Read<float>(car,0x77c+door*0x18);

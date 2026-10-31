@@ -528,6 +528,32 @@ int main() {
      StoreBasis(frames[0],Basis{{0,1,0},{-1,0,0},{0,0,1},{0,.5f,.8f}});
      Write(vehicle,0x758+7*8,static_cast<void*>(frames[0]));Basis bar{};Vec p{};
      CHECK(BikeGripPoint(vehicle,1,bar,p));CHECK(Length(p-Vec{0,.81f,.8f})<.001f);}
+    // BMX and mountain/city bikes use node 6; quad uses its own +0x888
+    // steering frame and must never call a CBike component method.
+    for(int model:{481,509,510,471}){Setup();Write<std::uint16_t>(vehicle,0x32,static_cast<std::uint16_t>(model));
+     static int component;component=-1;
+     g.CBike_IsComponentPresent=[](const void*,int node){component=node;return true;};
+     g.CBike_GetComponentWorldPosition=[](void*,int node,GameSymbols::Vec3* p){component=node;*p={0,.5f,.8f};};
+     StoreBasis(frames[0],Basis{{1,0,0},{0,1,0},{0,0,1},{0,.5f,.8f}});
+     Write(vehicle,model==471?0x888:0x758+6*8,static_cast<void*>(frames[0]));Basis bar{};Vec p{};
+     CHECK(BikeGripPoint(vehicle,0,bar,p));CHECK(Length(p-Vec{-.31f,.5f,.8f})<.001f);
+     CHECK(component==(model==471?-1:6));}
+    // All supported models can claim a tilted bar and turn it into a lift.
+    for(int model:{481,509,510,471}){Setup();hands[0]={};hands[1]={};
+     std::memset(driving::bikeGrip,0,sizeof(driving::bikeGrip));
+     g.CVehicle_GetVehicleAppearance=model==471?+[](const void*){return 1;}:+[](const void*){return 2;};
+     g.CBike_IsComponentPresent=[](const void*,int node){return node==6;};
+     g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* p){*p={0,.5f,.8f};};
+     static int forces;forces=0;g_turnForce=[](void*,float,float,float,float,float,float){++forces;};
+     const Basis tilted{{.94f,0,-.341174f},{0,1,0},{.341174f,0,.94f},{0,.5f,.8f}};
+     StoreBasis(matrix,Basis{tilted.right,tilted.forward,tilted.up,{}});StoreBasis(frames[0],tilted);
+     Write(vehicle,model==471?0x888:0x758+6*8,static_cast<void*>(frames[0]));
+     Write<std::uint16_t>(vehicle,0x32,static_cast<std::uint16_t>(model));Write<void*>(vehicle,0x5a0,nullptr);Write<float>(vehicle,0xb0,200.f);
+     vrcam::eye={0,-.5f,1.f};hands[0].gripPos[0]=-.31f*.94f;
+     hands[0].gripPos[1]=.5f;hands[0].gripPos[2]=.8f+.31f*.341174f;
+     Tick();CHECK(xr::published.count==2&&xr::published.markers[0].hideArrow);
+     hands[0].grip=1;Tick();CHECK(ClaimedHands()==1);hands[0].gripPos[2]+=.1f;Tick();CHECK(forces>0);
+     Tick(false,5,false);CHECK(ClaimedHands()==0);}
     // Seated trigger calibration edits each actual socket, not the wheel centre.
     for(int grip:{0,1}){Setup();hands[0]={};hands[1]={};driving::debugMode=1;driving::bikeWheel=true;seated=vehicle;
      std::memset(driving::bikeGrip,0,sizeof(driving::bikeGrip));Write<std::uint16_t>(vehicle,0x32,461);
