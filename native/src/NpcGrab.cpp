@@ -49,6 +49,7 @@ void (*vehicleControl)(void*){};
 void (*vehicleRails)(void*){};
 void (*pedJacked)(void*,int){};
 void (*pedAudioEvent)(void*,int,float,float,void*,unsigned char,int,unsigned){};
+void (*bikeJackedCtor)(void*,void*,int,int,void*,bool){};
 void (*realPhysics)(void*){};
 std::atomic<unsigned> claimed{};
 GripEdge edges[2];
@@ -63,6 +64,7 @@ struct HandMotion { Vec previous{};bool valid{},clenched{}; } handMotion[2];
 struct Feedback { Marker marker{};double started{};bool active{}; } feedback[4];
 unsigned nextFeedback{};
 Vec Bone(void* ped,int bone);
+void* Manager(void* ped);
 void ActionFeedback(void* ped,bool fist) {
     const Vec head=Bone(ped,fist?5:4);
     for (int i=0;i<worldMarkers.count;++i) {
@@ -136,6 +138,28 @@ struct Animation {
     bool landingPlayed{};
     int doorNode{};
 } animations[4];
+// Backlog 36: bike/bicycle/quad jacking. A hand on the rider's shoulder starts
+// the native CTaskSimpleBikeJacked and holds its BIKE_HIT flinch frozen on the
+// impact frame; a frontal face punch releases it and the engine performs the
+// BIKE_fall_off/BIKE_fallR knock-off itself. The bike is never braked.
+constexpr unsigned kBikeHitAnim=201,kBikeFallOffAnim=105,kBikeFallRAnim=106;
+constexpr float kFallOffLanding=10.f/30.f,kFallRLanding=8.f/30.f;
+constexpr float kBikeFrontCos=.2588f; // 150-degree frontal arc for the punch
+constexpr double kBikeTouchGrace=.38;
+enum class BikePhase { Touch,Falling };
+struct BikeScene {
+    Hold target{};
+    void* bike{}; // registered engine reference, stable storage
+    void* task{};
+    void* pausedAssociation{};
+    float speed{1.f};
+    bool synchronized{};
+    bool punched{};
+    bool landingPlayed{};
+    BikePhase phase{BikePhase::Touch};
+    double until{};
+    double touch{};
+} bikeScenes[3];
 struct TrafficStop { void* car{};double until{}; } stops[4];
 double Now() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -189,12 +213,69 @@ void OnPedJacked(void* entity,int event) {
     // Only the long, wall-clock jacking sequence for our own actor is replaced.
     // Generic CAESound allocation, playback and ordinary melee are untouched.
     Pool pool;
-    if (event>=69&&event<=73&&pool.Load()) for (const auto& a:animations)
-        if (a.target.ped&&a.target.Live(pool)&&static_cast<char*>(a.target.ped)+0x198==entity) return;
+    if (event>=69&&event<=73&&pool.Load()) {
+        for (const auto& a:animations)
+            if (a.target.ped&&a.target.Live(pool)&&static_cast<char*>(a.target.ped)+0x198==entity) return;
+        for (const auto& s:bikeScenes)
+            if (s.target.ped&&s.target.Live(pool)&&static_cast<char*>(s.target.ped)+0x198==entity) return;
+    }
     pedJacked(entity,event);
 }
-void SceneAudio(Animation& a,int event) {
-    pedAudioEvent(static_cast<char*>(a.target.ped)+0x198,event,0.f,1.f,owner,0,0,0);
+void SceneAudio(void* ped,int event) {
+    pedAudioEvent(static_cast<char*>(ped)+0x198,event,0.f,1.f,owner,0,0,0);
+}
+void SceneAudio(Animation& a,int event) { SceneAudio(a.target.ped,event); }
+BikeScene* BikeSceneOf(void* ped) {
+    for (auto& s:bikeScenes) if (s.target.ped==ped) return &s;
+    return nullptr;
+}
+void* BikeHitAnimation(void* ped) {
+    void* clump=Read<void*>(ped,0x20);
+    return clump?association(clump,kBikeHitAnim):nullptr;
+}
+void BikePause(BikeScene& s,void* anim) {
+    s.speed=Read<float>(anim,0x3c);
+    if (!std::isfinite(s.speed)||s.speed<=0) s.speed=1.f;
+    setAnimationTime(anim,0.f); // BIKE_HIT frame zero is the physical impact
+    s.pausedAssociation=anim;
+    const auto flags=Read<std::uint16_t>(anim,0x46);
+    s.synchronized=(flags&0x20u)!=0;
+    Write<std::uint16_t>(anim,0x46,flags&~0x20u);
+    Write(anim,0x3c,0.f);Write(anim,0x40,0.f);
+}
+void BikeResume(BikeScene& s) {
+    if (void* anim=s.pausedAssociation) {
+        Write(anim,0x3c,s.speed);Write(anim,0x40,0.f);
+        const auto flags=Read<std::uint16_t>(anim,0x46);
+        Write<std::uint16_t>(anim,0x46,(flags&~0x20u)|(s.synchronized?0x20u:0u));
+    }
+    s.pausedAssociation=nullptr;
+}
+void ClearBike(BikeScene& s) {
+    if (s.bike) cleanReference(s.bike,&s.bike);
+    s={};
+}
+void CancelBike(BikeScene& s) {
+    // Remove the task first: its destructor detaches the finish callback, so the
+    // frozen flinch can then be faded without triggering the native knock-off.
+    if (s.task) if (void* manager=Manager(s.target.ped))
+        if (Read<void*>(manager,0)==s.task) setTask(manager,nullptr,0,false);
+    void* anim=s.pausedAssociation?s.pausedAssociation:BikeHitAnimation(s.target.ped);
+    if (anim) {
+        Write(anim,0x3c,0.f);Write(anim,0x40,0.f);Write(anim,0x34,-1000.f);Write(anim,0x30,0.f);
+        const auto flags=Read<std::uint16_t>(anim,0x46);
+        Write<std::uint16_t>(anim,0x46,(flags&~(1u|0x20u))|4u);
+    }
+    s.pausedAssociation=nullptr;
+    ClearBike(s);
+}
+void ReportBikeJack(const BikeScene& s,void* player) {
+    void* brain=Read<void*>(s.target.ped,0x538);
+    if (!brain||!player||!s.bike) return;
+    alignas(16) std::uint8_t event[0x30]{};
+    draggedCtor(event,s.bike,player,Read<void*>(s.bike,0x5a0)==s.target.ped);
+    g.CEventGroup_Add(static_cast<char*>(brain)+0xc8,event,true);
+    draggedDtor(event);
 }
 void PausePose(Animation& a,void* anim,float time) {
     a.speed=Read<float>(anim,0x3c);
@@ -501,6 +582,91 @@ Hold ApproachAtSeat(const Pool& pool,void* player,Vec eye,Vec hand) {
     }
     return target;
 }
+// A resting hand (open or closed) on either clavicle of a slow bike rider
+// initiates the scene. Bikes are identified by appearance 2, which also covers
+// bicycles and the quad; all of them share the same BIKE_* jacking clips.
+bool BikeSeat(void* ped,void*& bike,int& door) {
+    bike=Read<void*>(ped,0x708);
+    if (!bike||g.CVehicle_GetVehicleAppearance(bike)!=2) return false;
+    const Vec speed=Read<Vec>(bike,0x68);
+    if (!Finite(speed)||Length(speed)>.035f) return false;
+    if (Read<void*>(bike,0x5a0)==ped) { door=10;return true; }
+    for (int i=0;i<3;++i) if (Read<void*>(bike,0x5a8+i*8)==ped) { door=8;return true; }
+    return false;
+}
+void BikeTouch(const Pool& pool,void* player,Vec eye,Vec p,int hand,double now) {
+    for (auto& s:bikeScenes)
+        if (s.target.ped&&s.phase==BikePhase::Touch&&s.target.Live(pool)) {
+            for (int bone:{21,31}) {
+                const Vec shoulder=Bone(s.target.ped,bone);
+                if (Finite(shoulder)&&Length(p-shoulder)<.30f) { s.touch=now;s.until=now+8.0;return; }
+            }
+        }
+    void* chosenPed{};void* chosenBike{};int chosenRef{},chosenDoor{};float nearest=.25f;
+    for (int slot=0;slot<pool.size;++slot) {
+        if (pool.flags[slot]&128) continue;
+        const int ref=(slot<<8)|pool.flags[slot];void* ped=getPed(ref);
+        if (!ped||ped==player||isPlayer(ped)||playerlife::Dead(ped)||!Seated(ped)||
+            BikeSceneOf(ped)||Animating(ped)||BeforeHit(ped)||Waiting(ped)) continue;
+        if (!Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f) continue;
+        void* bike{};int door{};
+        if (!BikeSeat(ped,bike,door)) continue;
+        void* manager=Manager(ped);
+        if (!manager||Read<void*>(manager,0)) continue;
+        for (int bone:{21,31}) {
+            const Vec shoulder=Bone(ped,bone);
+            const float distance=Length(p-shoulder);
+            if (Finite(shoulder)&&distance<nearest&&Visible(eye,shoulder,ped,bike)) {
+                nearest=distance;chosenPed=ped;chosenBike=bike;chosenRef=ref;chosenDoor=door;
+            }
+        }
+    }
+    if (!chosenPed) return;
+    BikeScene* scene=nullptr;
+    for (auto& s:bikeScenes) if (!s.target.ped) { scene=&s;break; }
+    void* task=scene?allocate(0x60):nullptr;
+    if (!task) return;
+    // A null jacker starts the victim's flinch immediately; the task then waits
+    // for its finish callback, which the frozen association never fires.
+    bikeJackedCtor(task,chosenBike,chosenDoor,2000,nullptr,chosenDoor==10);
+    void* manager=Manager(chosenPed);
+    setTask(manager,task,0,false);
+    if (Read<void*>(manager,0)!=task) return;
+    scene->target={chosenPed,pool.identity,pool.objects,nullptr,chosenRef,21,p,{},p,true};
+    scene->bike=chosenBike;registerReference(chosenBike,&scene->bike);
+    scene->task=task;scene->phase=BikePhase::Touch;
+    scene->touch=now;scene->until=now+8.0;
+    xr::TriggerHaptic(hand,.3f,60.f,25.f);
+}
+bool PunchBikeRider(const Pool& pool,void* player,Vec eye,Vec p,Vec previous) {
+    BikeScene* struck=nullptr;float nearest=.30f;
+    for (auto& s:bikeScenes) {
+        if (!s.target.ped||s.phase!=BikePhase::Touch||s.punched||!s.target.Live(pool)) continue;
+        const Vec head=Bone(s.target.ped,5),travel=p-previous;
+        const float length=Dot(travel,travel);
+        const Vec closest=previous+travel*(length>1.e-6f?std::clamp(Dot(head-previous,travel)/length,0.f,1.f):0.f);
+        const float distance=Length(head-closest);
+        if (!Finite(head)||distance>=nearest) continue;
+        // The fall clips throw the rider backwards, so the fist must arrive
+        // through the rider's frontal arc. Side or back punches never connect.
+        void* matrix=Read<void*>(s.target.ped,0x18);
+        if (!matrix) continue;
+        const Vec forward=Read<Vec>(matrix,0x10),towards=eye-head;
+        const float af=std::hypot(towards.x,towards.y),ff=std::hypot(forward.x,forward.y);
+        if (af<1.e-3f||ff<1.e-3f) continue;
+        if ((towards.x*forward.x+towards.y*forward.y)/(af*ff)<kBikeFrontCos) continue;
+        if (!Visible(eye,head,s.target.ped,s.bike)) continue;
+        nearest=distance;struck=&s;
+    }
+    if (!struck) return false;
+    struck->punched=true;
+    BikeResume(*struck); // the native chain plays BIKE_fall* and unseats the rider
+    ActionFeedback(struck->target.ped,true);
+    SceneAudio(struck->target.ped,65); // AE_PED_HIT_HIGH_UNARMED, at the physical hit
+    ReportBikeJack(*struck,player);
+    struck->phase=BikePhase::Falling;struck->until=updated+8.0;
+    return true;
+}
 bool ContinuePull(Animation& pending,void* player) {
     if (pending.phase!=Phase::Waiting) return false;
     const int door=ExitDoor(pending.target.ped,player);
@@ -599,6 +765,35 @@ void PruneAnimations(const Pool& pool,double now) {
     }
     for (const auto& stop:stops) if (stop.car) StopCar(stop.car,now);
     for (const auto& a:animations) if (a.car) StopCar(a.car,now);
+    for (auto& s:bikeScenes) if (s.target.ped) {
+        if (!s.target.Live(pool)||playerlife::Dead(s.target.ped)||now>=s.until) {
+            if (s.phase==BikePhase::Touch) CancelBike(s);
+            else ClearBike(s);
+            continue;
+        }
+        if (s.phase==BikePhase::Touch) {
+            if (!Seated(s.target.ped)) { CancelBike(s);continue; }
+            if (now-s.touch>kBikeTouchGrace) { CancelBike(s);continue; }
+            if (!s.pausedAssociation) if (void* anim=BikeHitAnimation(s.target.ped)) BikePause(s,anim);
+            continue;
+        }
+        // Falling: the native task owns positioning and the eventual get-up.
+        if (!s.landingPlayed) {
+            void* clump=Read<void*>(s.target.ped,0x20);
+            void* anim=clump?association(clump,kBikeFallOffAnim):nullptr;
+            float landing=kFallOffLanding;
+            if (!anim&&clump) { anim=association(clump,kBikeFallRAnim);landing=kFallRLanding; }
+            const float time=anim?Read<float>(anim,0x38):0.f;
+            if (anim&&std::isfinite(time)&&time>=landing) {
+                SceneAudio(s.target.ped,59);s.landingPlayed=true;
+            }
+        }
+        if (!Seated(s.target.ped)) {
+            // Fallback for an association removed before the ground-contact cue.
+            if (!s.landingPlayed) SceneAudio(s.target.ped,59);
+            ClearBike(s);
+        }
+    }
 }
 
 void OnCalculateVelocity(void* ped) {
@@ -686,6 +881,7 @@ void Install(void* handle) {
     RESOLVE(setAnimationTime,"_ZN21CAnimBlendAssociation14SetCurrentTimeEf");
     RESOLVE(realPhysics,"_ZN8CCarCtrl26SwitchVehicleToRealPhysicsEP8CVehicle");
     RESOLVE(pedAudioEvent,"_ZN17CAEPedAudioEntity13AddAudioEventEiffP9CPhysicalhij");
+    RESOLVE(bikeJackedCtor,"_ZN21CTaskSimpleBikeJackedC1EP8CVehicleiiP4CPedb");
     auto nameKey=reinterpret_cast<std::uint32_t(*)(const char*)>(dlsym(handle,"_ZN7CKeyGen15GetUppercaseKeyEPKc"));
     if (nameKey) for (auto& point:pausePoints) point.key=nameKey(point.name);
 #undef RESOLVE
@@ -695,7 +891,7 @@ void Install(void* handle) {
         canOpen&&g.CPed_GetBonePosition&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&
         draggedCtor&&draggedDtor&&association&&setAnimationTime&&realPhysics&&nameKey&&g.CEventGroup_Add&&
         g.CWeapon_GenerateDamageEvent&&g.CPed_GetLocalDirection&&
-        g.CWorld_ProcessLineOfSight&&g.CVehicle_GetVehicleAppearance;
+        g.CWorld_ProcessLineOfSight&&g.CVehicle_GetVehicleAppearance&&bikeJackedCtor;
     if (ready) {
         constexpr std::uint32_t velocity[]={0x6dbb2beb,0x6d0123e9,0xa9027bfd,0xf9001bf5};
         constexpr std::uint32_t placement[]={0xd10343ff,0xfd002bea,0x6d0623e9,0xa9077bfd};
@@ -773,6 +969,7 @@ bool BlocksNpcPunch(void* ped,int hand) {
     Pool pool;
     if (!pool.Load()) return false;
     for (const auto& a:animations) if (a.target.ped==ped&&a.target.Live(pool)) return true;
+    for (const auto& s:bikeScenes) if (s.target.ped==ped&&s.target.Live(pool)) return true;
     return false;
 }
 void PublishMarkers() {
@@ -804,6 +1001,10 @@ void Reset() {
     Pool current;current.Load();
     for (auto& a:animations) if (a.target.Live(current)&&a.phase!=Phase::Pull)
         CancelHit(a,owner&&g.FindPlayerPed&&g.FindPlayerPed(-1)==owner);
+    for (auto& s:bikeScenes) {
+        if (s.target.ped&&s.phase==BikePhase::Touch&&s.target.Live(current)) CancelBike(s);
+        else ClearBike(s);
+    }
     for (auto& flight:flights) flight={};
     claimed.store(0,std::memory_order_relaxed);
     worldMarkers={};xr::SetNpcGrabMarkers({});
@@ -842,6 +1043,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         // a door/window collider, not only once the fist reaches the face.
         approach[hand]=good&&hands[hand].grip>=.8f?
             ApproachAtSeat(pool,player,eye,p):Hold{};
+        if (good&&!h.ped) BikeTouch(pool,player,eye,p,hand,now);
         const Vec previous=handMotion[hand].previous;
         const bool wasClenched=handMotion[hand].clenched;
         const bool haveMotion=handMotion[hand].valid&&good&&Length(p-previous)<.6f;
@@ -879,7 +1081,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 if (Length(p-h.start)>.12f&&Length(h.velocity)>.6f) Aggression(h,player);
             }
         } else if (good&&haveMotion&&wasClenched&&Length(p-previous)>=.01f&&hands[hand].grip>=.8f&&handSpeed>=1.25f&&
-                   PunchAtSeat(pool,player,eye,p,previous)) {
+                   (PunchBikeRider(pool,player,eye,p,previous)||PunchAtSeat(pool,player,eye,p,previous))) {
             intent[hand]=false;extracted[hand]=true;mask|=1u<<hand;
             xr::TriggerHaptic(hand,.6f,80.f,45.f);
         } else if (intent[hand]&&hands[hand].grip>=.65f&&good) {
@@ -960,6 +1162,25 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         // Offset toward the viewer so the silhouette rests over the clothing.
         const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
         worldMarkers.markers[worldMarkers.count++]={point+facing*.18f,right,{0,0,1},near,!waiting};
+    }
+    // A fist hint at the face of a touched bike rider shows the unlocked punch.
+    for (auto& s:bikeScenes) {
+        if (worldMarkers.count>=MarkerFrame::kCapacity) break;
+        if (!s.target.ped||s.phase!=BikePhase::Touch||s.punched||!s.target.Live(pool)) continue;
+        const Vec point=Bone(s.target.ped,5);
+        if (!Finite(point)) continue;
+        Vec right=Cross(eye-point,Vec{0,0,1});
+        if (Length(right)<.1f) continue;
+        right=right*(1.f/Length(right));
+        bool near=false;
+        for (int hand=0;hand<2;++hand) if ((free&(1u<<hand))&&hands[hand].valid&&
+            !physicalweapon::IsSupportHand(hand)) {
+            float hp[3]{};
+            if (vrcam::TrackingPointToWorld(hands[hand].gripPos,hp)&&
+                Length(Vec{hp[0],hp[1],hp[2]}-point)<.35f) near=true;
+        }
+        const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
+        worldMarkers.markers[worldMarkers.count++]={point+facing*.18f,right,{0,0,1},near,true};
     }
 }
 }

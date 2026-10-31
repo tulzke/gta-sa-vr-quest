@@ -43,7 +43,8 @@ using namespace savr::npcgrab;
 using savr::vehicledoors::Vec;
 namespace {
 alignas(16) char player[0x9c8]{},npc[0x9c8]{},car[0xc68]{},pad[0x200]{},poolData[0x20]{},intelligence[0x100]{},fall[0x28]{},carMatrix[0x40]{};
-alignas(16) char taskMemory[32][0x28]{};
+alignas(16) char npcMatrix[0x40]{};
+alignas(16) char taskMemory[32][0x60]{};
 alignas(16) char otherCar[0xc68]{};
 int allocations{},aggressions{},dragEvents{},dragDestroyed{},primaryReplaced{},animatedNode{},refAdds{},refRemoves{},nativePlacements{};
 bool eventDriver{};
@@ -63,11 +64,19 @@ int animationStarts{},physicsConversions{};
 bool foreignLeaf{},expectBrakedAI{};
 float aiSpeed=.02f;
 int nativeJacked{},sceneHits{},sceneFalls{};
+int appearance{1};
+int bikeTasks{},bikeDoor{},bikeTime{};bool bikeDriver{};
+bool bikeFalling{};unsigned bikeFallId{};
+alignas(16) char bikeAnim[0x60]{},bikeFall[0x60]{};
 void NativePedJacked(void*,int) {++nativeJacked;}
 void NativePedAudio(void* entity,int event,float volume,float speed,void* attacker,unsigned char,int,unsigned) {
     CHECK(entity==npc+0x198&&volume==0&&speed==1&&attacker==owner);
-    if (event==65) { CHECK(animations[0].phase==Phase::Hit);++sceneHits; }
-    else { CHECK(event==59&&animations[0].phase==Phase::Pull);++sceneFalls; }
+    if (event==65) { CHECK(animations[0].phase==Phase::Hit||BikeSceneOf(npc));++sceneHits; }
+    else { CHECK(event==59&&(animations[0].phase==Phase::Pull||BikeSceneOf(npc)));++sceneFalls; }
+}
+void BikeJacked(void*,void* vehicle,int door,int time,void* jacker,bool driver) {
+    CHECK(vehicle==car&&!jacker&&time==2000);
+    bikeDoor=door;bikeTime=time;bikeDriver=driver;++bikeTasks;
 }
 const void* eventPlayer{};const void* eventCar{};
 void* poolPtr=poolData;
@@ -83,7 +92,7 @@ void BonePos(void* ped,GameSymbols::Vec3* out,unsigned int,bool) {
 bool Los(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,bool,bool,bool,bool,bool,bool,bool,bool) {
     *hit=wall?player:(carOccludes&&ignoredEntity!=car?car:nullptr);return *hit!=nullptr;
 }
-void* Allocate(std::size_t n) {CHECK(n==0x28);CHECK(allocations<32);return taskMemory[allocations++];}
+void* Allocate(std::size_t n) {CHECK(n==0x28||n==0x60);CHECK(allocations<32);return taskMemory[allocations++];}
 void Fall(void*,int direction,int ms) {CHECK(direction>=0&&direction<=3);lastFallDirection=direction;timer=ms;++fallCalls;}
 void SetTask(void* m,void* t,int slot,bool) {
     CHECK(slot==0||slot==3);Write(m,slot*8,t);
@@ -101,7 +110,7 @@ void DragDtor(void*) {++dragDestroyed;}
 void* AddEvent(void* group,void* event,bool valid) {
     CHECK(group==intelligence+0xc8&&valid);
     CHECK(eventCar==car&&eventPlayer==player&&Seated(npc));
-    CHECK(primaryReplaced==1&&fallCalls==0&&animatedNode); // stock animated task precedes reaction
+    CHECK((primaryReplaced==1&&fallCalls==0&&animatedNode)||bikeTasks); // stock animated task precedes reaction
     ++dragEvents;return event;
 }
 int Direction(void* ped,const GameSymbols::Vec2* relative) {CHECK(ped==npc);lastDirection=*relative;return 2;}
@@ -109,7 +118,13 @@ bool Damage(void* victim,void* attacker,int weapon,int damage,int piece,int dire
     CHECK(victim==npc&&attacker==player&&weapon==0&&damage==0&&piece==3&&direction==2);
     ++aggressions;return true;
 }
-void* Assoc(void* clump,unsigned id) {return clump==npc&&id==animationId&&Read<void*>(animationLeaf,0x18)&&Read<void*>(intelligence,8+3*8)?reaction:nullptr;}
+void* Assoc(void* clump,unsigned id) {
+    if (clump!=npc) return nullptr;
+    if (id==animationId&&Read<void*>(animationLeaf,0x18)&&Read<void*>(intelligence,8+3*8)) return reaction;
+    if (id==kBikeHitAnim&&!bikeFalling&&Read<void*>(intelligence,8)) return bikeAnim;
+    if (bikeFalling&&id==bikeFallId) return bikeFall;
+    return nullptr;
+}
 void AnimTime(void* anim,float t) {Write(anim,0x38,t);}
 void* Simplest(void* task) {
     CHECK(task==Read<void*>(intelligence,8+3*8));
@@ -132,7 +147,7 @@ bool NativeAI(void* v,unsigned*) {
 void NativeVelocity(void* ped) {Write(ped,0x68,Vec{});Write(ped,0x6bc,0.f);Write(ped,0x6c0,0.f);}
 bool IsPlayer(const void* p) {return p==player;}
 bool CanOpen(const void*,const void*) {return !locked;}
-int Appearance(const void*) {return 1;}
+int Appearance(const void*) {return appearance;}
 GameSymbols::Vec3 DoorPoint(const void* v,int node) {
     CHECK(v==car&&node>=8&&node<=11);placedNode=node;
     const float side=node==10||node==11?-1.f:1.f;
@@ -178,6 +193,10 @@ void Setup() {
     std::memset(player,0,sizeof(player));
     for (auto& target:preparationBlocked) target={};
     nativeJacked=sceneHits=sceneFalls=0;
+    appearance=1;bikeTasks=bikeDoor=bikeTime=0;bikeDriver=false;bikeFalling=false;bikeFallId=0;
+    std::memset(npcMatrix,0,sizeof(npcMatrix));
+    std::memset(bikeAnim,0,sizeof(bikeAnim));Write(bikeAnim,0x3c,1.f);
+    std::memset(bikeFall,0,sizeof(bikeFall));Write(bikeFall,0x3c,1.f);
     flags[0]=1;wall=locked=carOccludes=placementBlocked=false;ignoredEntity=nullptr;placedNode=0;
     firstSpotBlocked=groundMissing=false;removed=added=sphereTests=0;
     allocations=aggressions=dragEvents=dragDestroyed=primaryReplaced=animatedNode=refAdds=refRemoves=nativePlacements=0;eventCar=eventPlayer=nullptr;
@@ -199,7 +218,7 @@ void Setup() {
     draggedCtor=DragCtor;draggedDtor=DragDtor;association=Assoc;setAnimationTime=AnimTime;realPhysics=Physics;vehicleAI=NativeAI;
     simplestTask=Simplest;startDraggedAnimation=StartAnimation;draggedAnimationVtable=animationVtable;
     vehicleControl=NativeControl;vehicleRails=NativeRails;
-    pedJacked=NativePedJacked;pedAudioEvent=NativePedAudio;
+    pedJacked=NativePedJacked;pedAudioEvent=NativePedAudio;bikeJackedCtor=BikeJacked;
     g.CEventGroup_Add=AddEvent;g.CPed_GetLocalDirection=Direction;g.CWeapon_GenerateDamageEvent=Damage;
     g.FindPlayerPed=Player;g.FindPlayerVehicle=Vehicle;g.CPad_GetPad=Pad;
     g.CWorld_pIgnoreEntity=&ignoredEntity;g.CPed_GetBonePosition=BonePos;g.CWorld_ProcessLineOfSight=Los;g.CVehicle_GetVehicleAppearance=Appearance;
@@ -520,5 +539,71 @@ int main() {
         std::fprintf(preview,"%f,%f\n",p.x,p.y);
     }
     std::fclose(preview);
-    std::puts("NPC grab: hit/wait/grip phases, traffic stop, timeout reaction, holds, throws and hints passed");
+    // Bike jacking (backlog 36): a hand on the shoulder starts the native
+    // CTaskSimpleBikeJacked frozen on the BIKE_HIT impact frame; only a frontal
+    // face punch releases the native fall. The forward vector points at the
+    // player for a frontal punch; the opposite direction is a punch from behind.
+    const auto bikeSeat=[&](int passenger,Vec forward) {
+        Setup();Seat(passenger);appearance=2;
+        const Vec position=Position(npc);
+        Write<void*>(npc,0x18,npcMatrix);
+        Write(npcMatrix,0,Vec{1,0,0});Write(npcMatrix,0x10,forward);
+        Write(npcMatrix,0x20,Vec{0,0,1});Write(npcMatrix,0x30,position);
+    };
+    // Driver: touch starts the frozen flinch; frontal punch knocks off with
+    // BIKE_fall_off, ground-contact sound exactly once at frame 10/30.
+    bikeSeat(-1,{1,0,0});Tick();
+    CHECK(bikeTasks==1&&bikeDoor==10&&bikeDriver&&Read<void*>(intelligence,8)==taskMemory[0]);
+    CHECK(bikeScenes[0].target.ped==npc&&bikeScenes[0].phase==BikePhase::Touch);
+    CHECK(BlocksNpcPunch(npc,0)&&BlocksNpcPunch(npc,1));
+    Tick();CHECK(bikeScenes[0].pausedAssociation==bikeAnim&&Read<float>(bikeAnim,0x3c)==0);
+    CHECK(Read<float>(bikeAnim,0x38)==0&&refAdds==1); // frozen on the impact frame
+    npcgrab::PublishMarkers();
+    CHECK(xr::markers.count==1&&xr::markers.markers[0].fist); // unlocked punch hint
+    OnPedJacked(npc+0x198,69);CHECK(!nativeJacked); // jacking reaction stays suppressed
+    Punch();
+    CHECK(bikeScenes[0].punched&&bikeScenes[0].phase==BikePhase::Falling);
+    CHECK(Read<float>(bikeAnim,0x3c)==1.f); // flinch released into the native chain
+    CHECK(sceneHits==1&&dragEvents==1&&eventDriver&&!sceneFalls);
+    bikeFalling=true;bikeFallId=kBikeFallOffAnim;
+    Write(bikeFall,0x38,kFallOffLanding-.01f);Tick();CHECK(!sceneFalls);
+    Write(bikeFall,0x38,kFallOffLanding);Tick();CHECK(sceneFalls==1&&Seated(npc));
+    Write(bikeFall,0x38,kFallOffLanding+.2f);Tick();CHECK(sceneFalls==1);
+    Write<std::uint8_t>(npc,0x585,0);Tick();
+    CHECK(!bikeScenes[0].target.ped&&sceneFalls==1&&refRemoves==1);
+    OnPedJacked(npc+0x198,69);CHECK(nativeJacked==1); // native audio restored after the scene
+    // Passenger on the back uses the rear door id, so the native chain picks
+    // BIKE_fallR with its earlier frame-8/30 ground contact.
+    bikeSeat(0,{-1,0,0});Tick();
+    CHECK(bikeTasks==1&&bikeDoor==8&&!bikeDriver);
+    Tick();Punch();
+    CHECK(sceneHits==1&&dragEvents==1&&!eventDriver);
+    bikeFalling=true;bikeFallId=kBikeFallRAnim;
+    Write(bikeFall,0x38,kFallRLanding-.01f);Tick();CHECK(!sceneFalls);
+    Write(bikeFall,0x38,kFallRLanding);Tick();CHECK(sceneFalls==1);
+    // A punch from behind or from the side never connects; the scene keeps
+    // waiting with the flinch frozen.
+    bikeSeat(-1,{-1,0,0});Tick();Tick();Punch();
+    CHECK(!bikeScenes[0].punched&&bikeScenes[0].phase==BikePhase::Touch);
+    CHECK(!sceneHits&&!dragEvents&&!aggressions);
+    bikeSeat(-1,{0,1,0});Tick();Tick();Punch();
+    CHECK(!bikeScenes[0].punched&&!sceneHits);
+    // Removing the hand from the shoulder past the grace window quietly cancels:
+    // the task is removed and the flinch fades without the knock-off callback.
+    bikeSeat(-1,{1,0,0});Tick();Tick();
+    CHECK(bikeScenes[0].pausedAssociation==bikeAnim);
+    hands[0].gripPos[0]=.5f;Tick();Tick();
+    CHECK(bikeScenes[0].target.ped); // grace window keeps a briefly uncovered scene
+    bikeScenes[0].touch=updated-1;Tick();
+    CHECK(!bikeScenes[0].target.ped&&!Read<void*>(intelligence,8));
+    CHECK(Read<float>(bikeAnim,0x34)==-1000.f&&Read<float>(bikeAnim,0x3c)==0);
+    CHECK(!sceneHits&&!sceneFalls&&!dragEvents&&refRemoves==1);
+    // A moving bike is never acquired, and the scene survives a recenter only
+    // through the same cancellation path as car scenes.
+    bikeSeat(-1,{1,0,0});Write(car,0x68,Vec{.1f,0,0});Tick();
+    CHECK(!bikeTasks&&!bikeScenes[0].target.ped);
+    bikeSeat(-1,{1,0,0});Tick();Tick();CHECK(bikeScenes[0].target.ped);
+    Tick(true);
+    CHECK(!bikeScenes[0].target.ped&&!Read<void*>(intelligence,8)&&!sceneHits);
+    std::puts("NPC grab: hit/wait/grip phases, traffic stop, timeout reaction, holds, throws, hints and bike jacking passed");
 }
