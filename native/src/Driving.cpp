@@ -5,6 +5,7 @@
 #include "VehicleDoors.h"
 #include "VehicleEntry.h"
 #include "BikeSteering.h"
+#include "QuadHandlebar.h"
 #include "MissionComfort.h"
 
 #include "Locomotion.h"
@@ -1750,6 +1751,25 @@ bool OnKnockOffBikeAffectsPed(const void* event,void* ped) {
 }
 
 BikePreRenderFn g_origBmxPreRender=nullptr;
+BikePreRenderFn g_origQuadPreRender=nullptr;
+void OnQuadPreRenderThunk(void* vehicle) {
+    if (g_origQuadPreRender) g_origQuadPreRender(vehicle);
+    if (!vehicle||!g.RwFrameUpdateObjects||!g.FindPlayerVehicle||
+        !g.FindPlayerPed||!g.CVehicle_IsDriver||g.FindPlayerVehicle(-1,false)!=vehicle) return;
+    void* ped=g.FindPlayerPed(-1);
+    if (!ped||!g.CVehicle_IsDriver(vehicle,ped)) return;
+    const int model=*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0x32);
+    float angle=0.0f;
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        if (!IsQuadBikeModelId(model)||!g_visual.active||!g_visual.bike||g_visual.modelId!=model) return;
+        angle=g_visual.physicalAngle;
+    }
+    void* frame=*reinterpret_cast<void**>(static_cast<char*>(vehicle)+0x888);
+    if (!frame) return;
+    float* matrix=reinterpret_cast<float*>(static_cast<char*>(frame)+0x20);
+    if (quadbar::SetRotation(matrix,angle)) g.RwFrameUpdateObjects(frame);
+}
 void BikePreRenderCommon(void* bike, BikePreRenderFn orig);
 void OnBikePreRenderThunk(void* bike) {
     BikePreRenderCommon(bike, g_origBikePreRender);
@@ -2809,8 +2829,18 @@ void InstallPadHooks() {
                 reinterpret_cast<void*>(&OnBmxPreRenderThunk),bmxPreRender,
                 "CBmx::PreRender"));
     }
-    LOGI("[driving] handlebar hooks bike=%d bmx=%d",
-         g_origBikePreRender?1:0,g_origBmxPreRender?1:0);
+    // Quad's own PreRender sets node +0x888 from its filtered steering angle.
+    // Replace only that visual rotation after the stock update, as on bikes.
+    if (g.LoadBase&&g.CQuadBike_PreRender&&
+        reinterpret_cast<std::uintptr_t>(g.CQuadBike_PreRender)-g.LoadBase==0x6d1920u) {
+        constexpr std::uint32_t quadPreRender[4]={
+            0xd102c3ffu,0x6d0723e9u,0xa9087bfdu,0xf9004bf5u};
+        g_origQuadPreRender=reinterpret_cast<BikePreRenderFn>(InstallVerifiedTrampoline(
+            reinterpret_cast<void*>(g.CQuadBike_PreRender),
+            reinterpret_cast<void*>(&OnQuadPreRenderThunk),quadPreRender,"CQuadBike::PreRender"));
+    }
+    LOGI("[driving] handlebar hooks bike=%d bmx=%d quad=%d",
+         g_origBikePreRender?1:0,g_origBmxPreRender?1:0,g_origQuadPreRender?1:0);
     if (g.LoadBase&&g.CEventKnockOffBike_AffectsPed&&
         reinterpret_cast<std::uintptr_t>(g.CEventKnockOffBike_AffectsPed)-
             g.LoadBase==0x4ea90cu) {

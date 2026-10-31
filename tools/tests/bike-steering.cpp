@@ -1,4 +1,5 @@
 #include "BikeSteering.h"
+#include "QuadHandlebar.h"
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -22,6 +23,17 @@ float Settle(State& state,Vec3 chord,bool two,float speed,float yaw,double& now,
     return output;
 }
 int main() {
+    float matrix[16]{}; matrix[12]=3.0f; matrix[13]=4.0f; matrix[14]=5.0f; matrix[3]=7.0f;
+    CHECK(savr::quadbar::SetRotation(matrix,0.5f));
+    CHECK(Near(matrix[0],std::cos(.5f))&&Near(matrix[1],std::sin(.5f)));
+    CHECK(Near(matrix[4],-std::sin(.5f))&&Near(matrix[5],std::cos(.5f)));
+    CHECK(matrix[12]==3&&matrix[13]==4&&matrix[14]==5&&matrix[3]==7);
+    CHECK(savr::quadbar::SetRotation(matrix,-.5f));
+    CHECK(Near(matrix[1],-std::sin(.5f))); // Absolute, never accumulated.
+    CHECK(savr::quadbar::SetRotation(matrix,0));
+    CHECK(matrix[0]==1&&matrix[1]==0&&matrix[5]==1&&matrix[10]==1);
+    CHECK(!savr::quadbar::SetRotation(matrix,NAN));
+    CHECK(!savr::quadbar::SetRotation(nullptr,0));
     float angle=0;
     for(float yaw:{-2.8f,-0.5f,0.0f,1.2f,3.0f}) {
         const auto chord=Chord(20*kRadians,yaw);

@@ -631,6 +631,7 @@ struct GameSymbols {
     void  (*CBike_CalculateLeanMatrix)(void* bike);
     void  (*CBike_PreRender)(void* bike);
     void  (*CBmx_PreRender)(void* bike);
+    void  (*CQuadBike_PreRender)(void* vehicle);
     const char* (*GetFrameNodeName)(void* frame);
     void*  Scene;                            // CScene { RpWorld* @0x0; RwCamera* @0x8 }
 

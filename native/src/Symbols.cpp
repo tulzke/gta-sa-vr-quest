@@ -344,6 +344,7 @@ bool ResolveGameSymbols(void* handle) {
         {"_ZN5CBike19CalculateLeanMatrixEv",                                    reinterpret_cast<void**>(&g.CBike_CalculateLeanMatrix),             false},
         {"_ZN5CBike9PreRenderEv",                                               reinterpret_cast<void**>(&g.CBike_PreRender),                       false},
         {"_ZN4CBmx9PreRenderEv",                                                reinterpret_cast<void**>(&g.CBmx_PreRender),                        false},
+        {"_ZN9CQuadBike9PreRenderEv",                                           reinterpret_cast<void**>(&g.CQuadBike_PreRender),                   false},
         {"_Z16GetFrameNodeNameP7RwFrame",                                      reinterpret_cast<void**>(&g.GetFrameNodeName),                      false},
         {"_Z15FindPlayerCoorsi",                                                 reinterpret_cast<void**>(&g.FindPlayerCoors),                       true },
         {"_Z17FindPlayerHeadingi",                                               reinterpret_cast<void**>(&g.FindPlayerHeading),                     true },
