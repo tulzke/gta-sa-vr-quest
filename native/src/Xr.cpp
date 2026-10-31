@@ -9810,7 +9810,7 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
         if (palms&&vehicledoors::Length(marker.strikeDirection)>.1f) {
             auto strike=marker;
             strike.direction=marker.strikeDirection;
-            strike.position=marker.position-strike.direction*.22f;
+            strike.position=marker.arrowOut?marker.position:marker.position-strike.direction*.22f;
             strike.up=vehicledoors::Vec{0,1,0};
             if (vehicledoors::Length(vehicledoors::Cross(strike.direction,strike.up))<.1f)
                 strike.up=vehicledoors::Vec{1,0,0};

@@ -370,6 +370,8 @@ int main() {
         CHECK(refAdds==1&&refRemoves==0);
         WaitForGrip();npcgrab::PublishMarkers();
         CHECK(xr::markers.count>=1&&!xr::markers.markers[xr::markers.count-1].fist&&Seated(npc));
+        const auto& pullHint=xr::markers.markers[xr::markers.count-1];
+        CHECK(pullHint.arrowOut&&pullHint.strikeDirection.x*(seat==-1||seat==1?-1.f:1.f)>.99f);
         ConfirmGrip();CHECK(animations[0].phase==Phase::Pull&&Read<float>(reaction,0x3c)==1);
         CHECK((Read<std::uint16_t>(reaction,0x46)&0x20)!=0);
         CHECK(dragEvents==1&&dragDestroyed==1&&eventDriver==(seat<0)&&!aggressions);

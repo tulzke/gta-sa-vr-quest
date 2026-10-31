@@ -978,6 +978,7 @@ void PublishMarkers() {
                 const Vec end=marker.position+marker.strikeDirection;float e[3]{};
                 const float raw[3]={end.x,end.y,end.z};
                 if (vrcam::WorldPointToTracking(raw,e)) frame.markers[frame.count-1].strikeDirection={e[0]-p[0],e[1]-p[1],e[2]-p[2]};
+                frame.markers[frame.count-1].arrowOut=marker.arrowOut;
             }
         }
     }
@@ -1156,7 +1157,21 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         }
         // Offset toward the viewer so the silhouette rests over the clothing.
         const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
-        worldMarkers.markers[worldMarkers.count++]={point+facing*.18f,right,{0,0,1},near,!waiting};
+        auto& marker=worldMarkers.markers[worldMarkers.count++];
+        marker={point+facing*.18f,right,{0,0,1},near,!waiting};
+        if (waiting) {
+            void* car=Read<void*>(ped,0x708);
+            void* matrix=car?Read<void*>(car,0x18):nullptr;
+            if (matrix) {
+                const Vec side=Read<Vec>(matrix,0);
+                const float length=std::hypot(side.x,side.y);
+                if (length>.001f) {
+                    const float sign=door==2||door==4?-1.f:1.f;
+                    marker.strikeDirection={sign*side.x/length,sign*side.y/length,0};
+                    marker.arrowOut=true;
+                }
+            }
+        }
     }
     // Advertise the strike at every nearby eligible rider before any contact.
     if (free) for (int slot=0;slot<pool.size&&worldMarkers.count<MarkerFrame::kCapacity;++slot) {

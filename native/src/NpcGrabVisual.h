@@ -46,14 +46,19 @@ inline PalmMesh Fist(const vehicledoors::Marker& marker) {
         const auto a=point(x0,y0),b=point(x1,y0),c=point(x1,y1),d=point(x0,y1);
         for (auto p:{a,b,c,a,c,d}) mesh.vertices[mesh.count++]=p;
     };
-    rectangle(-.029f,-.027f,.034f,.023f);
-    rectangle(-.019f,-.049f,.024f,-.025f);
-    // Four curled fingers/knuckles, visibly shorter than the open-palm hint.
+    const auto triangle=[&](float ax,float ay,float bx,float by,float cx,float cy) {
+        for (auto p:{point(ax,ay),point(bx,by),point(cx,cy)}) mesh.vertices[mesh.count++]=p;
+    };
+    // Face-on fist: four separate finger pads and a thumb crossing the palm.
+    // The empty channels are intentional; they keep the fingers legible at VR size.
+    rectangle(-.024f,-.047f,.025f,-.029f);
+    rectangle(-.034f,-.031f,.035f,-.012f);
     for (int finger=0;finger<4;++finger) {
-        const float x=-.032f+finger*.018f;
-        rectangle(x,.008f,x+.015f,.034f+(finger==1||finger==2?.006f:0.f));
+        const float x=-.035f+finger*.018f;
+        rectangle(x,-.008f,x+.015f,.031f+(finger==1||finger==2?.004f:0.f));
     }
-    rectangle(-.045f,-.014f,-.025f,.015f); // opposed curled thumb
+    triangle(-.047f,-.010f,-.031f,.005f,-.005f,-.011f);
+    triangle(-.047f,-.010f,-.005f,-.011f,-.010f,-.024f);
     return mesh;
 }
 }
