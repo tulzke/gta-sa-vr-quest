@@ -528,7 +528,7 @@ int main() {
     Tick();CHECK(sceneHits==1&&!sceneFalls); // cancellation never plays the remaining sequence
     const auto palm=npcgrab::Palm({{}, {1,0,0}, {0,1,0}, false});
     const auto fist=npcgrab::Fist({{}, {1,0,0}, {0,1,0}, false,true});
-    CHECK(palm.count>60&&palm.count<=120&&fist.count>24&&fist.count<=120);
+    CHECK(palm.count>60&&palm.count<=120&&fist.count>120&&fist.count<=2048);
     FILE* preview=std::fopen("palm.csv","w");CHECK(preview);
     for (int i=0;i<palm.count;++i) {
         const auto p=palm.vertices[i];CHECK(Finite(p)&&std::abs(p.x)<.07f&&std::abs(p.y)<.10f&&p.z==0);
