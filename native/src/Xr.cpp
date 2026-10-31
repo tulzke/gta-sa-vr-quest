@@ -9890,8 +9890,10 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
             glBufferData(GL_ARRAY_BUFFER,mesh.count*sizeof(vehicledoors::Vec),mesh.vertices.data(),GL_DYNAMIC_DRAW);
             glDrawArrays(GL_TRIANGLES,0,mesh.count);
         } else {
-            glBufferData(GL_ARRAY_BUFFER,arrow.size()*sizeof(vehicledoors::Vec),arrow.data(),GL_DYNAMIC_DRAW);
-            glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(arrow.size()));
+            if(!marker.hideArrow){
+                glBufferData(GL_ARRAY_BUFFER,arrow.size()*sizeof(vehicledoors::Vec),arrow.data(),GL_DYNAMIC_DRAW);
+                glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(arrow.size()));
+            }
             if (marker.doorGrab) {
                 auto hint=styled;
                 // Face the tracking origin so the handle is legible from either side.
@@ -9901,7 +9903,7 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
                 if (g_npcSpriteProg&&g_npcSpriteTextures[0]) drawSprite(hint,g_npcSpriteTextures[0]);
                 else {
                     const auto mesh=npcgrab::Palm(hint);
-                    glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.92f:.72f);
+                    glUniform4f(g_markerColLoc,1.f,.86f+.14f*marker.highlight,.08f+.92f*marker.highlight,marker.held?.92f:.72f);
                     glBufferData(GL_ARRAY_BUFFER,mesh.count*sizeof(vehicledoors::Vec),mesh.vertices.data(),GL_DYNAMIC_DRAW);
                     glDrawArrays(GL_TRIANGLES,0,mesh.count);
                 }

@@ -99,6 +99,7 @@ struct Marker {
     bool arrowOut{};
     bool doorGrab{};
     bool bikeGrip{};
+    bool hideArrow{};
 };
 struct MarkerFrame {
     static constexpr int kCapacity=12;

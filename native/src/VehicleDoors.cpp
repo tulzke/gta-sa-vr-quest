@@ -22,6 +22,7 @@ namespace {
 // Retail 2.11.311 arm64. Pool generation is checked before every retained
 // entity access; the interaction never owns an engine pointer or task.
 constexpr int kPoolSize=110,kStride=0xc68;
+constexpr float kBikeStableUp=.985f;
 constexpr int kNodes[4]={10,8,11,9};
 using OpenFn=void(*)(void*,void*,int,int,float,bool);
 using SwingFn=void(*)(void*,int,int);
@@ -451,7 +452,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         if(!Finite(delta)||Length(delta)>1.f){EndDebugEdit();g_claimed.store(0);return;}
         const Vec value=g_bikeEdit.base+delta;const float v[]={value.x,value.y,value.z};
         driving::SetBikeGripCalibration(g_bikeEdit.model,g_bikeEdit.grip,v);g_bikeEdit.dirty=true;
-        if(!g_bikeEdit.inside){Marker m{p,frame.right,frame.up,true};m.doorGrab=true;markers.markers[markers.count++]=m;}
+        if(!g_bikeEdit.inside){Marker m{p,frame.right,frame.up,true};m.doorGrab=true;m.hideArrow=true;markers.markers[markers.count++]=m;}
         if(hands[h].trigger<=.35f){EndDebugEdit();g_claimed.store(0);Publish(markers);return;}
         g_claimed.store(1u<<h);Publish(markers);return;
     }
@@ -486,7 +487,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             else {
                 void* matrix=Read<void*>(bike,0x18);const Basis b=matrix?Matrix(matrix):Basis{};
                 const float mass=Read<float>(bike,0xb0);
-                if(!matrix||!b.Valid()||b.up.z<.985f||!std::isfinite(mass)||mass<=1.f||mass>=2000.f)
+                if(!matrix||!b.Valid()||b.up.z<kBikeStableUp||!std::isfinite(mass)||mass<=1.f||mass>=2000.f)
                     g_bikeStable={};
                 else {
                     const float force=mass*std::clamp(-b.right.z*.08f,-.014f,.014f)*std::clamp(dt*60.f,0.f,2.f);
@@ -512,7 +513,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                     if(matrix){const Basis b=Matrix(matrix);if(b.Valid()){
                         const Vec angular=Read<Vec>(bike,0x74);
                         if(Finite(angular))Write<Vec>(bike,0x74,angular-b.forward*Dot(angular,b.forward));
-                        if(b.up.z>=.985f)g_bikeStable=g_bikeGrab.target;
+                        if(b.up.z>=kBikeStableUp)g_bikeStable=g_bikeGrab.target;
                     }}
                 }
                 g_bikeGrab={};g_claimed.store(0);
@@ -535,7 +536,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 }
                 g_claimed.store(1u<<h,std::memory_order_relaxed);
                 void* matrix=Read<void*>(bike,0x18);const Basis b=Matrix(matrix);
-                Marker m{point,b.right,b.up,true};m.doorGrab=true;markers.markers[markers.count++]=m;
+                Marker m{point,b.right,b.up,true};m.doorGrab=true;m.hideArrow=true;
+                m.highlight=b.up.z>=kBikeStableUp?1.f:0.f;markers.markers[markers.count++]=m;
                 Publish(markers);return;
             }
         }
@@ -547,10 +549,12 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const int model=Read<std::uint16_t>(bike,0x32);
             if(model==481||model==509||model==510||model==471)continue;
             const Vec speed=Read<Vec>(bike,0x68);if(!Finite(speed)||Length(speed)>.02f)continue;
+            void* matrix=Read<void*>(bike,0x18);if(!matrix)continue;
+            const Basis body=Matrix(matrix);if(!body.Valid()||body.up.z>=kBikeStableUp)continue;
             for(float side:{-1.f,1.f}){
                 Vec candidate{},base{};if(!bikePoint(bike,side,candidate,base)||Length(candidate-eye)>1.8f||!Visible(eye,candidate,bike))continue;
                 const Basis b=Matrix(Read<void*>(bike,0x18));
-                if(markers.count<MarkerFrame::kCapacity){Marker m{candidate,b.right,b.up};m.doorGrab=true;markers.markers[markers.count++]=m;}
+                if(markers.count<MarkerFrame::kCapacity){Marker m{candidate,b.right,b.up};m.doorGrab=true;m.hideArrow=true;markers.markers[markers.count++]=m;}
                 for(int h=0;h<2;++h)if(valid[h]&&fresh[h]&&!(occupied&(1u<<h))){
                     const float distance=Length(world[h]-candidate);
                     if(distance<.2f&&distance<best){best=distance;target={bike,pool.identity,pool.objects,pool.flags,slot,0,0,pool.flags[slot]};point=candidate;origin=base;chosenSide=side;chosenHand=h;}
