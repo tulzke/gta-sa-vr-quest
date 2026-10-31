@@ -51,7 +51,8 @@ void SetDoorCalibration(int model,int door,bool inside,const float in[3]) {
     for(int a=0;a<3;++a) corrections[model][(door-2)*6+inside*3+a]=in[a];
 }
 void SaveDebugCalibration() {++saves;}
-int GetActiveVehicleType() {return VEHICLE_CAR;}
+bool bikeWheel{};
+int GetActiveVehicleType() {return bikeWheel?VEHICLE_BIKE:VEHICLE_CAR;}
 int GetModeForVehicleType(int) {return MODE_IMMERSIVE;}
 int GetActiveSeatSideCm() {return 0;}
 int GetActiveSeatForwardCm() {return 0;}
@@ -68,6 +69,12 @@ void SetDebugPosition(int,int,bool,const int value[3]) { std::copy_n(value,3,pos
 unsigned grabbed{};
 bool GetWheelVisualState(WheelVisualState* out) {
     for(int i=0;i<2;++i)out->grabbed[i]=(grabbed&(1u<<i))!=0;
+    if(bikeWheel){out->active=true;out->bike=true;out->dashAnchorValid=true;out->modelId=461;
+        out->right[0]=1;out->up[1]=1;out->normal[2]=1;
+        out->center[1]=.5f;out->center[2]=.8f;
+        for(int i=0;i<2;++i){out->handlePosition[i][0]=(i?1.f:-1.f)*.31f+bikeGrip[i][0];
+            out->handlePosition[i][1]=.5f+bikeGrip[i][1];out->handlePosition[i][2]=.8f+bikeGrip[i][2];}
+        return true;}
     out->dashAnchorValid=true;out->modelId=400;out->radius=.2f;out->center[0]=-.4f;out->center[1]=.2f;out->center[2]=1.f;return true;
 }
 }
@@ -160,7 +167,7 @@ void Setup() {
     g_status=FakeStatus;g_setStatus=FakeSetStatus;g_frameLtm=FakeLtm;
     locked=busy=wall=entering=paused=false;vrcam::ground=vrcam::tracking=true;
     physicalweapon::mask=physicalweapon::support=basketball::held=0;
-    driving::grabbed=0;driving::debugMode=0;driving::corrections.clear();driving::saves=0;xr::focused=true;seated=nullptr;
+    driving::grabbed=0;driving::bikeWheel=false;driving::debugMode=0;driving::corrections.clear();driving::saves=0;xr::focused=true;seated=nullptr;
     writes=nativeSwings=invalidWrites=0;
     npcgrab::stopsRequested=0;
     npcgrab::claimedHands=0;
@@ -476,6 +483,7 @@ int main() {
             ++*forceCounter;
         };
         Write<std::uint16_t>(vehicle,0x32,461);Write<float>(vehicle,0xb0,200.f);Write<void*>(vehicle,0x5a0,nullptr);
+        StoreBasis(frames[0],{});Write(vehicle,0x758+7*8,static_cast<void*>(frames[0]));
         vrcam::eye={0,-.5f,1.f};hands[hand].gripPos[0]=hand? .31f:-.31f;
         hands[hand].gripPos[1]=.5f;hands[hand].gripPos[2]=.8f;
         Tick();CHECK(xr::published.count>=2);hands[hand].grip=1;Tick();CHECK(ClaimedHands()==(1u<<hand));
@@ -498,6 +506,7 @@ int main() {
         g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* out){*out={0,.5f,.8f};};
         g_turnForce=[](void*,float,float,float,float,float,float){};
         Write<std::uint16_t>(vehicle,0x32,461);Write<float>(vehicle,0xb0,200.f);Write<void*>(vehicle,0x5a0,nullptr);
+        StoreBasis(frames[0],{});Write(vehicle,0x758+7*8,static_cast<void*>(frames[0]));
         vrcam::eye={0,-.5f,1.f};hands[0].gripPos[0]=grip?.31f:-.31f;
         hands[0].gripPos[1]=.5f;hands[0].gripPos[2]=.8f;
         Tick();hands[0].trigger=1;Tick();CHECK(g_bikeEdit.hand==0&&g_bikeEdit.grip==grip);
@@ -506,5 +515,19 @@ int main() {
         CHECK(g_bikeEdit.hand<0&&driving::saves==1);
         g.CBike_IsComponentPresent=nullptr;g.CBike_GetComponentWorldPosition=nullptr;g_turnForce=nullptr;
     }
+    // Bar sockets follow the wheel node rotation, including calibrated offsets.
+    {Setup();std::memset(driving::bikeGrip,0,sizeof(driving::bikeGrip));
+     g.CBike_IsComponentPresent=[](const void*,int){return true;};
+     g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* p){*p={0,.5f,.8f};};
+     StoreBasis(frames[0],Basis{{0,1,0},{-1,0,0},{0,0,1},{0,.5f,.8f}});
+     Write(vehicle,0x758+7*8,static_cast<void*>(frames[0]));Basis bar{};Vec p{};
+     CHECK(BikeGripPoint(vehicle,1,bar,p));CHECK(Length(p-Vec{0,.81f,.8f})<.001f);}
+    // Seated trigger calibration edits each actual socket, not the wheel centre.
+    for(int grip:{0,1}){Setup();hands[0]={};hands[1]={};driving::debugMode=1;driving::bikeWheel=true;seated=vehicle;
+     std::memset(driving::bikeGrip,0,sizeof(driving::bikeGrip));Write<std::uint16_t>(vehicle,0x32,461);
+     hands[0].gripPos[0]=grip?.31f:-.31f;hands[0].gripPos[1]=.5f;hands[0].gripPos[2]=.8f;
+     Tick();hands[0].trigger=1;Tick();CHECK(g_bikeEdit.inside&&g_bikeEdit.grip==grip);
+     hands[0].gripPos[2]+=.1f;Tick();CHECK(std::abs(driving::bikeGrip[grip][2]-.1f)<.001f);
+     hands[0].trigger=0;Tick();CHECK(g_bikeEdit.hand<0&&driving::saves==1);}
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

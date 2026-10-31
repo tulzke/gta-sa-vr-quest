@@ -108,7 +108,7 @@ Target g_editTarget{};
 bool g_editInside{};
 struct Grab { Target target{}; Motion motion{}; int hand{-1}; bool inside{}; } g_grab;
 struct BikeGrab { Target target{}; int hand{-1}; float side{},phase{},roll{}; Vec lateral{}; } g_bikeGrab;
-struct BikeEdit { Target target{}; int hand{-1},grip{-1},model{}; Vec start{},base{};bool dirty{}; } g_bikeEdit;
+struct BikeEdit { Target target{}; int hand{-1},grip{-1},model{}; Vec start{},base{};bool dirty{},inside{}; } g_bikeEdit;
 Target g_bikeStable{};
 struct Release { Target target{}; ReleasedMotion motion{}; bool active{},inside{}; } g_release;
 struct Door {
@@ -119,6 +119,26 @@ struct Door {
 
 Basis Matrix(void* matrix) {
     return {Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+}
+bool BikeBarFrame(void* bike,Basis& frame,Vec& centre) {
+    void* matrix=Read<void*>(bike,0x18);if(!matrix||!g_frameLtm||!g.CBike_IsComponentPresent||
+       !g.CBike_GetComponentWorldPosition||!g.CBike_IsComponentPresent(bike,7))return false;
+    const Basis body=Matrix(matrix);if(!body.Valid())return false;
+    void* node=Read<void*>(bike,0x758+7*8);if(!node)return false;
+    void* ltm=g_frameLtm(node);if(!ltm)return false;
+    frame=Matrix(ltm);if(!frame.Valid())return false;
+    GameSymbols::Vec3 p{};g.CBike_GetComponentWorldPosition(bike,7,&p);
+    float correction[3]{},width{};driving::GetBikeBarCalibration(Read<std::uint16_t>(bike,0x32),correction,&width);
+    centre=Vec{p.x,p.y,p.z}+body.Vector({correction[0],correction[1],correction[2]});
+    frame.position=body.position;
+    return Finite(centre)&&Length(centre-body.position)<5.f;
+}
+bool BikeGripPoint(void* bike,int grip,Basis& frame,Vec& point) {
+    Vec centre{};if(!BikeBarFrame(bike,frame,centre))return false;
+    float correction[3]{},width{},offset[3]{};const int model=Read<std::uint16_t>(bike,0x32);
+    driving::GetBikeBarCalibration(model,correction,&width);driving::GetBikeGripCalibration(model,grip,offset);
+    point=centre+frame.right*((grip?width:-width)+offset[0])+frame.forward*offset[1]+frame.up*offset[2];
+    return Finite(point);
 }
 bool ReadDoor(const Target& t,void* ped,Door& d,bool inside=false) {
     if (!g.CVehicle_GetVehicleAppearance||g.CVehicle_GetVehicleAppearance(t.vehicle)!=1||
@@ -191,6 +211,19 @@ bool ToTracking(Vec world,Vec& local) {
 bool ToWorld(const float in[3],Vec& world) {
     float out[3]{};if (!vrcam::TrackingPointToWorld(in,out)) return false;
     world={out[0],out[1],out[2]};return Finite(world);
+}
+bool SeatedBikeGrip(const driving::WheelVisualState& wheel,int grip,Basis& frame,Vec& point) {
+    if(!wheel.bike||!wheel.dashAnchorValid||grip<0||grip>1||!ToWorld(wheel.handlePosition[grip],point))return false;
+    const float c=std::cos(wheel.physicalAngle),s=std::sin(wheel.physicalAngle);
+    float x[3]{},y[3]{},z[3]{};
+    for(int i=0;i<3;++i){
+        x[i]=wheel.center[i]+wheel.right[i]*c+wheel.up[i]*s;
+        y[i]=wheel.center[i]+wheel.up[i]*c-wheel.right[i]*s;
+        z[i]=wheel.center[i]+wheel.normal[i];
+    }
+    Vec center{},px{},py{},pz{};
+    if(!ToWorld(wheel.center,center)||!ToWorld(x,px)||!ToWorld(y,py)||!ToWorld(z,pz))return false;
+    frame={px-center,py-center,pz-center,center};return frame.Valid();
 }
 void ApplyDoor(const Target& t,float ratio) {
     // Preserve intact/damaged identity; only the open bit changes. The native
@@ -329,7 +362,7 @@ void Install(void* handle) {
     else LOGE("[doors] required symbols or verified hook unavailable; hand interaction disabled");
 }
 unsigned ClaimedHands() { return g_claimed.load(std::memory_order_relaxed); }
-bool DebugEditActive() { return g_edit.hand>=0; }
+bool DebugEditActive() { return g_edit.hand>=0||g_bikeEdit.hand>=0; }
 void PublishMarkers() {
     MarkerFrame worldFrame=g_worldMarkers;
     vehicleentry::Append(worldFrame);
@@ -403,6 +436,46 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     Vec world[2]{};bool valid[2]{};
     for (int h=0;h<2;++h) valid[h]=hands[h].valid&&ToWorld(hands[h].gripPos,world[h]);
     MarkerFrame markers;markers.epoch=epoch;
+    if(g_bikeEdit.hand>=0){
+        const int h=g_bikeEdit.hand;void* bike=g_bikeEdit.target.vehicle;
+        if(!editMode||!g_bikeEdit.target.Live(pool)||!valid[h]||!std::isfinite(hands[h].trigger)||
+           (g_bikeEdit.inside?(seated!=bike||!g.CVehicle_IsDriver||!g.CVehicle_IsDriver(bike,ped)):
+            (seated||Read<void*>(bike,0x5a0)||Read<void*>(bike,0x5a8)))){
+            EndDebugEdit();g_claimed.store(0);return;
+        }
+        Basis frame{};Vec p{};driving::WheelVisualState wheel{};
+        const bool ready=g_bikeEdit.inside?(driving::GetWheelVisualState(&wheel)&&wheel.modelId==g_bikeEdit.model&&
+            SeatedBikeGrip(wheel,g_bikeEdit.grip,frame,p)):BikeGripPoint(bike,g_bikeEdit.grip,frame,p);
+        if(!ready){EndDebugEdit();g_claimed.store(0);return;}
+        const Vec delta=frame.Local(world[h])-g_bikeEdit.start;
+        if(!Finite(delta)||Length(delta)>1.f){EndDebugEdit();g_claimed.store(0);return;}
+        const Vec value=g_bikeEdit.base+delta;const float v[]={value.x,value.y,value.z};
+        driving::SetBikeGripCalibration(g_bikeEdit.model,g_bikeEdit.grip,v);g_bikeEdit.dirty=true;
+        if(!g_bikeEdit.inside){Marker m{p,frame.right,frame.up,true};m.doorGrab=true;markers.markers[markers.count++]=m;}
+        if(hands[h].trigger<=.35f){EndDebugEdit();g_claimed.store(0);Publish(markers);return;}
+        g_claimed.store(1u<<h);Publish(markers);return;
+    }
+    if(editMode&&seated&&g.CVehicle_IsDriver&&g.CVehicle_IsDriver(seated,ped)){
+        driving::WheelVisualState wheel{};
+        if(driving::GetWheelVisualState(&wheel)&&wheel.bike&&wheel.modelId==Read<std::uint16_t>(seated,0x32)&&
+           Finite(Read<Vec>(seated,0x68))&&Length(Read<Vec>(seated,0x68))<=.01f){
+            int slot=-1;for(int i=0;i<kPoolSize;++i)if(!(pool.flags[i]&0x80)&&pool.objects+i*kStride==seated)slot=i;
+            float best=.20f;int hand=-1,grip=-1;Basis selected{};
+            for(int i=0;i<2&&slot>=0;++i){Basis frame{};Vec point{};
+                if(!SeatedBikeGrip(wheel,i,frame,point))continue;
+                for(int h=0;h<2;++h)if(valid[h]&&editFresh[h]&&!(occupied&(1u<<h))){
+                    const float distance=Length(world[h]-point);
+                    if(distance<best){best=distance;hand=h;grip=i;selected=frame;}
+                }
+            }
+            if(hand>=0){const int model=Read<std::uint16_t>(seated,0x32);float base[3]{};
+                driving::GetBikeGripCalibration(model,grip,base);
+                Target target{seated,pool.identity,pool.objects,pool.flags,slot,0,0,pool.flags[slot]};
+                g_bikeEdit={target,hand,grip,model,selected.Local(world[hand]),{base[0],base[1],base[2]},false,true};
+                g_claimed.store(1u<<hand);xr::TriggerHaptic(hand,.25f,0,30);Publish(markers);return;
+            }
+        }
+    }
     // A pedestrian can pull a stationary, unoccupied motorcycle by either bar.
     // All forces go through the native physics system; never rotate its matrix.
     if(!seated&&g.CBike_GetComponentWorldPosition&&g.CBike_IsComponentPresent&&g_turnForce){
@@ -423,35 +496,9 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             }
         }
         auto bikePoint=[&](void* bike,float side,Vec& point,Vec& origin)->bool {
-            void* matrix=Read<void*>(bike,0x18);if(!matrix)return false;
-            const Basis basis=Matrix(matrix);if(!basis.Valid())return false;
-            if(!g.CBike_IsComponentPresent(bike,7))return false;
-            GameSymbols::Vec3 centre{};g.CBike_GetComponentWorldPosition(bike,7,&centre);
-            float correction[3]{},width{};
-            driving::GetBikeBarCalibration(Read<std::uint16_t>(bike,0x32),correction,&width);
-            float grip[3]{};driving::GetBikeGripCalibration(Read<std::uint16_t>(bike,0x32),side<0?0:1,grip);
-            origin=basis.position;point=Vec{centre.x,centre.y,centre.z}+
-                basis.right*(side*width+correction[0]+grip[0])+basis.forward*(correction[1]+grip[1])+basis.up*(correction[2]+grip[2]);
-            return Finite(point)&&Length(point-origin)<5.f;
+            Basis frame{};if(!BikeGripPoint(bike,side<0?0:1,frame,point))return false;
+            origin=frame.position;return true;
         };
-        if(g_bikeEdit.hand>=0){
-            const int h=g_bikeEdit.hand;void* bike=g_bikeEdit.target.vehicle;
-            if(!editMode||!g_bikeEdit.target.Live(pool)||!valid[h]||!std::isfinite(hands[h].trigger)||
-               Read<void*>(bike,0x5a0)||Read<void*>(bike,0x5a8)){
-                EndDebugEdit();g_claimed.store(0);return;
-            }
-            void* matrix=Read<void*>(bike,0x18);if(!matrix){EndDebugEdit();return;}
-            const Basis b=Matrix(matrix);if(!b.Valid()){EndDebugEdit();return;}
-            const Vec delta=b.Local(world[h])-g_bikeEdit.start;
-            if(!Finite(delta)||Length(delta)>1.f){EndDebugEdit();return;}
-            const Vec value=g_bikeEdit.base+delta;const float v[]={value.x,value.y,value.z};
-            driving::SetBikeGripCalibration(g_bikeEdit.model,g_bikeEdit.grip,v);g_bikeEdit.dirty=true;
-            Vec p{},base{};if(bikePoint(bike,g_bikeEdit.grip?1.f:-1.f,p,base)){
-                Marker m{p,b.right,b.up,true};m.bikeGrip=true;markers.markers[markers.count++]=m;
-            }
-            if(hands[h].trigger<=.35f){EndDebugEdit();g_claimed.store(0);Publish(markers);return;}
-            g_claimed.store(1u<<h);Publish(markers);return;
-        }
         if(g_bikeGrab.hand>=0){
             const int h=g_bikeGrab.hand;void* bike=g_bikeGrab.target.vehicle;Vec point{},origin{};
             const bool ok=g_bikeGrab.target.Live(pool)&&valid[h]&&!(occupied&(1u<<h))&&
@@ -488,7 +535,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 }
                 g_claimed.store(1u<<h,std::memory_order_relaxed);
                 void* matrix=Read<void*>(bike,0x18);const Basis b=Matrix(matrix);
-                Marker m{point,b.right,b.up,true};m.bikeGrip=true;markers.markers[markers.count++]=m;
+                Marker m{point,b.right,b.up,true};m.doorGrab=true;markers.markers[markers.count++]=m;
                 Publish(markers);return;
             }
         }
@@ -503,7 +550,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             for(float side:{-1.f,1.f}){
                 Vec candidate{},base{};if(!bikePoint(bike,side,candidate,base)||Length(candidate-eye)>1.8f||!Visible(eye,candidate,bike))continue;
                 const Basis b=Matrix(Read<void*>(bike,0x18));
-                if(markers.count<MarkerFrame::kCapacity){Marker m{candidate,b.right,b.up};m.bikeGrip=true;markers.markers[markers.count++]=m;}
+                if(markers.count<MarkerFrame::kCapacity){Marker m{candidate,b.right,b.up};m.doorGrab=true;markers.markers[markers.count++]=m;}
                 for(int h=0;h<2;++h)if(valid[h]&&fresh[h]&&!(occupied&(1u<<h))){
                     const float distance=Length(world[h]-candidate);
                     if(distance<.2f&&distance<best){best=distance;target={bike,pool.identity,pool.objects,pool.flags,slot,0,0,pool.flags[slot]};point=candidate;origin=base;chosenSide=side;chosenHand=h;}
@@ -515,10 +562,11 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             }
         }
         if(editHand>=0){
-            void* bike=editTarget.vehicle;const Basis b=Matrix(Read<void*>(bike,0x18));
+            void* bike=editTarget.vehicle;Basis b{};Vec gripPoint{};
+            if(!BikeGripPoint(bike,editSide<0?0:1,b,gripPoint))return;
             const int model=Read<std::uint16_t>(bike,0x32),grip=editSide<0?0:1;float base[3]{};
             driving::GetBikeGripCalibration(model,grip,base);
-            g_bikeEdit={editTarget,editHand,grip,model,b.Local(world[editHand]),{base[0],base[1],base[2]},false};
+            g_bikeEdit={editTarget,editHand,grip,model,b.Local(world[editHand]),{base[0],base[1],base[2]},false,false};
             g_claimed.store(1u<<editHand);xr::TriggerHaptic(editHand,.25f,0,30);Publish(markers);return;
         }
         if(chosenHand>=0){g_bikeStable={};const Basis b=Matrix(Read<void*>(target.vehicle,0x18));
