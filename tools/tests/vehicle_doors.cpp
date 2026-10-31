@@ -269,6 +269,7 @@ int main() {
     OnSwing(vehicle,10,2);CHECK(nativeSwings==2); // release restores native physics
     Setup();GrabIt(1);CHECK(ClaimedHands()==2); // either controller
     Setup();GrabIt();
+    CHECK(xr::published.markers[0].doorGrab); // outside handle gets the grab icon
     const auto markerBefore=xr::published.markers[0].position;
     vrcam::rebase={1,2,3};PublishMarkers();
     CHECK(Length(xr::published.markers[0].position-(markerBefore-vrcam::rebase))<1e-5f);
@@ -317,6 +318,7 @@ int main() {
     Setup();seated=vehicle;vrcam::eye={-.35f,-.3f,1.3f};hands[0]={};hands[1]={};
     const Vec inner{-1.f+.34f,.6f-1.2f*.82f,.7f};
     std::memcpy(hands[0].gripPos,&inner,12);Tick();CHECK(xr::published.count==1);
+    CHECK(xr::published.markers[0].doorGrab); // inside handle gets the same icon
     CHECK(xr::published.markers[0].direction.x<-.9f); // arrow points toward the door
     CHECK(Length(xr::published.markers[0].position-(inner+Vec{.18f,0,0}))<1e-5f);
     driving::grabbed=1;hands[0].grip=1;Tick();CHECK(ClaimedHands()==0);

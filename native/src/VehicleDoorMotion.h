@@ -97,6 +97,7 @@ struct Marker {
     int seatIcon{};float progress{};
     Vec strikeDirection{};
     bool arrowOut{};
+    bool doorGrab{};
 };
 struct MarkerFrame {
     static constexpr int kCapacity=12;
