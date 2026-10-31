@@ -2,7 +2,7 @@
 #include "VehicleDoorMotion.h"
 
 namespace savr::npcgrab {
-// Small flat open-palm silhouette. No texture, asset pack or opaque backdrop.
+// Flat outlined grab and fist symbols without an opaque backdrop.
 // Marker direction is billboard right, marker up is billboard up.
 struct PalmMesh {
     std::array<vehicledoors::Vec,2048> vertices{};
@@ -10,33 +10,43 @@ struct PalmMesh {
 };
 inline PalmMesh Palm(const vehicledoors::Marker& marker) {
     PalmMesh mesh;
-    const auto point=[&](float x,float y) {
-        return marker.position+marker.direction*x+marker.up*y;
-    };
-    const auto triangle=[&](float ax,float ay,float bx,float by,float cx,float cy) {
-        mesh.vertices[mesh.count++]=point(ax,ay);
-        mesh.vertices[mesh.count++]=point(bx,by);
-        mesh.vertices[mesh.count++]=point(cx,cy);
-    };
-    const auto rectangle=[&](float x0,float y0,float x1,float y1) {
-        triangle(x0,y0,x1,y0,x1,y1);triangle(x0,y0,x1,y1,x0,y1);
-    };
-    rectangle(-.031f,-.035f,.033f,.023f); // palm
-    rectangle(-.021f,-.054f,.023f,-.033f); // wrist
-    constexpr float roots[]={-.024f,-.006f,.012f,.030f};
-    constexpr float tips[]={.068f,.084f,.078f,.060f};
-    for (int finger=0;finger<4;++finger) {
-        const float x=roots[finger],y=tips[finger],radius=.007f;
-        rectangle(x-radius,.018f,x+radius,y);
-        for (int i=0;i<4;++i) {
-            const float a=3.14159265f*i/4,b=3.14159265f*(i+1)/4;
-            triangle(x,y,x+radius*std::cos(a),y+radius*std::sin(a),
-                x+radius*std::cos(b),y+radius*std::sin(b));
+    const auto point=[&](float x,float y) { return marker.position+marker.direction*x+marker.up*y; };
+    struct Point { float x,y; };
+    constexpr float radius=.004f;
+    const auto stroke=[&](std::initializer_list<Point> path) {
+        auto prev=path.begin();
+        for (auto it=path.begin();it!=path.end();++it) {
+            for (int i=0;i<8;++i) {
+                const float a=6.2831853f*i/8,b=6.2831853f*(i+1)/8;
+                for (auto p:{point(it->x,it->y),point(it->x+radius*std::cos(a),it->y+radius*std::sin(a)),
+                             point(it->x+radius*std::cos(b),it->y+radius*std::sin(b))}) mesh.vertices[mesh.count++]=p;
+            }
+            if (it==path.begin()) continue;
+            const float dx=it->x-prev->x,dy=it->y-prev->y,len=std::hypot(dx,dy);
+            if (len>0) {
+                const float x=-dy*radius/len,y=dx*radius/len;
+                const auto a=point(prev->x+x,prev->y+y),b=point(prev->x-x,prev->y-y);
+                const auto c=point(it->x+x,it->y+y),d=point(it->x-x,it->y-y);
+                for (auto p:{a,b,c,c,b,d}) mesh.vertices[mesh.count++]=p;
+            }
+            prev=it;
         }
-    }
-    // Opposed thumb, separated from the fingers by a visible notch.
-    triangle(-.027f,-.027f,-.060f,.011f,-.051f,.023f);
-    triangle(-.027f,-.027f,-.051f,.023f,-.023f,.002f);
+    };
+    // Curled fingers, viewed from the palm, with the thumb separated on the left.
+    stroke({{-.025f,-.001f},{-.022f,.011f},{-.022f,.027f},{-.020f,.033f},
+        {-.016f,.036f},{-.011f,.036f},{-.007f,.033f},{-.006f,.027f},
+        {-.006f,.041f},{-.004f,.045f},{.001f,.047f},{.006f,.045f},
+        {.008f,.041f},{.008f,.027f},{.008f,.035f},{.011f,.039f},
+        {.016f,.040f},{.021f,.038f},{.023f,.034f},{.023f,.024f},
+        {.024f,.030f},{.027f,.032f},{.031f,.031f},{.035f,.028f},
+        {.038f,.022f},{.039f,.014f},{.039f,-.012f},{.037f,-.025f},
+        {.034f,-.033f},{.029f,-.039f},{.022f,-.042f},{.014f,-.043f},
+        {-.002f,-.043f},{-.013f,-.042f},{-.021f,-.039f},{-.028f,-.034f},
+        {-.036f,-.025f},{-.039f,-.019f},{-.039f,.001f},{-.038f,.010f},
+        {-.035f,.016f},{-.030f,.018f},{-.022f,.018f}});
+    // Taper the thumb into its pointed inner edge, as in the reference.
+    for (auto p:{point(-.026f,-.005f),point(-.026f,.005f),point(-.018f,.006f)})
+        mesh.vertices[mesh.count++]=p;
     return mesh;
 }
 inline PalmMesh Fist(const vehicledoors::Marker& marker) {
