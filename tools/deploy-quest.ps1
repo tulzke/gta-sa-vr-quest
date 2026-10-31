@@ -33,6 +33,9 @@ $package = 'com.rockstargames.gtasa'
 
 function Run {
     param([string]$Exe, [string[]]$Arguments)
+    # adb pull reports successful progress on stderr. Merging it under the
+    # script-wide Stop preference otherwise aborts before LASTEXITCODE is read.
+    $ErrorActionPreference = 'Continue'
     & $Exe @Arguments >> $log 2>&1
     if ($LASTEXITCODE -ne 0) { throw "$([IO.Path]::GetFileName($Exe)) failed (exit $LASTEXITCODE). Log: $log" }
 }
