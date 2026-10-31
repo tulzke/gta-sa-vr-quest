@@ -727,6 +727,13 @@ void OnCalculateVelocity(void* ped) {
         if (apply(h,true)) return;
     }
 }
+// Backlog 11: retail hides peds intersecting the third-person camera near clip.
+// A head-locked VR camera makes that mechanism hide close NPCs during fights and
+// vehicle extraction. Return "no peds hidden" without touching entity flags;
+// camera collision with buildings and vehicles remains unchanged.
+bool OnCheckCameraCollisionPeds(int,int,void*,void*,float*) {
+    return false;
+}
 bool Hook(void* target,const std::uint32_t (&expected)[4],void* replacement,void*& original) {
     // Both supported prologues only save stack/registers.
     if (!target||std::memcmp(target,expected,sizeof(expected))) return false;
@@ -828,6 +835,18 @@ void Install(void* handle) {
             pedJacked=reinterpret_cast<decltype(pedJacked)>(original);
         }
     }
+    // 0x3be800 in retail 2.11.311 arm64. This hook is independent of grab
+    // availability: camera-driven NPC hiding must also stay disabled on a
+    // partial hook failure elsewhere in this module.
+    constexpr std::uint32_t cameraPeds[]={
+        0xd10203ff,0xfd0013e8,0xa902fbfd,0xf9001ffb,
+    };
+    void* cameraPedsOriginal{};
+    const bool cameraPedsDisabled=Hook(
+        dlsym(handle,"_ZN10CCollision24CheckCameraCollisionPedsEiiP7CVectorS1_Pf"),
+        cameraPeds,reinterpret_cast<void*>(&OnCheckCameraCollisionPeds),cameraPedsOriginal);
+    LOGI("[npc.visibility] camera_near_clip_hiding=%s",
+         cameraPedsDisabled?"disabled":"unavailable");
     LOGI("[npcgrab] available=%d",ready);
 }
 void OnDoorOpening(void* car) {
