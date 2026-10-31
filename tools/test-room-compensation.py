@@ -11,7 +11,26 @@ start = source.index('const auto accepted = []')
 end = source.index('\n    };', start) + len('\n    };')
 code = '#include <algorithm>\n#include <cmath>\n#include <cassert>\nint main(){\n'
 code += source[start:end]
+turn_start = source.index('const auto followYaw = []')
+turn_end = source.index('\n        };',turn_start)+len('\n        };')
+code += '\n'+source[turn_start:turn_end]
 code += r'''
+const float pi=3.14159265358979323846f;
+// Releasing sideways movement must turn gradually without a wrap-around spin.
+float yaw=pi/2;
+for(int i=0;i<120;++i){
+    const float next=followYaw(yaw,0,1.f/60);
+    assert(next>=0 && next<=yaw && yaw-next<=4.001f*pi/180);
+    yaw=next;
+}
+assert(yaw<.001f);
+assert(followYaw(179*pi/180,-179*pi/180,1.f/60)>179*pi/180);
+// Time-based smoothing should converge similarly across frame rates.
+float a=.5f,b=.5f;
+for(int i=0;i<60;++i)a=followYaw(a,0,1.f/60);
+for(int i=0;i<90;++i)b=followYaw(b,0,1.f/90);
+assert(std::abs(a-b)<1e-5f);
+assert(followYaw(.5f,0,0)==.5f);
 assert(std::abs(accepted(.1f,.1f,.04f)-.04f)<1e-6f); // free motion: keep native .06
 assert(accepted(0,.1f,.04f)==0); // wall: do not eat the physical lean
 assert(std::abs(accepted(.05f,.1f,.04f)-.02f)<1e-6f); // partial collision response

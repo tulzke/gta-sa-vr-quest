@@ -3932,7 +3932,10 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                         const V3 liveHead{gameHead.x,gameHead.y,gameHead.z};
                         const V3 delta=liveHead-pedPosition;
                         if (Finite(liveHead)&&Dot(delta,delta)<4.0f) {
-                            anchorPosition=liveHead;
+                            // On foot, animation yaw must not orbit the eye
+                            // around CJ's root. Head bob contributes height only.
+                            anchorPosition=enteringVehicle ? liveHead :
+                                V3{pedPosition.x,pedPosition.y,liveHead.z};
                             // The live animation may already lower the head;
                             // min prevents double-lowering while still making
                             // the VR crouch visible on rigid animations.
@@ -30327,7 +30330,18 @@ void OnRoomPlayerControl(void* ped) {
     const bool moving = movePad && (std::abs(static_cast<int>(movePad[0])) > 20 ||
                                     std::abs(static_cast<int>(movePad[1])) > 20);
     if (!moving && g_roomOrientation && Finite(forward) && std::hypot(forward.x,forward.y)>0.1f) {
-        const float yaw = std::atan2(-forward.x,forward.y);
+        const auto followYaw = [](float current,float target,float dt) {
+            constexpr float pi = 3.14159265358979323846f;
+            const float error = std::remainder(target-current,2.0f*pi);
+            const float change = error*(1.0f-std::exp(-8.0f*dt));
+            const float limit = (240.0f*pi/180.0f)*dt;
+            return current+std::clamp(change,-limit,limit);
+        };
+        float current{};
+        std::memcpy(&current,static_cast<char*>(ped)+0x6c4,sizeof(current));
+        const float target = std::atan2(-forward.x,forward.y);
+        if (!std::isfinite(current)) return;
+        const float yaw = followYaw(current,target,step/50.0f);
         g_roomOrientation(ped,0.0f,0.0f,yaw);
         std::memcpy(static_cast<char*>(ped)+0x6c4,&yaw,sizeof(yaw));
         std::memcpy(static_cast<char*>(ped)+0x6c8,&yaw,sizeof(yaw));
