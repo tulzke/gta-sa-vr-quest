@@ -14092,21 +14092,47 @@ void TraceClosePedVisibility(void* entity, int stage, int result) {
     const V3 delta = pos - camera;
     const float distSq = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
     if (!std::isfinite(distSq) || distSq > 5.0f * 5.0f) return;
-    struct Sample { void* entity{}; double last[3]{}; };
+    struct Sample {
+        void* entity{};
+        double last[3]{};
+        double observedMs{};
+        int visible{-1};
+        int stage{-1};
+        int model{-1};
+    };
     static thread_local Sample samples[64]{};
     Sample& sample = samples[(reinterpret_cast<std::uintptr_t>(entity) >> 4u) % 64u];
-    if (sample.entity != entity) sample = {entity, {}};
     const double now = NowMs();
+    const int model = *reinterpret_cast<const std::int16_t*>(bytes + 0x32);
+    const int visible = (bytes[0x28] & 0x80u) ? 1 : 0;
+    if (sample.entity != entity || sample.model != model ||
+        now - sample.observedMs > 2000.0) {
+        sample = {};
+        sample.entity = entity;
+        sample.model = model;
+        sample.visible = visible;
+        sample.stage = stage;
+    } else if (sample.visible != visible) {
+        __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
+            "[npc.flag] entity=%p model=%d visible=%d->%d "
+            "previous_stage=%d stage=%d gap_ms=%.1f dist=%.2f eye=%d",
+            entity, model, sample.visible, visible, sample.stage, stage,
+            now - sample.observedMs, static_cast<double>(std::sqrt(distSq)),
+            g_renderingStereoEyeIndex);
+        sample.visible = visible;
+    }
+    sample.observedMs = now;
+    sample.stage = stage;
     if (now - sample.last[stage] < 500.0) return;
     sample.last[stage] = now;
     __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
          "[npc.close] stage=%s entity=%p model=%d dist=%.2f "
          "delta=%.2f,%.2f,%.2f result=%d visible=%d rw=%d",
          stage == 0 ? "screen" : (stage == 1 ? "eye0" : "eye1"),
-         entity, static_cast<int>(*reinterpret_cast<const std::int16_t*>(bytes + 0x32)),
+         entity, model,
          static_cast<double>(std::sqrt(distSq)), static_cast<double>(delta.x),
          static_cast<double>(delta.y), static_cast<double>(delta.z), result,
-         (bytes[0x28] & 0x80u) ? 1 : 0,
+         visible,
          *reinterpret_cast<void* const*>(bytes + 0x20) ? 1 : 0);
 }
 
