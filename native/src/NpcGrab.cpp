@@ -14,6 +14,12 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#if defined(__ANDROID__)
+#include <cerrno>
+#include <linux/hw_breakpoint.h>
+#include <linux/perf_event.h>
+#include <sys/syscall.h>
+#endif
 
 namespace savr::npcgrab {
 namespace {
@@ -101,6 +107,32 @@ struct Pool {
 // Backlog 11: sample the live ped pool independently of visibility scans.
 // Slot generation identifies reuse; never dereference a previously stored ped.
 void TraceNearbyPedPool(const Pool& pool, void* player, double now) {
+#if defined(__ANDROID__)
+    // Feasibility probe only: a disabled, short-lived watchpoint on our own
+    // stack. It does not monitor game memory or install a signal handler.
+    static bool watchpointProbed = false;
+    if (!watchpointProbed) {
+        watchpointProbed = true;
+        alignas(8) std::uint64_t target = 0;
+        perf_event_attr attr{};
+        attr.type = PERF_TYPE_BREAKPOINT;
+        attr.size = sizeof(attr);
+        attr.bp_type = HW_BREAKPOINT_W;
+        attr.bp_addr = reinterpret_cast<std::uintptr_t>(&target);
+        attr.bp_len = HW_BREAKPOINT_LEN_8;
+        attr.disabled = 1;
+        attr.exclude_kernel = 1;
+        attr.exclude_hv = 1;
+        errno = 0;
+        const int fd = static_cast<int>(syscall(__NR_perf_event_open, &attr,
+                                                0, -1, -1, 0));
+        const int error = fd < 0 ? errno : 0;
+        if (fd >= 0) close(fd);
+        __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
+            "[npc.watchprobe] perf_event_open=%s errno=%d",
+            fd >= 0 ? "ok" : "failed", error);
+    }
+#endif
     struct Sample {
         void* pool{};
         int ref{-1};
