@@ -1158,7 +1158,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         // Offset toward the viewer so the silhouette rests over the clothing.
         const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
         auto& marker=worldMarkers.markers[worldMarkers.count++];
-        marker={point+facing*.18f,right,{0,0,1},near,!waiting};
+        // The torso grab hint needs extra clearance in front of the ped model.
+        marker={point+facing*(waiting?.30f:.18f),right,{0,0,1},near,!waiting};
         if (waiting) {
             void* car=Read<void*>(ped,0x708);
             void* matrix=car?Read<void*>(car,0x18):nullptr;
