@@ -98,6 +98,7 @@ struct Marker {
     Vec strikeDirection{};
     bool arrowOut{};
     bool doorGrab{};
+    bool bikeGrip{};
 };
 struct MarkerFrame {
     static constexpr int kCapacity=12;
@@ -108,6 +109,22 @@ struct MarkerFrame {
         return valid&&epoch==current&&count>0&&count<=kCapacity;
     }
 };
+// A horizontal bar socket, in the marker's local basis.
+inline std::array<Vec,144> GripCylinder(const Marker& m) {
+    std::array<Vec,144> mesh{};int n=0;
+    const Vec axis=m.direction,up=m.up,across=Cross(axis,up);
+    const Vec left=m.position-axis*.055f,right=m.position+axis*.055f;
+    for(int i=0;i<12;++i){
+        const float a=6.2831853f*i/12,b=6.2831853f*(i+1)/12;
+        const Vec r=(up*std::cos(a)+across*std::sin(a))*.022f;
+        const Vec s=(up*std::cos(b)+across*std::sin(b))*.022f;
+        mesh[n++]=left+r;mesh[n++]=right+r;mesh[n++]=left+s;
+        mesh[n++]=left+s;mesh[n++]=right+r;mesh[n++]=right+s;
+        mesh[n++]=left;mesh[n++]=left+s;mesh[n++]=left+r;
+        mesh[n++]=right;mesh[n++]=right+r;mesh[n++]=right+s;
+    }
+    return mesh;
+}
 // Six-sided 3D arrow, 18 cm long: still visible when looking along its
 // opening direction. Its root is the actual grab point.
 inline std::array<Vec,54> Arrow(const Marker& m) {

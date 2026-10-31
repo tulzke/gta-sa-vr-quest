@@ -9819,6 +9819,13 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
     glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),nullptr);
     for (int i=0;i<frame.count;++i) {
         const auto& marker=frame.markers[i];
+        if(marker.bikeGrip){
+            const auto mesh=vehicledoors::GripCylinder(marker);
+            glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.95f:.8f);
+            glBufferData(GL_ARRAY_BUFFER,mesh.size()*sizeof(vehicledoors::Vec),mesh.data(),GL_DYNAMIC_DRAW);
+            glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(mesh.size()));
+            continue;
+        }
         if(marker.seatIcon) {
             using vehicledoors::Vec;
             const Vec r=vehicledoors::Cross(marker.direction,marker.up),u=marker.up;
@@ -10783,6 +10790,16 @@ void DrawImmersiveDrivingWheel(const float* mvp,
     // sockets are green; reachable but free sockets use the VC cyan highlight.
     for (int hand=0; hand<2; ++hand) {
         if (!wheel.markerVisible[hand]) continue;
+        if(wheel.bike){
+            vehicledoors::Marker marker;
+            marker.position={wheel.handlePosition[hand][0],wheel.handlePosition[hand][1],wheel.handlePosition[hand][2]};
+            marker.direction={wheelRight.x,wheelRight.y,wheelRight.z};
+            marker.up={normal.x,normal.y,normal.z};
+            const auto mesh=vehicledoors::GripCylinder(marker);
+            unsigned short indices[144]{};for(int i=0;i<144;++i)indices[i]=static_cast<unsigned short>(i);
+            DrawDrivingBoxes(mvp,reinterpret_cast<const float*>(mesh.data()),144,indices,144,1.f,.86f,.08f);
+            continue;
+        }
         float vertices[8*3]{}; unsigned short indices[36]{};
         int vertexCount=0,indexCount=0;
         AppendDrivingBox(vertices,vertexCount,indices,indexCount,

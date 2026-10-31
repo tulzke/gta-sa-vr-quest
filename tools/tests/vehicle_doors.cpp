@@ -38,6 +38,9 @@ bool IsSupportHand(int h) { return (support&(1u<<h))!=0; }
 namespace basketball { unsigned held{};unsigned HeldHandMask() { return held; } }
 namespace driving {
 void GetBikeBarCalibration(int,float out[3],float* width){out[0]=out[1]=out[2]=0;*width=.31f;}
+float bikeGrip[2][3]{};
+void GetBikeGripCalibration(int,int grip,float out[3]){std::copy_n(bikeGrip[grip],3,out);}
+void SetBikeGripCalibration(int,int grip,const float in[3]){std::copy_n(in,3,bikeGrip[grip]);}
 int debugMode{},saves{};
 std::map<int,std::array<float,24>> corrections;
 int GetVehicleDebugMode() {return debugMode;}
@@ -467,18 +470,41 @@ int main() {
         g.CBike_IsComponentPresent=[](const void*,int){return true;};
         g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* out){*out={0,.5f,.8f};};
         int forceCalls=0;static int* forceCounter;forceCounter=&forceCalls;
-        g.CPhysical_ApplyForce=[](void*,float,float,float z,float,float,float,bool){CHECK(std::isfinite(z)&&std::abs(z)<=7.1f);++*forceCounter;};
+        g_turnForce=[](void*,float x,float y,float z,float ax,float ay,float az){
+            CHECK(std::isfinite(z)&&std::abs(z)<=10.1f);
+            const Vec torque=Cross({ax,ay,az},{x,y,z});CHECK(std::abs(torque.x)<1e-5f&&std::abs(torque.z)<1e-5f);
+            ++*forceCounter;
+        };
         Write<std::uint16_t>(vehicle,0x32,461);Write<float>(vehicle,0xb0,200.f);Write<void*>(vehicle,0x5a0,nullptr);
         vrcam::eye={0,-.5f,1.f};hands[hand].gripPos[0]=hand? .31f:-.31f;
         hands[hand].gripPos[1]=.5f;hands[hand].gripPos[2]=.8f;
         Tick();CHECK(xr::published.count>=2);hands[hand].grip=1;Tick();CHECK(ClaimedHands()==(1u<<hand));
         hands[hand].gripPos[2]+=.1f;Tick();CHECK(forceCalls>0);
         if(hand==0){
-            hands[hand].grip=0;Tick();CHECK(ClaimedHands()==0&&g_bikeStable.vehicle==vehicle);
+            Write<Vec>(vehicle,0x74,{.1f,.2f,.3f});hands[hand].grip=0;Tick();
+            CHECK(ClaimedHands()==0&&g_bikeStable.vehicle==vehicle);
+            const Vec angular=Read<Vec>(vehicle,0x74);CHECK(std::abs(angular.x-.1f)<1e-5f&&std::abs(angular.y)<1e-5f&&std::abs(angular.z-.3f)<1e-5f);
             Tick();CHECK(forceCalls>1);
             Write<Vec>(vehicle,0x68,{.1f,0,0});Tick();CHECK(!g_bikeStable.vehicle);
         } else {Tick(false,5,false);CHECK(ClaimedHands()==0&&g_bikeGrab.hand<0);}
-        g.CBike_IsComponentPresent=nullptr;g.CBike_GetComponentWorldPosition=nullptr;g.CPhysical_ApplyForce=nullptr;
+        g.CBike_IsComponentPresent=nullptr;g.CBike_GetComponentWorldPosition=nullptr;g_turnForce=nullptr;
+    }
+    // Each physical bar socket is independently editable with the trigger.
+    for(int grip:{0,1}) {
+        Setup();hands[0]={};hands[1]={};driving::debugMode=1;
+        std::memset(driving::bikeGrip,0,sizeof(driving::bikeGrip));
+        g.CVehicle_GetVehicleAppearance=[](const void*){return 2;};
+        g.CBike_IsComponentPresent=[](const void*,int){return true;};
+        g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* out){*out={0,.5f,.8f};};
+        g_turnForce=[](void*,float,float,float,float,float,float){};
+        Write<std::uint16_t>(vehicle,0x32,461);Write<float>(vehicle,0xb0,200.f);Write<void*>(vehicle,0x5a0,nullptr);
+        vrcam::eye={0,-.5f,1.f};hands[0].gripPos[0]=grip?.31f:-.31f;
+        hands[0].gripPos[1]=.5f;hands[0].gripPos[2]=.8f;
+        Tick();hands[0].trigger=1;Tick();CHECK(g_bikeEdit.hand==0&&g_bikeEdit.grip==grip);
+        hands[0].gripPos[2]+=.1f;Tick();CHECK(std::abs(driving::bikeGrip[grip][2]-.1f)<.001f);
+        CHECK(driving::bikeGrip[1-grip][2]==0);hands[0].trigger=0;Tick();
+        CHECK(g_bikeEdit.hand<0&&driving::saves==1);
+        g.CBike_IsComponentPresent=nullptr;g.CBike_GetComponentWorldPosition=nullptr;g_turnForce=nullptr;
     }
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

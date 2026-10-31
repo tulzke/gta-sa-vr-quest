@@ -3296,6 +3296,18 @@ void GetBikeBarCalibration(int model,float out[3],float* halfWidth) {
     out[1]+=(g_value[F_BIKE_DISTANCE].load()-30)*.01f;
     out[2]+=(g_value[F_BIKE_HEIGHT].load()-82)*.01f;
 }
+void GetBikeGripCalibration(int model,int hand,float out[3]) {
+    EnsureInit();std::fill_n(out,3,0.f);if(hand<0||hand>1)return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const auto it=g_modelCalibration.find(model);
+    if(it!=g_modelCalibration.end())for(int i=0;i<3;++i)out[i]=it->second.control[hand][i]*.005f;
+}
+void SetBikeGripCalibration(int model,int hand,const float value[3]) {
+    if(model<400||model>611||hand<0||hand>1)return;
+    for(int i=0;i<3;++i)if(!std::isfinite(value[i]))return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    for(int i=0;i<3;++i)g_modelCalibration[model].control[hand][i]=ClampControlValue(i,std::lround(value[i]*200.f));
+}
 void SetDoorCalibration(int model,int door,bool inside,const float value[3]) {
     if(model<400||model>611||door<2||door>5) return;
     for(int a=0;a<3;++a) if(!std::isfinite(value[a])) return;
