@@ -33,6 +33,7 @@
 #include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <sys/system_properties.h>
 #include <unistd.h>
 
@@ -9159,6 +9160,13 @@ void EnsureHandProgram() {
 // Flat-colour program + cube geometry for the holster markers.
 GLuint g_markerProg = 0, g_markerVbo = 0, g_markerEbo = 0;
 GLint  g_markerMvpLoc = -1, g_markerColLoc = -1;
+extern "C" {
+extern const unsigned char savr_fist_png[],savr_fist_png_end[];
+extern const unsigned char savr_grab_png[],savr_grab_png_end[];
+}
+GLuint g_npcSpriteProg=0,g_npcSpriteTextures[2]{};
+GLint g_npcSpriteMvp=-1,g_npcSpriteTex=-1,g_npcSpriteColor=-1;
+bool g_npcSpritesTried=false;
 GLuint g_arrowProg = 0;
 GLint  g_arrowMvpLoc = -1, g_arrowColLoc = -1;
 GLuint g_tracerProg = 0, g_tracerVbo = 0, g_tracerEbo = 0;
@@ -9183,6 +9191,48 @@ void EnsureMarkerProgram() {
     g_markerMvpLoc = glGetUniformLocation(g_markerProg, "uMVP");
     g_markerColLoc = glGetUniformLocation(g_markerProg, "uCol");
     glGenBuffers(1, &g_markerVbo); glGenBuffers(1, &g_markerEbo);
+}
+
+void EnsureNpcSprites() {
+    if (g_npcSpritesTried) return;
+    g_npcSpritesTried=true;
+    // Android 11+ has a PNG decoder in libandroid. Resolve it at runtime so
+    // devices on the project's Android 9 minimum retain the mesh fallback.
+    const auto create=reinterpret_cast<int(*)(const void*,size_t,void**)>(dlsym(RTLD_DEFAULT,"AImageDecoder_createFromBuffer"));
+    const auto decode=reinterpret_cast<int(*)(void*,void*,size_t,size_t)>(dlsym(RTLD_DEFAULT,"AImageDecoder_decodeImage"));
+    const auto destroy=reinterpret_cast<void(*)(void*)>(dlsym(RTLD_DEFAULT,"AImageDecoder_delete"));
+    const auto unpremultiply=reinterpret_cast<int(*)(void*,bool)>(dlsym(RTLD_DEFAULT,"AImageDecoder_setUnpremultipliedRequired"));
+    if (!create||!decode||!destroy||!unpremultiply) return;
+    const unsigned char* starts[]={savr_grab_png,savr_fist_png};
+    const unsigned char* ends[]={savr_grab_png_end,savr_fist_png_end};
+    GLint oldTexture=0;glGetIntegerv(GL_TEXTURE_BINDING_2D,&oldTexture);
+    for (int i=0;i<2;++i) {
+        void* decoder{};
+        if (create(starts[i],static_cast<size_t>(ends[i]-starts[i]),&decoder)!=0||!decoder) continue;
+        std::vector<unsigned char> pixels(512*512*4);
+        const bool ok=unpremultiply(decoder,true)==0&&decode(decoder,pixels.data(),512*4,pixels.size())==0;
+        destroy(decoder);
+        if (!ok) continue;
+        glGenTextures(1,&g_npcSpriteTextures[i]);glBindTexture(GL_TEXTURE_2D,g_npcSpriteTextures[i]);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,512,512,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    }
+    glBindTexture(GL_TEXTURE_2D,static_cast<GLuint>(oldTexture));
+    if (!g_npcSpriteTextures[0]&&!g_npcSpriteTextures[1]) return;
+    const char* vs="#version 300 es\nlayout(location=0) in vec3 aPos;layout(location=1) in vec2 aUv;"
+        "uniform mat4 uMVP;out vec2 uv;void main(){uv=aUv;gl_Position=uMVP*vec4(aPos,1.0);}";
+    const char* fs="#version 300 es\nprecision mediump float;in vec2 uv;uniform sampler2D uTex;"
+        "uniform vec4 uColor;out vec4 o;void main(){vec4 c=texture(uTex,uv);"
+        "o=vec4(mix(c.rgb,vec3(1.0),uColor.rgb),c.a*uColor.a);}";
+    const GLuint v=CompileHandShader(GL_VERTEX_SHADER,vs),f=CompileHandShader(GL_FRAGMENT_SHADER,fs);
+    g_npcSpriteProg=glCreateProgram();glAttachShader(g_npcSpriteProg,v);glAttachShader(g_npcSpriteProg,f);
+    glLinkProgram(g_npcSpriteProg);glDeleteShader(v);glDeleteShader(f);
+    g_npcSpriteMvp=glGetUniformLocation(g_npcSpriteProg,"uMVP");
+    g_npcSpriteTex=glGetUniformLocation(g_npcSpriteProg,"uTex");
+    g_npcSpriteColor=glGetUniformLocation(g_npcSpriteProg,"uColor");
 }
 
 // Vice City's bullet trace is a textured four-sided smoke volume, not a flat
@@ -9756,6 +9806,7 @@ void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
 void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& frame,bool navigation=false,bool palms=false) {
     if (frame.count<=0) return;
     EnsureMarkerProgram();
+    if (palms) EnsureNpcSprites();
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE); // translucent hints never hide the hand/world
@@ -9798,15 +9849,39 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
         const auto arrow=vehicledoors::Arrow(marker);
         auto styled=marker;
         styled.direction=styled.direction*marker.scale;styled.up=styled.up*marker.scale;
-        const auto palm=marker.fist?npcgrab::Fist(styled):npcgrab::Palm(styled);
-        const auto* vertices=palms?palm.vertices.data():arrow.data();
-        const int count=palms?palm.count:static_cast<int>(arrow.size());
         static_assert(sizeof(vehicledoors::Vec)==3*sizeof(float));
         if(navigation)glUniform4f(g_markerColLoc,.10f,1.f,.22f,marker.held?.95f:.75f);
         else glUniform4f(g_markerColLoc,1.f,.86f+.14f*marker.highlight,.08f+.82f*marker.highlight,
             marker.opacity*(palms?(marker.held?.92f:.72f):(marker.held?.72f:.45f)));
-        glBufferData(GL_ARRAY_BUFFER,count*sizeof(vehicledoors::Vec),vertices,GL_DYNAMIC_DRAW);
-        glDrawArrays(GL_TRIANGLES,0,count);
+        const GLuint sprite=palms?g_npcSpriteTextures[marker.fist?1:0]:0;
+        if (sprite&&g_npcSpriteProg) {
+            struct SpriteVertex { vehicledoors::Vec p;float u,v; };
+            const auto r=styled.direction*.064f,u=styled.up*.064f,p=styled.position;
+            const SpriteVertex quad[]={
+                {p-r+u,0,0},{p-r-u,0,1},{p+r+u,1,0},
+                {p+r+u,1,0},{p-r-u,0,1},{p+r-u,1,1}};
+            GLint active=0,texture=0;glGetIntegerv(GL_ACTIVE_TEXTURE,&active);
+            glActiveTexture(GL_TEXTURE0);glGetIntegerv(GL_TEXTURE_BINDING_2D,&texture);
+            glBindTexture(GL_TEXTURE_2D,sprite);glUseProgram(g_npcSpriteProg);
+            glUniformMatrix4fv(g_npcSpriteMvp,1,GL_FALSE,mvp);glUniform1i(g_npcSpriteTex,0);
+            glUniform4f(g_npcSpriteColor,marker.highlight,marker.highlight,marker.highlight,
+                marker.opacity*(marker.held?.92f:.72f));
+            glBufferData(GL_ARRAY_BUFFER,sizeof(quad),quad,GL_DYNAMIC_DRAW);
+            glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(SpriteVertex),nullptr);
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(SpriteVertex),reinterpret_cast<void*>(3*sizeof(float)));
+            glDrawArrays(GL_TRIANGLES,0,6);
+            glDisableVertexAttribArray(1);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),nullptr);
+            glBindTexture(GL_TEXTURE_2D,static_cast<GLuint>(texture));glActiveTexture(static_cast<GLenum>(active));
+            glUseProgram(g_markerProg);
+        } else if (palms) {
+            const auto mesh=marker.fist?npcgrab::Fist(styled):npcgrab::Palm(styled);
+            glBufferData(GL_ARRAY_BUFFER,mesh.count*sizeof(vehicledoors::Vec),mesh.vertices.data(),GL_DYNAMIC_DRAW);
+            glDrawArrays(GL_TRIANGLES,0,mesh.count);
+        } else {
+            glBufferData(GL_ARRAY_BUFFER,arrow.size()*sizeof(vehicledoors::Vec),arrow.data(),GL_DYNAMIC_DRAW);
+            glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(arrow.size()));
+        }
         if (palms&&vehicledoors::Length(marker.strikeDirection)>.1f) {
             auto strike=marker;
             strike.direction=marker.strikeDirection;

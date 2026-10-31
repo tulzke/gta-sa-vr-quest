@@ -1,0 +1,17 @@
+    .section .rodata.savr_npc_hints,"a",@progbits
+    .balign 16
+    .global savr_fist_png
+    .hidden savr_fist_png
+savr_fist_png:
+    .incbin "@NPC_FIST_PNG@"
+    .global savr_fist_png_end
+    .hidden savr_fist_png_end
+savr_fist_png_end:
+    .balign 16
+    .global savr_grab_png
+    .hidden savr_grab_png
+savr_grab_png:
+    .incbin "@NPC_GRAB_PNG@"
+    .global savr_grab_png_end
+    .hidden savr_grab_png_end
+savr_grab_png_end:

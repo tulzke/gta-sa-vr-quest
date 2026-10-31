@@ -47,7 +47,13 @@ set_target_properties(openxr_loader PROPERTIES
     IMPORTED_LOCATION "${OPENXR_LOADER_SO}"
 )
 
+set(NPC_FIST_PNG "${CMAKE_CURRENT_SOURCE_DIR}/../assets/ui/fist.png")
+set(NPC_GRAB_PNG "${CMAKE_CURRENT_SOURCE_DIR}/../assets/ui/grab.png")
+configure_file(src/NpcHintSprites.S.in "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S" @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S" PROPERTY OBJECT_DEPENDS "${NPC_FIST_PNG};${NPC_GRAB_PNG}")
+
 add_library(savr SHARED
+    "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S"
     src/main.cpp
     src/AircraftHlod.cpp
     src/AircraftHlodData.S
