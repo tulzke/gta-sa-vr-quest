@@ -3551,6 +3551,7 @@ bool StabilizeRemoteCamera(CamBasis& base) {
     return true;
 }
 
+void FinishRoomMovement();
 void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
     static thread_local bool inHook = false;
 
@@ -3564,6 +3565,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
 
     if (stereo && !inHook && self == g.TheCamera) {
         inHook = true;
+        FinishRoomMovement();
         float hp[3], hq[4];
         std::uint64_t epoch{};
         if (xr::GetHeadPose(hp, hq, &epoch)) {
@@ -30187,6 +30189,7 @@ void RememberCutsceneCamera() {
 }
 
 // Room-scale input enters after the player's control task has produced its
+namespace {
 // normal velocity and before CWorld runs the collision pass. The injected
 // velocity is removed on the next control update so it cannot accumulate.
 using PlayerControlFn = void (*)(void*);
@@ -30203,8 +30206,49 @@ struct RoomMotionState {
     bool valid{};
 };
 RoomMotionState g_roomMotion{};
+struct RoomPending {
+    bool valid{};
+    void* ped{};
+    V3 start{}, requested{}, room{};
+    CamBasis basis{};
+    Q origin{};
+    std::uint64_t serial{}, epoch{};
+} g_roomPending;
+
+void FinishRoomMovement() {
+    const auto pending = g_roomPending;
+    g_roomPending.valid = false;
+    if (!pending.valid || pending.serial != g_cameraResetSerial ||
+        !g.FindPlayerPed || g.FindPlayerPed(-1) != pending.ped ||
+        !g_origin.valid || !GroundWalkControlsActive()) return;
+    float hp[3]{}, hq[4]{}; std::uint64_t epoch{};
+    if (!xr::GetHeadPose(hp,hq,&epoch) || epoch != pending.epoch) return;
+    void* matrix{};
+    std::memcpy(&matrix,static_cast<char*>(pending.ped)+0x18,sizeof(matrix));
+    if (!matrix) return;
+    V3 position{};
+    std::memcpy(&position,static_cast<char*>(matrix)+0x30,sizeof(position));
+    const V3 actual = position-pending.start;
+    if (!Finite(actual) || std::hypot(actual.x,actual.y)>0.5f) return;
+    // Share each axis's collision response between native locomotion and
+    // room input. In open space this removes only room movement; at a wall
+    // zero accepted displacement leaves the physical head completely free.
+    const auto accepted = [](float moved,float requested,float room) {
+        return room * (std::abs(requested)>1e-5f
+            ? std::clamp(moved/requested,0.0f,1.0f) : 1.0f);
+    };
+    const V3 world{accepted(actual.x,pending.requested.x,pending.room.x),
+                   accepted(actual.y,pending.requested.y,pending.room.y),0.0f};
+    const V3 relative{-Dot(world,pending.basis.right),
+                       Dot(world,pending.basis.up),-Dot(world,pending.basis.forward)};
+    const V3 tracking = Rotate(pending.origin,relative);
+    g_origin.pos.x += tracking.x; g_origin.pos.z += tracking.z;
+    g_roomMotion.neutralHead.x += tracking.x;
+    g_roomMotion.neutralHead.z += tracking.z;
+}
 
 void OnRoomPlayerControl(void* ped) {
+    FinishRoomMovement();
     auto* speed = reinterpret_cast<V3*>(static_cast<char*>(ped) + 0x68);
     if (g_roomMotion.ped == ped && Finite(*speed)) {
         // Collision may have reduced the old impulse. Remove only the part
@@ -30250,20 +30294,27 @@ void OnRoomPlayerControl(void* ped) {
              head.z-g_roomMotion.neutralHead.z};
     const float distance = std::hypot(delta.x,delta.z);
     if (distance > kRoomRadius) {
-        delta = delta * ((distance-kRoomRadius)/distance);
+        // A blocked lean may be large; never turn it into a single-frame leap
+        // when the obstacle goes away. Maximum follow speed is 2 m/s.
+        delta = delta * (std::min(distance-kRoomRadius,step*0.04f)/distance);
     } else {
         delta = {};
     }
-    // Remove physical translation from the camera origin as it is handed to
-    // the ped; otherwise the same step moves both the ped and the camera.
+    // Defer camera compensation until physics has resolved this request.
     const Q inv{-g_origin.ori.x,-g_origin.ori.y,-g_origin.ori.z,g_origin.ori.w};
     const V3 world = TrackingToGame(g_vrBase, Rotate(inv,delta));
     if (Finite(world) && Finite(*speed)) {
+        void* matrix{};
+        std::memcpy(&matrix,static_cast<char*>(ped)+0x18,sizeof(matrix));
+        if (!matrix) return;
+        V3 position{};
+        std::memcpy(&position,static_cast<char*>(matrix)+0x30,sizeof(position));
+        if (!Finite(position)) return;
         const V3 impulse{world.x/step,world.y/step,0.0f};
         speed->x += impulse.x; speed->y += impulse.y;
         g_roomMotion.injected = impulse;
-        g_origin.pos.x += delta.x; g_origin.pos.z += delta.z;
-        g_roomMotion.neutralHead.x += delta.x; g_roomMotion.neutralHead.z += delta.z;
+        g_roomPending = {true,ped,position,(*speed)*step,world,g_vrBase,
+                         g_origin.ori,g_cameraResetSerial,epoch};
     }
     const Q orientation{hq[0],hq[1],hq[2],hq[3]};
     const V3 localForward = Rotate(inv, Rotate(orientation,{0.0f,0.0f,-1.0f}));
@@ -30282,6 +30333,8 @@ void OnRoomPlayerControl(void* ped) {
         std::memcpy(static_cast<char*>(ped)+0x6c8,&yaw,sizeof(yaw));
     }
 }
+
+} // namespace
 
 bool Install() {
     // Resolve-thread I/O: keep the first RenderScene hook free of settings-file
