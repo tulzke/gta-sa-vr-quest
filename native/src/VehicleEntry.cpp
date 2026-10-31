@@ -96,7 +96,7 @@ void Update(bool usable,std::uint64_t epoch){
   if(flags[slot]&0x80)continue;
   void* car=objects+slot*0xc68;
   if(seated&&seated!=car)continue;
-  if((Read<std::uint8_t>(car,0x5a)&7)!=2||!g.CVehicle_GetVehicleAppearance||!canOpen(car,ped))continue;
+  if((Read<std::uint8_t>(car,0x5a)&7)!=2||!g.CVehicle_GetVehicleAppearance||(!seated&&!canOpen(car,ped)))continue;
   const int appearance=g.CVehicle_GetVehicleAppearance(car);
   if(appearance!=1&&appearance!=2)continue;
   const Vec speed=Read<Vec>(car,0x68);if(!Finite(speed)||(!seated&&Length(speed)>.02f))continue;
@@ -115,7 +115,7 @@ void Update(bool usable,std::uint64_t epoch){
     if(!exit&&seat==0&&Read<std::uint8_t>(car,0x5ec)==0)actionable=false;
     float correction[3]{};driving::GetEntryCalibration(model,index,correction);
     const float side=index==0?-1.f:1.f;
-    Vec local=exit?Vec{side*.85f,0,.6f}:
+    Vec local=exit?Vec{side*(model==471?1.4f:.85f),0,.6f}:
       Vec{correction[0],(index==0?.20f:-.55f)+correction[1],.85f+correction[2]};
     Vec p=b.Point(local);
     if(Length(p-eye)>1.8f)continue;

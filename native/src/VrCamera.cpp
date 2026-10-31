@@ -21834,7 +21834,7 @@ void OnRenderScene(bool underwater) {
             // renders the tracked hands plus the virtual wheel instead.
             const bool hideBody = playerlife::HideBody(playerlife::Dead(playerPed),
                 FormalCutsceneRunning()||ScriptedCutsceneRunning(),playerInVehicle,
-                driving::GetMode()==driving::MODE_IMMERSIVE);
+                driving::GetMode()==driving::MODE_IMMERSIVE||driving::IsPlayerOnQuad());
             ScopedPlayerBodyHide hidePlayerBody(hideBody ? playerPed : nullptr);
             airhlod::Render(eye.pos.x, eye.pos.y,
                             aircraftLod.hlodFillActive,

@@ -3621,8 +3621,15 @@ bool VehicleWeaponsImmersive() {
 bool ShouldUseTrackedHands() {
     EnsureInit();
     if (!HasPlayerVehicle()) return true;
+    if (IsPlayerOnQuad()) return true;
     if(vehicleentry::SeatIndex(g.FindPlayerVehicle(-1,false),g.FindPlayerPed(-1))>=0)return true;
     return ModeForAppearance(GetActiveVehicleAppearance(false))==MODE_IMMERSIVE;
+}
+bool IsPlayerOnQuad() {
+    void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+    if(!vehicle)return false;
+    const int model=*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0x32);
+    return IsQuadBikeModelId(model);
 }
 void SetMenuPreview(bool active,int calibrationHand) {
     g_menuPreview.store(active, std::memory_order_release);

@@ -323,6 +323,7 @@ void ToggleDrivebyAimImmersive();
 // on. Weapon/fire/render gates read this; driving CONTROL never does.
 bool VehicleWeaponsImmersive();
 bool ShouldUseTrackedHands();
+bool IsPlayerOnQuad();
 void SetMenuPreview(bool active, int calibrationHand = -1);
 
 void UpdateInput(const xr::InputState& input, bool gameplay, bool blocked);

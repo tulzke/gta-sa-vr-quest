@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 using savr::vehicledoors::Vec;
-double testNow=1;float eyeX=-1.3f,eyeY=0;int vehicleAppearance=1;
+double testNow=1;float eyeX=-1.3f,eyeY=0;int vehicleAppearance=1;bool locksOpen=true;
 namespace savr {
 GameSymbols g{};
 namespace passengerreaction { void Update(bool){} }
@@ -35,7 +35,7 @@ int main(){
  canStepOut=[](const void*,bool){return true;};
  g.FindPlayerPed=[](int)->void*{return ped;};g.FindPlayerVehicle=[](int,bool)->void*{return current;};
  g.CPad_GetPad=[](int)->void*{return pad;};g.CVehicle_GetVehicleAppearance=[](const void*){return vehicleAppearance;};
- canOpen=[](const void*,const void*){return true;};healthy=[](const void*){return true;};frameLtm=[](void* p){return p;};
+ canOpen=[](const void*,const void*){return locksOpen;};healthy=[](const void*){return true;};frameLtm=[](void* p){return p;};
  Tick();Tick();xr::input.leftStick[0]=1;Tick();CHECK(started>0);Tick();Tick();CHECK(boatentry::calls==0);
  xr::input.leftStick[0]=-1;Tick();CHECK(started==0);
  xr::input.leftStick[0]=1;Tick();for(int i=0;i<7;++i)Tick();CHECK(boatentry::calls==0);
@@ -105,6 +105,13 @@ int main(){
   xr::input.leftStick[0]=1;const int before=boatentry::calls;
   for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==before+1&&boatentry::seat==-1);
  }
+ // Quad exit icons sit outside the wider chassis and do not depend on locks.
+ current=cars;Put(cars,0x5a0,static_cast<void*>(ped));locksOpen=false;eyeX=eyeY=0;
+ xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
+ CHECK(icons.count==2&&std::abs(icons.markers[0].position.x+1.4f)<.001f&&
+       std::abs(icons.markers[1].position.x-1.4f)<.001f);
+ const int beforeQuadExit=vrcam::exits;xr::input.leftStick[0]=1;
+ for(int i=0;i<12;++i)Tick();CHECK(vrcam::exits==beforeQuadExit+1);
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 
