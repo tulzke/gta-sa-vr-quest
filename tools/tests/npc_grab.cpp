@@ -8,6 +8,9 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#define ANDROID_LOG_INFO 4
+#define SAVR_TAG "SAVR"
+int __android_log_print(int, const char*, const char*, ...) { return 0; }
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1); } } while(0)
 namespace savr {
 GameSymbols g{};

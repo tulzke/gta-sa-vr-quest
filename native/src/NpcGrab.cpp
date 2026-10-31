@@ -97,6 +97,63 @@ struct Pool {
         return size>0&&size<=1024&&objects&&flags;
     }
 };
+
+// Backlog 11: sample the live ped pool independently of visibility scans.
+// Slot generation identifies reuse; never dereference a previously stored ped.
+void TraceNearbyPedPool(const Pool& pool, void* player, double now) {
+    struct Sample {
+        void* pool{};
+        int ref{-1};
+        std::uint64_t flags{};
+        double lastLog{};
+        double lastSeen{};
+        bool active{};
+    };
+    static Sample samples[1024]{};
+    static double nextScan{};
+    if (!player || !getPed || !pool.identity || !pool.flags ||
+        pool.size <= 0 || pool.size > 1024 || now < nextScan) return;
+    nextScan = now + 0.05;
+    const Vec origin = Position(player);
+    if (!Finite(origin)) return;
+    for (int slot = 0; slot < pool.size; ++slot) {
+        Sample& sample = samples[slot];
+        const unsigned char generation = pool.flags[slot];
+        if (generation & 0x80u) { sample.active = false; continue; }
+        const int ref = (slot << 8) | generation;
+        void* ped = getPed(ref);
+        if (!ped || ped == player) { sample.active = false; continue; }
+        const Vec position = Position(ped);
+        const float distance = Length(position - origin);
+        if (!Finite(position) || !std::isfinite(distance) || distance > 8.f) {
+            sample.active = false;
+            continue;
+        }
+        const std::uint64_t flags = Read<std::uint64_t>(ped, 0x28);
+        const bool fresh = !sample.active || sample.pool != pool.identity ||
+            sample.ref != ref || now - sample.lastSeen > 0.5;
+        const std::uint64_t changed = fresh ? 0 : sample.flags ^ flags;
+        if (fresh || (changed & 0x80u) || now - sample.lastLog >= 0.5) {
+            __android_log_print(ANDROID_LOG_INFO, SAVR_TAG,
+                "[npc.pool] %s entity=%p ref=%x model=%d dist=%.2f "
+                "pos=%.2f,%.2f,%.2f flags=%llx changed=%llx visible=%d rw=%d vehicle=%p gap_ms=%.1f",
+                fresh ? "enter" : (changed ? "change" : "sample"), ped, ref,
+                static_cast<int>(Read<std::int16_t>(ped, 0x32)),
+                static_cast<double>(distance), static_cast<double>(position.x),
+                static_cast<double>(position.y), static_cast<double>(position.z),
+                static_cast<unsigned long long>(flags),
+                static_cast<unsigned long long>(changed), (flags & 0x80u) ? 1 : 0,
+                Read<void*>(ped, 0x20) ? 1 : 0, Read<void*>(ped, 0x708),
+                fresh ? 0.0 : (now - sample.lastSeen) * 1000.0);
+            sample.lastLog = now;
+        }
+        sample.pool = pool.identity;
+        sample.ref = ref;
+        sample.flags = flags;
+        sample.lastSeen = now;
+        sample.active = true;
+    }
+}
 struct Hold {
     void* ped{};void* pool{};void* objects{};void* task{};
     int ref{-1},bone{};Vec previous{},velocity{},start{};
@@ -799,6 +856,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     if (player!=owner) { Reset();owner=player; }
     void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
     Pool pool;pool.Load();
+    TraceNearbyPedPool(pool, player, now);
     PruneAnimations(pool,now);
     const bool usable=ready&&!blocked&&trackingValid&&epoch==previousEpoch&&
         dt>0&&dt<=.15f&&xr::IsSessionFocused()&&player&&!playerlife::Dead(player)&&pad&&
