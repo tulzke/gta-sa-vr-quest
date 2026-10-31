@@ -110,6 +110,8 @@ int main(){
     LevelBasis(visual,right,forward);
     CHECK(Near(right.x,1)&&Near(right.y,0)&&Near(right.z,0));
     CHECK(Near(forward.z,-1));
+    LevelBasis(visual,right,forward,471);
+    CHECK(Near(right.y,visual.right[1])); // Quad never enables lean steering.
     g_bikeLeanSteering=false;
     LevelBasis(visual,right,forward);
     CHECK(Near(right.y,visual.right[1])); // BARS ONLY retains the old axes
@@ -167,7 +169,8 @@ void Route(WheelVisualState& visual,V3 positions[2],bool left,bool rightGrabbed,
            bool leanSteering,bool preview,float steering,int activeModel) {
 ''' + route + '''
 }
-void LevelBasis(WheelVisualState visual,V3& rightOut,V3& forwardOut) {
+bool IsQuadBikeModelId(int model) { return model==471; }
+void LevelBasis(WheelVisualState visual,V3& rightOut,V3& forwardOut,int activeModel=411) {
 ''' + axes + '\nrightOut=right;forwardOut=up;\n}\n' + '''
 void ReadSettings(const char* text){
     int bikeLeanSteering=1,bikeLeanSensitivity=100;

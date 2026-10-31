@@ -351,6 +351,19 @@ void Publish(const MarkerFrame& frame) {
 }
 } // namespace
 
+bool QuadBarPosition(void* vehicle,float out[3]) {
+    if(!vehicle||!out||Read<std::uint16_t>(vehicle,0x32)!=471||!g_frameLtm) return false;
+    void* body=Read<void*>(vehicle,0x18);
+    void* node=Read<void*>(vehicle,0x888);
+    if(!body||!node) return false;
+    void* ltm=g_frameLtm(node);
+    if(!ltm) return false;
+    const Basis b=Matrix(body),bar=Matrix(ltm);
+    if(!b.Valid()||!bar.Valid()||Length(bar.position-b.position)>=5.f) return false;
+    out[0]=bar.position.x;out[1]=bar.position.y;out[2]=bar.position.z;
+    return true;
+}
+
 void Install(void* handle) {
     vehicleentry::Install(handle);
     if (!handle||g_ready) return;

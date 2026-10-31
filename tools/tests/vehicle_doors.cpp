@@ -538,6 +538,15 @@ int main() {
      Write(vehicle,model==471?0x888:0x758+6*8,static_cast<void*>(frames[0]));Basis bar{};Vec p{};
      CHECK(BikeGripPoint(vehicle,0,bar,p));CHECK(Length(p-Vec{-.31f,.5f,.8f})<.001f);
      CHECK(component==(model==471?-1:6));}
+    {Setup(); Write<std::uint16_t>(vehicle,0x32,471); float out[3]{};
+     CHECK(!QuadBarPosition(vehicle,out));
+     StoreBasis(frames[0],Basis{{1,0,0},{0,1,0},{0,0,1},{0,.5f,.8f}});
+     Write(vehicle,0x888,static_cast<void*>(frames[0]));
+     CHECK(QuadBarPosition(vehicle,out)); CHECK(std::abs(out[1]-.5f)<.001f);
+     Write<std::uint16_t>(vehicle,0x32,481); CHECK(!QuadBarPosition(vehicle,out));
+     Write<std::uint16_t>(vehicle,0x32,471);
+     StoreBasis(frames[0],Basis{{1,0,0},{0,1,0},{0,0,1},{0,8,0}});
+     CHECK(!QuadBarPosition(vehicle,out));}
     // All supported models can claim a tilted bar and turn it into a lift.
     for(int model:{481,509,510,471}){Setup();hands[0]={};hands[1]={};
      std::memset(driving::bikeGrip,0,sizeof(driving::bikeGrip));

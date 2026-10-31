@@ -3,6 +3,7 @@
 namespace savr::xr { struct HandPose; }
 namespace savr::vehicledoors {
 void Install(void* gameHandle);
+bool QuadBarPosition(void* vehicle, float out[3]);
 // Called before weapon ownership, using that update's exact tracking snapshot.
 void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uint64_t epoch);
 void Reset();

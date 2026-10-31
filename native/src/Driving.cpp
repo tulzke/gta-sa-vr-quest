@@ -1186,13 +1186,9 @@ int GetActiveVehicleAppearance(bool requireDriver=true) {
         if (!ped||!g.CVehicle_IsDriver(vehicle,ped)) return 0;
     }
     const int appearance=g.CVehicle_GetVehicleAppearance(vehicle);
-    if (appearance==2) {
-        const int modelId=*reinterpret_cast<const std::uint16_t*>(
-            reinterpret_cast<const char*>(vehicle)+0x32);
-        if ((g.CModelInfo_IsQuadBikeModel&&
-             g.CModelInfo_IsQuadBikeModel(modelId))||modelId==471)
-            return 0;
-    }
+    const int modelId=*reinterpret_cast<const std::uint16_t*>(
+        reinterpret_cast<const char*>(vehicle)+0x32);
+    if (IsQuadBikeModelId(modelId)) return 2; // Handlebar controls, not CBike layout.
     return appearance;
 }
 
@@ -1552,6 +1548,37 @@ bool BuildBikeTracking(WheelVisualState* visual) {
              center.x,center.y,center.z,visual->radius);
         loggedModel=modelId;
     }
+    return true;
+}
+
+// The quad is an automobile subclass: use only its entity and steering frames.
+bool BuildQuadTracking(WheelVisualState* visual) {
+    if (!visual||!g.FindPlayerVehicle||!g.FindPlayerPed||!g.CVehicle_IsDriver) return false;
+    void* vehicle=g.FindPlayerVehicle(-1,false);
+    void* ped=g.FindPlayerPed(-1);
+    if (!vehicle||!ped||!g.CVehicle_IsDriver(vehicle,ped)) return false;
+    const int model=*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0x32);
+    if (!IsQuadBikeModelId(model)) return false;
+    V3 r,f,u,p; float node[3]{};
+    if (!ReadEntityMatrix(vehicle,&r,&f,&u,&p)||!vehicledoors::QuadBarPosition(vehicle,node)) return false;
+    float correction[3]{},width{};
+    GetBikeBarCalibration(model,correction,&width);
+    const V3 world=V3{node[0],node[1],node[2]}+r*correction[0]+f*correction[1]+u*correction[2];
+    V3 center,pr,pf,pu;
+    if (!WorldPointToTracking(world,&center)||!WorldPointToTracking(world+r,&pr)||
+        !WorldPointToTracking(world+f,&pf)||!WorldPointToTracking(world+u,&pu)) return false;
+    V3 normal=Normalized(pu-center);
+    V3 right=Normalized((pr-center)-normal*Dot(pr-center,normal));
+    V3 forward=Normalized((pf-center)-normal*Dot(pf-center,normal)-right*Dot(pf-center,right));
+    if (Dot(Cross(right,forward),normal)<0.0f) forward=forward*-1.0f;
+    if (Length(right)<0.5f||Length(forward)<0.5f||Length(normal)<0.5f) return false;
+    visual->active=true; visual->dashAnchorValid=true; visual->visible=true; visual->bike=true;
+    visual->bikeHandsFollowTilt=g_bikeHandsFollowTilt.load(); visual->modelId=model;
+    visual->center[0]=center.x; visual->center[1]=center.y; visual->center[2]=center.z;
+    visual->right[0]=right.x; visual->right[1]=right.y; visual->right[2]=right.z;
+    visual->up[0]=forward.x; visual->up[1]=forward.y; visual->up[2]=forward.z;
+    visual->normal[0]=normal.x; visual->normal[1]=normal.y; visual->normal[2]=normal.z;
+    visual->radius=width;
     return true;
 }
 
@@ -3836,7 +3863,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
             activeVehicle=vehicle;
             activeModel=*reinterpret_cast<const std::uint16_t*>(
                 reinterpret_cast<const char*>(vehicle)+0x32);
-            if (activeType==VEHICLE_BIKE) {
+            if (activeType==VEHICLE_BIKE&&!IsQuadBikeModelId(activeModel)) {
                 // Android 2.11 CBike::nBikeFlags is the byte at +0x800 and
                 // bit 4 is bOnSideStand (verified against ProcessControl).
                 // Keep the ridden bike balanced during stationary calibration
@@ -3863,7 +3890,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
         prevJumpButton=jumpButton;
     }
     int activeAccelerator=BIKE_ACCEL_HOLD_TRIGGER;
-    if (activeType==VEHICLE_BIKE&&activeModel>=0) {
+    if (activeType==VEHICLE_BIKE&&activeModel>=0&&!IsQuadBikeModelId(activeModel)) {
         std::lock_guard<std::mutex> modelLock(g_modelMutex);
         const auto found=g_modelCalibration.find(activeModel);
         if (found!=g_modelCalibration.end())
@@ -3909,7 +3936,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
         const bool anchorBuilt = gameplay && !ThirdPersonViewActive() &&
             ((appearance==1||appearance==4||appearance==5)
                            ? BuildWheelTracking(&anchor)
-                           : (appearance==2 ? BuildBikeTracking(&anchor)
+                           : (appearance==2 ? (IsQuadBikeModelId(activeModel)?BuildQuadTracking(&anchor):BuildBikeTracking(&anchor))
                                             : false));
         ClearInteractionLocked();
         if (anchorBuilt) {
@@ -3950,7 +3977,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     WheelVisualState visual{};
     const bool poseBuilt=(appearance==1||appearance==4||appearance==5)?
         BuildWheelTracking(&visual):
-        (appearance==2?BuildBikeTracking(&visual):false);
+        (appearance==2?(IsQuadBikeModelId(activeModel)?BuildQuadTracking(&visual):BuildBikeTracking(&visual)):false);
     if (!poseBuilt) {
         static int failedAppearance=-1;
         static unsigned int failedFrames=0;
@@ -3979,7 +4006,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     const V3 center{visual.center[0],visual.center[1],visual.center[2]};
     V3 right{visual.right[0],visual.right[1],visual.right[2]};
     V3 up{visual.up[0],visual.up[1],visual.up[2]};
-    const bool leanSteering=visual.bike&&g_bikeLeanSteering.load();
+    const bool leanSteering=visual.bike&&!IsQuadBikeModelId(activeModel)&&g_bikeLeanSteering.load();
     if (leanSteering) {
         // Input yaw uses gravity-level axes; visual axes keep the retail roll
         // for rendering. Reading yaw in the rolled bar plane feeds the game's
@@ -4248,7 +4275,8 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
             g_bikeThrottleGestureActive=false;
             g_bikeThrottleReferenceValid=false;
         }
-        UpdateBikeLeanLocked(poses,left,rightGrabbed);
+        if (!IsQuadBikeModelId(activeModel)) UpdateBikeLeanLocked(poses,left,rightGrabbed);
+        else g_bikeLean=0.0f;
     }
     else {
         g_bikeThrottle=0.0f;
@@ -4303,7 +4331,7 @@ void RefreshVisualTracking() {
     // transform. Reproject the combine wheel as well as bike bars afterwards;
     // otherwise it uses the previous camera while the cab uses the current one.
     WheelVisualState refreshed=previous;
-    if (!(previous.bike ? BuildBikeTracking(&refreshed) :
+    if (!(previous.bike ? (IsQuadBikeModelId(previous.modelId)?BuildQuadTracking(&refreshed):BuildBikeTracking(&refreshed)) :
                          BuildWheelTracking(&refreshed))) return;
     refreshed.physicalAngle=previous.physicalAngle;
     refreshed.steering=previous.steering;
