@@ -138,10 +138,7 @@ struct Animation {
     bool landingPlayed{};
     int doorNode{};
 } animations[4];
-// Backlog 36: bike/bicycle/quad jacking. A hand on the rider's shoulder starts
-// the native CTaskSimpleBikeJacked and holds its BIKE_HIT flinch frozen on the
-// impact frame; a frontal face punch releases it and the engine performs the
-// BIKE_fall_off/BIKE_fallR knock-off itself. The bike is never braked.
+// Bike, bicycle and quad knock-offs use the native jacking task.
 constexpr unsigned kBikeHitAnim=201,kBikeFallOffAnim=105,kBikeFallRAnim=106;
 constexpr float kFallOffLanding=10.f/30.f,kFallRLanding=8.f/30.f;
 constexpr float kBikeFrontCos=.2588f; // 150-degree frontal arc for the punch
@@ -582,9 +579,7 @@ Hold ApproachAtSeat(const Pool& pool,void* player,Vec eye,Vec hand) {
     }
     return target;
 }
-// A resting hand (open or closed) on either clavicle of a slow bike rider
-// initiates the scene. Bikes are identified by appearance 2, which also covers
-// bicycles and the quad; all of them share the same BIKE_* jacking clips.
+// Appearance 2 covers motorcycles, bicycles and quads.
 bool BikeSeat(void* ped,void*& bike,int& door) {
     bike=Read<void*>(ped,0x708);
     if (!bike||g.CVehicle_GetVehicleAppearance(bike)!=2) return false;
@@ -594,77 +589,69 @@ bool BikeSeat(void* ped,void*& bike,int& door) {
     for (int i=0;i<3;++i) if (Read<void*>(bike,0x5a8+i*8)==ped) { door=8;return true; }
     return false;
 }
-void BikeTouch(const Pool& pool,void* player,Vec eye,Vec p,int hand,double now) {
-    for (auto& s:bikeScenes)
-        if (s.target.ped&&s.phase==BikePhase::Touch&&s.target.Live(pool)) {
-            for (int bone:{21,31}) {
-                const Vec shoulder=Bone(s.target.ped,bone);
-                if (Finite(shoulder)&&Length(p-shoulder)<.30f) { s.touch=now;s.until=now+8.0;return; }
-            }
-        }
-    void* chosenPed{};void* chosenBike{};int chosenRef{},chosenDoor{};float nearest=.25f;
+Hold ApproachBike(const Pool& pool,void* player,Vec eye,Vec hand) {
+    Hold target{};float nearest=.95f;
     for (int slot=0;slot<pool.size;++slot) {
         if (pool.flags[slot]&128) continue;
         const int ref=(slot<<8)|pool.flags[slot];void* ped=getPed(ref);
         if (!ped||ped==player||isPlayer(ped)||playerlife::Dead(ped)||!Seated(ped)||
-            BikeSceneOf(ped)||Animating(ped)||BeforeHit(ped)||Waiting(ped)) continue;
-        if (!Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f) continue;
-        void* bike{};int door{};
-        if (!BikeSeat(ped,bike,door)) continue;
-        void* manager=Manager(ped);
-        if (!manager||Read<void*>(manager,0)) continue;
-        for (int bone:{21,31}) {
-            const Vec shoulder=Bone(ped,bone);
-            const float distance=Length(p-shoulder);
-            if (Finite(shoulder)&&distance<nearest&&Visible(eye,shoulder,ped,bike)) {
-                nearest=distance;chosenPed=ped;chosenBike=bike;chosenRef=ref;chosenDoor=door;
-            }
+            BikeSceneOf(ped)||Animating(ped)||!Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f) continue;
+        void* bike{};int door{};if (!BikeSeat(ped,bike,door)) continue;
+        void* manager=Manager(ped);if (!manager||Read<void*>(manager,0)) continue;
+        const Vec head=Bone(ped,5);const float distance=Length(head-hand);
+        if (Finite(head)&&distance<nearest&&Visible(eye,head,ped,bike)) {
+            nearest=distance;target={ped,pool.identity,pool.objects,nullptr,ref,5};
         }
     }
-    if (!chosenPed) return;
+    return target;
+}
+bool StartBikeFall(const Pool& pool,void* ped,void* bike,int door,int ref,void* player,bool impact) {
+    void* manager=Manager(ped);
+    if (!manager||Read<void*>(manager,0)||BikeSceneOf(ped)) return false;
     BikeScene* scene=nullptr;
     for (auto& s:bikeScenes) if (!s.target.ped) { scene=&s;break; }
     void* task=scene?allocate(0x60):nullptr;
-    if (!task) return;
-    // A null jacker starts the victim's flinch immediately; the task then waits
-    // for its finish callback, which the frozen association never fires.
-    bikeJackedCtor(task,chosenBike,chosenDoor,2000,nullptr,chosenDoor==10);
-    void* manager=Manager(chosenPed);
+    if (!task) return false;
+    bikeJackedCtor(task,bike,door,2000,nullptr,door==10);
     setTask(manager,task,0,false);
-    if (Read<void*>(manager,0)!=task) return;
-    scene->target={chosenPed,pool.identity,pool.objects,nullptr,chosenRef,21,p,{},p,true};
-    scene->bike=chosenBike;registerReference(chosenBike,&scene->bike);
-    scene->task=task;scene->phase=BikePhase::Touch;
-    scene->touch=now;scene->until=now+8.0;
-    xr::TriggerHaptic(hand,.3f,60.f,25.f);
+    if (Read<void*>(manager,0)!=task) return false;
+    scene->target={ped,pool.identity,pool.objects,nullptr,ref,5};
+    scene->bike=bike;registerReference(bike,&scene->bike);
+    scene->task=task;scene->phase=BikePhase::Falling;scene->punched=true;scene->until=updated+8.0;
+    if (impact) { ActionFeedback(ped,true);SceneAudio(ped,65); }
+    ReportBikeJack(*scene,player);
+    return true;
 }
 bool PunchBikeRider(const Pool& pool,void* player,Vec eye,Vec p,Vec previous) {
-    BikeScene* struck=nullptr;float nearest=.30f;
-    for (auto& s:bikeScenes) {
-        if (!s.target.ped||s.phase!=BikePhase::Touch||s.punched||!s.target.Live(pool)) continue;
-        const Vec head=Bone(s.target.ped,5),travel=p-previous;
-        const float length=Dot(travel,travel);
-        const Vec closest=previous+travel*(length>1.e-6f?std::clamp(Dot(head-previous,travel)/length,0.f,1.f):0.f);
+    void* chosen{};void* chosenBike{};int chosenDoor{},chosenRef{};float nearest=.30f;
+    const Vec travel=p-previous;const float length=Dot(travel,travel);
+    const float horizontal=std::hypot(travel.x,travel.y);
+    if (length<1.e-6f||horizontal<1.e-3f) return false;
+    for (int slot=0;slot<pool.size;++slot) {
+        if (pool.flags[slot]&128) continue;
+        const int ref=(slot<<8)|pool.flags[slot];void* ped=getPed(ref);
+        if (!ped||ped==player||isPlayer(ped)||playerlife::Dead(ped)||!Seated(ped)||
+            BikeSceneOf(ped)||Animating(ped)||!Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f) continue;
+        void* bike{};int door{};if (!BikeSeat(ped,bike,door)) continue;
+        void* manager=Manager(ped);if (!manager||Read<void*>(manager,0)) continue;
+        const Vec head=Bone(ped,5);
+        const Vec closest=previous+travel*std::clamp(Dot(head-previous,travel)/length,0.f,1.f);
         const float distance=Length(head-closest);
-        if (!Finite(head)||distance>=nearest) continue;
-        // The fall clips throw the rider backwards, so the fist must arrive
-        // through the rider's frontal arc. Side or back punches never connect.
-        void* matrix=Read<void*>(s.target.ped,0x18);
-        if (!matrix) continue;
-        const Vec forward=Read<Vec>(matrix,0x10),towards=eye-head;
-        const float af=std::hypot(towards.x,towards.y),ff=std::hypot(forward.x,forward.y);
-        if (af<1.e-3f||ff<1.e-3f) continue;
-        if ((towards.x*forward.x+towards.y*forward.y)/(af*ff)<kBikeFrontCos) continue;
-        if (!Visible(eye,head,s.target.ped,s.bike)) continue;
-        nearest=distance;struck=&s;
+        void* matrix=Read<void*>(ped,0x18);if (!matrix||!Finite(head)||distance>=nearest) continue;
+        const Vec forward=Read<Vec>(matrix,0x10);const float ff=std::hypot(forward.x,forward.y);
+        if (ff<1.e-3f||-(travel.x*forward.x+travel.y*forward.y)/(horizontal*ff)<kBikeFrontCos) continue;
+        if (!Visible(eye,head,ped,bike)) continue;
+        nearest=distance;chosen=ped;chosenBike=bike;chosenDoor=door;chosenRef=ref;
     }
-    if (!struck) return false;
-    struck->punched=true;
-    BikeResume(*struck); // the native chain plays BIKE_fall* and unseats the rider
-    ActionFeedback(struck->target.ped,true);
-    SceneAudio(struck->target.ped,65); // AE_PED_HIT_HIGH_UNARMED, at the physical hit
-    ReportBikeJack(*struck,player);
-    struck->phase=BikePhase::Falling;struck->until=updated+8.0;
+    if (!chosen||!StartBikeFall(pool,chosen,chosenBike,chosenDoor,chosenRef,player,true)) return false;
+    if (chosenDoor==10) for (int slot=0;slot<pool.size;++slot) {
+        if (pool.flags[slot]&128) continue;
+        const int ref=(slot<<8)|pool.flags[slot];void* passenger=getPed(ref);
+        if (!passenger||passenger==chosen||isPlayer(passenger)||playerlife::Dead(passenger)||!Seated(passenger)) continue;
+        void* bike{};int door{};
+        if (BikeSeat(passenger,bike,door)&&bike==chosenBike&&door==8)
+            StartBikeFall(pool,passenger,bike,door,ref,player,false);
+    }
     return true;
 }
 bool ContinuePull(Animation& pending,void* player) {
@@ -970,6 +957,7 @@ bool BlocksNpcPunch(void* ped,int hand) {
     if (!pool.Load()) return false;
     for (const auto& a:animations) if (a.target.ped==ped&&a.target.Live(pool)) return true;
     for (const auto& s:bikeScenes) if (s.target.ped==ped&&s.target.Live(pool)) return true;
+    if (approach[hand].ped==ped&&approach[hand].Live(pool)) return true;
     return false;
 }
 void PublishMarkers() {
@@ -983,9 +971,15 @@ void PublishMarkers() {
         if (!vrcam::WorldPointToTracking(world,p)||!vrcam::WorldPointToTracking(right,r)||
             !vrcam::WorldPointToTracking(above,u)) continue;
         const Vec position{p[0],p[1],p[2]},direction{r[0]-p[0],r[1]-p[1],r[2]-p[2]},vertical{u[0]-p[0],u[1]-p[1],u[2]-p[2]};
-        if (Finite(position)&&Finite(direction)&&Finite(vertical))
+        if (Finite(position)&&Finite(direction)&&Finite(vertical)) {
             frame.markers[frame.count++]={position,direction,vertical,marker.held,marker.fist,
                 marker.opacity,marker.highlight,marker.scale};
+            if (Length(marker.strikeDirection)>.1f) {
+                const Vec end=marker.position+marker.strikeDirection;float e[3]{};
+                const float raw[3]={end.x,end.y,end.z};
+                if (vrcam::WorldPointToTracking(raw,e)) frame.markers[frame.count-1].strikeDirection={e[0]-p[0],e[1]-p[1],e[2]-p[2]};
+            }
+        }
     }
     xr::SetNpcGrabMarkers(frame);
 }
@@ -1043,7 +1037,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         // a door/window collider, not only once the fist reaches the face.
         approach[hand]=good&&hands[hand].grip>=.8f?
             ApproachAtSeat(pool,player,eye,p):Hold{};
-        if (good&&!h.ped) BikeTouch(pool,player,eye,p,hand,now);
+        if (good&&hands[hand].grip>=.8f&&!approach[hand].ped)
+            approach[hand]=ApproachBike(pool,player,eye,p);
         const Vec previous=handMotion[hand].previous;
         const bool wasClenched=handMotion[hand].clenched;
         const bool haveMotion=handMotion[hand].valid&&good&&Length(p-previous)<.6f;
@@ -1163,24 +1158,24 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
         worldMarkers.markers[worldMarkers.count++]={point+facing*.18f,right,{0,0,1},near,!waiting};
     }
-    // A fist hint at the face of a touched bike rider shows the unlocked punch.
-    for (auto& s:bikeScenes) {
-        if (worldMarkers.count>=MarkerFrame::kCapacity) break;
-        if (!s.target.ped||s.phase!=BikePhase::Touch||s.punched||!s.target.Live(pool)) continue;
-        const Vec point=Bone(s.target.ped,5);
-        if (!Finite(point)) continue;
-        Vec right=Cross(eye-point,Vec{0,0,1});
-        if (Length(right)<.1f) continue;
+    // Advertise the strike at every nearby eligible rider before any contact.
+    if (free) for (int slot=0;slot<pool.size&&worldMarkers.count<MarkerFrame::kCapacity;++slot) {
+        if (pool.flags[slot]&128) continue;
+        void* ped=getPed((slot<<8)|pool.flags[slot]);
+        if (!ped||ped==player||isPlayer(ped)||playerlife::Dead(ped)||!Seated(ped)||
+            BikeSceneOf(ped)||Animating(ped)||!Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f) continue;
+        void* bike{};int door{};if (!BikeSeat(ped,bike,door)) continue;
+        void* manager=Manager(ped);void* matrix=Read<void*>(ped,0x18);
+        if (!manager||Read<void*>(manager,0)||!matrix) continue;
+        const Vec point=Bone(ped,5),forward=Read<Vec>(matrix,0x10);
+        const float fl=std::hypot(forward.x,forward.y);
+        if (!Finite(point)||fl<.001f||!Visible(eye,point,ped,bike)) continue;
+        Vec right=Cross(eye-point,Vec{0,0,1});if (Length(right)<.1f) continue;
         right=right*(1.f/Length(right));
-        bool near=false;
-        for (int hand=0;hand<2;++hand) if ((free&(1u<<hand))&&hands[hand].valid&&
-            !physicalweapon::IsSupportHand(hand)) {
-            float hp[3]{};
-            if (vrcam::TrackingPointToWorld(hands[hand].gripPos,hp)&&
-                Length(Vec{hp[0],hp[1],hp[2]}-point)<.35f) near=true;
-        }
         const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
-        worldMarkers.markers[worldMarkers.count++]={point+facing*.18f,right,{0,0,1},near,true};
+        auto& marker=worldMarkers.markers[worldMarkers.count++];
+        marker={point+facing*.18f,right,{0,0,1},false,true};
+        marker.strikeDirection=Vec{-forward.x/fl,-forward.y/fl,0};
     }
 }
 }

@@ -539,10 +539,7 @@ int main() {
         std::fprintf(preview,"%f,%f\n",p.x,p.y);
     }
     std::fclose(preview);
-    // Bike jacking (backlog 36): a hand on the shoulder starts the native
-    // CTaskSimpleBikeJacked frozen on the BIKE_HIT impact frame; only a frontal
-    // face punch releases the native fall. The forward vector points at the
-    // player for a frontal punch; the opposite direction is a punch from behind.
+    // Bike jacking starts only on impact and checks fist travel, not player position.
     const auto bikeSeat=[&](int passenger,Vec forward) {
         Setup();Seat(passenger);appearance=2;
         const Vec position=Position(npc);
@@ -550,60 +547,33 @@ int main() {
         Write(npcMatrix,0,Vec{1,0,0});Write(npcMatrix,0x10,forward);
         Write(npcMatrix,0x20,Vec{0,0,1});Write(npcMatrix,0x30,position);
     };
-    // Driver: touch starts the frozen flinch; frontal punch knocks off with
-    // BIKE_fall_off, ground-contact sound exactly once at frame 10/30.
     bikeSeat(-1,{1,0,0});Tick();
-    CHECK(bikeTasks==1&&bikeDoor==10&&bikeDriver&&Read<void*>(intelligence,8)==taskMemory[0]);
-    CHECK(bikeScenes[0].target.ped==npc&&bikeScenes[0].phase==BikePhase::Touch);
-    CHECK(BlocksNpcPunch(npc,0)&&BlocksNpcPunch(npc,1));
-    Tick();CHECK(bikeScenes[0].pausedAssociation==bikeAnim&&Read<float>(bikeAnim,0x3c)==0);
-    CHECK(Read<float>(bikeAnim,0x38)==0&&refAdds==1); // frozen on the impact frame
-    npcgrab::PublishMarkers();
-    CHECK(xr::markers.count==1&&xr::markers.markers[0].fist); // unlocked punch hint
-    OnPedJacked(npc+0x198,69);CHECK(!nativeJacked); // jacking reaction stays suppressed
-    Punch();
-    CHECK(bikeScenes[0].punched&&bikeScenes[0].phase==BikePhase::Falling);
-    CHECK(Read<float>(bikeAnim,0x3c)==1.f); // flinch released into the native chain
-    CHECK(sceneHits==1&&dragEvents==1&&eventDriver&&!sceneFalls);
+    CHECK(!bikeTasks);npcgrab::PublishMarkers();
+    CHECK(xr::markers.count==1&&xr::markers.markers[0].fist);
+    CHECK(xr::markers.markers[0].strikeDirection.x<-.99f);
+    Pool bikePool;CHECK(bikePool.Load());
+    const Vec head=Bone(npc,5);
+    // The eye is behind the rider, but the fist travels from the front.
+    CHECK(PunchBikeRider(bikePool,player,head+Vec{-1,0,0},head,head+Vec{.2f,0,0}));
+    CHECK(bikeTasks==1&&bikeDoor==10&&bikeDriver&&sceneHits==1&&dragEvents==1);
+    CHECK(bikeScenes[0].phase==BikePhase::Falling);
     bikeFalling=true;bikeFallId=kBikeFallOffAnim;
-    Write(bikeFall,0x38,kFallOffLanding-.01f);Tick();CHECK(!sceneFalls);
-    Write(bikeFall,0x38,kFallOffLanding);Tick();CHECK(sceneFalls==1&&Seated(npc));
-    Write(bikeFall,0x38,kFallOffLanding+.2f);Tick();CHECK(sceneFalls==1);
-    Write<std::uint8_t>(npc,0x585,0);Tick();
-    CHECK(!bikeScenes[0].target.ped&&sceneFalls==1&&refRemoves==1);
-    OnPedJacked(npc+0x198,69);CHECK(nativeJacked==1); // native audio restored after the scene
-    // Passenger on the back uses the rear door id, so the native chain picks
-    // BIKE_fallR with its earlier frame-8/30 ground contact.
-    bikeSeat(0,{-1,0,0});Tick();
-    CHECK(bikeTasks==1&&bikeDoor==8&&!bikeDriver);
-    Tick();Punch();
-    CHECK(sceneHits==1&&dragEvents==1&&!eventDriver);
-    bikeFalling=true;bikeFallId=kBikeFallRAnim;
-    Write(bikeFall,0x38,kFallRLanding-.01f);Tick();CHECK(!sceneFalls);
-    Write(bikeFall,0x38,kFallRLanding);Tick();CHECK(sceneFalls==1);
-    // A punch from behind or from the side never connects; the scene keeps
-    // waiting with the flinch frozen.
-    bikeSeat(-1,{-1,0,0});Tick();Tick();Punch();
-    CHECK(!bikeScenes[0].punched&&bikeScenes[0].phase==BikePhase::Touch);
-    CHECK(!sceneHits&&!dragEvents&&!aggressions);
-    bikeSeat(-1,{0,1,0});Tick();Tick();Punch();
-    CHECK(!bikeScenes[0].punched&&!sceneHits);
-    // Removing the hand from the shoulder past the grace window quietly cancels:
-    // the task is removed and the flinch fades without the knock-off callback.
-    bikeSeat(-1,{1,0,0});Tick();Tick();
-    CHECK(bikeScenes[0].pausedAssociation==bikeAnim);
-    hands[0].gripPos[0]=.5f;Tick();Tick();
-    CHECK(bikeScenes[0].target.ped); // grace window keeps a briefly uncovered scene
-    bikeScenes[0].touch=updated-1;Tick();
-    CHECK(!bikeScenes[0].target.ped&&!Read<void*>(intelligence,8));
-    CHECK(Read<float>(bikeAnim,0x34)==-1000.f&&Read<float>(bikeAnim,0x3c)==0);
-    CHECK(!sceneHits&&!sceneFalls&&!dragEvents&&refRemoves==1);
-    // A moving bike is never acquired, and the scene survives a recenter only
-    // through the same cancellation path as car scenes.
-    bikeSeat(-1,{1,0,0});Write(car,0x68,Vec{.1f,0,0});Tick();
-    CHECK(!bikeTasks&&!bikeScenes[0].target.ped);
-    bikeSeat(-1,{1,0,0});Tick();Tick();CHECK(bikeScenes[0].target.ped);
-    Tick(true);
-    CHECK(!bikeScenes[0].target.ped&&!Read<void*>(intelligence,8)&&!sceneHits);
+    Write(bikeFall,0x38,kFallOffLanding);Tick();CHECK(sceneFalls==1);
+    Write<std::uint8_t>(npc,0x585,0);Tick();CHECK(!bikeScenes[0].target.ped);
+    bikeSeat(0,{1,0,0});Tick();CHECK(bikePool.Load());
+    const Vec passengerHead=Bone(npc,5);
+    CHECK(PunchBikeRider(bikePool,player,passengerHead,passengerHead,passengerHead+Vec{.2f,0,0}));
+    CHECK(bikeDoor==8&&!bikeDriver&&sceneHits==1);
+    bikeSeat(-1,{1,0,0});Tick();CHECK(bikePool.Load());
+    const Vec h=Bone(npc,5);
+    CHECK(!PunchBikeRider(bikePool,player,h,h,h-Vec{.2f,0,0}));
+    CHECK(!PunchBikeRider(bikePool,player,h,h,h+Vec{0,.2f,0}));
+    CHECK(!bikeTasks&&!sceneHits);
+    // Exercise the complete hand sampling path without a shoulder touch.
+    bikeSeat(-1,{-1,0,0});Tick();Punch();
+    CHECK(bikeTasks==1&&bikeScenes[0].phase==BikePhase::Falling&&sceneHits==1);
+    bikeSeat(-1,{1,0,0});Write(car,0x68,Vec{.1f,0,0});Tick();CHECK(bikePool.Load());
+    CHECK(!PunchBikeRider(bikePool,player,h,h,h+Vec{.2f,0,0}));
+    CHECK(!bikeTasks);
     std::puts("NPC grab: hit/wait/grip phases, traffic stop, timeout reaction, holds, throws, hints and bike jacking passed");
 }

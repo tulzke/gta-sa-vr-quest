@@ -9807,6 +9807,17 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
             marker.opacity*(palms?(marker.held?.92f:.72f):(marker.held?.72f:.45f)));
         glBufferData(GL_ARRAY_BUFFER,count*sizeof(vehicledoors::Vec),vertices,GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLES,0,count);
+        if (palms&&vehicledoors::Length(marker.strikeDirection)>.1f) {
+            auto strike=marker;
+            strike.direction=marker.strikeDirection;
+            strike.position=marker.position-strike.direction*.22f;
+            strike.up=vehicledoors::Vec{0,1,0};
+            if (vehicledoors::Length(vehicledoors::Cross(strike.direction,strike.up))<.1f)
+                strike.up=vehicledoors::Vec{1,0,0};
+            const auto arrow=vehicledoors::Arrow(strike);
+            glBufferData(GL_ARRAY_BUFFER,arrow.size()*sizeof(vehicledoors::Vec),arrow.data(),GL_DYNAMIC_DRAW);
+            glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(arrow.size()));
+        }
     }
     glDisableVertexAttribArray(0);glBindBuffer(GL_ARRAY_BUFFER,0);glUseProgram(0);
     glDepthMask(GL_TRUE);glDisable(GL_BLEND);
