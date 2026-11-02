@@ -136,9 +136,9 @@ void Update(bool usable,std::uint64_t epoch){
    if(FILE* f=std::fopen(path,"a+")){
     std::fseek(f,0,SEEK_END);if(std::ftell(f)>32768){std::fclose(f);f=std::fopen(path,"w");}
     if(f){const Vec speed=Read<Vec>(nearest,0x68);
-     std::fprintf(f,"%.2f model=%d dist=%.2f basis=%d eye=%.2f,%.2f,%.2f speed=%.4f lock=%d driver=%d seated=%d clear=%d,%d\n",
+     std::fprintf(f,"%.2f model=%d dist=%.2f basis=%d eye=%.2f,%.2f,%.2f speed=%.4f lock=%d lock_state=%u driver=%d seated=%d clear=%d,%d\n",
        now,model,distance,validBasis,local.x,local.y,local.z,Length(speed),canOpen(nearest,ped),
-       Read<void*>(nearest,0x5a0)!=nullptr,seated==nearest,approachClear,seatClear);
+       unsigned(Read<std::uint32_t>(nearest,0x684)),Read<void*>(nearest,0x5a0)!=nullptr,seated==nearest,approachClear,seatClear);
      std::fclose(f);}
    }
   }
