@@ -9,6 +9,7 @@
 #include "Locomotion.h"
 #include "VehicleAccess.h"
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <dlfcn.h>
 namespace savr::vehicleentry {
@@ -26,6 +27,7 @@ MarkerFrame icons;
 int editHand=-1,editModel=-1,editSeat=-1;Vec editStart{},editBase{};
 bool editLatch[2]{true,true};unsigned claimed{};
 constexpr int nodes[4]={10,8,11,9};
+double lastAccessReport{};
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 void EndEdit(){if(editHand>=0)driving::SaveDebugCalibration();editHand=-1;claimed=0;}
 bool DoorOpen(void* car,int index){
@@ -107,6 +109,40 @@ void Update(bool usable,std::uint64_t epoch){
  if(!objects||!flags){started=0;EndEdit();return;}
  void* seated=g.FindPlayerVehicle(-1,false);const int currentSeat=SeatIndex(seated,ped);
  const Vec eye{o[0],o[1],o[2]};
+ // Bounded field diagnostics for model-specific access failures. Record the
+ // nearest configured vehicle at most once per second, without changing gates.
+ if(now-lastAccessReport>=1.0){
+  void* nearest=nullptr;float distance=4.5f;
+  for(int slot=0;slot<110;++slot){
+   if(flags[slot]&0x80)continue;
+   void* car=objects+slot*0xc68;
+   if((Read<std::uint8_t>(car,0x5a)&7)!=2||!vehicleaccess::Find(Read<std::uint16_t>(car,0x32)))continue;
+   void* matrix=Read<void*>(car,0x18);if(!matrix)continue;
+   const Vec pos=Read<Vec>(matrix,0x30);if(!Finite(pos))continue;
+   const float d=Length(eye-pos);if(d<distance){distance=d;nearest=car;}
+  }
+  if(nearest){
+   lastAccessReport=now;
+   const int model=Read<std::uint16_t>(nearest,0x32);const auto* profile=vehicleaccess::Find(model);
+   void* matrix=Read<void*>(nearest,0x18);
+   Basis basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+   const bool validBasis=basis.Valid();Vec local{};bool approachClear=false,seatClear=false;
+   if(validBasis){
+    local=basis.Local(eye);const float side=local.x<0?-1.f:1.f;
+    approachClear=ClearExit(eye,basis.Point({side*profile->halfWidth,profile->seatY,profile->seatZ}),nearest);
+    seatClear=ClearExit(eye,basis.Point({side*profile->seatX,profile->seatY,profile->seatZ}),nearest);
+   }
+   const char* path="/sdcard/Android/data/com.rockstargames.gtasa/files/vr_vehicle_access.log";
+   if(FILE* f=std::fopen(path,"a+")){
+    std::fseek(f,0,SEEK_END);if(std::ftell(f)>32768){std::fclose(f);f=std::fopen(path,"w");}
+    if(f){const Vec speed=Read<Vec>(nearest,0x68);
+     std::fprintf(f,"%.2f model=%d dist=%.2f basis=%d eye=%.2f,%.2f,%.2f speed=%.4f lock=%d driver=%d seated=%d clear=%d,%d\n",
+       now,model,distance,validBasis,local.x,local.y,local.z,Length(speed),canOpen(nearest,ped),
+       Read<void*>(nearest,0x5a0)!=nullptr,seated==nearest,approachClear,seatClear);
+     std::fclose(f);}
+   }
+  }
+ }
  Vec forward{f[0],f[1],0};float length=Length(forward);
  if(length<.1f){target=nullptr;started=0;EndEdit();return;}forward=forward*(1/length);
  const Vec right{forward.y,-forward.x,0};const Vec move=right*x+forward*y;
