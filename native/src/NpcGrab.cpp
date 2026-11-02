@@ -113,6 +113,7 @@ struct Hold {
     }
 } holds[2];
 Hold approach[2];
+Hold headPush[2];
 Hold flights[4];
 unsigned nextFlight{};
 Hold preparationBlocked[4];
@@ -185,6 +186,17 @@ const PausePoint* AnimationPoint(void* anim) {
         for (const auto& point:pausePoints) if (point.key&&point.key==key) return &point;
     }
     return nullptr;
+}
+bool DashboardPush(const Animation& a) {
+    return a.car&&a.doorNode==8&&Read<void*>(a.car,0x5a8)==a.target.ped&&
+        a.pausedAssociation&&AnimationPoint(a.pausedAssociation)==&pausePoints[3];
+}
+Vec DashboardDirection(void* car) {
+    void* matrix=car?Read<void*>(car,0x18):nullptr;
+    if (!matrix) return {};
+    const Vec forward=Read<Vec>(matrix,0x10);
+    const float length=std::hypot(forward.x,forward.y);
+    return length>.001f?Vec{.8660254f*forward.x/length,.8660254f*forward.y/length,-.5f}:Vec{};
 }
 float PauseTime(void* anim) {
     // Retail arm64 Init stores m_BlendHier at +0x28; SetName stores its
@@ -525,7 +537,7 @@ bool BeginHit(Hold& h,bool preparing=false) {
         void* anim=VictimAnimation(h.ped);
         if (!anim) return false;
         ResumePose(*pending);
-        ActionFeedback(h.ped,true);
+        ActionFeedback(h.ped,!DashboardPush(*pending));
         pending->phase=Phase::Hit;pending->until=updated+8.0;
         SceneAudio(*pending,65); // AE_PED_HIT_HIGH_UNARMED, at the physical hit
         return true;
@@ -582,6 +594,7 @@ bool PunchAtSeat(const Pool& pool,void* player,Vec eye,Vec p,Vec previous) {
                 if (!ped||ped==player||playerlife::Dead(ped)||!Seated(ped)||
                     (Animating(ped)&&!BeforeHit(ped))||Waiting(ped)||isPlayer(ped)) continue;
                 const int door=ExitDoor(ped,player);if (door<0) continue;
+                if (auto* scene=BeforeHit(ped);scene&&DashboardPush(*scene)) continue;
                 const Vec head=Bone(ped,5),travel=p-previous;
                 const float length=Dot(travel,travel);
                 const Vec closest=previous+travel*(length>1.e-6f?std::clamp(Dot(head-previous,travel)/length,0.f,1.f):0.f);
@@ -1025,6 +1038,7 @@ void Reset() {
     for (auto& released:extracted) released=false;
     for (auto& motion:handMotion) motion={};
     for (auto& target:approach) target={};
+    for (auto& target:headPush) target={};
     for (auto& effect:feedback) effect={};
     Pool current;current.Load();
     for (auto& a:animations) if (a.target.Live(current)&&a.phase!=Phase::Pull)
@@ -1086,6 +1100,36 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             // or holsters; otherwise the extraction sweep becomes a punch.
             if (good&&hands[hand].grip>.35f) { mask|=1u<<hand;continue; }
             extracted[hand]=false;
+        }
+        auto& push=headPush[hand];
+        if (push.ped) {
+            auto* scene=BeforeHit(push.ped);
+            if (!good||hands[hand].grip<=.35f||!push.Live(pool)||!scene||
+                scene->phase!=Phase::AwaitHit||!DashboardPush(*scene)||Length(p-push.previous)>.6f) {
+                push={};
+            } else {
+                push.previous=p;mask|=1u<<hand;
+                const Vec direction=DashboardDirection(scene->car),travel=p-push.start;
+                if (Length(direction)>.9f&&Dot(travel,direction)>=.15f&&
+                    Dot(travel,direction)>=Length(travel)*.7f&&BeginHit(push)) {
+                    push={};intent[hand]=false;extracted[hand]=true;
+                    xr::TriggerHaptic(hand,.6f,80.f,45.f);
+                }
+                continue;
+            }
+        }
+        if (good&&intent[hand]&&hands[hand].grip>=.65f) {
+            for (auto& scene:animations) {
+                if (scene.phase!=Phase::AwaitHit||updated<scene.punchAfter||!DashboardPush(scene)||
+                    !scene.target.Live(pool)||headPush[1-hand].ped==scene.target.ped) continue;
+                const Vec head=Bone(scene.target.ped,5);
+                const int door=ExitDoor(scene.target.ped,player);
+                if (door<0||!Finite(head)||Length(p-head)>=.30f||!SeatReachable(scene.target.ped,door,eye,p)||
+                    !Visible(eye,head,scene.target.ped,scene.car)||!Visible(p,head,scene.target.ped,scene.car)) continue;
+                push=scene.target;push.start=push.previous=p;intent[hand]=false;mask|=1u<<hand;
+                xr::TriggerHaptic(hand,.3f,80.f,25.f);break;
+            }
+            if (push.ped) continue;
         }
         if (h.ped) {
             if (!h.Live(pool)||!good||playerlife::Dead(h.ped)||Length(p-h.previous)>.6f||
@@ -1193,7 +1237,10 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const Vec facing=(eye-point)*(1.f/std::max(.1f,Length(eye-point)));
         auto& marker=worldMarkers.markers[worldMarkers.count++];
         // The torso grab hint needs extra clearance in front of the ped model.
-        marker={point+facing*(waiting?.30f:.18f),right,{0,0,1},near,!waiting};
+        const auto* scene=BeforeHit(ped);
+        const bool pushing=scene&&scene->phase==Phase::AwaitHit&&DashboardPush(*scene);
+        marker={point+facing*(waiting?.30f:.18f),right,{0,0,1},near,!waiting&&!pushing};
+        if (pushing) { marker.strikeDirection=DashboardDirection(scene->car);marker.arrowOut=true; }
         if (waiting) {
             void* car=Read<void*>(ped,0x708);
             void* matrix=car?Read<void*>(car,0x18):nullptr;
