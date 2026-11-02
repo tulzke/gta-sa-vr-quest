@@ -1,4 +1,5 @@
 #include "NpcGrab.h"
+#include "DoorlessVehicle.h"
 #include "NpcGrabVisual.h"
 #include "Symbols.h"
 #include "PlayerLife.h"
@@ -278,6 +279,13 @@ int main() {
         CHECK(BeginHit(target));CHECK(animatedNode==(side<0?10:8));
         CHECK(animations[0].phase==Phase::Hit&&sceneHits==1);
         CHECK(Read<float>(reaction,0x38)==(side<0?15.f/30.f:20.f/30.f));
+    }
+    for(int model:{531,424,568})for(int side:{-1,1}) {
+        Setup();Seat(model!=531&&side>0?0:-1);Write<std::uint16_t>(car,0x32,std::uint16_t(model));
+        Write(carMatrix,0x30,Vec{-float(side)*.6f,0,0});
+        CHECK(ExitDoor(npc,player)==(side<0?2:3));
+        Write(carMatrix,0x30,Vec{float(side)*.6f,0,0});
+        CHECK(ExitDoor(npc,player)==(model==531?(side<0?3:2):-1));
     }
     // Choose by the actual clip hierarchy, not the shared 378/379 animation IDs.
     struct Clip { const char* name;unsigned key,id;float pause,ready,landing; } clips[]={

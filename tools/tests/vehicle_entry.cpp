@@ -1,4 +1,5 @@
 #include "VehicleEntry.h"
+#include "DoorlessVehicle.h"
 #include "Symbols.h"
 #include <chrono>
 #include <cstring>
@@ -138,6 +139,16 @@ int main(){
   for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==before+1&&boatentry::seat==-1);
  }
  xr::input.leftStick[0]=0;Put(cars,0x5a0,static_cast<void*>(ped));Tick();CHECK(icons.count==0);
+ // Tractor is single-seat; the two buggies expose a passenger only if available.
+ for(int model:{531,424,568})for(float side:{-1.f,1.f}){
+  Put(cars,0x32,std::uint16_t(model));Put(cars,0x5a0,static_cast<void*>(nullptr));
+  Put(cars,0x5a8,static_cast<void*>(nullptr));Put(cars,0x5ec,std::uint8_t(1));
+  eyeX=side*1.0f;xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
+  CHECK(icons.count==1);const int seat=model==531||side<0?-1:0;
+  CHECK(icons.markers[0].seatIcon==(seat<0?1:2));
+  const int before=boatentry::calls;xr::input.leftStick[0]=-side;
+  for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==before+1&&boatentry::seat==seat);
+ }
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

@@ -7,6 +7,7 @@
 #include "Xr.h"
 #include "Driving.h"
 #include "Locomotion.h"
+#include "DoorlessVehicle.h"
 #include <chrono>
 #include <cstring>
 #include <dlfcn.h>
@@ -169,24 +170,24 @@ void Update(bool usable,std::uint64_t epoch){
    }
    continue;
   }
-  // Kart has one central seat and no door frames. Either side approaches the
-  // same driver slot; never expose the nonexistent front passenger slot.
-  if(model==571&&!seated){
-   if(Read<void*>(car,0x5a0))continue;
+  if(const auto* profile=doorless::Find(model);profile&&!seated){
    const Vec localEye=b.Local(eye);
    const float side=localEye.x<0?-1.f:1.f;
    if(std::abs(localEye.x)<.2f)continue;
-   float correction[3]{};driving::GetEntryCalibration(model,0,correction);
-   const Vec p=b.Point({correction[0],correction[1],.65f+correction[2]});
-   const Vec approach=b.Point({side*.65f,0,.65f});
+   const int seat=profile->single||side<0?-1:0;
+   if(seat==0&&Read<std::uint8_t>(car,0x5ec)==0)continue;
+   if(Read<void*>(car,seat<0?0x5a0:0x5a8))continue;
+   float correction[3]{};driving::GetEntryCalibration(model,seat+1,correction);
+   const Vec p=b.Point({side*profile->seatX+correction[0],profile->seatY+correction[1],profile->seatZ+correction[2]});
+   const Vec approach=b.Point({side*profile->halfWidth,profile->seatY,profile->seatZ});
    if(Length(eye-approach)>1.5f||!ClearExit(eye,approach,car)||!ClearExit(eye,p,car))continue;
-   Marker m{p,forward,{0,0,1}};m.seatIcon=1;
+   Marker m{p,forward,{0,0,1}};m.seatIcon=seat<0?1:2;
    if(icons.count>=icons.kCapacity)continue;
    const int icon=icons.count;icons.markers[icons.count++]=m;
    Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
    const float direction=distance>.05f?Dot(move,delta)/distance:-1;
    if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
-    bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=-1;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
+    bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=seat;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
    }
    continue;
   }
