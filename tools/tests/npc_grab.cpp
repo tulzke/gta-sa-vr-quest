@@ -431,6 +431,14 @@ int main() {
         FinishExtraction();Tick();CHECK(!Animating(npc)&&refRemoves==1);
         hands[0].grip=0;Tick();CHECK(!npcgrab::ClaimedHands());
     }
+    // The second grab also covers the viewer-facing palm and space around it.
+    Setup();Seat();Punch();WaitForGrip();
+    hands[0].gripPos[0]=-.18f;Tick();
+    CHECK(Length(Vec{hands[0].gripPos[0],hands[0].gripPos[1],hands[0].gripPos[2]}-Bone(npc,4))>.35f);
+    ConfirmGrip();CHECK(animations[0].phase==Phase::Pull);
+    Setup();Seat();Punch();WaitForGrip();
+    hands[0].gripPos[0]=.1f;Tick();ConfirmGrip();
+    CHECK(animations[0].phase==Phase::Waiting&&!dragEvents);
     Setup();Seat();Grip();CHECK(BeforeHit(npc)&&!npcgrab::ClaimedHands()&&!aggressions); // grip alone leaves preparation awaiting a punch
     Setup();Seat();hands[0].grip=hands[0].trigger=1;Tick();
     CHECK(BeforeHit(npc)&&BlocksVehicleInteraction(car,0)); // approach is protected before reaching the face

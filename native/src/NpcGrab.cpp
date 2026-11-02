@@ -1195,7 +1195,18 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 if (!manager||Read<void*>(manager,0)) continue;
                 for (int bone:{3,4,5}) {
                     const Vec point=Bone(ped,bone);
-                    const float distance=Length(p-point);
+                    float distance=Length(p-point);
+                    if (seated&&bone==4&&Finite(point)) {
+                        // The displayed palm sits 30 cm toward the viewer. Include
+                        // the whole space between it and the chest in the grab area.
+                        const Vec toward=eye-point;
+                        const float length=Length(toward);
+                        if (length>.001f) {
+                            const Vec axis=toward*(1.f/length);
+                            const Vec closest=point+axis*std::clamp(Dot(p-point,axis),0.f,.30f);
+                            distance=std::min(distance,Length(p-closest));
+                        }
+                    }
                     void* ignored=seated?Read<void*>(ped,0x708):nullptr;
                     if (Finite(point)&&distance<best&&Visible(eye,point,ped,ignored)&&Visible(p,point,ped,ignored)) {
                         best=distance;chosen={ped,pool.identity,pool.objects,nullptr,ref,bone,p,{},p,seated};
