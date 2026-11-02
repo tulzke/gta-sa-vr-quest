@@ -10,7 +10,7 @@ OUT = ROOT / 'build/vehicle-exit-tests'
 OUT.mkdir(parents=True, exist_ok=True)
 source=(ROOT / 'native/src/VehicleExit.cpp').read_text(encoding='utf8')
 start=source.index('void Install(')
-end=source.index('bool TryExit(',start)
+end=source.index('bool EmergencyAvailable(',start)
 source=source[:start]+source[end:]
 source='\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness=(ROOT / 'tools/tests/vehicle_exit.cpp').read_text(encoding='utf8')

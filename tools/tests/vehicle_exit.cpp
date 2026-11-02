@@ -12,11 +12,11 @@ namespace vehicleentry {int SeatIndex(void* car,void* ped){void* p{};std::memcpy
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 using namespace savr;using namespace vehicleexit;using vehicledoors::Vec;
 char car[0xc68]{},ped[0x800]{},pad[0x140]{},matrix[0x40]{},carMatrix[0x40]{},intelligence[0x80]{},drive[8]{},obstacle[8]{};
-void* vtable[6]{};void* current{};int selected{},ctorCalls{},processCalls{},dtorCalls{},removes{},adds{},clears{},taskType{};bool wall{},terrain=true,carOverlap{},pathBlocked{}; void* ignored{}; float expectedX=2;
+void* vtable[6]{};void* current{};int selected{},ctorCalls{},processCalls{},dtorCalls{},removes{},adds{},clears{},taskType{};bool wall{},terrain=true,carOverlap{},pathBlocked{},emergencyTask{},ownRoom{},oppositeRoom{}; void* ignored{}; float expectedX=2;
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 void Setup(int seat){
  std::memset(car,0,sizeof(car));std::memset(ped,0,sizeof(ped));std::memset(pad,0,sizeof(pad));std::memset(intelligence,0,sizeof(intelligence));
- current=car;selected=seat;ctorCalls=processCalls=dtorCalls=removes=adds=clears=0;wall=false;terrain=true;carOverlap=false;pathBlocked=false;ignored=obstacle;expectedX=2;taskType=725;
+ current=car;selected=seat;ctorCalls=processCalls=dtorCalls=removes=adds=clears=0;wall=false;terrain=true;carOverlap=false;pathBlocked=false;emergencyTask=false;ownRoom=false;oppositeRoom=false;ignored=obstacle;expectedX=2;taskType=725;
  Put(car,seat<0?0x5a0:0x5a8+seat*8,static_cast<void*>(ped));Put(car,0x770+(seat+3)*0x18,1.f);Put(car,0x77c+(seat+3)*0x18,.8f);
  Put(car,0x18,static_cast<void*>(carMatrix));Put(carMatrix,0,Vec{1,0,0});Put(carMatrix,0x10,Vec{0,1,0});Put(carMatrix,0x20,Vec{0,0,1});Put(carMatrix,0x30,Vec{});
  Put(ped,0x18,static_cast<void*>(matrix));Put(ped,0x538,static_cast<void*>(intelligence));
@@ -26,9 +26,10 @@ void Setup(int seat){
  g.CWorld_pIgnoreEntity=&ignored;
  g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void**,bool,bool,bool,bool,bool,bool,bool,bool){CHECK(ignored==car);return pathBlocked;};
  outCtor=[](void* t,void* c,int node,bool){CHECK(c==car);const int nodes[]={10,8,11,9};CHECK(node==nodes[selected+1]);++ctorCalls;std::memset(t,0,0x28);};
- outProcess=[](void* t,void* p){CHECK(p==ped&&Read<std::uint8_t>(t,0x1f)==1);++processCalls;Put(car,selected<0?0x5a0:0x5a8+selected*8,static_cast<void*>(nullptr));current=nullptr;return true;};
+ outProcess=[](void* t,void* p){CHECK(p==ped&&Read<std::uint8_t>(t,0x1f)==(emergencyTask?0:1));++processCalls;Put(car,selected<0?0x5a0:0x5a8+selected*8,static_cast<void*>(nullptr));current=nullptr;return true;};
  outDtor=[](void*){++dtorCalls;};ground=[](GameSymbols::Vec3* p){p->z=1;return terrain;};
  worldRemove=[](void* p){CHECK(p==ped);++removes;};worldAdd=[](void* p){CHECK(p==ped);++adds;CHECK(Read<Vec>(matrix,0x30).x==expectedX&&Read<Vec>(matrix,0x30).z==1);};
+ roomToLeave=[](const void*,int node,GameSymbols::Vec3*){return node==10?ownRoom:oppositeRoom;};
  setTask=[](void*,void* t,int slot,bool){CHECK(!t&&slot==3);++clears;};healthy=[](const void*){return true;};canStepOut=[](const void*,bool){return true;};
 }
 int main(){
@@ -39,6 +40,9 @@ int main(){
  Setup(-1);wall=true;CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0);
  Setup(-1);carOverlap=true;expectedX=2.25f;CHECK(TryExit(car,-1,{2,0,1})&&ignored==obstacle);
  Setup(-1);carOverlap=true;pathBlocked=true;CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0&&ignored==obstacle);
+ Setup(-1);CHECK(EmergencyAvailable(car,-1));emergencyTask=true;CHECK(TryExit(car,-1,{2,0,1},true)&&removes==0);
+ Setup(-1);ownRoom=true;CHECK(!EmergencyAvailable(car,-1));CHECK(!TryExit(car,-1,{2,0,1},true));
+ Setup(-1);oppositeRoom=true;CHECK(!EmergencyAvailable(car,-1));Put(car,0x5a8,static_cast<void*>(obstacle));CHECK(EmergencyAvailable(car,-1));
  Setup(-1);terrain=false;CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0);
  Setup(-1);Put(car,0x68,Vec{1,0,0});CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0);
  for(int seat:{-1,0}){Setup(seat);g.CVehicle_GetVehicleAppearance=[](const void*){return 2;};

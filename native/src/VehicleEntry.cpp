@@ -91,7 +91,7 @@ void Update(bool usable,std::uint64_t epoch){
  bool editFresh[2]{};
  for(int h=0;h<2;++h){if(!editing||!hands[h].valid)editLatch[h]=true;else if(hands[h].trigger<.35f)editLatch[h]=false;else if(hands[h].trigger>.55f&&!editLatch[h]){editLatch[h]=true;editFresh[h]=true;}}
  void* bestCar=nullptr;int bestSeat=-1,bestIcon=-1;std::uint8_t bestGeneration{};Vec point{};float bestDirection=-1;float bestDistance=100;
- bool editContinued=false;
+ bool editContinued=false,bestEmergency=false;
  for(int slot=0;slot<110;++slot){
   if(flags[slot]&0x80)continue;
   void* car=objects+slot*0xc68;
@@ -141,13 +141,13 @@ void Update(bool usable,std::uint64_t epoch){
     Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
     const float direction=distance>.05f?Dot(move,delta)/distance:-1;
     if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
-     bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=exit?3:seat;point=p;bestGeneration=flags[slot];bestIcon=icon;
+     bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=exit?3:seat;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
     }
    }
    continue;
   }
   for(int index=0;index<4;++index){
-   const int seat=index-1;const bool exit=seated&&seat==currentSeat;
+   const int seat=index-1;const bool exit=seated&&seat==currentSeat;bool emergency=false;
    if(seated&&currentSeat<-1)continue;
    bool actionable=exit||!Read<void*>(car,seat<0?0x5a0:0x5a8+seat*8);
    if(!editing&&!actionable)continue;
@@ -179,9 +179,12 @@ void Update(bool usable,std::uint64_t epoch){
    }
    if(exit){
     if(editing&&icons.count<icons.kCapacity){Marker calibration{p,forward,{0,0,1}};calibration.seatIcon=seat<0?1:2;icons.markers[icons.count++]=calibration;}
-    if(Length(speed)>.02f||!DoorOpen(car,index)||!canStepOut||!canStepOut(car,false))actionable=false;
+    const bool canLeave=Length(speed)<=.02f&&canStepOut&&canStepOut(car,false);
     p=b.Point({hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f});
-    if(!ClearExit(eye,p,car))actionable=false;
+    const bool clear=ClearExit(eye,p,car);
+    const bool normal=canLeave&&DoorOpen(car,index)&&clear;
+    emergency=canLeave&&!normal&&vehicleexit::EmergencyAvailable(car,currentSeat);
+    actionable=normal||emergency;
    }
    if(!editing&&!actionable)continue;
    Marker m{p,forward,{0,0,1}};m.seatIcon=exit?3:(seat<0?1:2);
@@ -191,7 +194,7 @@ void Update(bool usable,std::uint64_t epoch){
    Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
    const float direction=distance>.05f?Dot(move,delta)/distance:-1;
    if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
-    bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=exit?3:seat;point=p;bestGeneration=flags[slot];bestIcon=icon;
+    bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=exit?3:seat;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=emergency;
    }
   }
  }
@@ -205,7 +208,7 @@ void Update(bool usable,std::uint64_t epoch){
  icons.markers[bestIcon]=marker;visible=true;
  if(marker.progress>=1){
   bool success=false;
-  if(bestSeat==3)success=vehicleexit::TryExit(bestCar,currentSeat,point);
+  if(bestSeat==3)success=vehicleexit::TryExit(bestCar,currentSeat,point,bestEmergency);
   else success=boatentry::SeatPlayer(bestCar,bestSeat);
   if(success){marker.highlight=1;flashUntil=now+.2;xr::TriggerHaptic(0,.3f,0,35);}
   released=false;started=0;

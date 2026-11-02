@@ -13,7 +13,7 @@ namespace xr { struct HandPose {bool valid{};float trigger{},gripPos[3]{};};Hand
 namespace driving { int debug{},saves{};float calibration[4][3]{};int GetVehicleDebugMode(){return debug;}void SaveDebugCalibration(){++saves;} void GetEntryCalibration(int,int seat,float* out){for(int i=0;i<3;++i)out[i]=calibration[seat][i];}void SetEntryCalibration(int,int seat,const float* in){for(int i=0;i<3;++i)calibration[seat][i]=in[i];} }
 namespace locomotion { void MapGameplaySticks(float x,float y,float,float,float* mx,float* my,float*,float*){*mx=x;*my=y;} }
 namespace vrcam { int exits{};void RequestVehicleExit(){++exits;}bool TrackingPointToWorld(const float* in,float* out){for(int i=0;i<3;++i)out[i]=in[i];return true;} bool GetHeadWorldRay(float* o,float* f){o[0]=eyeX;o[1]=eyeY;o[2]=.6f;f[0]=0;f[1]=1;f[2]=0;return true;} }
-namespace vehicleexit { bool TryExit(void*,int,vehicledoors::Vec){++vrcam::exits;return true;} }
+namespace vehicleexit { bool emergencyAvailable{},lastEmergency{};bool EmergencyAvailable(void*,int){return emergencyAvailable;} bool TryExit(void*,int,vehicledoors::Vec,bool emergency){lastEmergency=emergency;++vrcam::exits;return true;} }
 namespace boatentry {int calls{},seat{};bool success=true;bool SeatPlayer(void*,int s){++calls;seat=s;return success;} }
 }
 // PRODUCTION_ENTRY
@@ -60,6 +60,10 @@ int main(){
  for(int i=0;i<2;++i)Tick();CHECK(vrcam::exits==1);
  for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=0;Tick();Put(cars,0x77c+3*0x18,0.f);xr::input.leftStick[0]=1;
  for(int i=0;i<20;++i)Tick();CHECK(vrcam::exits==1);
+ // A closed, blocked doorway offers the same hold for a native emergency exit.
+ vehicleexit::emergencyAvailable=true;xr::input.leftStick[0]=0;Tick();xr::input.leftStick[0]=1;
+ for(int i=0;i<12;++i)Tick();CHECK(vrcam::exits==2&&vehicleexit::lastEmergency);
+ vehicleexit::emergencyAvailable=false;
  // Rear passenger cannot teleport into the front row.
  current=nullptr;Put(cars,0x5a8,static_cast<void*>(nullptr));
  Put(rearMatrix,0x30,Vec{1,-.8f,.4f});Put(cars,0x800+9*8,static_cast<void*>(rearMatrix));

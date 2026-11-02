@@ -17,6 +17,7 @@ void (*worldAdd)(void*){};
 void (*setTask)(void*,void*,int,bool){};
 bool (*healthy)(const void*){};
 bool (*canStepOut)(const void*,bool){};
+bool (*roomToLeave)(const void*,int,GameSymbols::Vec3*){};
 }
 void Install(void* h){
 #define LOAD(v,n) v=reinterpret_cast<decltype(v)>(dlsym(h,n))
@@ -28,9 +29,19 @@ void Install(void* h){
  LOAD(setTask,"_ZN12CTaskManager7SetTaskEP5CTaskib");
  LOAD(healthy,"_ZN13CCarEnterExit12IsPedHealthyERK4CPed");
  LOAD(canStepOut,"_ZNK8CVehicle16CanPedStepOutCarEb");
+ LOAD(roomToLeave,"_ZN13CCarEnterExit22IsRoomForPedToLeaveCarERK8CVehicleiP7CVector");
 #undef LOAD
 }
-bool TryExit(void* car,int seat,Vec hint){
+bool EmergencyAvailable(void* car,int seat){
+ if(!car||seat<-1||seat>2||!roomToLeave)return false;
+ constexpr int nodes[]={10,8,11,9};
+ const int index=seat+1;
+ if(roomToLeave(car,nodes[index],nullptr))return false;
+ const int opposite=(index^1)-1;
+ const bool occupied=Read<void*>(car,opposite<0?0x5a0:0x5a8+opposite*8)!=nullptr;
+ return occupied||!roomToLeave(car,nodes[index^1],nullptr);
+}
+bool TryExit(void* car,int seat,Vec hint,bool emergency){
  if(!car||seat<-1||seat>2||!Finite(hint)||!outCtor||!outProcess||!outDtor||!ground||!worldRemove||!worldAdd||!setTask||!healthy||!canStepOut||!g.FindPlayerPed||!g.FindPlayerVehicle||!g.CPad_GetPad||!g.CWorld_TestSphereAgainstWorld)return false;
  void* ped=g.FindPlayerPed(-1);void* pad=g.CPad_GetPad(0);
  if(!ped||!pad||g.FindPlayerVehicle(-1,false)!=car||vehicleentry::SeatIndex(car,ped)!=seat||Read<std::uint16_t>(pad,0x110)||Read<std::uint8_t>(pad,0x12d)||!healthy(ped)||!canStepOut(car,false))return false;
@@ -38,7 +49,8 @@ bool TryExit(void* car,int seat,Vec hint){
  const bool bike=Read<std::uint16_t>(car,0x32)==471||
      (g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2);
  const int door=seat+3;
- if(!bike){
+ if(emergency&&!EmergencyAvailable(car,seat))return false;
+ if(!bike&&!emergency){
  const float open=Read<float>(car,0x770+door*0x18),angle=Read<float>(car,0x77c+door*0x18);
  if(Read<std::uint8_t>(car,0x758+9+door)!=4&&(!std::isfinite(open)||!std::isfinite(angle)||std::abs(open)<.3f||angle/open<.45f))return false;
  }
@@ -47,13 +59,14 @@ bool TryExit(void* car,int seat,Vec hint){
  // wide car there. Search a short distance outward only when that car blocks
  // the initial point; never skip another obstacle or an obstructed path.
  void* matrix=Read<void*>(car,0x18);
- if(!matrix)return false;
- Basis basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
- if(!basis.Valid())return false;
+ if(!matrix&&!emergency)return false;
+ Basis basis=matrix?Basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)}:Basis{};
+ if(!basis.Valid()&&!emergency)return false;
  const float side=Dot(hint-basis.position,basis.right)<0?-1.f:1.f;
  GameSymbols::Vec3 destination{};
  bool found=false;
  for(float distance:{0.f,.25f,.5f,.75f}) {
+  if(emergency)break;
   const Vec candidate=hint+basis.right*(side*distance);
   GameSymbols::Vec3 point{candidate.x,candidate.y,candidate.z};
   if(!ground(&point)||!Finite({point.x,point.y,point.z})||std::abs(point.z-hint.z)>1.5f)break;
@@ -79,7 +92,7 @@ bool TryExit(void* car,int seat,Vec hint){
   }
   destination=point;found=true;break;
  }
- if(!found){LOGI("[vehicle-exit] no safe placement near open door");return false;}
+ if(!found&&!emergency){LOGI("[vehicle-exit] no safe placement near open door");return false;}
  void* manager=static_cast<char*>(intelligence)+8;
  // Remove only a driving primary task. Mission tasks remain owned by the game.
  if(void* task=Read<void*>(manager,3*8)){
@@ -88,13 +101,15 @@ bool TryExit(void* car,int seat,Vec hint){
   if(type==725||type==711)setTask(manager,nullptr,3,false);
  }
  // Retail ARM64 task is 0x28 bytes; +0x1f skips the engine's perimeter
- // position search. ProcessPed detaches the occupant, removes sit animations
+ // position search for ordinary exits. Emergency exits use that search.
+ // ProcessPed detaches the occupant, removes sit animations
  // and installs PlayerOnFoot immediately, without any leave/close-door task.
  constexpr int nodes[]={10,8,11,9};
  alignas(16) std::uint8_t task[0x28]{};
- outCtor(task,car,nodes[seat+1],false);task[0x1f]=1;
+ outCtor(task,car,nodes[seat+1],false);task[0x1f]=emergency?0:1;
  const bool processed=outProcess(task,ped);outDtor(task);
  if(!processed||vehicleentry::SeatIndex(car,ped)!=-2){LOGI("[vehicle-exit] native detach failed (processed=%d)",processed);return false;}
+ if(emergency)return true;
  worldRemove(ped);
  Vec position{destination.x,destination.y,destination.z};
  matrix=Read<void*>(ped,0x18);
