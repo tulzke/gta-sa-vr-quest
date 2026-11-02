@@ -351,6 +351,7 @@ void AddMarker(MarkerFrame& frame,const Door& door,bool held,bool inside=false) 
     if (frame.count>=MarkerFrame::kCapacity) return;
     Marker marker{door.handle,door.tangent,door.car.up,held};
     marker.doorGrab=true;
+    marker.hideArrow=inside;
     frame.markers[frame.count++]=inside?ReverseArrow(marker):marker;
 }
 void Publish(const MarkerFrame& frame) {
