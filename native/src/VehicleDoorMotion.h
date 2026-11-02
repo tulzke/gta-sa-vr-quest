@@ -108,6 +108,8 @@ struct Marker {
     bool doorGrab{};
     bool bikeGrip{};
     bool hideArrow{};
+    bool panelVolume{};
+    Vec halfExtent{}; // local right, forward, up
 };
 struct MarkerFrame {
     static constexpr int kCapacity=32;
@@ -118,6 +120,17 @@ struct MarkerFrame {
         return valid&&epoch==current&&count>0&&count<=kCapacity;
     }
 };
+inline std::array<Vec,36> PanelVolume(const Marker& m) {
+    const Vec right=Cross(m.direction,m.up)*m.halfExtent.x;
+    const Vec forward=m.direction*m.halfExtent.y,up=m.up*m.halfExtent.z;
+    const Vec p[8]={m.position-right-forward-up,m.position+right-forward-up,
+        m.position+right+forward-up,m.position-right+forward-up,
+        m.position-right-forward+up,m.position+right-forward+up,
+        m.position+right+forward+up,m.position-right+forward+up};
+    constexpr int indices[36]={0,2,1,0,3,2,4,5,6,4,6,7,
+        0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7};
+    std::array<Vec,36> mesh{};for(int i=0;i<36;++i)mesh[i]=p[indices[i]];return mesh;
+}
 // A horizontal bar socket, in the marker's local basis.
 inline std::array<Vec,144> GripCylinder(const Marker& m) {
     std::array<Vec,144> mesh{};int n=0;

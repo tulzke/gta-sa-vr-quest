@@ -361,6 +361,11 @@ Vec PanelCorner(const Door& d,int corner) {
     return d.panel.Point({d.panelX,corner&1?d.ymax:d.ymin,corner&2?d.zmax:d.zmin});
 }
 void AddPanelCorners(MarkerFrame& frame,const Door& d,int held=-1) {
+    if(frame.count<MarkerFrame::kCapacity) {
+        Marker volume{d.panel.Point({d.panelX,(d.ymin+d.ymax)*.5f,(d.zmin+d.zmax)*.5f}),d.panel.forward,d.panel.up};
+        volume.panelVolume=true;volume.halfExtent={d.thickness,(d.ymax-d.ymin)*.5f,(d.zmax-d.zmin)*.5f};
+        frame.markers[frame.count++]=volume;
+    }
     for(int i=0;i<4&&frame.count<MarkerFrame::kCapacity;++i) {
         Marker m{PanelCorner(d,i),d.panel.forward,d.panel.up,i==held};
         m.bikeGrip=true;frame.markers[frame.count++]=m;

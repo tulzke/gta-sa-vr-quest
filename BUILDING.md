@@ -114,7 +114,8 @@ in public and developer builds.
 DOORS edits the existing supported car-door arrows. Outside handles are stored
 per model and door; the driver's inside handle has a separate correction.
 Corrections follow the moving door panel and also affect the normal grip hit test.
-In VEHICLE DEBUG, four small bars mark the corners of each door's grip panel.
+In VEHICLE DEBUG, a yellow box shows each door's grip volume at 20% transparency;
+four small bars mark the corners of the panel.
 Hold a trigger on a corner and move it along the door or vertically to adjust
 its length and height. Two additional bars near the centre mark the thickness
 limits: drag either one toward or away from the door to change both limits

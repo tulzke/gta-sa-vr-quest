@@ -9819,6 +9819,20 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
     glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,3*sizeof(float),nullptr);
     for (int i=0;i<frame.count;++i) {
         const auto& marker=frame.markers[i];
+        if(marker.panelVolume) {
+            const auto mesh=vehicledoors::PanelVolume(marker);
+            const auto right=vehicledoors::Cross(marker.direction,marker.up);
+            const auto view=marker.position*-1.f;
+            const bool inside=std::abs(vehicledoors::Dot(view,right))<marker.halfExtent.x&&
+                std::abs(vehicledoors::Dot(view,marker.direction))<marker.halfExtent.y&&
+                std::abs(vehicledoors::Dot(view,marker.up))<marker.halfExtent.z;
+            glEnable(GL_CULL_FACE);glCullFace(inside?GL_FRONT:GL_BACK);
+            glUniform4f(g_markerColLoc,1.f,.86f,.08f,.8f);
+            glBufferData(GL_ARRAY_BUFFER,mesh.size()*sizeof(vehicledoors::Vec),mesh.data(),GL_DYNAMIC_DRAW);
+            glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(mesh.size()));
+            glCullFace(GL_BACK);glDisable(GL_CULL_FACE);
+            continue;
+        }
         if(marker.bikeGrip){
             const auto mesh=vehicledoors::GripCylinder(marker);
             glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.95f:.8f);

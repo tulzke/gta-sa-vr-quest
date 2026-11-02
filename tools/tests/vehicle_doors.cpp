@@ -197,7 +197,7 @@ void AtHandle(int hand,int index=0) {
 void Ready(int hand=0) {
     hands[0]={};hands[1]={};AtHandle(hand);
     Tick(); // open hand arms the edge
-    CHECK(xr::published.count==(driving::debugMode?14:2)); // debug adds six panel handles per door
+    CHECK(xr::published.count==(driving::debugMode?16:2)); // debug adds volume and six handles per door
 }
 void GrabIt(int hand=0) {
     Ready(hand);hands[hand].grip=1;Tick();
@@ -205,6 +205,10 @@ void GrabIt(int hand=0) {
 }
 }
 int main() {
+    { Marker box{};box.direction={0,1,0};box.up={0,0,1};box.halfExtent={.1f,.5f,.3f};
+      const auto mesh=PanelVolume(box);for(const Vec p:mesh) {
+          CHECK(std::abs(std::abs(p.x)-.1f)<1e-5f&&std::abs(std::abs(p.y)-.5f)<1e-5f&&std::abs(std::abs(p.z)-.3f)<1e-5f);
+      } }
     CHECK(PanelDistance({.05f,-.5f,.1f},0,-1,-.22f,-.35f,.3f)<.06f);
     CHECK(PanelDistance({0,-.5f,.31f},0,-1,-.22f,-.35f,.3f)>1.f);
     CHECK(PanelDistance({.3f,-.5f,.1f},0,-1,-.22f,-.35f,.3f)>.12f);
