@@ -73,6 +73,7 @@ HAND_FILES = (
     "BigHandRight.uxrh",
     "BigHandLeftPalm.uxrh",
     "BigHandRightPalm.uxrh",
+    "BigHandRightPinch.uxrh",
     "BigHandsAlbedo.rgba",
 )
 OFFICIAL_ARM64_LIBS = {

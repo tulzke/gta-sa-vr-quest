@@ -8723,6 +8723,7 @@ struct UxrhVertex { float pos[4][3]; float nrm[4][3]; float u, v; };   // 104 by
 struct HandMesh   { std::vector<UxrhVertex> verts; std::vector<unsigned short> idx; bool loaded = false; };
 HandMesh g_handMesh[2];
 HandMesh g_ballPalmMesh[2];
+HandMesh g_rightPinchMesh;
 GLuint   g_handTex = 0;
 bool     g_handAssetsTried = false;
 
@@ -8769,6 +8770,7 @@ void EnsureHandAssets() {
     std::snprintf(path, sizeof(path), "%sBigHandRight.uxrh", dir); LoadUxrh(path, g_handMesh[1]);
     std::snprintf(path, sizeof(path), "%sBigHandLeftPalm.uxrh", dir);  LoadUxrh(path, g_ballPalmMesh[0]);
     std::snprintf(path, sizeof(path), "%sBigHandRightPalm.uxrh", dir); LoadUxrh(path, g_ballPalmMesh[1]);
+    std::snprintf(path, sizeof(path), "%sBigHandRightPinch.uxrh", dir); LoadUxrh(path, g_rightPinchMesh);
     std::snprintf(path, sizeof(path), "%sBigHandsAlbedo.rgba", dir); g_handTex = LoadRgbaTexture(path, 1024, 1024);
 }
 
@@ -8783,7 +8785,7 @@ int            g_hIndexCount[2] = {0, 0};
 // the displayed eye textures were baked with), so hands + weapon share one frame.
 void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                      const driving::WheelVisualState& drivingWheel,
-                     const BallHandLock& ballLock) {
+                     const BallHandLock& ballLock, unsigned int weaponHandMask) {
     g_hVc = 0; g_hIc = 0;
     g_hFirstIndex[0] = g_hFirstIndex[1] = 0;
     g_hIndexCount[0] = g_hIndexCount[1] = 0;
@@ -8944,29 +8946,45 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             }
         }
 
+        const bool pinch = hand == 1 && !(weaponHandMask & (1u << hand)) &&
+            !steeringHand && !drivingWheel.ignitionGrabbed[hand] &&
+            !ballLock.locked[hand] && !TwoHandStateUsable(twoHand) &&
+            g_rightPinchMesh.loaded && g_rightPinchMesh.verts.size() == g_handMesh[hand].verts.size();
+        const float pinchWeight = pinch ? trig * (1.0f - grip) : 0.0f;
         const float wO = (1 - grip) * (1 - trig), wG = grip * (1 - trig), wT = (1 - grip) * trig, wB = grip * trig;
         const HandMesh& m = basketballFlatPalm && g_ballPalmMesh[hand].loaded
             ? g_ballPalmMesh[hand] : g_handMesh[hand];
         const int base = g_hVc;
-        for (const UxrhVertex& v : m.verts) {
+        for (size_t vertex = 0; vertex < m.verts.size(); ++vertex) {
+            const UxrhVertex& v = m.verts[vertex];
             if (g_hVc >= kHandMaxV) break;
             const auto component = [&](float open, float gripPose,
                                        float triggerPose, float bothPose) {
                 return open * wO + gripPose * wG +
                        triggerPose * wT + bothPose * wB;
             };
-            const float lx = component(v.pos[0][0], v.pos[1][0],
+            float lx = component(v.pos[0][0], v.pos[1][0],
                                        v.pos[2][0], v.pos[3][0]);
-            const float ly = component(v.pos[0][1], v.pos[1][1],
+            float ly = component(v.pos[0][1], v.pos[1][1],
                                        v.pos[2][1], v.pos[3][1]);
-            const float lz = component(v.pos[0][2], v.pos[1][2],
+            float lz = component(v.pos[0][2], v.pos[1][2],
                                        v.pos[2][2], v.pos[3][2]);
-            const float nx = component(v.nrm[0][0], v.nrm[1][0],
+            float nx = component(v.nrm[0][0], v.nrm[1][0],
                                        v.nrm[2][0], v.nrm[3][0]);
-            const float ny = component(v.nrm[0][1], v.nrm[1][1],
+            float ny = component(v.nrm[0][1], v.nrm[1][1],
                                        v.nrm[2][1], v.nrm[3][1]);
-            const float nz = component(v.nrm[0][2], v.nrm[1][2],
+            float nz = component(v.nrm[0][2], v.nrm[1][2],
                                        v.nrm[2][2], v.nrm[3][2]);
+            if (pinchWeight > 0.0f) {
+                const UxrhVertex& target = g_rightPinchMesh.verts[vertex];
+                const float rest = 1.0f - pinchWeight;
+                lx = lx * rest + target.pos[0][0] * pinchWeight;
+                ly = ly * rest + target.pos[0][1] * pinchWeight;
+                lz = lz * rest + target.pos[0][2] * pinchWeight;
+                nx = nx * rest + target.nrm[0][0] * pinchWeight;
+                ny = ny * rest + target.nrm[0][1] * pinchWeight;
+                nz = nz * rest + target.nrm[0][2] * pinchWeight;
+            }
             // UXR local axes: X->forward (wrist pulled 5.5cm back), Z->right, Y->-up.
             const XrVector3f wp = vadd(vadd(vadd(pos, vscale(forward, lx - 0.055f)), vscale(right, lz)), vscale(up, -ly));
             const XrVector3f wn = vnorm(vadd(vadd(vscale(forward, nx), vscale(right, nz)), vscale(up, -ny)));
@@ -11965,7 +11983,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
 
     if (!bakedScope.active) {
         BuildHandMeshes(bakedHands, bakedTwoHand, drivingWheel,
-                        ballHandLock); // same ring pose + cockpit/support correction
+                        ballHandLock, bakedWeaponHandMask); // same ring pose + cockpit/support correction
         BuildWeaponMesh(bakedHands);   // (weapon-mesh path; dead until Approach-B geometry exists)
     }
     BulletTracer liveTracers[kMaxBulletTracers]{};
