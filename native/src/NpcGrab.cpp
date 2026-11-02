@@ -396,7 +396,7 @@ bool Seated(void* ped) { return (Read<std::uint8_t>(ped,0x585)&1)!=0; }
 // This also excludes boats, bikes, aircraft and occupants across the cabin.
 int ExitDoor(void* ped,void* player) {
     void* car=Read<void*>(ped,0x708);
-    if (!car||g.CVehicle_GetVehicleAppearance(car)!=1||!canOpen(car,player)||
+    if (!car||g.CVehicle_GetVehicleAppearance(car)!=1||
         !Finite(Read<Vec>(car,0x68))||Length(Read<Vec>(car,0x68))>.035f) return -1;
     int door=-1;
     if (Read<void*>(car,0x5a0)==ped) door=2;
@@ -411,10 +411,11 @@ int ExitDoor(void* ped,void* player) {
         if (!basis.Valid()) return -1;
         const float x=basis.Local(Position(player)).x;
         const int side=x<-.2f?2:(x>.2f?3:-1);
-        return profile->single||side==door?side:-1;
+        return (profile->single||side==door)&&vehicleaccess::LockAllows(car,side,canOpen(car,player))?side:-1;
     }
     const auto status=Read<std::uint8_t>(car,0x758+9+door);
     const float angle=Read<float>(car,0x770+door*0x18+0xc);
+    if (!vehicleaccess::LockAllows(car,door,canOpen(car,player))) return -1;
     if (!vehicleaccess::DoorAbsent(car,door)&&status!=3&&!(status<=2&&std::isfinite(angle)&&std::abs(angle)>.45f)) return -1;
     return door;
 }

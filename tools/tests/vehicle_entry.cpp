@@ -166,6 +166,14 @@ int main(){
  eyeX=-1.3f;xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
  CHECK(DoorOpen(cars,0));const int beforeDetached=boatentry::calls;xr::input.leftStick[0]=1;
  for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==beforeDetached+1&&boatentry::seat==-1);
+ // Stock lock state 2 cannot lock a physically absent door; other native
+ // lock states and an intact door remain blocked.
+ Put(cars,0x32,std::uint16_t(531));Put(cars,0x684,std::uint32_t(2));locksOpen=false;
+ xr::input.leftStick[0]=0;eyeX=-1.f;for(int i=0;i<3;++i)Tick();CHECK(icons.count==1);
+ const int beforeLocked=boatentry::calls;xr::input.leftStick[0]=1;for(int i=0;i<12;++i)Tick();
+ CHECK(boatentry::calls==beforeLocked+1&&boatentry::seat==-1);
+ xr::input.leftStick[0]=0;Put(cars,0x684,std::uint32_t(3));for(int i=0;i<3;++i)Tick();CHECK(icons.count==0);
+ Put(cars,0x32,std::uint16_t(400));Put(cars,0x684,std::uint32_t(2));Put(cars,0x758+9+2,std::uint8_t(0));Tick();CHECK(icons.count==0);
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

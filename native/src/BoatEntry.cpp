@@ -2,6 +2,7 @@
 #include "PassengerReaction.h"
 #include "Symbols.h"
 #include "VrCamera.h"
+#include "VehicleAccess.h"
 
 #include <algorithm>
 #include <chrono>
@@ -143,7 +144,9 @@ void Install(void* handle) {
 bool SeatPlayer(void* vehicle,int passenger) {
     if (passenger>2||passenger < -1||!vehicle||!g_passCtor||!g_passProcess||!g_passDtor||!g_removeDriver||!g_removePassenger||!g_seatCtor||!g_taskAlloc||!g_driveCtor||!g_setTask||!g_seatProcess||!g_seatDtor||!g_driveDelete) return false;
     void* ped=g.FindPlayerPed(-1);
-    if (!ped||!g_vehicleHealthy||!g_pedHealthy||!g_canOpenLocks||!g_vehicleHealthy(vehicle)||!g_pedHealthy(ped)||!g_canOpenLocks(vehicle,ped)||Read<void*>(vehicle,passenger<0?0x5a0:0x5a8+passenger*8)) return false;
+    if (!ped||!g_vehicleHealthy||!g_pedHealthy||!g_canOpenLocks||!g_vehicleHealthy(vehicle)||!g_pedHealthy(ped)||
+        !vehicleaccess::LockAllows(vehicle,passenger+3,g_canOpenLocks(vehicle,ped))||
+        Read<void*>(vehicle,passenger<0?0x5a0:0x5a8+passenger*8)) return false;
     const bool bike=Read<std::uint16_t>(vehicle,0x32)==471||
         (g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(vehicle)==2);
     if(passenger>=0&&bike&&

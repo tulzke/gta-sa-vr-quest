@@ -24,4 +24,13 @@ inline bool DoorAbsent(const void* vehicle,int door) {
     std::memcpy(&status,static_cast<const char*>(vehicle)+0x758+9+door,sizeof(status));
     return status==4;
 }
+// The ordinary locked-door state cannot obstruct a physically missing door.
+// Preserve every other native lock state, including player/script locks.
+inline bool LockAllows(const void* vehicle,int door,bool nativeAllows) {
+    if(nativeAllows)return true;
+    if(!vehicle||!DoorAbsent(vehicle,door))return false;
+    std::uint32_t lock{};
+    std::memcpy(&lock,static_cast<const char*>(vehicle)+0x684,sizeof(lock));
+    return lock==2;
+}
 }

@@ -165,7 +165,7 @@ void Update(bool usable,std::uint64_t epoch){
   if(flags[slot]&0x80)continue;
   void* car=objects+slot*0xc68;
   if(seated&&seated!=car)continue;
-  if((Read<std::uint8_t>(car,0x5a)&7)!=2||!g.CVehicle_GetVehicleAppearance||(!seated&&!canOpen(car,ped)))continue;
+  if((Read<std::uint8_t>(car,0x5a)&7)!=2||!g.CVehicle_GetVehicleAppearance)continue;
   const int appearance=g.CVehicle_GetVehicleAppearance(car);
   if(appearance!=1&&appearance!=2)continue;
   const Vec speed=Read<Vec>(car,0x68);if(!Finite(speed)||(!seated&&Length(speed)>.02f))continue;
@@ -174,6 +174,7 @@ void Update(bool usable,std::uint64_t epoch){
   Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
   if(!b.Valid()||Length(eye-b.position)>4.5f)continue;
   if(appearance==2||model==471){
+   if(!seated&&!canOpen(car,ped))continue;
    if(b.up.z<.94f||Length(speed)>.02f)continue;
    if(seated&&currentSeat!= -1&&currentSeat!=0)continue;
    for(int index=0;index<2;++index){
@@ -239,6 +240,7 @@ void Update(bool usable,std::uint64_t epoch){
    const Vec localEye=b.Local(eye);
    const float side=localEye.x<0?-1.f:1.f;
    if(std::abs(localEye.x)<.2f)continue;
+   if(!vehicleaccess::LockAllows(car,side<0?2:3,canOpen(car,ped)))continue;
    const int seat=profile->single||side<0?-1:0;
    if(seat==0&&Read<std::uint8_t>(car,0x5ec)==0)continue;
    if(Read<void*>(car,seat<0?0x5a0:0x5a8))continue;
@@ -260,6 +262,7 @@ void Update(bool usable,std::uint64_t epoch){
    void* doorMatrix=frameLtm(frame);if(!doorMatrix)continue;
    const Vec hinge=b.Local(Read<Vec>(doorMatrix,0x30));if(!Finite(hinge))continue;
    const float side=(index==0||index==2)?-1.f:1.f;
+   if(!seated&&!vehicleaccess::LockAllows(car,index+2,canOpen(car,ped)))continue;
    float correction[3]{};driving::GetEntryCalibration(model,index,correction);
    Vec local={hinge.x*.5f+correction[0],hinge.y-.35f+correction[1],hinge.z+.2f+correction[2]};
    Vec p=b.Point(local);

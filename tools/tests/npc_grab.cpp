@@ -302,6 +302,11 @@ int main() {
     Pool pool;CHECK(pool.Load());Hold target{npc,pool.identity,pool.objects,nullptr,flags[0],5};
     CHECK(BeginHit(target)&&animations[0].phase==Phase::Hit&&sceneHits==1);
     CHECK(Read<float>(reaction,0x38)==15.f/30.f);
+    Setup();Seat();Write<std::uint16_t>(car,0x32,531);locked=true;
+    Write<std::uint32_t>(car,0x684,2);CHECK(ExitDoor(npc,player)==2);
+    Write<std::uint32_t>(car,0x684,3);CHECK(ExitDoor(npc,player)<0);
+    Write<std::uint16_t>(car,0x32,400);Write<std::uint32_t>(car,0x684,2);
+    CHECK(ExitDoor(npc,player)<0);Write<std::uint8_t>(car,0x758+9+2,4);CHECK(ExitDoor(npc,player)==2);
     // Choose by the actual clip hierarchy, not the shared 378/379 animation IDs.
     struct Clip { const char* name;unsigned key,id;float pause,ready,landing; } clips[]={
         {"CAR_jackedLHS",1,378,1.f,15.f/30.f,64.f/30.f},
