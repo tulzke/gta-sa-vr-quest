@@ -1,6 +1,7 @@
 #include "IgnitionState.h"
 #include <cassert>
 #include <limits>
+#include <initializer_list>
 
 using namespace savr::ignition;
 
@@ -10,6 +11,8 @@ int main() {
     assert(ReleasedEngineOn(60));
     assert(ReleasedEngineOn(90));
     assert(ClampAngle(-10) == 0 && ClampAngle(100) == 90);
+    assert(ClampAngle(-134) == 0 && ClampAngle(224) == 90);
+    assert(ClampAngle(226) == 0 && ClampAngle(-136) == 90);
     assert(!ReleasedEngineOn(std::numeric_limits<float>::quiet_NaN()));
 
     Rotation key;
@@ -29,6 +32,24 @@ int main() {
     assert(key.Release() && key.angle == 90);
     key.SetEngine(false);
     assert(key.angle == 0);
+
+    Rotation over;
+    float h[2]{0,0};
+    over.Step(1,h);
+    h[0]=80; over.Step(1,h); assert(over.angle==80);
+    for (float step : {160.f, -160.f, -136.f}) {
+        h[0]=step;
+        over.Step(1,h);
+        assert(over.angle==90);
+    }
+    h[0]=-134.f; over.Step(1,h); // passes the midpoint of the unused arc
+    assert(over.angle==0);
+    over={}; h[0]=0; over.Step(1,h);
+    for (float step : {-45.f,-90.f,-134.f}) {
+        h[0]=step; over.Step(1,h); assert(over.angle==0);
+    }
+    h[0]=-136.f; over.Step(1,h);
+    assert(over.angle==90);
 
     HintState hint;
     assert(hint.Update(10, false, false) == Hint::None);

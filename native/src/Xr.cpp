@@ -8856,7 +8856,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             // Pinch mesh fingertips extend ~7.5 cm from its render origin and
             // sit ~4.5 cm below it. Place the palm in front of the key while
             // thumb and index meet at the key, for both mirrored hands.
-            pos=vadd(pos,vadd(vscale(forward,-.120f),vscale(up,.045f)));
+            pos=vadd(pos,vadd(vscale(forward,-.0975f),vscale(up,.045f)));
             pos=vadd(pos,vscale(right,hand==0?.025f:-.025f));
             // User calibration is expressed in the turning key frame, so the
             // adjusted pose stays attached while the key rotates.
@@ -10839,9 +10839,9 @@ void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
     const XrVector3f keyRight=vnorm(vcross(keyUp,n));
     // The key head stands perpendicular to the circular face and protrudes
     // towards the driver, instead of lying flat on the far side of the lock.
-    const XrVector3f head=vadd(c,vscale(n,-.027f));
-    AppendDrivingBox(boxes,vc,indices,ic,head,keyUp,keyRight,n,.030f,.004f,.027f);
-    AppendDrivingBox(boxes,vc,indices,ic,vadd(head,vscale(keyUp,.020f)),keyRight,keyUp,n,.014f,.007f,.027f);
+    const XrVector3f head=vadd(c,vscale(n,-.0135f));
+    AppendDrivingBox(boxes,vc,indices,ic,head,keyUp,keyRight,n,.030f,.004f,.0135f);
+    AppendDrivingBox(boxes,vc,indices,ic,vadd(head,vscale(keyUp,.020f)),keyRight,keyUp,n,.014f,.007f,.0135f);
     DrawDrivingBoxes(mvp,boxes,vc,indices,ic,.72f,.72f,.72f);
     if (!w.ignitionHint) return;
     vc=ic=0;

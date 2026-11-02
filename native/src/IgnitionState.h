@@ -12,7 +12,11 @@ inline bool ReleasedEngineOn(float angleDegrees) {
 }
 
 inline float ClampAngle(float angleDegrees) {
-    return std::isfinite(angleDegrees) ? std::clamp(angleDegrees, 0.0f, 90.0f) : 0.0f;
+    if (!std::isfinite(angleDegrees)) return 0.0f;
+    // The remaining 270 degrees are split at 225 degrees: the half next
+    // to OFF belongs to 0, and the half next to ON belongs to 90.
+    const float aroundMidpoint=std::remainder(angleDegrees-45.0f,360.0f)+45.0f;
+    return std::clamp(aroundMidpoint,0.0f,90.0f);
 }
 
 // A grab takes a reference rather than jumping to the controller's current
@@ -20,6 +24,7 @@ inline float ClampAngle(float angleDegrees) {
 struct Rotation {
     float angle{};
     float reference[2]{};
+    float travel[2]{};
     float baseline{};
     unsigned owners{};
 
@@ -32,14 +37,16 @@ struct Rotation {
         if (mask != owners) {
             owners = mask;
             baseline = angle;
-            for (int h=0; h<2; ++h) reference[h] = handDegrees[h];
+            for (int h=0; h<2; ++h) { reference[h] = handDegrees[h]; travel[h]=0.0f; }
         }
         if (!owners) return;
         float sum = 0.0f;
         int count = 0;
         for (int h=0; h<2; ++h) if (owners & (1u << h)) {
             if (!std::isfinite(handDegrees[h]) || !std::isfinite(reference[h])) return;
-            sum += std::remainder(handDegrees[h] - reference[h], 360.0f);
+            travel[h] += std::remainder(handDegrees[h] - reference[h], 360.0f);
+            reference[h] = handDegrees[h];
+            sum += travel[h];
             ++count;
         }
         angle = ClampAngle(baseline + sum / count);
