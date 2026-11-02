@@ -44,6 +44,7 @@ void SetBikeGripCalibration(int,int grip,const float in[3]){std::copy_n(in,3,bik
 int debugMode{},saves{};
 std::map<int,std::array<float,24>> corrections;
 int GetVehicleDebugMode() {return debugMode;}
+void GetDoorPanelCalibration(int,int,bool,float out[5]) {std::fill_n(out,5,0.f);}
 void GetDoorCalibration(int model,int door,bool inside,float out[3]) {
     for(int a=0;a<3;++a) out[a]=corrections[model][(door-2)*6+inside*3+a];
 }
@@ -196,6 +197,9 @@ void GrabIt(int hand=0) {
 }
 }
 int main() {
+    CHECK(PanelDistance({.05f,-.5f,.1f},0,-1,-.22f,-.35f,.3f)<.06f);
+    CHECK(PanelDistance({0,-.5f,.31f},0,-1,-.22f,-.35f,.3f)>1.f);
+    CHECK(PanelDistance({.3f,-.5f,.1f},0,-1,-.22f,-.35f,.3f)>.12f);
     Setup();
     auto* damage=static_cast<char*>(vehicle)+0x758;
     Write<std::uint8_t>(damage,11,1);g_driveDoorStatusReturn=1234;
@@ -262,6 +266,9 @@ int main() {
     GripEdge edge;CHECK(!edge.Step(1,true));CHECK(!edge.Step(0,true));CHECK(edge.Step(1,true));
     CHECK(!edge.Step(0,false)&&!edge.Step(1,true));
 
+    Setup();Ready();hands[0].gripPos[1]+=.35f;hands[0].gripPos[2]-=.25f;
+    hands[0].grip=1;Tick();CHECK(ClaimedHands()==1); // panel away from the arrow
+    Tick();CHECK(ClaimedHands()==1);
     Setup();Ready();hands[0].grip=1;Tick();CHECK(ClaimedHands()==1);
     CHECK(npcgrab::stopsRequested==1);
     npcgrab::claimedHands=1;Tick();CHECK(ClaimedHands()==0); // one hand cannot own both NPC and door
@@ -335,7 +342,8 @@ int main() {
     CHECK(Length(xr::published.markers[0].position-(inner+Vec{.18f,0,0}))<1e-5f);
     driving::grabbed=1;hands[0].grip=1;Tick();CHECK(ClaimedHands()==0);
     driving::grabbed=0;hands[0].grip=0;Tick();
-    hands[0].gripPos[2]+=.3f;hands[0].grip=1;Tick();CHECK(ClaimedHands()==1); // larger seated reach
+    hands[0].gripPos[2]+=.3f;hands[0].grip=1;Tick();CHECK(ClaimedHands()==0); // window is not a grab surface
+    hands[0].grip=0;hands[0].gripPos[2]-=.3f;Tick();hands[0].grip=1;Tick();CHECK(ClaimedHands()==1);
     seated=nullptr;Tick();CHECK(ClaimedHands()==0); // do not retain a grab across seat exit
     // A released interior door remains open even if the game overwrites its angle.
     Setup();seated=vehicle;vrcam::eye={-.35f,-.3f,1.3f};hands[0]={};hands[1]={};

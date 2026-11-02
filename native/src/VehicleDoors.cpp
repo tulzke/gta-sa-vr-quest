@@ -109,7 +109,7 @@ void LatchOpen(const Target& t) {
 }
 Target g_editTarget{};
 bool g_editInside{};
-struct Grab { Target target{}; Motion motion{}; int hand{-1}; bool inside{}; } g_grab;
+struct Grab { Target target{}; Motion motion{}; int hand{-1}; bool inside{}; Vec localHand{}; } g_grab;
 struct BikeGrab { Target target{}; int hand{-1}; float side{},phase{},roll{}; Vec lateral{}; } g_bikeGrab;
 struct BikeEdit { Target target{}; int hand{-1},grip{-1},model{}; Vec start{},base{};bool dirty{},inside{}; } g_bikeEdit;
 Target g_bikeStable{};
@@ -117,7 +117,7 @@ struct Release { Target target{}; ReleasedMotion motion{}; bool active{},inside{
 struct Door {
     Basis car{},panel{};
     Vec hinge{},handle{},outward{},tangent{};
-    float angle{},closed{},open{};
+    float angle{},closed{},open{},panelX{},ymin{},ymax{},zmin{},zmax{};
 };
 
 Basis Matrix(void* matrix) {
@@ -201,6 +201,11 @@ bool ReadDoor(const Target& t,void* ped,Door& d,bool inside=false) {
     float correction[3]{};
     driving::GetDoorCalibration(model,t.door,inside,correction);
     d.handle=d.handle+panel.Vector({correction[0],correction[1],correction[2]});
+    float adjust[5]{};driving::GetDoorPanelCalibration(model,t.door,inside,adjust);
+    d.panelX=side*(inside?-.34f:.065f)+adjust[0];
+    d.ymin=-length+adjust[1];d.ymax=-.22f+adjust[2];
+    d.zmin=-.35f+adjust[3];d.zmax=.30f+adjust[4];
+    if(d.ymin>=d.ymax||d.zmin>=d.zmax)return false;
     d.outward=panel.right*side;
     Vec tangent=Cross(d.car.up,d.handle-panel.position)*(d.open>0?1.f:-1.f);
     const float n=Length(tangent);
@@ -610,7 +615,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const int h=g_grab.hand;Door d;
         if (!g_grab.target.Live(pool)||!valid[h]||(occupied&(1u<<h))||
             (g_grab.inside ? (seated!=g_grab.target.vehicle||g_grab.target.door!=vehicleentry::SeatIndex(seated,ped)+3) : seated!=nullptr)||
-            !ReadDoor(g_grab.target,ped,d,g_grab.inside)||Length(d.handle-world[h])>.7f||
+            !ReadDoor(g_grab.target,ped,d,g_grab.inside)||Length(d.panel.Point(g_grab.localHand)-world[h])>.7f||
             !Visible(eye,d.handle,g_grab.target.vehicle)||
             !g_grab.motion.Step(d.car.Local(world[h]),dt)) {
             // Losing the hand, line of sight or reach cancels the grab, but
@@ -793,8 +798,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         ReadDoor(g_editTarget,ped,d,g_editInside);AddMarker(markers,d,true,g_editInside);
         Publish(markers);return;
     }
-    float best=seated?.34f:.23f;Target chosen{};Door chosenDoor{};int chosenHand=-1;
-    float bestEdit=best;Target editTarget{};Door editDoor{};int editHand=-1;
+    float best=seated?.20f:.12f;Target chosen{};Door chosenDoor{};int chosenHand=-1;
+    float bestEdit=seated?.34f:.23f;Target editTarget{};Door editDoor{};int editHand=-1;
     // Show only the nearest car's reachable side. Four arrows at most, and no
     // distant traffic markers. Selection is spatial; there is no enter-button gate.
     float nearest=2.2f;int nearestSlot=-1;
@@ -830,7 +835,9 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         for (int h=0;h<2;++h) {
             if (!valid[h]||(occupied&(1u<<h))) continue;
             const float distance=Length(world[h]-d.handle);
-            if (fresh[h]&&distance<best) { best=distance;chosen=t;chosenDoor=d;chosenHand=h; }
+            const Vec local=d.panel.Local(world[h]);
+            const float panelDistance=PanelDistance(local,d.panelX,d.ymin,d.ymax,d.zmin,d.zmax);
+            if (fresh[h]&&panelDistance<best) { best=panelDistance;chosen=t;chosenDoor=d;chosenHand=h; }
             if (editMode&&editFresh[h]&&distance<bestEdit) {bestEdit=distance;editTarget=t;editDoor=d;editHand=h;}
         }
     }
@@ -850,6 +857,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         g_openDetents[chosen.slot*4+chosen.door-2]={chosen,false};
         g_grab.target=chosen;g_grab.hand=chosenHand;
         g_grab.inside=seated!=nullptr;
+        g_grab.localHand=chosenDoor.panel.Local(world[chosenHand]);
         if (!g_grab.inside&&g_grab.motion.Ratio()<.5f) npcgrab::OnDoorOpening(chosen.vehicle);
         g_claimed.store(1u<<chosenHand,std::memory_order_relaxed);
         Apply();markers.count=0;AddMarker(markers,chosenDoor,true,g_grab.inside);

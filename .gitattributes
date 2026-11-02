@@ -5,3 +5,4 @@
 *.png -text
 *.rgba -text
 
+assets/radio/** !text !filter !merge !diff

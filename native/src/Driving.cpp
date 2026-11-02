@@ -267,6 +267,7 @@ double g_bicycleTriggerPreviousTime{};
 std::atomic<int> g_vehicleDebugMode{};
 struct ModelCalibration {
     int door[4][2][3]{};
+    int doorPanel[4][2][5]{};
     int entry[4][3]{};
     int seatSide[MODE_COUNT]{};
     int seatForward[MODE_COUNT]{};
@@ -512,6 +513,8 @@ void Save() {
                 std::fprintf(file,"EntryCalib.%d.%d.%d=%d\n",model,seat,axis,calibration.entry[seat][axis]);
             for(int door=0;door<4;++door) for(int inside=0;inside<2;++inside) for(int axis=0;axis<3;++axis)
                 std::fprintf(file,"DoorCalib.%d.%d.%d.%d=%d\n",model,door,inside,axis,calibration.door[door][inside][axis]);
+            for(int door=0;door<4;++door) for(int inside=0;inside<2;++inside) for(int axis=0;axis<5;++axis)
+                if(calibration.doorPanel[door][inside][axis]) std::fprintf(file,"DoorPanel.%d.%d.%d.%d=%d\n",model,door,inside,axis,calibration.doorPanel[door][inside][axis]);
             for (int mode = 0; mode < MODE_COUNT; ++mode) {
                 std::fprintf(file, "ModelSeat.%d.%d.SideCm=%d\n",
                              model, mode, calibration.seatSide[mode]);
@@ -676,6 +679,10 @@ void Load() {
             else {
                 int model = -1, mode = -1, hand = -1;
                 int door=-1,inside=-1,axis=-1;
+                if(std::sscanf(line,"DoorPanel.%d.%d.%d.%d=%d",&model,&door,&inside,&axis,&value)==5 &&
+                   model>=400&&model<=611&&door>=0&&door<4&&inside>=0&&inside<2&&axis>=0&&axis<5) {
+                    g_modelCalibration[model].doorPanel[door][inside][axis]=std::clamp(value,-200,200);continue;
+                }
                 if(std::sscanf(line,"EntryCalib.%d.%d.%d=%d",&model,&door,&axis,&value)==4 &&
                    model>=400&&model<=611&&door>=0&&door<4&&axis>=0&&axis<3) {
                     g_modelCalibration[model].entry[door][axis]=std::clamp(value,-200,200);continue;
@@ -3340,6 +3347,13 @@ void GetDoorCalibration(int model,int door,bool inside,float out[3]) {
     std::lock_guard<std::mutex> lock(g_modelMutex);
     const auto it=g_modelCalibration.find(model);
     if(it!=g_modelCalibration.end()) for(int a=0;a<3;++a) out[a]=it->second.door[door-2][inside][a]/100.f;
+}
+void GetDoorPanelCalibration(int model,int door,bool inside,float out[5]) {
+    EnsureInit();std::fill_n(out,5,0.f);
+    if(door<2||door>5)return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const auto it=g_modelCalibration.find(model);
+    if(it!=g_modelCalibration.end()) for(int a=0;a<5;++a)out[a]=it->second.doorPanel[door-2][inside][a]/100.f;
 }
 void GetBikeBarCalibration(int model,float out[3],float* halfWidth) {
     EnsureInit();std::fill_n(out,3,0.f);

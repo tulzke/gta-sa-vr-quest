@@ -14,6 +14,14 @@ struct Vec {
 inline bool Finite(Vec v) { return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z); }
 inline float Dot(Vec a,Vec b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
 inline float Length(Vec v) { return std::sqrt(Dot(v,v)); }
+// Distance to a finite panel, in door-local coordinates. The surface has a
+// small interaction thickness; its top edge stays below the window.
+inline float PanelDistance(Vec p,float x,float ymin,float ymax,float zmin,float zmax) {
+    if(p.z>zmax+.001f)return 1e6f; // Do not extend the hit area into the window.
+    const float dy=p.y-std::clamp(p.y,ymin,ymax);
+    const float dz=p.z-std::clamp(p.z,zmin,zmax);
+    return std::sqrt((p.x-x)*(p.x-x)+dy*dy+dz*dz);
+}
 inline Vec Cross(Vec a,Vec b) { return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x}; }
 inline Vec Rotate(Vec v,float a) {
     const float c=std::cos(a),s=std::sin(a);
