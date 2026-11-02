@@ -276,7 +276,7 @@ struct ModelCalibration {
     int control[2][CONTROL_FIELD_COUNT]{};
     int wheel[WHEEL_CAL_FIELD_COUNT]{};
     int ignition[6]{};
-    int ignitionHand[2][6]{};
+    int ignitionHand[2][2][6]{}; // hand, normal/reverse grip, field
     int acceleratorMode{BIKE_ACCEL_HOLD_TRIGGER};
 };
 
@@ -298,6 +298,8 @@ void* g_ignitionVehicle{};
 bool g_ignitionGripDown[2]{};
 bool g_ignitionPinchOwned[2]{};
 std::atomic<int> g_ignitionCalibrationHand{1};
+std::atomic<int> g_ignitionCalibrationGrip{0};
+bool g_ignitionReverseGrip[2]{};
 std::atomic<bool> g_ignitionHandPreview{false};
 
 void PublishIgnitionPinch(const WheelVisualState& visual) {
@@ -574,9 +576,12 @@ void Save() {
             for (int field=0; field<6; ++field)
                 std::fprintf(file, "Ignition.%d.%d=%d\n", model, field,
                              calibration.ignition[field]);
-            for (int hand=0;hand<2;++hand) for (int field=0;field<6;++field)
+            for (int hand=0;hand<2;++hand) for (int field=0;field<6;++field) {
                 std::fprintf(file,"IgnitionHand.%d.%d.%d=%d\n",model,hand,field,
-                             calibration.ignitionHand[hand][field]);
+                             calibration.ignitionHand[hand][0][field]);
+                std::fprintf(file,"IgnitionHandReverse.%d.%d.%d=%d\n",model,hand,field,
+                             calibration.ignitionHand[hand][1][field]);
+            }
         }
     }
     const bool wrote = std::fflush(file) == 0;
@@ -721,9 +726,14 @@ void Load() {
             else {
                 int model = -1, mode = -1, hand = -1;
                 int door=-1,inside=-1,axis=-1;
+                if (std::sscanf(line,"IgnitionHandReverse.%d.%d.%d=%d",&model,&hand,&axis,&value)==4 &&
+                    model>=400 && model<=611 && hand>=0 && hand<2 && axis>=0 && axis<6) {
+                    g_modelCalibration[model].ignitionHand[hand][1][axis]=std::clamp(value,-720,720);
+                    continue;
+                }
                 if (std::sscanf(line,"IgnitionHand.%d.%d.%d=%d",&model,&hand,&axis,&value)==4 &&
                     model>=400 && model<=611 && hand>=0 && hand<2 && axis>=0 && axis<6) {
-                    g_modelCalibration[model].ignitionHand[hand][axis]=std::clamp(value,-720,720);
+                    g_modelCalibration[model].ignitionHand[hand][0][axis]=std::clamp(value,-720,720);
                     continue;
                 }
                 if (std::sscanf(line,"Ignition.%d.%d=%d",&model,&axis,&value)==3 &&
@@ -1761,8 +1771,11 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
     up=RotateAroundAxis(up,normal,adjustment[5]*rad);
     if (preview) {
         visual.ignitionVisible=true;
-        if (g_ignitionHandPreview.load(std::memory_order_acquire))
-            visual.ignitionGrabbed[g_ignitionCalibrationHand.load(std::memory_order_acquire)]=true;
+        if (g_ignitionHandPreview.load(std::memory_order_acquire)) {
+            const int hand=g_ignitionCalibrationHand.load(std::memory_order_acquire);
+            visual.ignitionGrabbed[hand]=true;
+            visual.ignitionReverseGrip[hand]=g_ignitionCalibrationGrip.load(std::memory_order_acquire)!=0;
+        }
         visual.ignitionAngle=EngineOn(vehicle)?1.57079632679f:0.0f;
         const V3 vectors[4]{center,right,up,normal};
         float* fields[4]{visual.ignitionCenter,visual.ignitionRight,visual.ignitionUp,visual.ignitionNormal};
@@ -1784,7 +1797,12 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
         const bool valid=poses[h].valid && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
         if (!valid || input.grip[h]<=.30f || (occupied&(1u<<h))) mask&=~(1u<<h);
         if (valid && !(occupied&(1u<<h)) && !g_ignitionGripDown[h] &&
-            input.grip[h]>=.65f && Length(p-center)<.12f) mask|=1u<<h;
+            input.grip[h]>=.65f && Length(p-center)<.12f) {
+            const float a=g_ignitionRotation.angle*rad;
+            const V3 keyUp=up*std::cos(a)+right*std::sin(a);
+            g_ignitionReverseGrip[h]=ignition::ReverseGrip(Dot(p-center,keyUp));
+            mask|=1u<<h;
+        }
         if (input.grip[h]<=.30f) g_ignitionGripDown[h]=false;
         else if (input.grip[h]>=.65f) g_ignitionGripDown[h]=true;
         // Rotate a controller axis into tracking space, then measure its
@@ -1812,7 +1830,10 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
     const V3 vectors[4]{center,right,up,normal};
     float* fields[4]{visual.ignitionCenter,visual.ignitionRight,visual.ignitionUp,visual.ignitionNormal};
     for (int i=0;i<4;++i) { fields[i][0]=vectors[i].x;fields[i][1]=vectors[i].y;fields[i][2]=vectors[i].z; }
-    for (int h=0;h<2;++h) visual.ignitionGrabbed[h]=(mask&(1u<<h))!=0;
+    for (int h=0;h<2;++h) {
+        visual.ignitionGrabbed[h]=(mask&(1u<<h))!=0;
+        visual.ignitionReverseGrip[h]=g_ignitionReverseGrip[h];
+    }
 }
 
 // Android SA 2.11 polls touch widgets inside these queries. Hook the queries,
@@ -3304,7 +3325,7 @@ constexpr int kDefaultBikeItems[] = {
     MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM,
     MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
-    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
+    MENU_IGNITION_HAND, MENU_IGNITION_GRIP, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
     MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY, MENU_IGNITION_HAND_RZ,
     MENU_RESET, MENU_BACK
 };
@@ -3316,7 +3337,7 @@ constexpr int kDefaultCarItems[] = {
     MENU_INTERIOR_GLASS, MENU_DRIVEBY_AIM,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
     MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
-    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
+    MENU_IGNITION_HAND, MENU_IGNITION_GRIP, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
     MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY, MENU_IGNITION_HAND_RZ,
     MENU_RESET, MENU_BACK
 };
@@ -3330,7 +3351,7 @@ constexpr int kImmersiveBikeItems[] = {
     MENU_BIKE_HAND_TILT, MENU_BIKE_BLOCK_WHEELIE, MENU_LOCAL_HORIZON, MENU_BIKE_VISUAL_LEAN,
     MENU_KEEP_RIDER_ON_FLIPS,
     MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
-    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
+    MENU_IGNITION_HAND, MENU_IGNITION_GRIP, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
     MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY, MENU_IGNITION_HAND_RZ,
     MENU_RESET, MENU_BACK
 };
@@ -3343,7 +3364,7 @@ constexpr int kImmersiveCarItems[] = {
     MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
     MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
-    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
+    MENU_IGNITION_HAND, MENU_IGNITION_GRIP, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
     MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY, MENU_IGNITION_HAND_RZ,
     MENU_RESET, MENU_BACK
 };
@@ -3435,20 +3456,22 @@ int GetIgnitionCalibration(int field) {
 }
 int GetIgnitionHand() { return g_ignitionCalibrationHand.load(); }
 void ToggleIgnitionHand() { g_ignitionCalibrationHand.store(1-GetIgnitionHand()); }
+int GetIgnitionGrip() { return g_ignitionCalibrationGrip.load(); }
+void ToggleIgnitionGrip() { g_ignitionCalibrationGrip.store(1-GetIgnitionGrip()); }
 void SetIgnitionHandPreview(bool active) { g_ignitionHandPreview.store(active); }
 int GetIgnitionHandCalibration(int field) {
     if (field<0||field>=6) return 0;
     const int model=GetActiveVehicleModelId(),hand=GetIgnitionHand();
     std::lock_guard<std::mutex> lock(g_modelMutex);
     const auto it=g_modelCalibration.find(model);
-    return it==g_modelCalibration.end()?0:it->second.ignitionHand[hand][field];
+    return it==g_modelCalibration.end()?0:it->second.ignitionHand[hand][GetIgnitionGrip()][field];
 }
 void AdjustIgnitionHandCalibration(int field,int direction) {
     const int model=GetActiveVehicleModelId(),hand=GetIgnitionHand();
     if (model<400||field<0||field>=6||!direction) return;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        int& value=g_modelCalibration[model].ignitionHand[hand][field];
+        int& value=g_modelCalibration[model].ignitionHand[hand][GetIgnitionGrip()][field];
         value=std::clamp(value+(direction<0?-1:1),-720,720);
     }
     Save();

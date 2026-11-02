@@ -115,10 +115,11 @@ struct WheelVisualState {
     float handleForward[2][3]{};
     bool ignitionVisible{};
     bool ignitionGrabbed[2]{};
+    bool ignitionReverseGrip[2]{};
     int ignitionHint{};
     float ignitionCenter[3]{}, ignitionRight[3]{}, ignitionUp[3]{}, ignitionNormal[3]{};
     float ignitionAngle{};
-    int ignitionHandCalibration[2][6]{};
+    int ignitionHandCalibration[2][2][6]{};
 };
 
 // Per-vehicle-type camera view for stereo driving. FIRST anchors the eyes at
@@ -166,7 +167,7 @@ enum MenuItem {
     MENU_VEHICLE_TEST_PAGE
     , MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z,
     MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
-    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y,
+    MENU_IGNITION_HAND, MENU_IGNITION_GRIP, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y,
     MENU_IGNITION_HAND_Z, MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY,
     MENU_IGNITION_HAND_RZ
 };
@@ -175,6 +176,8 @@ int GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);
 int GetIgnitionHand();
 void ToggleIgnitionHand();
+int GetIgnitionGrip();
+void ToggleIgnitionGrip();
 int GetIgnitionHandCalibration(int field);
 void AdjustIgnitionHandCalibration(int field,int direction);
 void SetIgnitionHandPreview(bool active);

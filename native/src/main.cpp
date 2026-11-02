@@ -1408,6 +1408,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::AdjustCurrentModelSeatHeightCm(drivingVehicleType,step);
             } else if (item==savr::driving::MENU_IGNITION_HAND && (enter||step) && available) {
                 savr::driving::ToggleIgnitionHand();
+            } else if (item==savr::driving::MENU_IGNITION_GRIP && (enter||step) && available) {
+                savr::driving::ToggleIgnitionGrip();
             } else if (item>=savr::driving::MENU_IGNITION_HAND_X &&
                        item<=savr::driving::MENU_IGNITION_HAND_RZ && step && available) {
                 savr::driving::AdjustIgnitionHandCalibration(item-savr::driving::MENU_IGNITION_HAND_X,step);

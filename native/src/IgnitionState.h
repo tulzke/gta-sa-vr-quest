@@ -5,6 +5,12 @@
 
 namespace savr::ignition {
 
+// A grab from below the key uses the reverse pose. The caller latches the
+// choice at the grip edge so movement while held cannot flip the hand.
+inline bool ReverseGrip(float heightAlongKey) {
+    return std::isfinite(heightAlongKey) && heightAlongKey < 0.0f;
+}
+
 // Clockwise travel in degrees, measured from the vertical OFF position.
 // The first 60 degrees snap OFF; the final 30 snap ON upon release.
 inline bool ReleasedEngineOn(float angleDegrees) {

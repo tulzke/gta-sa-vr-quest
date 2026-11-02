@@ -7,6 +7,9 @@ using namespace savr::ignition;
 
 int main() {
     assert(!ReleasedEngineOn(0));
+    assert(!ReverseGrip(0.01f) && ReverseGrip(-0.01f));
+    assert(!ReverseGrip(0.0f));
+    assert(!ReverseGrip(std::numeric_limits<float>::quiet_NaN()));
     assert(!ReleasedEngineOn(59.99f));
     assert(ReleasedEngineOn(60));
     assert(ReleasedEngineOn(90));

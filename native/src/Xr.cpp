@@ -7753,6 +7753,10 @@ void BuildDrivingMenu() {
                 std::snprintf(rows[row],sizeof(rows[row]),"KEY HAND < %s >",
                               driving::GetIgnitionHand()==0?"LEFT":"RIGHT");
                 break;
+            case driving::MENU_IGNITION_GRIP:
+                std::snprintf(rows[row],sizeof(rows[row]),"KEY GRIP < %s >",
+                              driving::GetIgnitionGrip()==0?"TOP":"BOTTOM");
+                break;
             case driving::MENU_IGNITION_HAND_X: case driving::MENU_IGNITION_HAND_Y:
             case driving::MENU_IGNITION_HAND_Z: case driving::MENU_IGNITION_HAND_RX:
             case driving::MENU_IGNITION_HAND_RY: case driving::MENU_IGNITION_HAND_RZ: {
@@ -8851,6 +8855,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             const XrVector3f keyRight=vnorm(vcross(keyUp,forward));
             // Rotate the pinching hand 90 degrees clockwise around the key axis.
             up=vnorm(vcross(up,forward));
+            if (drivingWheel.ignitionReverseGrip[hand]) up=vscale(up,-1.0f);
             right=vnorm(vcross(up,forward));
             if (hand==0) right=vscale(right,-1.0f);
             // Pinch mesh fingertips extend ~7.5 cm from its render origin and
@@ -8860,7 +8865,8 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             pos=vadd(pos,vscale(right,hand==0?.025f:-.025f));
             // User calibration is expressed in the turning key frame, so the
             // adjusted pose stays attached while the key rotates.
-            const int* adjustment=drivingWheel.ignitionHandCalibration[hand];
+            const int* adjustment=drivingWheel.ignitionHandCalibration[hand]
+                [drivingWheel.ignitionReverseGrip[hand]?1:0];
             pos=vadd(pos,vadd(vscale(keyRight,adjustment[0]*.01f),
                  vadd(vscale(keyUp,adjustment[1]*.01f),vscale(forward,adjustment[2]*.01f))));
             const XrVector3f axes[3]{keyRight,keyUp,forward};
