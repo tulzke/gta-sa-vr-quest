@@ -127,6 +127,17 @@ int main(){
        std::abs(icons.markers[1].position.x-1.4f)<.001f);
  const int beforeQuadExit=vrcam::exits;xr::input.leftStick[0]=1;
  for(int i=0;i<12;++i)Tick();CHECK(vrcam::exits==beforeQuadExit+1);
+ // Kart has one central driver seat, approached from either side without a door node.
+ current=nullptr;locksOpen=true;vehicleAppearance=1;Put(cars,0x32,std::uint16_t(571));
+ Put(cars,0x5a0,static_cast<void*>(nullptr));Put(cars,0x800+10*8,static_cast<void*>(nullptr));
+ Put(cars,0x800+8*8,static_cast<void*>(nullptr));eyeY=0;
+ for(float side:{-1.f,1.f}){
+  eyeX=side*1.0f;xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
+  CHECK(icons.count==1&&icons.markers[0].seatIcon==1);
+  const int before=boatentry::calls;xr::input.leftStick[0]=-side;
+  for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==before+1&&boatentry::seat==-1);
+ }
+ xr::input.leftStick[0]=0;Put(cars,0x5a0,static_cast<void*>(ped));Tick();CHECK(icons.count==0);
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

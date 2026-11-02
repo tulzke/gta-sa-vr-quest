@@ -401,6 +401,15 @@ int ExitDoor(void* ped,void* player) {
     for (int i=0;i<3&&door<0;++i)
         if (Read<void*>(car,0x5a8+i*8)==ped) door=i==0?3:(i==1?4:5);
     if (door<0) return -1;
+    if (Read<std::uint16_t>(car,0x32)==571) {
+        if (door!=2) return -1; // Kart: only the driver, reachable from either side.
+        void* matrix=Read<void*>(car,0x18);
+        if (!matrix) return -1;
+        const Basis basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+        if (!basis.Valid()) return -1;
+        const float x=basis.Local(Position(player)).x;
+        return x<-.2f?2:(x>.2f?3:-1);
+    }
     const auto status=Read<std::uint8_t>(car,0x758+9+door);
     const float angle=Read<float>(car,0x770+door*0x18+0xc);
     if (status!=3&&!(status<=2&&std::isfinite(angle)&&std::abs(angle)>.45f)) return -1;
@@ -499,8 +508,11 @@ void ReportCarjack(Animation& pending,void* player) {
     g.CEventGroup_Add(static_cast<char*>(brain)+0xc8,event,true);
     draggedDtor(event);
 }
+void CancelHit(Animation& a,bool react);
 bool BeginHit(Hold& h,bool preparing=false) {
     const int door=ExitDoor(h.ped,owner);
+    void* vehicle=Read<void*>(h.ped,0x708);
+    const bool kart=vehicle&&Read<std::uint16_t>(vehicle,0x32)==571;
     if (!preparing) if (auto* pending=BeforeHit(h.ped)) {
         if (door<0||pending->phase!=Phase::AwaitHit||updated<pending->punchAfter) return false;
         void* anim=VictimAnimation(h.ped);
@@ -511,11 +523,14 @@ bool BeginHit(Hold& h,bool preparing=false) {
         SceneAudio(*pending,65); // AE_PED_HIT_HIGH_UNARMED, at the physical hit
         return true;
     }
-    if (!preparing) return false; // door-opening motion cannot bypass preparation
+    if (!preparing&&!kart) return false; // ordinary cars require preparation
+    if (preparing&&kart) return false;
     if (door<0||Animating(h.ped)||Waiting(h.ped)) return false;
     if (BeforeHit(h.ped)) return false;
     constexpr int nodes[]={10,8,11,9};
-    void* car=Read<void*>(h.ped,0x708);
+    void* car=vehicle;
+    Vec exit{};
+    if (kart&&!FindDoorExit(h.ped,car,door,exit)) return false;
     Animation* pending=nullptr;
     for (auto& a:animations) if (!a.target.ped) { pending=&a;break; }
     if (!pending) return false;
@@ -542,6 +557,13 @@ bool BeginHit(Hold& h,bool preparing=false) {
     if (leaf&&Read<void*>(leaf,0)==draggedAnimationVtable) {
         if (!Read<void*>(leaf,0x18)) startDraggedAnimation(leaf,h.ped);
         pending->ownedAssociation=Read<void*>(leaf,0x18);
+    }
+    if (kart) {
+        const auto* point=pending->ownedAssociation?AnimationPoint(pending->ownedAssociation):nullptr;
+        if (!point) { CancelHit(*pending,false);return false; }
+        setAnimationTime(pending->ownedAssociation,point->start);
+        ActionFeedback(h.ped,true);
+        SceneAudio(*pending,65);
     }
     return true;
 }
@@ -657,6 +679,8 @@ bool PunchBikeRider(const Pool& pool,void* player,Vec eye,Vec p,Vec previous) {
 bool ContinuePull(Animation& pending,void* player) {
     if (pending.phase!=Phase::Waiting) return false;
     const int door=ExitDoor(pending.target.ped,player);
+    if (Read<std::uint16_t>(pending.car,0x32)==571&&
+        pending.doorNode!=(door==2?10:door==3?8:-1)) return false;
     Vec destination{};
     if (door<0||!FindDoorExit(pending.target.ped,pending.car,door,destination)) return false;
     pending.exitPoint=destination;pending.exitChecked=true;
@@ -1142,7 +1166,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const Vec point=Bone(ped,waiting?4:5);
         if (door<0||!Finite(point)||!SeatReachable(ped,door,eye,point)||
             !Visible(eye,point,ped,Read<void*>(ped,0x708))) continue;
-        if (!waiting&&!BeforeHit(ped)&&!PreparationBlocked(ped)) {
+        const bool kart=Read<std::uint16_t>(Read<void*>(ped,0x708),0x32)==571;
+        if (!kart&&!waiting&&!BeforeHit(ped)&&!PreparationBlocked(ped)) {
             Hold target{ped,pool.identity,pool.objects,nullptr,(slot<<8)|pool.flags[slot],5};
             if (!BeginHit(target,true)) continue;
         }

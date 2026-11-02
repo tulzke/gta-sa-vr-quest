@@ -169,6 +169,27 @@ void Update(bool usable,std::uint64_t epoch){
    }
    continue;
   }
+  // Kart has one central seat and no door frames. Either side approaches the
+  // same driver slot; never expose the nonexistent front passenger slot.
+  if(model==571&&!seated){
+   if(Read<void*>(car,0x5a0))continue;
+   const Vec localEye=b.Local(eye);
+   const float side=localEye.x<0?-1.f:1.f;
+   if(std::abs(localEye.x)<.2f)continue;
+   float correction[3]{};driving::GetEntryCalibration(model,0,correction);
+   const Vec p=b.Point({correction[0],correction[1],.65f+correction[2]});
+   const Vec approach=b.Point({side*.65f,0,.65f});
+   if(Length(eye-approach)>1.5f||!ClearExit(eye,approach,car)||!ClearExit(eye,p,car))continue;
+   Marker m{p,forward,{0,0,1}};m.seatIcon=1;
+   if(icons.count>=icons.kCapacity)continue;
+   const int icon=icons.count;icons.markers[icons.count++]=m;
+   Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
+   const float direction=distance>.05f?Dot(move,delta)/distance:-1;
+   if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
+    bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=-1;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
+   }
+   continue;
+  }
   for(int index=0;index<4;++index){
    const int seat=index-1;const bool exit=seated&&seat==currentSeat;bool emergency=false;
    if(seated&&currentSeat<-1)continue;

@@ -266,6 +266,19 @@ void ConfirmGrip() {hands[0].grip=1;hands[0].trigger=0;Tick();}
 
 }
 int main() {
+    // A kart hint must not start a task; the strike selects the player's side.
+    for (int side:{-1,1}) {
+        Setup();Seat();Write<std::uint16_t>(car,0x32,571);
+        Write(player,8,Vec{0,0,0});
+        Write(npc,8,Vec{0,.3f,0});Write(carMatrix,0x30,Vec{-float(side)*.6f,0,0});
+        hands[0].gripPos[0]=float(side)*.7f;Write(animationHierarchy,0,side<0?1u:4u);
+        Tick();CHECK(!primaryReplaced&&!animationStarts&&worldMarkers.count>0);
+        CHECK(ExitDoor(npc,player)==(side<0?2:3));
+        Pool pool;CHECK(pool.Load());Hold target{npc,pool.identity,pool.objects,nullptr,flags[0],5};
+        CHECK(BeginHit(target));CHECK(animatedNode==(side<0?10:8));
+        CHECK(animations[0].phase==Phase::Hit&&sceneHits==1);
+        CHECK(Read<float>(reaction,0x38)==(side<0?15.f/30.f:20.f/30.f));
+    }
     // Choose by the actual clip hierarchy, not the shared 378/379 animation IDs.
     struct Clip { const char* name;unsigned key,id;float pause,ready,landing; } clips[]={
         {"CAR_jackedLHS",1,378,1.f,15.f/30.f,64.f/30.f},
