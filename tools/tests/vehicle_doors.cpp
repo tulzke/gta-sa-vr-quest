@@ -423,17 +423,19 @@ int main() {
         CHECK(std::abs(d.panel.Local(d.handle).z-.4f)<1e-4f);
         CHECK(driving::corrections[400][5]==0&&driving::corrections[412][2]==0);
     }
-    // Corner drag adjusts only the selected two panel bounds, never depth.
+    // Corner drag adjusts two bounds and moves the whole panel in depth.
     Setup();driving::debugMode=1;Ready();
     { Door d;Target t{vehicle,poolMemory,vehicles.data(),flags,0,2,10,flags[0]};CHECK(ReadDoor(t,pedMemory,d));
       const Vec corner=PanelCorner(d,3);std::memcpy(hands[0].gripPos,&corner,12);Tick();
       hands[0].trigger=1;Tick();CHECK(g_editKind==4&&g_panelCorner==3);
-      hands[0].gripPos[1]+=.1f;hands[0].gripPos[2]+=.1f;Tick();
+      hands[0].gripPos[0]+=.05f;hands[0].gripPos[1]+=.1f;hands[0].gripPos[2]+=.1f;Tick();
       CHECK(std::abs(driving::panelCorrections[400][2]-.1f)<1e-4f);
       CHECK(std::abs(driving::panelCorrections[400][4]-.1f)<1e-4f);
       CHECK(std::abs(driving::panelCorrections[400][14]-.1f)<1e-4f);
       CHECK(std::abs(driving::panelCorrections[400][16]-.1f)<1e-4f);
-      CHECK(driving::panelCorrections[400][0]==0);
+      CHECK(std::abs(driving::panelCorrections[400][0]-.05f)<1e-4f);
+      CHECK(std::abs(driving::panelCorrections[400][12]+.05f)<1e-4f);
+      CHECK(driving::panelCorrections[400][5]==0);
       hands[0].trigger=0;Tick();CHECK(driving::saves==1); }
     Setup();driving::debugMode=1;Ready();
     { Door d;Target t{vehicle,poolMemory,vehicles.data(),flags,0,2,10,flags[0]};CHECK(ReadDoor(t,pedMemory,d));

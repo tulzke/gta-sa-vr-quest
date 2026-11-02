@@ -117,13 +117,16 @@ Corrections follow the moving door panel and also affect the normal grip hit tes
 In VEHICLE DEBUG, a yellow box shows each door's grip volume at 20% transparency;
 four small bars mark the corners of the panel.
 Hold a trigger on a corner and move it along the door or vertically to adjust
-its length and height. Two additional bars near the centre mark the thickness
+its length and height; moving it toward or away from the door shifts the whole
+volume in depth. Two additional bars near the centre mark the thickness
 limits: drag either one toward or away from the door to change both limits
 symmetrically. Release the trigger to save. The upper edge defines the window
 boundary. Configure the outside and inside separately. Editing either side
 mirrors the same panel or arrow adjustment to the opposite front or rear door.
 Existing separate corrections are retained until their corresponding setting
 is edited; unusual asymmetric models need a headset check.
+The default panel centre is now 6.5 cm closer to the door node outside and
+7 cm closer inside. Existing saved offsets remain additive to this new default.
 WHEEL edits the centre and radius of a car wheel, boat helm or plane yoke from
 the driver's seat in first person. SEAT marks the neutral camera position where
 the player's head appears on entry and edits the model's camera offset for the

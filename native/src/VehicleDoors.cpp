@@ -204,7 +204,9 @@ bool ReadDoor(const Target& t,void* ped,Door& d,bool inside=false) {
     driving::GetDoorCalibration(model,t.door,inside,correction);
     d.handle=d.handle+panel.Vector({correction[0],correction[1],correction[2]});
     float adjust[6]{};driving::GetDoorPanelCalibration(model,t.door,inside,adjust);
-    d.panelX=side*(inside?-.34f:.065f)+adjust[0];
+    // Start closer to the model's door frame than the independently placed
+    // interaction hint. Existing panel offsets remain additive.
+    d.panelX=side*(inside?-.27f:0.f)+adjust[0];
     d.ymin=-length+adjust[1];d.ymax=-.22f+adjust[2];
     d.zmin=-.35f+adjust[3];d.zmax=.30f+adjust[4];
     d.thickness=std::clamp((inside?.20f:.12f)+adjust[5],.02f,.5f);
@@ -826,6 +828,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 const float change=g_edit.delta.x*(g_panelCorner==5?1.f:-1.f);
                 value[5]+=std::clamp(g_panelThickness+change,.02f,.5f)-g_panelThickness;
             } else {
+                value[0]+=g_edit.delta.x;
                 const int y=(g_panelCorner&1)?2:1,z=(g_panelCorner&2)?4:3;
                 value[y]+=std::clamp(g_edit.delta.y,(g_panelCorner&1)?-g_panelWidth+.10f:-2.f,(g_panelCorner&1)?2.f:g_panelWidth-.10f);
                 value[z]+=std::clamp(g_edit.delta.z,(g_panelCorner&2)?-g_panelHeight+.10f:-2.f,(g_panelCorner&2)?2.f:g_panelHeight-.10f);
