@@ -27,8 +27,8 @@ replace the ordinary controller hand meshes. Rebuild them with
 FBX files to embedded glTF.
 
 `BigHandLeftPinch.uxrh` and `BigHandRightPinch.uxrh` are custom pinch poses made
-by the project user from the UltimateXR hands. They are used temporarily while
-pressing the corresponding trigger with a free hand. Export the posed mesh from Blender to
+by the project user from the UltimateXR hands. See [PINCH.md](PINCH.md) for
+the contextual animation API. Export the posed mesh from Blender to
 GLB with the armature modifier applied, then run
 `python tools/build_pinch_hand.py <posed.glb> assets/vrhands/BigHandRight.uxrh <endpoint.uxrh>`.
 The converter checks UV correspondence and topology before writing the pose.

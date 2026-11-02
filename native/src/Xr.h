@@ -101,6 +101,10 @@ bool GetTrackingSnapshot(float headPosition[3], float headOrientation[4],
 // ring slot instead of resampling the asynchronously updated XR poses.
 void SetRenderedHandPoses(const HandPose poses[2]);
 
+// Publish a contextual pinch amount: hand 0 = left, 1 = right; 0 clears it,
+// 1 selects the authored pinch. The caller owns transitions and must clear it.
+void SetHandPinchAmount(int hand, float amount);
+
 // Basketball palm lock: while the ball is held, the rendered hand(s) are
 // pinned onto the ball surface with an open palm (wheel-grab pattern), so
 // ball and hand can never visibly drift apart. Positions are in tracking
