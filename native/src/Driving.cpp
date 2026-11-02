@@ -3383,6 +3383,11 @@ void SetDebugWheelRadius(int model,int value) {
     std::lock_guard<std::mutex> lock(g_modelMutex);
     g_modelCalibration[model].wheel[WHEEL_CAL_RADIUS]=ClampWheelCalibration(WHEEL_CAL_RADIUS,value);
 }
+void SetDebugWheelPitch(int model,int value) {
+    if(model<400||model>611) return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    g_modelCalibration[model].wheel[WHEEL_CAL_PITCH]=ClampWheelCalibration(WHEEL_CAL_PITCH,value);
+}
 void SaveDebugCalibration() { Save(); }
 
 int GetCurrentModelSeatSideCm(int vehicleType) {

@@ -63,6 +63,7 @@ int GetCurrentModelSeatHeightCm(int) {return 0;}
 int GetWheelCalibrationValue(int) {return 0;}
 int radiusValue{},radiusWrites{};
 void SetDebugWheelRadius(int,int value) {radiusValue=value;++radiusWrites;}
+void SetDebugWheelPitch(int,int) {}
 int positions[3]{},positionWrites{};
 void SetDebugPosition(int,int,bool,const int value[3]) { std::copy_n(value,3,positions);++positionWrites; }
 
@@ -455,6 +456,10 @@ int main() {
     hands[1].gripPos[0]+=.1f;Tick();CHECK(driving::radiusValue==5&&driving::radiusWrites>0);
     hands[1].trigger=0;Tick();CHECK(g_secondHand<0&&driving::positions[0]==0);
     hands[0].trigger=0;Tick();CHECK(g_edit.hand<0&&driving::saves==1);
+    CHECK(WheelPitchDelta({0,0,1},0)==0);
+    CHECK(WheelPitchDelta({0,-1,1},0)==90);
+    CHECK(WheelPitchDelta({0,1,1},0)==-90);
+    CHECK(WheelPitchDelta({0,.01f,-1},-3.13159299f)==2);
     DebugDrag drag;CHECK(drag.Begin(1,b.Local(b.Point({.1f,.2f,.3f}))));
     CHECK(drag.Step(b.Local(b.Point({.2f,.3f,.4f}))));
     CHECK(Length(drag.delta-Vec{.1f,.1f,.1f})<1e-4f);

@@ -200,6 +200,7 @@ void SetBikeGripCalibration(int model,int hand,const float value[3]);
 void SetDoorCalibration(int model,int door,bool inside,const float value[3]);
 void SetDebugPosition(int model,int mode,bool seat,const int value[3]);
 void SetDebugWheelRadius(int model,int value);
+void SetDebugWheelPitch(int model,int value);
 void SaveDebugCalibration();
 void Init();
 void ResetDefaultPreset();

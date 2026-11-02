@@ -45,7 +45,9 @@ MarkerFrame g_worldMarkers{};
 DebugDrag g_edit;
 int g_editMode{},g_editModel{-1},g_editDrivingMode{};
 int g_editKind{},g_secondHand{-1},g_scaleBase{};
-float g_scaleSpan{};
+float g_scaleSpan{},g_pitchStart{};
+int g_pitchBase{};
+bool g_pitchEditing{};
 int g_editBase[3]{};
 Vec g_editDoorBase{};
 bool g_editDirty{};
@@ -717,6 +719,11 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                     if(std::isfinite(span)&&span>.1f) {
                         g_secondHand=other;g_scaleSpan=span;
                         g_scaleBase=driving::GetWheelCalibrationValue(driving::WHEEL_CAL_RADIUS);
+                        const Vec line=car.Local(world[other])-car.Local(world[h]);
+                        g_pitchEditing=std::abs(line.z)>std::abs(line.x) &&
+                            std::hypot(line.y,line.z)>.1f;
+                        g_pitchStart=std::atan2(line.y,line.z);
+                        g_pitchBase=driving::GetWheelCalibrationValue(driving::WHEEL_CAL_PITCH);
                         xr::TriggerHaptic(other,.25f,0,30);
                     }
                 }
@@ -732,6 +739,12 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                     const float span=Length(world[other]-world[h]);
                     if(!std::isfinite(span)||std::abs(span-g_scaleSpan)>1.f) { Reset();return; }
                     driving::SetDebugWheelRadius(model,g_scaleBase+std::lround((span-g_scaleSpan)*50.f));
+                    if(g_pitchEditing) {
+                        const Vec line=car.Local(world[other])-car.Local(world[h]);
+                        if(std::hypot(line.y,line.z)>.1f) {
+                            driving::SetDebugWheelPitch(model,g_pitchBase+WheelPitchDelta(line,g_pitchStart));
+                        }
+                    }
                     g_editDirty=true;
                 }
             }
