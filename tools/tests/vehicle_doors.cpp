@@ -44,7 +44,13 @@ void SetBikeGripCalibration(int,int grip,const float in[3]){std::copy_n(in,3,bik
 int debugMode{},saves{};
 std::map<int,std::array<float,24>> corrections;
 int GetVehicleDebugMode() {return debugMode;}
-void GetDoorPanelCalibration(int,int,bool,float out[5]) {std::fill_n(out,5,0.f);}
+std::map<int,std::array<float,40>> panelCorrections;
+void GetDoorPanelCalibration(int model,int door,bool inside,float out[5]) {
+    for(int a=0;a<5;++a)out[a]=panelCorrections[model][(door-2)*10+inside*5+a];
+}
+void SetDoorPanelCalibration(int model,int door,bool inside,const float in[5]) {
+    for(int a=0;a<5;++a)panelCorrections[model][(door-2)*10+inside*5+a]=in[a];
+}
 void GetDoorCalibration(int model,int door,bool inside,float out[3]) {
     for(int a=0;a<3;++a) out[a]=corrections[model][(door-2)*6+inside*3+a];
 }
@@ -169,7 +175,7 @@ void Setup() {
     g_status=FakeStatus;g_setStatus=FakeSetStatus;g_frameLtm=FakeLtm;
     locked=busy=wall=entering=paused=false;vrcam::ground=vrcam::tracking=true;
     physicalweapon::mask=physicalweapon::support=basketball::held=0;
-    driving::grabbed=0;driving::bikeWheel=false;driving::debugMode=0;driving::corrections.clear();driving::saves=0;xr::focused=true;seated=nullptr;
+    driving::grabbed=0;driving::bikeWheel=false;driving::debugMode=0;driving::corrections.clear();driving::panelCorrections.clear();driving::saves=0;xr::focused=true;seated=nullptr;
     writes=nativeSwings=invalidWrites=0;
     npcgrab::stopsRequested=0;
     npcgrab::claimedHands=0;
@@ -189,7 +195,7 @@ void AtHandle(int hand,int index=0) {
 void Ready(int hand=0) {
     hands[0]={};hands[1]={};AtHandle(hand);
     Tick(); // open hand arms the edge
-    CHECK(xr::published.count==2); // only the near side, automatically
+    CHECK(xr::published.count==(driving::debugMode?10:2)); // debug adds four corners per door
 }
 void GrabIt(int hand=0) {
     Ready(hand);hands[hand].grip=1;Tick();
@@ -411,6 +417,16 @@ int main() {
         CHECK(std::abs(d.panel.Local(d.handle).z-.4f)<1e-4f);
         CHECK(driving::corrections[400][5]==0&&driving::corrections[412][2]==0);
     }
+    // Corner drag adjusts only the selected two panel bounds, never depth.
+    Setup();driving::debugMode=1;Ready();
+    { Door d;Target t{vehicle,poolMemory,vehicles.data(),flags,0,2,10,flags[0]};CHECK(ReadDoor(t,pedMemory,d));
+      const Vec corner=PanelCorner(d,3);std::memcpy(hands[0].gripPos,&corner,12);Tick();
+      hands[0].trigger=1;Tick();CHECK(g_editKind==4&&g_panelCorner==3);
+      hands[0].gripPos[1]+=.1f;hands[0].gripPos[2]+=.1f;Tick();
+      CHECK(std::abs(driving::panelCorrections[400][2]-.1f)<1e-4f);
+      CHECK(std::abs(driving::panelCorrections[400][4]-.1f)<1e-4f);
+      CHECK(driving::panelCorrections[400][0]==0);
+      hands[0].trigger=0;Tick();CHECK(driving::saves==1); }
     Setup();driving::debugMode=1;Ready();hands[0].trigger=1;Tick();
     hands[0].gripPos[2]+=.1f;Tick();Tick(true);
     CHECK(g_edit.hand<0&&driving::saves==1&&writes==0);

@@ -114,6 +114,11 @@ in public and developer builds.
 DOORS edits the existing supported car-door arrows. Outside handles are stored
 per model and door; the driver's inside handle has a separate correction.
 Corrections follow the moving door panel and also affect the normal grip hit test.
+In VEHICLE DEBUG, four small bars mark the corners of each door's grip panel.
+Hold a trigger on a corner and move it along the door or vertically to adjust
+its length and height; release to save. The other two edges stay fixed, and
+movement toward or away from the panel does not change its depth. The upper
+edge defines the window boundary. Configure the outside and inside separately.
 WHEEL edits the centre and radius of a car wheel, boat helm or plane yoke from
 the driver's seat in first person. SEAT marks the neutral camera position where
 the player's head appears on entry and edits the model's camera offset for the
@@ -133,7 +138,7 @@ supported by this editor.
 All model corrections live in `vr_driving.ini`. Existing seat and wheel keys are
 retained; additive `DoorCalib.<model>.<door 0..3>.<inside 0..1>.<axis 0..2>`
 keys store panel-local centimetres (X/Y/Z). Missing door keys mean zero offset.
-Door grip panels can be adjusted manually with `DoorPanel.<model>.<door 0..3>.<inside 0..1>.<axis 0..4>=<cm>` in `vr_driving.ini`. The five values are additive offsets for panel X, minimum Y, maximum Y, minimum Z and maximum Z respectively, in the moving door's local frame. Missing keys mean zero. The upper Z edge excludes the window. Invalid or inverted bounds disable that door until corrected. These settings are independent of the arrow calibration; the in-game editor does not yet edit panel bounds.
+Door grip panels can also be adjusted manually with `DoorPanel.<model>.<door 0..3>.<inside 0..1>.<axis 0..4>=<cm>` in `vr_driving.ini`. The five values are additive offsets for panel X, minimum Y, maximum Y, minimum Z and maximum Z respectively, in the moving door's local frame. Missing keys mean zero. The upper Z edge excludes the window. Invalid or inverted bounds disable that door until corrected. These settings are independent of the arrow calibration.
 Save uses a temporary file and replacement; a failed replacement preserves the
 previous config.
 

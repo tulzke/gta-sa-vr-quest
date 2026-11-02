@@ -50,6 +50,8 @@ int g_pitchBase{};
 bool g_pitchEditing{};
 int g_editBase[3]{};
 Vec g_editDoorBase{};
+float g_panelBase[5]{},g_panelWidth{},g_panelHeight{};
+int g_panelCorner{};
 bool g_editDirty{};
 void* g_editVehicle{};
 
@@ -354,6 +356,15 @@ void AddMarker(MarkerFrame& frame,const Door& door,bool held,bool inside=false) 
     marker.hideArrow=inside;
     frame.markers[frame.count++]=inside?ReverseArrow(marker):marker;
 }
+Vec PanelCorner(const Door& d,int corner) {
+    return d.panel.Point({d.panelX,corner&1?d.ymax:d.ymin,corner&2?d.zmax:d.zmin});
+}
+void AddPanelCorners(MarkerFrame& frame,const Door& d,int held=-1) {
+    for(int i=0;i<4&&frame.count<MarkerFrame::kCapacity;++i) {
+        Marker m{PanelCorner(d,i),d.panel.forward,d.panel.up,i==held};
+        m.bikeGrip=true;frame.markers[frame.count++]=m;
+    }
+}
 void Publish(const MarkerFrame& frame) {
     g_worldMarkers=frame;PublishMarkers();
 }
@@ -654,7 +665,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         Publish(markers);return;
     }
 
-    int cockpitKind=g_editKind>=2?g_editKind:0;
+    int cockpitKind=(g_editKind==2||g_editKind==3)?g_editKind:0;
     if(editMode && seated && g_edit.hand<0 && g.CVehicle_IsDriver && g.CVehicle_IsDriver(seated,ped)) {
         driving::WheelVisualState wheel{}; driving::GetWheelVisualState(&wheel);
         Vec wheelPoint{}; float seatEye[3]{};
@@ -677,8 +688,11 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 Target target{seated,pool.identity,pool.objects,pool.flags,slot,2,kNodes[0],pool.flags[slot]};
                 Door door{};
                 if(ReadDoor(target,ped,door,true)&&Visible(eye,door.handle,seated))
-                    for(int h=0;h<2;++h) if(valid[h]&&editFresh[h]&&!(occupied&(1u<<h))&&Length(world[h]-door.handle)<best) {
-                        best=Length(world[h]-door.handle);cockpitKind=0;
+                    for(int h=0;h<2;++h) if(valid[h]&&editFresh[h]&&!(occupied&(1u<<h))) {
+                        const float handleDistance=Length(world[h]-door.handle);
+                        if(handleDistance<best){best=handleDistance;cockpitKind=0;}
+                        for(int corner=0;corner<4;++corner){const float cd=Length(world[h]-PanelCorner(door,corner));
+                            if(cd<.15f&&cd<best){best=cd;cockpitKind=0;}}
                     }
                 break;
             }
@@ -784,23 +798,31 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             markers.markers[markers.count++]={point,car.forward,car.up,g_edit.hand>=0};
         Publish(markers);return;
     }
-    if(editMode&&g_editKind==1&&g_edit.hand>=0) {
+    if(editMode&&(g_editKind==1||g_editKind==4)&&g_edit.hand>=0) {
         const int h=g_edit.hand;Door d;
         if(!g_editTarget.Live(pool)||!valid[h]||!std::isfinite(hands[h].trigger)||
            (g_editInside?seated!=g_editTarget.vehicle:seated!=nullptr)||
            !ReadDoor(g_editTarget,ped,d,g_editInside)||
            !g_edit.Step(d.panel.Local(world[h]))) { Reset();return; }
-        const Vec value=g_editDoorBase+g_edit.delta;
-        const float correction[]={value.x,value.y,value.z};
-        driving::SetDoorCalibration(g_editModel,g_editTarget.door,g_editInside,correction);
+        if(g_editKind==1) {
+            const Vec value=g_editDoorBase+g_edit.delta;
+            const float correction[]={value.x,value.y,value.z};
+            driving::SetDoorCalibration(g_editModel,g_editTarget.door,g_editInside,correction);
+        } else {
+            float value[5];std::copy_n(g_panelBase,5,value);
+            const int y=(g_panelCorner&1)?2:1,z=(g_panelCorner&2)?4:3;
+            value[y]+=std::clamp(g_edit.delta.y,(g_panelCorner&1)?-.0f-g_panelWidth+.10f:-2.f,(g_panelCorner&1)?2.f:g_panelWidth-.10f);
+            value[z]+=std::clamp(g_edit.delta.z,(g_panelCorner&2)?-.0f-g_panelHeight+.10f:-2.f,(g_panelCorner&2)?2.f:g_panelHeight-.10f);
+            driving::SetDoorPanelCalibration(g_editModel,g_editTarget.door,g_editInside,value);
+        }
         g_editDirty=true;
         if(hands[h].trigger<=.35f) { EndDebugEdit();g_claimed.store(0);return; }
         g_claimed.store(1u<<h,std::memory_order_relaxed);
-        ReadDoor(g_editTarget,ped,d,g_editInside);AddMarker(markers,d,true,g_editInside);
+        ReadDoor(g_editTarget,ped,d,g_editInside);AddMarker(markers,d,true,g_editInside);AddPanelCorners(markers,d,g_editKind==4?g_panelCorner:-1);
         Publish(markers);return;
     }
     float best=seated?.20f:.12f;Target chosen{};Door chosenDoor{};int chosenHand=-1;
-    float bestEdit=seated?.34f:.23f;Target editTarget{};Door editDoor{};int editHand=-1;
+    float bestEdit=seated?.34f:.23f;Target editTarget{};Door editDoor{};int editHand=-1,editCorner=-1;
     // Show only the nearest car's reachable side. Four arrows at most, and no
     // distant traffic markers. Selection is spatial; there is no enter-button gate.
     float nearest=2.2f;int nearestSlot=-1;
@@ -833,21 +855,30 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             (!seated && Dot(eye-d.car.position,d.car.right)*((i==0||i==2)?-1.f:1.f)<-.12f)||
             !Visible(eye,d.handle,t.vehicle)) continue;
         AddMarker(markers,d,false,seated!=nullptr);
+        if(editMode)AddPanelCorners(markers,d);
         for (int h=0;h<2;++h) {
             if (!valid[h]||(occupied&(1u<<h))) continue;
             const float distance=Length(world[h]-d.handle);
             const Vec local=d.panel.Local(world[h]);
             const float panelDistance=PanelDistance(local,d.panelX,d.ymin,d.ymax,d.zmin,d.zmax);
             if (fresh[h]&&panelDistance<best) { best=panelDistance;chosen=t;chosenDoor=d;chosenHand=h; }
-            if (editMode&&editFresh[h]&&distance<bestEdit) {bestEdit=distance;editTarget=t;editDoor=d;editHand=h;}
+            if (editMode&&editFresh[h]&&distance<bestEdit) {bestEdit=distance;editTarget=t;editDoor=d;editHand=h;editCorner=-1;}
+            if(editMode&&editFresh[h]) for(int corner=0;corner<4;++corner) {
+                const float cd=Length(world[h]-PanelCorner(d,corner));
+                if(cd<.15f&&cd<bestEdit){bestEdit=cd;editTarget=t;editDoor=d;editHand=h;editCorner=corner;}
+            }
         }
     }
     if(editMode&&editHand>=0) {
-        g_editTarget=editTarget;g_editInside=seated!=nullptr;g_editKind=1;
+        g_editTarget=editTarget;g_editInside=seated!=nullptr;g_editKind=editCorner<0?1:4;
         g_edit.Begin(editHand,editDoor.panel.Local(world[editHand]));
         g_editModel=Read<std::uint16_t>(editTarget.vehicle,0x32);
         float base[3]{};driving::GetDoorCalibration(g_editModel,editTarget.door,g_editInside,base);
         g_editDoorBase={base[0],base[1],base[2]};
+        if(editCorner>=0) {
+            g_panelCorner=editCorner;g_panelWidth=editDoor.ymax-editDoor.ymin;g_panelHeight=editDoor.zmax-editDoor.zmin;
+            driving::GetDoorPanelCalibration(g_editModel,editTarget.door,g_editInside,g_panelBase);
+        }
         g_claimed.store(1u<<editHand,std::memory_order_relaxed);
         xr::TriggerHaptic(editHand,.25f,0,30);
         Publish(markers);return;

@@ -3355,6 +3355,12 @@ void GetDoorPanelCalibration(int model,int door,bool inside,float out[5]) {
     const auto it=g_modelCalibration.find(model);
     if(it!=g_modelCalibration.end()) for(int a=0;a<5;++a)out[a]=it->second.doorPanel[door-2][inside][a]/100.f;
 }
+void SetDoorPanelCalibration(int model,int door,bool inside,const float value[5]) {
+    if(model<400||model>611||door<2||door>5)return;
+    for(int i=0;i<5;++i)if(!std::isfinite(value[i]))return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    for(int i=0;i<5;++i)g_modelCalibration[model].doorPanel[door-2][inside][i]=std::lround(std::clamp(value[i],-2.f,2.f)*100.f);
+}
 void GetBikeBarCalibration(int model,float out[3],float* halfWidth) {
     EnsureInit();std::fill_n(out,3,0.f);
     *halfWidth=g_value[F_BIKE_HALF_WIDTH].load()*.01f;
