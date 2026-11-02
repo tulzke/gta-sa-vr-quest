@@ -492,7 +492,11 @@ int main() {
     Write(car,0x68,Vec{.2f,0,0});CHECK(!StopCar(car,Now())); // door-only guard retained
     // The normal right-front clip requires a head grip and a forward/down push.
     Setup();Seat(0);Write(animationHierarchy,0,4u);Tick();
-    Write(reaction,0x38,20.f/30.f);Tick();animations[0].punchAfter=Now()-1;
+    CHECK(animations[0].phase==Phase::Preparing);npcgrab::PublishMarkers();
+    CHECK(xr::markers.count==1&&!xr::markers.markers[0].fist);
+    Write(reaction,0x38,13.f/30.f);Tick();CHECK(animations[0].phase==Phase::Preparing);
+    Write(reaction,0x38,14.f/30.f);Tick();animations[0].punchAfter=Now()-1;
+    CHECK(animations[0].phase==Phase::AwaitHit&&std::abs(Read<float>(reaction,0x38)-14.f/30.f)<.001f);
     CHECK(DashboardPush(animations[0]));npcgrab::PublishMarkers();
     CHECK(xr::markers.count==1&&!xr::markers.markers[0].fist);
     CHECK(std::abs(xr::markers.markers[0].strikeDirection.z+.5f)<.001f);
@@ -501,6 +505,7 @@ int main() {
     hands[0].gripPos[1]=-.2f;Tick();CHECK(animations[0].phase==Phase::AwaitHit);
     hands[0].gripPos[1]=.17f;hands[0].gripPos[2]=.9f;Tick();
     CHECK(animations[0].phase==Phase::Hit&&!headPush[0].ped);
+    CHECK(std::abs(Read<float>(reaction,0x38)-24.f/30.f)<.001f);
     Setup();Seat(0);Write(animationHierarchy,0,3u);Tick();
     Write(reaction,0x38,26.f/30.f);Tick();CHECK(!DashboardPush(animations[0]));
     // Door motion and an open/partly closed hand cannot trigger the prepared hit.

@@ -188,8 +188,9 @@ const PausePoint* AnimationPoint(void* anim) {
     return nullptr;
 }
 bool DashboardPush(const Animation& a) {
+    void* anim=a.pausedAssociation?a.pausedAssociation:a.ownedAssociation;
     return a.car&&a.doorNode==8&&Read<void*>(a.car,0x5a8)==a.target.ped&&
-        a.pausedAssociation&&AnimationPoint(a.pausedAssociation)==&pausePoints[3];
+        anim&&AnimationPoint(anim)==&pausePoints[3];
 }
 Vec DashboardDirection(void* car) {
     void* matrix=car?Read<void*>(car,0x18):nullptr;
@@ -536,8 +537,10 @@ bool BeginHit(Hold& h,bool preparing=false) {
         if (door<0||pending->phase!=Phase::AwaitHit||updated<pending->punchAfter) return false;
         void* anim=VictimAnimation(h.ped);
         if (!anim) return false;
+        const bool dashboard=DashboardPush(*pending);
         ResumePose(*pending);
-        ActionFeedback(h.ped,!DashboardPush(*pending));
+        if (dashboard) setAnimationTime(anim,24.f/30.f);
+        ActionFeedback(h.ped,!dashboard);
         pending->phase=Phase::Hit;pending->until=updated+8.0;
         SceneAudio(*pending,65); // AE_PED_HIT_HIGH_UNARMED, at the physical hit
         return true;
@@ -779,7 +782,7 @@ void PruneAnimations(const Pool& pool,double now) {
             a.until=now+8.0; // wider scene radius; reach/visibility gates only acquire actions
             if (a.phase==Phase::Preparing) if (void* anim=VictimAnimation(a.target.ped)) {
                 const auto* point=AnimationPoint(anim);
-                const float time=Read<float>(anim,0x38),pause=point?point->start:0.f;
+                const float time=Read<float>(anim,0x38),pause=DashboardPush(a)?14.f/30.f:(point?point->start:0.f);
                 if (std::isfinite(time)&&time>=pause) {
                     PausePose(a,anim,pause);a.phase=Phase::AwaitHit;
                     a.punchAfter=std::max(a.punchAfter,now+.2);
@@ -1238,7 +1241,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         auto& marker=worldMarkers.markers[worldMarkers.count++];
         // The torso grab hint needs extra clearance in front of the ped model.
         const auto* scene=BeforeHit(ped);
-        const bool pushing=scene&&scene->phase==Phase::AwaitHit&&DashboardPush(*scene);
+        const bool pushing=scene&&DashboardPush(*scene);
         marker={point+facing*(waiting?.30f:.18f),right,{0,0,1},near,!waiting&&!pushing};
         if (pushing) { marker.strikeDirection=DashboardDirection(scene->car);marker.arrowOut=true; }
         if (waiting) {
