@@ -55,7 +55,7 @@ int main(){
   Put(car,0x770+(seat+3)*0x18,0.f);CHECK(TryExit(car,seat,{2,0,1}));}
  Setup(-1);g.CVehicle_GetVehicleAppearance=[](const void*){return 1;};Put(car,0x32,std::uint16_t(471));
  Put(car,0x770+2*0x18,0.f);CHECK(TryExit(car,-1,{2,0,1}));
- for(int model:{531,424,568,571})for(int side:{-1,1}){
+ for(int model:{531,424,568,571,457,485,486,530,572})for(int side:{-1,1}){
   Setup(-1);Put(car,0x32,std::uint16_t(model));Put(car,0x77c+2*0x18,0.f);
   expectedNode=side<0?10:8;expectedX=side*2.f;CHECK(TryExit(car,-1,{side*2.f,0,1}));
  }

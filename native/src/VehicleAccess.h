@@ -8,9 +8,14 @@ struct Profile { int model; bool single; float halfWidth, seatX, seatY, seatZ; }
 inline const Profile* Find(int model) {
     static constexpr Profile profiles[]={
         {424,false,.85f,.38f,.0f,.65f}, // BF Injection
+        {457,false,.75f,.32f,.0f,.75f}, // Caddy
+        {485,true,.80f,0.f,.0f,.80f},   // Baggage
+        {486,true,1.45f,0.f,.0f,1.45f}, // Dozer
+        {530,true,.75f,0.f,.0f,.85f},   // Forklift
         {531,true,1.0f,0.f,.0f,1.05f}, // Tractor
         {568,false,.90f,.38f,.0f,.65f}, // Bandito
         {571,true,.65f,0.f,.0f,.65f},  // Kart
+        {572,true,.60f,0.f,.0f,.65f},  // Mower
     };
     for (const auto& profile:profiles) if (profile.model==model) return &profile;
     return nullptr;

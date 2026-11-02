@@ -280,12 +280,13 @@ int main() {
         CHECK(animations[0].phase==Phase::Hit&&sceneHits==1);
         CHECK(Read<float>(reaction,0x38)==(side<0?15.f/30.f:20.f/30.f));
     }
-    for(int model:{531,424,568})for(int side:{-1,1}) {
-        Setup();Seat(model!=531&&side>0?0:-1);Write<std::uint16_t>(car,0x32,std::uint16_t(model));
+    for(int model:{531,424,568,457,485,486,530,572})for(int side:{-1,1}) {
+        const bool single=vehicleaccess::Find(model)->single;
+        Setup();Seat(!single&&side>0?0:-1);Write<std::uint16_t>(car,0x32,std::uint16_t(model));
         Write(carMatrix,0x30,Vec{-float(side)*.6f,0,0});
         CHECK(ExitDoor(npc,player)==(side<0?2:3));
         Write(carMatrix,0x30,Vec{float(side)*.6f,0,0});
-        CHECK(ExitDoor(npc,player)==(model==531?(side<0?3:2):-1));
+        CHECK(ExitDoor(npc,player)==(single?(side<0?3:2):-1));
     }
     // A tractor driver can sit well inside the chassis; the head does not
     // have to cross its centre plane to advertise a reachable strike.

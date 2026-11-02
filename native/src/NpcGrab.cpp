@@ -64,7 +64,6 @@ MarkerFrame worldMarkers{};
 struct HandMotion { Vec previous{};bool valid{},clenched{}; } handMotion[2];
 struct Feedback { Marker marker{};double started{};bool active{}; } feedback[4];
 unsigned nextFeedback{};
-double lastSeatReport{};
 Vec Bone(void* ped,int bone);
 void* Manager(void* ped);
 void ActionFeedback(void* ped,bool fist) {
@@ -1163,28 +1162,6 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     }
     unsigned free=~(occupied|mask)&3u;
     for (int hand=0;hand<2;++hand) if (!hands[hand].valid||physicalweapon::IsSupportHand(hand)) free&=~(1u<<hand);
-    if(now-lastSeatReport>=1.0) for(int slot=0;slot<pool.size;++slot){
-        if(pool.flags[slot]&128)continue;
-        void* ped=getPed((slot<<8)|pool.flags[slot]);
-        if(!ped||ped==player||!Seated(ped))continue;
-        void* car=Read<void*>(ped,0x708);
-        if(!car||!vehicleaccess::Find(Read<std::uint16_t>(car,0x32)))continue;
-        const Vec pos=Position(ped);const float distance=Length(pos-Position(player));
-        if(!Finite(pos)||distance>4.f)continue;
-        lastSeatReport=now;
-        const int door=ExitDoor(ped,player);const Vec head=Bone(ped,5);
-        void* manager=Manager(ped);
-        const bool reachable=door>=0&&Finite(head)&&SeatReachable(ped,door,eye,head);
-        const bool visible=Finite(head)&&Visible(eye,head,ped,car);
-        const char* path="/sdcard/Android/data/com.rockstargames.gtasa/files/vr_vehicle_jack.log";
-        if(FILE* f=std::fopen(path,"a+")){
-            std::fseek(f,0,SEEK_END);if(std::ftell(f)>32768){std::fclose(f);f=std::fopen(path,"w");}
-            if(f){std::fprintf(f,"%.2f model=%u distance=%.2f free=%u dead=%d anim=%d manager=%d primary=%d door=%d reach=%d visible=%d speed=%.4f lock=%d\n",
-                now,unsigned(Read<std::uint16_t>(car,0x32)),distance,free,playerlife::Dead(ped),Animating(ped),manager!=nullptr,
-                manager&&Read<void*>(manager,0)!=nullptr,door,reachable,visible,Length(Read<Vec>(car,0x68)),canOpen(car,player));std::fclose(f);}
-        }
-        break;
-    }
     if (free) for (int slot=0;slot<pool.size&&worldMarkers.count<MarkerFrame::kCapacity;++slot) {
         if (pool.flags[slot]&128) continue;
         void* ped=getPed((slot<<8)|pool.flags[slot]);
