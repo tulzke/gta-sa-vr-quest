@@ -110,7 +110,7 @@ struct Marker {
     bool hideArrow{};
 };
 struct MarkerFrame {
-    static constexpr int kCapacity=12;
+    static constexpr int kCapacity=32;
     std::array<Marker,kCapacity> markers{};
     int count{};
     std::uint64_t epoch{};

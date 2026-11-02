@@ -44,18 +44,20 @@ void SetBikeGripCalibration(int,int grip,const float in[3]){std::copy_n(in,3,bik
 int debugMode{},saves{};
 std::map<int,std::array<float,24>> corrections;
 int GetVehicleDebugMode() {return debugMode;}
-std::map<int,std::array<float,40>> panelCorrections;
-void GetDoorPanelCalibration(int model,int door,bool inside,float out[5]) {
-    for(int a=0;a<5;++a)out[a]=panelCorrections[model][(door-2)*10+inside*5+a];
+std::map<int,std::array<float,48>> panelCorrections;
+void GetDoorPanelCalibration(int model,int door,bool inside,float out[6]) {
+    for(int a=0;a<6;++a)out[a]=panelCorrections[model][(door-2)*12+inside*6+a];
 }
-void SetDoorPanelCalibration(int model,int door,bool inside,const float in[5]) {
-    for(int a=0;a<5;++a)panelCorrections[model][(door-2)*10+inside*5+a]=in[a];
+void SetDoorPanelCalibration(int model,int door,bool inside,const float in[6]) {
+    for(int a=0;a<6;++a){panelCorrections[model][(door-2)*12+inside*6+a]=in[a];
+        panelCorrections[model][((door-2)^1)*12+inside*6+a]=a==0?-in[a]:in[a];}
 }
 void GetDoorCalibration(int model,int door,bool inside,float out[3]) {
     for(int a=0;a<3;++a) out[a]=corrections[model][(door-2)*6+inside*3+a];
 }
 void SetDoorCalibration(int model,int door,bool inside,const float in[3]) {
-    for(int a=0;a<3;++a) corrections[model][(door-2)*6+inside*3+a]=in[a];
+    for(int a=0;a<3;++a){corrections[model][(door-2)*6+inside*3+a]=in[a];
+        corrections[model][((door-2)^1)*6+inside*3+a]=a==0?-in[a]:in[a];}
 }
 void SaveDebugCalibration() {++saves;}
 bool bikeWheel{};
@@ -195,7 +197,7 @@ void AtHandle(int hand,int index=0) {
 void Ready(int hand=0) {
     hands[0]={};hands[1]={};AtHandle(hand);
     Tick(); // open hand arms the edge
-    CHECK(xr::published.count==(driving::debugMode?10:2)); // debug adds four corners per door
+    CHECK(xr::published.count==(driving::debugMode?14:2)); // debug adds six panel handles per door
 }
 void GrabIt(int hand=0) {
     Ready(hand);hands[hand].grip=1;Tick();
@@ -425,7 +427,17 @@ int main() {
       hands[0].gripPos[1]+=.1f;hands[0].gripPos[2]+=.1f;Tick();
       CHECK(std::abs(driving::panelCorrections[400][2]-.1f)<1e-4f);
       CHECK(std::abs(driving::panelCorrections[400][4]-.1f)<1e-4f);
+      CHECK(std::abs(driving::panelCorrections[400][14]-.1f)<1e-4f);
+      CHECK(std::abs(driving::panelCorrections[400][16]-.1f)<1e-4f);
       CHECK(driving::panelCorrections[400][0]==0);
+      hands[0].trigger=0;Tick();CHECK(driving::saves==1); }
+    Setup();driving::debugMode=1;Ready();
+    { Door d;Target t{vehicle,poolMemory,vehicles.data(),flags,0,2,10,flags[0]};CHECK(ReadDoor(t,pedMemory,d));
+      const Vec p=d.panel.Point({d.panelX+d.thickness,(d.ymin+d.ymax)*.5f,(d.zmin+d.zmax)*.5f});
+      std::memcpy(hands[0].gripPos,&p,12);Tick();hands[0].trigger=1;Tick();CHECK(g_editKind==4&&g_panelCorner==5);
+      hands[0].gripPos[0]+=.08f;Tick();
+      CHECK(std::abs(driving::panelCorrections[400][5]-.08f)<1e-4f);
+      CHECK(std::abs(driving::panelCorrections[400][17]-.08f)<1e-4f);
       hands[0].trigger=0;Tick();CHECK(driving::saves==1); }
     Setup();driving::debugMode=1;Ready();hands[0].trigger=1;Tick();
     hands[0].gripPos[2]+=.1f;Tick();Tick(true);

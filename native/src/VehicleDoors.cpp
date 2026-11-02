@@ -50,7 +50,7 @@ int g_pitchBase{};
 bool g_pitchEditing{};
 int g_editBase[3]{};
 Vec g_editDoorBase{};
-float g_panelBase[5]{},g_panelWidth{},g_panelHeight{};
+float g_panelBase[6]{},g_panelWidth{},g_panelHeight{},g_panelThickness{};
 int g_panelCorner{};
 bool g_editDirty{};
 void* g_editVehicle{};
@@ -119,7 +119,7 @@ struct Release { Target target{}; ReleasedMotion motion{}; bool active{},inside{
 struct Door {
     Basis car{},panel{};
     Vec hinge{},handle{},outward{},tangent{};
-    float angle{},closed{},open{},panelX{},ymin{},ymax{},zmin{},zmax{};
+    float angle{},closed{},open{},panelX{},ymin{},ymax{},zmin{},zmax{},thickness{};
 };
 
 Basis Matrix(void* matrix) {
@@ -203,10 +203,11 @@ bool ReadDoor(const Target& t,void* ped,Door& d,bool inside=false) {
     float correction[3]{};
     driving::GetDoorCalibration(model,t.door,inside,correction);
     d.handle=d.handle+panel.Vector({correction[0],correction[1],correction[2]});
-    float adjust[5]{};driving::GetDoorPanelCalibration(model,t.door,inside,adjust);
+    float adjust[6]{};driving::GetDoorPanelCalibration(model,t.door,inside,adjust);
     d.panelX=side*(inside?-.34f:.065f)+adjust[0];
     d.ymin=-length+adjust[1];d.ymax=-.22f+adjust[2];
     d.zmin=-.35f+adjust[3];d.zmax=.30f+adjust[4];
+    d.thickness=std::clamp((inside?.20f:.12f)+adjust[5],.02f,.5f);
     if(d.ymin>=d.ymax||d.zmin>=d.zmax)return false;
     d.outward=panel.right*side;
     Vec tangent=Cross(d.car.up,d.handle-panel.position)*(d.open>0?1.f:-1.f);
@@ -363,6 +364,10 @@ void AddPanelCorners(MarkerFrame& frame,const Door& d,int held=-1) {
     for(int i=0;i<4&&frame.count<MarkerFrame::kCapacity;++i) {
         Marker m{PanelCorner(d,i),d.panel.forward,d.panel.up,i==held};
         m.bikeGrip=true;frame.markers[frame.count++]=m;
+    }
+    for(int i=0;i<2&&frame.count<MarkerFrame::kCapacity;++i) {
+        const Vec p=d.panel.Point({d.panelX+(i?d.thickness:-d.thickness),(d.ymin+d.ymax)*.5f,(d.zmin+d.zmax)*.5f});
+        Marker m{p,d.panel.up,d.panel.forward,held==4+i};m.bikeGrip=true;frame.markers[frame.count++]=m;
     }
 }
 void Publish(const MarkerFrame& frame) {
@@ -693,6 +698,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                         if(handleDistance<best){best=handleDistance;cockpitKind=0;}
                         for(int corner=0;corner<4;++corner){const float cd=Length(world[h]-PanelCorner(door,corner));
                             if(cd<.15f&&cd<best){best=cd;cockpitKind=0;}}
+                        for(int side=0;side<2;++side){const Vec p=door.panel.Point({door.panelX+(side?door.thickness:-door.thickness),(door.ymin+door.ymax)*.5f,(door.zmin+door.zmax)*.5f});
+                            const float cd=Length(world[h]-p);if(cd<.10f&&cd<best){best=cd;cockpitKind=0;}}
                     }
                 break;
             }
@@ -809,10 +816,15 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const float correction[]={value.x,value.y,value.z};
             driving::SetDoorCalibration(g_editModel,g_editTarget.door,g_editInside,correction);
         } else {
-            float value[5];std::copy_n(g_panelBase,5,value);
-            const int y=(g_panelCorner&1)?2:1,z=(g_panelCorner&2)?4:3;
-            value[y]+=std::clamp(g_edit.delta.y,(g_panelCorner&1)?-.0f-g_panelWidth+.10f:-2.f,(g_panelCorner&1)?2.f:g_panelWidth-.10f);
-            value[z]+=std::clamp(g_edit.delta.z,(g_panelCorner&2)?-.0f-g_panelHeight+.10f:-2.f,(g_panelCorner&2)?2.f:g_panelHeight-.10f);
+            float value[6];std::copy_n(g_panelBase,6,value);
+            if(g_panelCorner>=4) {
+                const float change=g_edit.delta.x*(g_panelCorner==5?1.f:-1.f);
+                value[5]+=std::clamp(g_panelThickness+change,.02f,.5f)-g_panelThickness;
+            } else {
+                const int y=(g_panelCorner&1)?2:1,z=(g_panelCorner&2)?4:3;
+                value[y]+=std::clamp(g_edit.delta.y,(g_panelCorner&1)?-g_panelWidth+.10f:-2.f,(g_panelCorner&1)?2.f:g_panelWidth-.10f);
+                value[z]+=std::clamp(g_edit.delta.z,(g_panelCorner&2)?-g_panelHeight+.10f:-2.f,(g_panelCorner&2)?2.f:g_panelHeight-.10f);
+            }
             driving::SetDoorPanelCalibration(g_editModel,g_editTarget.door,g_editInside,value);
         }
         g_editDirty=true;
@@ -821,7 +833,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         ReadDoor(g_editTarget,ped,d,g_editInside);AddMarker(markers,d,true,g_editInside);AddPanelCorners(markers,d,g_editKind==4?g_panelCorner:-1);
         Publish(markers);return;
     }
-    float best=seated?.20f:.12f;Target chosen{};Door chosenDoor{};int chosenHand=-1;
+    float best=1e6f;Target chosen{};Door chosenDoor{};int chosenHand=-1;
     float bestEdit=seated?.34f:.23f;Target editTarget{};Door editDoor{};int editHand=-1,editCorner=-1;
     // Show only the nearest car's reachable side. Four arrows at most, and no
     // distant traffic markers. Selection is spatial; there is no enter-button gate.
@@ -861,11 +873,16 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const float distance=Length(world[h]-d.handle);
             const Vec local=d.panel.Local(world[h]);
             const float panelDistance=PanelDistance(local,d.panelX,d.ymin,d.ymax,d.zmin,d.zmax);
-            if (fresh[h]&&panelDistance<best) { best=panelDistance;chosen=t;chosenDoor=d;chosenHand=h; }
+            if (fresh[h]&&panelDistance<d.thickness&&panelDistance<best) { best=panelDistance;chosen=t;chosenDoor=d;chosenHand=h; }
             if (editMode&&editFresh[h]&&distance<bestEdit) {bestEdit=distance;editTarget=t;editDoor=d;editHand=h;editCorner=-1;}
             if(editMode&&editFresh[h]) for(int corner=0;corner<4;++corner) {
                 const float cd=Length(world[h]-PanelCorner(d,corner));
                 if(cd<.15f&&cd<bestEdit){bestEdit=cd;editTarget=t;editDoor=d;editHand=h;editCorner=corner;}
+            }
+            if(editMode&&editFresh[h]) for(int side=0;side<2;++side) {
+                const Vec p=d.panel.Point({d.panelX+(side?d.thickness:-d.thickness),(d.ymin+d.ymax)*.5f,(d.zmin+d.zmax)*.5f});
+                const float cd=Length(world[h]-p);
+                if(cd<.10f&&cd<bestEdit){bestEdit=cd;editTarget=t;editDoor=d;editHand=h;editCorner=4+side;}
             }
         }
     }
@@ -876,7 +893,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         float base[3]{};driving::GetDoorCalibration(g_editModel,editTarget.door,g_editInside,base);
         g_editDoorBase={base[0],base[1],base[2]};
         if(editCorner>=0) {
-            g_panelCorner=editCorner;g_panelWidth=editDoor.ymax-editDoor.ymin;g_panelHeight=editDoor.zmax-editDoor.zmin;
+            g_panelCorner=editCorner;g_panelWidth=editDoor.ymax-editDoor.ymin;g_panelHeight=editDoor.zmax-editDoor.zmin;g_panelThickness=editDoor.thickness;
             driving::GetDoorPanelCalibration(g_editModel,editTarget.door,g_editInside,g_panelBase);
         }
         g_claimed.store(1u<<editHand,std::memory_order_relaxed);
