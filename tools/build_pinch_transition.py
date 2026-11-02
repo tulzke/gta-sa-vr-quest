@@ -54,13 +54,14 @@ def fit(source, target, weight):
 
 def main():
     args = sys.argv[sys.argv.index('--') + 1:]
-    if len(args) != 3:
-        raise ValueError('Expected OPEN.uxrh PINCH.uxrh OUTPUT.uxrh')
+    if len(args) not in (3, 4) or (len(args) == 4 and args[3] not in ('left', 'right')):
+        raise ValueError('Expected OPEN.uxrh PINCH.uxrh OUTPUT.uxrh [left|right]')
     original, start = read(args[0])
     target_data, end = read(args[1])
     if len(original) != len(target_data) or not np.array_equal(start[:, 24:26], end[:, 24:26]):
         raise ValueError('Hand geometry does not match')
-    groups, w = weights(bpy.data.objects['HandRight'], start[:, 24:26])
+    side = args[3].capitalize() if len(args) == 4 else 'Right'
+    groups, w = weights(bpy.data.objects['Hand' + side], start[:, 24:26])
     x, final = start[:, :3], end[:, 9:12]
     normals, final_normals = start[:, 12:15], end[:, 21:24]
     transforms = []

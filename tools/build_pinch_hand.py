@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Convert an evaluated right-hand glTF binary into a matching UXRH pose.
+"""Convert an evaluated hand glTF binary into a matching UXRH pose.
 
-Export only the posed HandRight mesh from Blender to GLB, applying its armature
+Export only the posed hand mesh from Blender to GLB, applying its armature
 and preserving UVs. Pass the game hand as reference; vertex order may differ.
 """
 import argparse
@@ -52,6 +52,7 @@ def main():
     parser.add_argument('glb', type=Path)
     parser.add_argument('reference', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--side', choices=('left', 'right'), default='right')
     args = parser.parse_args()
     output = bytearray(args.reference.read_bytes())
     magic, version, vertices, indices = struct.unpack_from('<4sIII', output)
@@ -74,9 +75,11 @@ def main():
     for i, source in enumerate(mapping):
         x, y, z = pos[source]
         nx, ny, nz = norm[source]
-        # glTF object-space coordinates use centimetres. Game axes: X, -Z, Y.
-        xyz = (x * .01, -z * .01, y * .01)
-        normal = (nx, -nz, ny)
+        # glTF object-space coordinates use centimetres. Left and right game
+        # meshes use opposite handedness in their local Y coordinate.
+        side = 1 if args.side == 'left' else -1
+        xyz = (x * .01, side * z * .01, y * .01)
+        normal = (nx, side * nz, ny)
         if not all(math.isfinite(v) for v in xyz + normal):
             raise ValueError('Non-finite vertex')
         for pose in range(4):

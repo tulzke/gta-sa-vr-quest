@@ -8723,7 +8723,7 @@ struct UxrhVertex { float pos[4][3]; float nrm[4][3]; float u, v; };   // 104 by
 struct HandMesh   { std::vector<UxrhVertex> verts; std::vector<unsigned short> idx; bool loaded = false; };
 HandMesh g_handMesh[2];
 HandMesh g_ballPalmMesh[2];
-HandMesh g_rightPinchMesh;
+HandMesh g_pinchMesh[2];
 GLuint   g_handTex = 0;
 bool     g_handAssetsTried = false;
 
@@ -8770,7 +8770,8 @@ void EnsureHandAssets() {
     std::snprintf(path, sizeof(path), "%sBigHandRight.uxrh", dir); LoadUxrh(path, g_handMesh[1]);
     std::snprintf(path, sizeof(path), "%sBigHandLeftPalm.uxrh", dir);  LoadUxrh(path, g_ballPalmMesh[0]);
     std::snprintf(path, sizeof(path), "%sBigHandRightPalm.uxrh", dir); LoadUxrh(path, g_ballPalmMesh[1]);
-    std::snprintf(path, sizeof(path), "%sBigHandRightPinch.uxrh", dir); LoadUxrh(path, g_rightPinchMesh);
+    std::snprintf(path, sizeof(path), "%sBigHandLeftPinch.uxrh", dir); LoadUxrh(path, g_pinchMesh[0]);
+    std::snprintf(path, sizeof(path), "%sBigHandRightPinch.uxrh", dir); LoadUxrh(path, g_pinchMesh[1]);
     std::snprintf(path, sizeof(path), "%sBigHandsAlbedo.rgba", dir); g_handTex = LoadRgbaTexture(path, 1024, 1024);
 }
 
@@ -8946,10 +8947,10 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             }
         }
 
-        const bool pinch = hand == 1 && !(weaponHandMask & (1u << hand)) &&
+        const bool pinch = !(weaponHandMask & (1u << hand)) &&
             !steeringHand && !drivingWheel.ignitionGrabbed[hand] &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand) &&
-            g_rightPinchMesh.loaded && g_rightPinchMesh.verts.size() == g_handMesh[hand].verts.size();
+            g_pinchMesh[hand].loaded && g_pinchMesh[hand].verts.size() == g_handMesh[hand].verts.size();
         const float pinchWeight = pinch ? 1.0f - grip : 0.0f;
         const float pinchFrame = trig * 4.0f;
         const int pinchSegment = std::min(static_cast<int>(pinchFrame), 3);
@@ -8979,7 +8980,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             float nz = component(v.nrm[0][2], v.nrm[1][2],
                                        v.nrm[2][2], v.nrm[3][2]);
             if (pinchWeight > 0.0f) {
-                const UxrhVertex& target = g_rightPinchMesh.verts[vertex];
+                const UxrhVertex& target = g_pinchMesh[hand].verts[vertex];
                 const float rest = 1.0f - pinchWeight;
                 const auto pinchComponent = [&](bool normal, int axis) {
                     const float first = pinchSegment == 0

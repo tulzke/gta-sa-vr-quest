@@ -73,6 +73,7 @@ HAND_FILES = (
     "BigHandRight.uxrh",
     "BigHandLeftPalm.uxrh",
     "BigHandRightPalm.uxrh",
+    "BigHandLeftPinch.uxrh",
     "BigHandRightPinch.uxrh",
     "BigHandsAlbedo.rgba",
 )

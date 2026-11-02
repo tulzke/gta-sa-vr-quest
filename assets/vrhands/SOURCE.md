@@ -26,9 +26,9 @@ replace the ordinary controller hand meshes. Rebuild them with
 `tools/build_ultimatexr_palm_hands.py` after converting the official BigHands
 FBX files to embedded glTF.
 
-`BigHandRightPinch.uxrh` is a custom right-hand pinch pose made by the project
-user from the UltimateXR hand. It is used temporarily while pressing the right
-trigger with a free hand. Export the posed `HandRight` mesh from Blender to
+`BigHandLeftPinch.uxrh` and `BigHandRightPinch.uxrh` are custom pinch poses made
+by the project user from the UltimateXR hands. They are used temporarily while
+pressing the corresponding trigger with a free hand. Export the posed mesh from Blender to
 GLB with the armature modifier applied, then run
 `python tools/build_pinch_hand.py <posed.glb> assets/vrhands/BigHandRight.uxrh <endpoint.uxrh>`.
 The converter checks UV correspondence and topology before writing the pose.
@@ -36,6 +36,8 @@ Bake the four joint-aware transition frames using the original `.blend`:
 `blender -b <hand.blend> --python tools/build_pinch_transition.py -- assets/vrhands/BigHandRight.uxrh <endpoint.uxrh> assets/vrhands/BigHandRightPinch.uxrh`.
 The transition builder estimates joint rotations using the source mesh weights;
 the fourth frame retains the exact authored pinch endpoint.
+For the left hand, export `HandLeft`, pass `--side left` to the converter and
+pass `left` after the transition builder's three UXRH paths.
 
 UltimateXR is distributed under the MIT License. See
 `ULTIMATEXR_LICENSE.txt` in this directory.
