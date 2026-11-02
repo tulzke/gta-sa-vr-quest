@@ -8950,7 +8950,10 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             !steeringHand && !drivingWheel.ignitionGrabbed[hand] &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand) &&
             g_rightPinchMesh.loaded && g_rightPinchMesh.verts.size() == g_handMesh[hand].verts.size();
-        const float pinchWeight = pinch ? trig * (1.0f - grip) : 0.0f;
+        const float pinchWeight = pinch ? 1.0f - grip : 0.0f;
+        const float pinchFrame = trig * 4.0f;
+        const int pinchSegment = std::min(static_cast<int>(pinchFrame), 3);
+        const float pinchFraction = pinchFrame - pinchSegment;
         const float wO = (1 - grip) * (1 - trig), wG = grip * (1 - trig), wT = (1 - grip) * trig, wB = grip * trig;
         const HandMesh& m = basketballFlatPalm && g_ballPalmMesh[hand].loaded
             ? g_ballPalmMesh[hand] : g_handMesh[hand];
@@ -8978,12 +8981,19 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             if (pinchWeight > 0.0f) {
                 const UxrhVertex& target = g_rightPinchMesh.verts[vertex];
                 const float rest = 1.0f - pinchWeight;
-                lx = lx * rest + target.pos[0][0] * pinchWeight;
-                ly = ly * rest + target.pos[0][1] * pinchWeight;
-                lz = lz * rest + target.pos[0][2] * pinchWeight;
-                nx = nx * rest + target.nrm[0][0] * pinchWeight;
-                ny = ny * rest + target.nrm[0][1] * pinchWeight;
-                nz = nz * rest + target.nrm[0][2] * pinchWeight;
+                const auto pinchComponent = [&](bool normal, int axis) {
+                    const float first = pinchSegment == 0
+                        ? (normal ? v.nrm[0][axis] : v.pos[0][axis])
+                        : (normal ? target.nrm[pinchSegment - 1][axis] : target.pos[pinchSegment - 1][axis]);
+                    const float last = normal ? target.nrm[pinchSegment][axis] : target.pos[pinchSegment][axis];
+                    return first + (last - first) * pinchFraction;
+                };
+                lx = lx * rest + pinchComponent(false, 0) * pinchWeight;
+                ly = ly * rest + pinchComponent(false, 1) * pinchWeight;
+                lz = lz * rest + pinchComponent(false, 2) * pinchWeight;
+                nx = nx * rest + pinchComponent(true, 0) * pinchWeight;
+                ny = ny * rest + pinchComponent(true, 1) * pinchWeight;
+                nz = nz * rest + pinchComponent(true, 2) * pinchWeight;
             }
             // UXR local axes: X->forward (wrist pulled 5.5cm back), Z->right, Y->-up.
             const XrVector3f wp = vadd(vadd(vadd(pos, vscale(forward, lx - 0.055f)), vscale(right, lz)), vscale(up, -ly));
