@@ -8834,12 +8834,14 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             forward={drivingWheel.ignitionNormal[0],drivingWheel.ignitionNormal[1],drivingWheel.ignitionNormal[2]};
             const float a=drivingWheel.ignitionAngle;
             up=vnorm(vadd(vscale(ku,std::cos(a)),vscale(kr,std::sin(a))));
+            // Rotate the pinching hand 90 degrees clockwise around the key axis.
+            up=vnorm(vcross(up,forward));
             right=vnorm(vcross(up,forward));
             if (hand==0) right=vscale(right,-1.0f);
             // Pinch mesh fingertips extend ~7.5 cm from its render origin and
             // sit ~4.5 cm below it. Place the palm in front of the key while
             // thumb and index meet at the key, for both mirrored hands.
-            pos=vadd(pos,vadd(vscale(forward,-.075f),vscale(up,.045f)));
+            pos=vadd(pos,vadd(vscale(forward,-.120f),vscale(up,.045f)));
             pos=vadd(pos,vscale(right,hand==0?.025f:-.025f));
             grip=trig=0.0f;
         } else if (steeringHand) {
@@ -10794,7 +10796,7 @@ void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
         const float a=6.2831853f*i/N;
         const XrVector3f p=vadd(c,vadd(vscale(r,.035f*std::cos(a)),vscale(u,.035f*std::sin(a))));
         verts[(i+1)*3]=p.x;verts[(i+1)*3+1]=p.y;verts[(i+1)*3+2]=p.z;
-        const XrVector3f back=vadd(p,vscale(n,-.006f));
+        const XrVector3f back=vadd(p,vscale(n,.006f));
         verts[(N+i+1)*3]=back.x;verts[(N+i+1)*3+1]=back.y;verts[(N+i+1)*3+2]=back.z;
         const auto a0=static_cast<unsigned short>(i+1), a1=static_cast<unsigned short>((i+1)%N+1);
         const auto b0=static_cast<unsigned short>(N+i+1), b1=static_cast<unsigned short>(N+(i+1)%N+1);
@@ -10807,8 +10809,11 @@ void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
     float boxes[8*3*20]{};unsigned short indices[36*20]{};int vc=0,ic=0;
     const XrVector3f keyUp=vnorm(vadd(vscale(u,std::cos(w.ignitionAngle)),vscale(r,std::sin(w.ignitionAngle))));
     const XrVector3f keyRight=vnorm(vcross(keyUp,n));
-    AppendDrivingBox(boxes,vc,indices,ic,vadd(c,vscale(n,.004f)),keyUp,keyRight,n,.030f,.006f,.004f);
-    AppendDrivingBox(boxes,vc,indices,ic,vadd(vadd(c,vscale(keyUp,.020f)),vscale(n,.004f)),keyRight,keyUp,n,.014f,.007f,.004f);
+    // The key head stands perpendicular to the circular face and protrudes
+    // towards the driver, instead of lying flat on the far side of the lock.
+    const XrVector3f head=vadd(c,vscale(n,-.027f));
+    AppendDrivingBox(boxes,vc,indices,ic,head,keyUp,keyRight,n,.030f,.004f,.027f);
+    AppendDrivingBox(boxes,vc,indices,ic,vadd(head,vscale(keyUp,.020f)),keyRight,keyUp,n,.014f,.007f,.027f);
     DrawDrivingBoxes(mvp,boxes,vc,indices,ic,.72f,.72f,.72f);
     if (!w.ignitionHint) return;
     vc=ic=0;
