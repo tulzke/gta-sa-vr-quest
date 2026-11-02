@@ -294,6 +294,16 @@ int main() {
     Write(carMatrix,0x30,Vec{.7f,0,0});Write(npc,8,Vec{.95f,.3f,0});
     CHECK(ExitDoor(npc,player)==2);
     CHECK(SeatReachable(npc,2,Vec{0,0,1},Vec{.95f,.3f,1}));
+    // Right-side tractor uses a head grip and push without starting a task on approach.
+    Setup();Seat();Write<std::uint16_t>(car,0x32,531);
+    Write(carMatrix,0x30,Vec{-.6f,0,0});Write(npc,8,Vec{.2f,.3f,0});
+    Write(animationHierarchy,0,4u);hands[0].gripPos[0]=.2f;hands[0].gripPos[1]=.3f;
+    Tick();npcgrab::PublishMarkers();CHECK(!animationStarts&&xr::markers.count==1&&!xr::markers.markers[0].fist);
+    hands[0].grip=1;Tick();CHECK(headPush[0].ped==npc&&!animationStarts);
+    hands[0].gripPos[1]+=.17f;hands[0].gripPos[2]-=.1f;Tick();
+    CHECK(animations[0].phase==Phase::Hit&&animatedNode==8&&sceneHits==1);
+    CHECK(std::abs(Read<float>(reaction,0x38)-24.f/30.f)<.001f);
+    WaitForGrip();CHECK(animations[0].phase==Phase::Waiting);
     // A detached ordinary door follows the same direct strike path, while
     // its opposite intact door remains subject to its own state.
     Setup();Seat();Write<std::uint8_t>(car,0x758+9+2,4);

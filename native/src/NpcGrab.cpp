@@ -199,6 +199,10 @@ Vec DashboardDirection(void* car) {
     const float length=std::hypot(forward.x,forward.y);
     return length>.001f?Vec{.8660254f*forward.x/length,.8660254f*forward.y/length,-.5f}:Vec{};
 }
+bool TractorRight(void* ped,int door) {
+    void* car=Read<void*>(ped,0x708);
+    return car&&door==3&&Read<std::uint16_t>(car,0x32)==531&&Read<void*>(car,0x5a0)==ped;
+}
 float PauseTime(void* anim) {
     // Retail arm64 Init stores m_BlendHier at +0x28; SetName stores its
     // uppercase CKeyGen hash at +0. IDs 378/379 alone do not identify the clip.
@@ -529,7 +533,7 @@ void ReportCarjack(Animation& pending,void* player) {
     draggedDtor(event);
 }
 void CancelHit(Animation& a,bool react);
-bool BeginHit(Hold& h,bool preparing=false) {
+bool BeginHit(Hold& h,bool preparing=false,bool directPush=false) {
     const int door=ExitDoor(h.ped,owner);
     void* vehicle=Read<void*>(h.ped,0x708);
     const bool openVehicle=vehicleaccess::DoorAbsent(vehicle,door);
@@ -583,8 +587,8 @@ bool BeginHit(Hold& h,bool preparing=false) {
     if (openVehicle) {
         const auto* point=pending->ownedAssociation?AnimationPoint(pending->ownedAssociation):nullptr;
         if (!point) { CancelHit(*pending,false);return false; }
-        setAnimationTime(pending->ownedAssociation,point->start);
-        ActionFeedback(h.ped,true);
+        setAnimationTime(pending->ownedAssociation,directPush&&point==&pausePoints[3]?24.f/30.f:point->start);
+        ActionFeedback(h.ped,!directPush);
         SceneAudio(*pending,65);
     }
     return true;
@@ -597,6 +601,7 @@ bool PunchAtSeat(const Pool& pool,void* player,Vec eye,Vec p,Vec previous) {
                 if (!ped||ped==player||playerlife::Dead(ped)||!Seated(ped)||
                     (Animating(ped)&&!BeforeHit(ped))||Waiting(ped)||isPlayer(ped)) continue;
                 const int door=ExitDoor(ped,player);if (door<0) continue;
+                if (TractorRight(ped,door)) continue;
                 if (auto* scene=BeforeHit(ped);scene&&DashboardPush(*scene)) continue;
                 const Vec head=Bone(ped,5),travel=p-previous;
                 const float length=Dot(travel,travel);
@@ -1107,14 +1112,16 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         auto& push=headPush[hand];
         if (push.ped) {
             auto* scene=BeforeHit(push.ped);
-            if (!good||hands[hand].grip<=.35f||!push.Live(pool)||!scene||
-                scene->phase!=Phase::AwaitHit||!DashboardPush(*scene)||Length(p-push.previous)>.6f) {
+            const int door=push.Live(pool)?ExitDoor(push.ped,player):-1;
+            const bool direct=door>=0&&TractorRight(push.ped,door)&&!scene&&!Animating(push.ped);
+            if (!good||hands[hand].grip<=.35f||!push.Live(pool)||
+                (!direct&&(!scene||scene->phase!=Phase::AwaitHit||!DashboardPush(*scene)))||Length(p-push.previous)>.6f) {
                 push={};
             } else {
                 push.previous=p;mask|=1u<<hand;
-                const Vec direction=DashboardDirection(scene->car),travel=p-push.start;
+                const Vec direction=DashboardDirection(direct?Read<void*>(push.ped,0x708):scene->car),travel=p-push.start;
                 if (Length(direction)>.9f&&Dot(travel,direction)>=.15f&&
-                    Dot(travel,direction)>=Length(travel)*.7f&&BeginHit(push)) {
+                    Dot(travel,direction)>=Length(travel)*.7f&&BeginHit(push,false,direct)) {
                     push={};intent[hand]=false;extracted[hand]=true;
                     xr::TriggerHaptic(hand,.6f,80.f,45.f);
                 }
@@ -1122,6 +1129,18 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             }
         }
         if (good&&intent[hand]&&hands[hand].grip>=.65f) {
+            const auto& candidate=approach[hand];
+            if (candidate.Live(pool)&&headPush[1-hand].ped!=candidate.ped&&
+                !BeforeHit(candidate.ped)&&!Animating(candidate.ped)&&
+                TractorRight(candidate.ped,ExitDoor(candidate.ped,player))) {
+                const Vec head=Bone(candidate.ped,5);
+                void* car=Read<void*>(candidate.ped,0x708);
+                if (Finite(head)&&Length(p-head)<.30f&&Visible(p,head,candidate.ped,car)) {
+                    push=candidate;push.start=push.previous=p;intent[hand]=false;mask|=1u<<hand;
+                    xr::TriggerHaptic(hand,.3f,80.f,25.f);
+                }
+            }
+            if (push.ped) continue;
             for (auto& scene:animations) {
                 if (scene.phase!=Phase::AwaitHit||updated<scene.punchAfter||!DashboardPush(scene)||
                     !scene.target.Live(pool)||headPush[1-hand].ped==scene.target.ped) continue;
@@ -1241,9 +1260,9 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         auto& marker=worldMarkers.markers[worldMarkers.count++];
         // The torso grab hint needs extra clearance in front of the ped model.
         const auto* scene=BeforeHit(ped);
-        const bool pushing=scene&&DashboardPush(*scene);
+        const bool pushing=(scene&&DashboardPush(*scene))||(!waiting&&TractorRight(ped,door));
         marker={point+facing*(waiting?.30f:.18f),right,{0,0,1},near,!waiting&&!pushing};
-        if (pushing) { marker.strikeDirection=DashboardDirection(scene->car);marker.arrowOut=true; }
+        if (pushing) { marker.strikeDirection=DashboardDirection(Read<void*>(ped,0x708));marker.arrowOut=true; }
         if (waiting) {
             void* car=Read<void*>(ped,0x708);
             void* matrix=car?Read<void*>(car,0x18):nullptr;
