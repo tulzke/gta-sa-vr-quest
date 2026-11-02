@@ -1,6 +1,7 @@
 #include "VehicleExit.h"
 #include "VehicleEntry.h"
 #include "Symbols.h"
+#include "Log.h"
 #include <cstring>
 #include <dlfcn.h>
 namespace savr::vehicleexit {
@@ -42,12 +43,43 @@ bool TryExit(void* car,int seat,Vec hint){
  if(Read<std::uint8_t>(car,0x758+9+door)!=4&&(!std::isfinite(open)||!std::isfinite(angle)||std::abs(open)<.3f||angle/open<.45f))return false;
  }
  void* intelligence=Read<void*>(ped,0x538);if(!intelligence)return false;
- GameSymbols::Vec3 destination{hint.x,hint.y,hint.z};
- if(!ground(&destination)||!Finite({destination.x,destination.y,destination.z})||std::abs(destination.z-hint.z)>1.5f)return false;
- for(float height:{-.35f,.35f}){
-  const GameSymbols::Vec3 centre{destination.x,destination.y,destination.z+height};
-  if(g.CWorld_TestSphereAgainstWorld(centre,.3f,ped,true,true,true,true,true,false))return false;
+ // The marker is just outside the door hinge, but body spheres can overlap a
+ // wide car there. Search a short distance outward only when that car blocks
+ // the initial point; never skip another obstacle or an obstructed path.
+ void* matrix=Read<void*>(car,0x18);
+ if(!matrix)return false;
+ Basis basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+ if(!basis.Valid())return false;
+ const float side=Dot(hint-basis.position,basis.right)<0?-1.f:1.f;
+ GameSymbols::Vec3 destination{};
+ bool found=false;
+ for(float distance:{0.f,.25f,.5f,.75f}) {
+  const Vec candidate=hint+basis.right*(side*distance);
+  GameSymbols::Vec3 point{candidate.x,candidate.y,candidate.z};
+  if(!ground(&point)||!Finite({point.x,point.y,point.z})||std::abs(point.z-hint.z)>1.5f)break;
+  bool carBlocked=false,otherBlocked=false;
+  for(float height:{-.35f,.35f}) {
+   const GameSymbols::Vec3 centre{point.x,point.y,point.z+height};
+   void* hit=g.CWorld_TestSphereAgainstWorld(centre,.3f,ped,true,true,true,true,true,false);
+   if(hit==car)carBlocked=true;else if(hit)otherBlocked=true;
+  }
+  if(otherBlocked)break;
+  if(carBlocked)continue;
+  if(distance>0) {
+   if(!g.CWorld_ProcessLineOfSight||!g.CWorld_pIgnoreEntity)break;
+   void* previous=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=car;
+   bool blocked=false;
+   for(float height:{-.35f,.35f}) {
+    const GameSymbols::Vec3 from{hint.x,hint.y,point.z+height},to{point.x,point.y,point.z+height};
+    alignas(8) unsigned char col[0x2c]{};void* hit{};
+    if(g.CWorld_ProcessLineOfSight(&from,&to,col,&hit,true,true,true,true,true,false,false,false)) {blocked=true;break;}
+   }
+   *g.CWorld_pIgnoreEntity=previous;
+   if(blocked)break;
+  }
+  destination=point;found=true;break;
  }
+ if(!found){LOGI("[vehicle-exit] no safe placement near open door");return false;}
  void* manager=static_cast<char*>(intelligence)+8;
  // Remove only a driving primary task. Mission tasks remain owned by the game.
  if(void* task=Read<void*>(manager,3*8)){
@@ -62,10 +94,10 @@ bool TryExit(void* car,int seat,Vec hint){
  alignas(16) std::uint8_t task[0x28]{};
  outCtor(task,car,nodes[seat+1],false);task[0x1f]=1;
  const bool processed=outProcess(task,ped);outDtor(task);
- if(!processed||vehicleentry::SeatIndex(car,ped)!=-2)return false;
+ if(!processed||vehicleentry::SeatIndex(car,ped)!=-2){LOGI("[vehicle-exit] native detach failed (processed=%d)",processed);return false;}
  worldRemove(ped);
  Vec position{destination.x,destination.y,destination.z};
- void* matrix=Read<void*>(ped,0x18);
+ matrix=Read<void*>(ped,0x18);
  std::memcpy(static_cast<char*>(matrix?matrix:ped)+(matrix?0x30:8),&position,sizeof(position));
  const Vec zero{};std::memcpy(static_cast<char*>(ped)+0x68,&zero,sizeof(zero));
  worldAdd(ped);
