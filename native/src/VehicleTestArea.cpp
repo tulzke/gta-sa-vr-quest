@@ -501,6 +501,15 @@ template<class Fn> bool Hook(void* target,const std::array<std::uint32_t,4>& exp
 }
 } // namespace
 
+bool FindExitGround(float x,float y,float z,float* outZ) {
+    const Vec p{x,y,z};
+    if(!outZ||state!=State::Active||!InBounds(p))return false;
+    float floorZ{};
+    if(!Ground(p,floorZ))return false;
+    *outZ=floorZ+1.f;
+    return true;
+}
+
 void Install(void* handle) {
     if(!handle||api.ready)return;
 #define RESOLVE(field,name) api.field=reinterpret_cast<decltype(api.field)>(dlsym(handle,name))

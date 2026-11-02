@@ -5,7 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 namespace savr { GameSymbols g{};
-namespace vehicleentry {int SeatIndex(void* car,void* ped){void* p{};std::memcpy(&p,static_cast<char*>(car)+0x5a0,8);if(p==ped)return -1;for(int i=0;i<3;++i){std::memcpy(&p,static_cast<char*>(car)+0x5a8+i*8,8);if(p==ped)return i;}return -2;}}
+namespace testarea { bool active{}; bool FindExitGround(float,float,float,float* z){if(!active)return false;*z=1;return true;} }
+namespace vehicleentry {bool obstructed=true;bool ExitObstructed(void*,int){return obstructed;} int SeatIndex(void* car,void* ped){void* p{};std::memcpy(&p,static_cast<char*>(car)+0x5a0,8);if(p==ped)return -1;for(int i=0;i<3;++i){std::memcpy(&p,static_cast<char*>(car)+0x5a8+i*8,8);if(p==ped)return i;}return -2;}}
 }
 #define LOGI(...) ((void)0)
 // PRODUCTION_EXIT
@@ -16,7 +17,7 @@ void* vtable[6]{};void* current{};int selected{},ctorCalls{},processCalls{},dtor
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 void Setup(int seat){
  std::memset(car,0,sizeof(car));std::memset(ped,0,sizeof(ped));std::memset(pad,0,sizeof(pad));std::memset(intelligence,0,sizeof(intelligence));
- current=car;selected=seat;ctorCalls=processCalls=dtorCalls=removes=adds=clears=0;wall=false;terrain=true;carOverlap=false;pathBlocked=false;emergencyTask=false;ownRoom=false;oppositeRoom=false;ignored=obstacle;expectedX=2;taskType=725;
+ current=car;selected=seat;ctorCalls=processCalls=dtorCalls=removes=adds=clears=0;testarea::active=false;vehicleentry::obstructed=true;wall=false;terrain=true;carOverlap=false;pathBlocked=false;emergencyTask=false;ownRoom=false;oppositeRoom=false;ignored=obstacle;expectedX=2;taskType=725;
  Put(car,seat<0?0x5a0:0x5a8+seat*8,static_cast<void*>(ped));Put(car,0x770+(seat+3)*0x18,1.f);Put(car,0x77c+(seat+3)*0x18,.8f);
  Put(car,0x18,static_cast<void*>(carMatrix));Put(carMatrix,0,Vec{1,0,0});Put(carMatrix,0x10,Vec{0,1,0});Put(carMatrix,0x20,Vec{0,0,1});Put(carMatrix,0x30,Vec{});
  Put(ped,0x18,static_cast<void*>(matrix));Put(ped,0x538,static_cast<void*>(intelligence));
@@ -43,6 +44,8 @@ int main(){
  Setup(-1);CHECK(EmergencyAvailable(car,-1));emergencyTask=true;CHECK(TryExit(car,-1,{2,0,1},true)&&removes==0);
  Setup(-1);ownRoom=true;CHECK(!EmergencyAvailable(car,-1));CHECK(!TryExit(car,-1,{2,0,1},true));
  Setup(-1);oppositeRoom=true;CHECK(!EmergencyAvailable(car,-1));Put(car,0x5a8,static_cast<void*>(obstacle));CHECK(EmergencyAvailable(car,-1));
+ Setup(-1);terrain=false;testarea::active=true;CHECK(TryExit(car,-1,{2,0,1}));
+ Setup(-1);vehicleentry::obstructed=false;CHECK(!EmergencyAvailable(car,-1));
  Setup(-1);terrain=false;CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0);
  Setup(-1);Put(car,0x68,Vec{1,0,0});CHECK(!TryExit(car,-1,{2,0,1})&&ctorCalls==0);
  for(int seat:{-1,0}){Setup(seat);g.CVehicle_GetVehicleAppearance=[](const void*){return 2;};

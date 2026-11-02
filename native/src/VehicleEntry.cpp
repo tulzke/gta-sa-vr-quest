@@ -52,6 +52,29 @@ int SeatIndex(void* car,void* ped){
  for(int i=0;i<3;++i)if(Read<void*>(car,0x5a8+i*8)==ped)return i;
  return -2;
 }
+bool ExitObstructed(void* car,int seat){
+ if(!car||seat<-1||seat>2||!frameLtm||!g.CWorld_ProcessLineOfSight)return false;
+ float origin[3]{},direction[3]{};
+ if(!vrcam::GetHeadWorldRay(origin,direction))return false;
+ void* matrix=Read<void*>(car,0x18);if(!matrix)return false;
+ Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+ if(!b.Valid())return false;
+ const Vec eye{origin[0],origin[1],origin[2]};
+ auto blocked=[&](int index,bool& result){
+  void* frame=Read<void*>(car,0x800+nodes[index]*8);
+  if(!frame)return false;
+  void* door=frameLtm(frame);if(!door)return false;
+  const Vec hinge=b.Local(Read<Vec>(door,0x30));if(!Finite(hinge))return false;
+  const float side=(index==0||index==2)?-1.f:1.f;
+  const Vec point=b.Point({hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f});
+  result=!ClearExit(eye,point,car);return true;
+ };
+ const int index=seat+1,opposite=(index^1)-1;
+ bool ownBlocked=false,otherBlocked=false;
+ if(!blocked(index,ownBlocked)||!ownBlocked)return false;
+ if(Read<void*>(car,opposite<0?0x5a0:0x5a8+opposite*8))return true;
+ return blocked(index^1,otherBlocked)&&otherBlocked;
+}
 unsigned ClaimedHands(){return claimed;}
 void Install(void* h){
  vehicleexit::Install(h);
@@ -186,7 +209,7 @@ void Update(bool usable,std::uint64_t epoch){
     emergency=canLeave&&!normal&&vehicleexit::EmergencyAvailable(car,currentSeat);
     actionable=normal||emergency;
    }
-   if(!editing&&!actionable)continue;
+   if(!actionable&&(!editing||exit))continue;
    Marker m{p,forward,{0,0,1}};m.seatIcon=exit?3:(seat<0?1:2);
    if(icons.count>=icons.kCapacity)continue;
    const int icon=icons.count;icons.markers[icons.count++]=m;

@@ -19,9 +19,9 @@ namespace boatentry {int calls{},seat{};bool success=true;bool SeatPlayer(void*,
 // PRODUCTION_ENTRY
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
-char cars[110*0xc68]{},pool[32]{},matrix[64]{},doorMatrix[64]{},rearMatrix[64]{},ped[64]{},pad[0x140]{};
+char cars[110*0xc68]{},pool[32]{},matrix[64]{},doorMatrix[64]{},rearMatrix[64]{},leftMatrix[64]{},ped[64]{},pad[0x140]{};
 unsigned char flags[110];void* poolPtr=pool;void* current{};
-bool Ray(const savr::GameSymbols::Vec3*,const savr::GameSymbols::Vec3*,void*,void** hit,bool,bool,bool,bool,bool,bool,bool,bool){*hit=nullptr;return false;}
+bool blockedLeft=false,blockedRight=false; bool Ray(const savr::GameSymbols::Vec3*,const savr::GameSymbols::Vec3* end,void*,void** hit,bool,bool,bool,bool,bool,bool,bool,bool){bool blocked=end->x<0?blockedLeft:blockedRight;*hit=blocked?pad:nullptr;return blocked;}
 void Tick(float dt=.1f){testNow+=dt;savr::vehicleentry::Update(true,1);}
 int main(){
  using namespace savr;using namespace vehicleentry;
@@ -60,6 +60,17 @@ int main(){
  for(int i=0;i<2;++i)Tick();CHECK(vrcam::exits==1);
  for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=0;Tick();Put(cars,0x77c+3*0x18,0.f);xr::input.leftStick[0]=1;
  for(int i=0;i<20;++i)Tick();CHECK(vrcam::exits==1);
+ // Closed doors are not treated as blocked just because native ground lookup fails.
+ Put(leftMatrix,0x30,Vec{-1,.35f,.4f});Put(cars,0x800+10*8,static_cast<void*>(leftMatrix));
+ blockedLeft=false;blockedRight=false;CHECK(!ExitObstructed(cars,0));
+ blockedRight=true;CHECK(!ExitObstructed(cars,0));
+ blockedLeft=true;CHECK(ExitObstructed(cars,0));
+ blockedLeft=false;Put(cars,0x5a0,static_cast<void*>(ped));CHECK(ExitObstructed(cars,0));
+ Put(cars,0x5a0,static_cast<void*>(nullptr));blockedLeft=blockedRight=false;
+ // Debug calibration can show seat markers, but never an unavailable exit beacon.
+ driving::debug=1;xr::input.leftStick[0]=0;Tick();
+ for(int i=0;i<icons.count;++i)CHECK(icons.markers[i].seatIcon!=3);
+ driving::debug=0;
  // A closed, blocked doorway offers the same hold for a native emergency exit.
  vehicleexit::emergencyAvailable=true;xr::input.leftStick[0]=0;Tick();xr::input.leftStick[0]=1;
  for(int i=0;i<12;++i)Tick();CHECK(vrcam::exits==2&&vehicleexit::lastEmergency);

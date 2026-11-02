@@ -1,5 +1,6 @@
 #include "VehicleExit.h"
 #include "VehicleEntry.h"
+#include "VehicleTestArea.h"
 #include "Symbols.h"
 #include "Log.h"
 #include <cstring>
@@ -33,7 +34,7 @@ void Install(void* h){
 #undef LOAD
 }
 bool EmergencyAvailable(void* car,int seat){
- if(!car||seat<-1||seat>2||!roomToLeave)return false;
+ if(!car||seat<-1||seat>2||!roomToLeave||!vehicleentry::ExitObstructed(car,seat))return false;
  constexpr int nodes[]={10,8,11,9};
  const int index=seat+1;
  if(roomToLeave(car,nodes[index],nullptr))return false;
@@ -42,9 +43,13 @@ bool EmergencyAvailable(void* car,int seat){
  return occupied||!roomToLeave(car,nodes[index^1],nullptr);
 }
 bool TryExit(void* car,int seat,Vec hint,bool emergency){
- if(!car||seat<-1||seat>2||!Finite(hint)||!outCtor||!outProcess||!outDtor||!ground||!worldRemove||!worldAdd||!setTask||!healthy||!canStepOut||!g.FindPlayerPed||!g.FindPlayerVehicle||!g.CPad_GetPad||!g.CWorld_TestSphereAgainstWorld)return false;
+ if(!car||seat<-1||seat>2||!Finite(hint)||!outCtor||!outProcess||!outDtor||!ground||!worldRemove||!worldAdd||!setTask||!healthy||!canStepOut||!g.FindPlayerPed||!g.FindPlayerVehicle||!g.CPad_GetPad||!g.CWorld_TestSphereAgainstWorld){
+  LOGI("[vehicle-exit] missing dependency or invalid request seat=%d",seat);return false;
+ }
  void* ped=g.FindPlayerPed(-1);void* pad=g.CPad_GetPad(0);
- if(!ped||!pad||g.FindPlayerVehicle(-1,false)!=car||vehicleentry::SeatIndex(car,ped)!=seat||Read<std::uint16_t>(pad,0x110)||Read<std::uint8_t>(pad,0x12d)||!healthy(ped)||!canStepOut(car,false))return false;
+ if(!ped||!pad||g.FindPlayerVehicle(-1,false)!=car||vehicleentry::SeatIndex(car,ped)!=seat||Read<std::uint16_t>(pad,0x110)||Read<std::uint8_t>(pad,0x12d)||!healthy(ped)||!canStepOut(car,false)){
+  LOGI("[vehicle-exit] player, seat or controls no longer eligible");return false;
+ }
  const Vec speed=Read<Vec>(car,0x68);if(!Finite(speed)||Length(speed)>.02f)return false;
  const bool bike=Read<std::uint16_t>(car,0x32)==471||
      (g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2);
@@ -69,7 +74,10 @@ bool TryExit(void* car,int seat,Vec hint,bool emergency){
   if(emergency)break;
   const Vec candidate=hint+basis.right*(side*distance);
   GameSymbols::Vec3 point{candidate.x,candidate.y,candidate.z};
-  if(!ground(&point)||!Finite({point.x,point.y,point.z})||std::abs(point.z-hint.z)>1.5f)break;
+  float floorZ{};
+  if(testarea::FindExitGround(point.x,point.y,point.z,&floorZ))point.z=floorZ;
+  else if(!ground(&point))break;
+  if(!Finite({point.x,point.y,point.z})||std::abs(point.z-hint.z)>1.5f)break;
   bool carBlocked=false,otherBlocked=false;
   for(float height:{-.35f,.35f}) {
    const GameSymbols::Vec3 centre{point.x,point.y,point.z+height};

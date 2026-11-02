@@ -202,6 +202,9 @@ int main() {
     CHECK(!OnSave(0)&&notice==Notice::ExitToSave);
     // Bounds/collision are actually probed at the arrival and each parking bay.
     CHECK(CheckFloor());
+    float exitGround{};
+    CHECK(FindExitGround(kCentreX,kCentreY,kFloorZ+1.f,&exitGround)&&std::abs(exitGround-(kFloorZ+1.f))<.001f);
+    CHECK(!FindExitGround(kCentreX+1000.f,kCentreY,kFloorZ+1.f,&exitGround));
     const auto first=cars[0];void* parked=first.Pointer(Vehicles());
     seated=parked;SetPage(1);CHECK(page==0&&deletedCars==0&&notice==Notice::LeaveCar);seated=nullptr;
     vehicledoors::editing=true;SetPage(1);CHECK(page==0&&notice==Notice::EditorBusy);vehicledoors::editing=false;

@@ -14,4 +14,6 @@ bool UpdateNavigation(bool blocked, const xr::HandPose hands[2],
                       const float head[3], const float orientation[4],
                       bool trackingValid, std::uint64_t epoch);
 void PublishMarkers();
+// Resolve an exit only against a live, owned test-area floor tile.
+bool FindExitGround(float x,float y,float z,float* outZ);
 }
