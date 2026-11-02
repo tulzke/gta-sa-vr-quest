@@ -8834,10 +8834,14 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             forward={drivingWheel.ignitionNormal[0],drivingWheel.ignitionNormal[1],drivingWheel.ignitionNormal[2]};
             const float a=drivingWheel.ignitionAngle;
             up=vnorm(vadd(vscale(ku,std::cos(a)),vscale(kr,std::sin(a))));
-            pos=vadd(pos,vscale(up,hand==0?-.020f:.020f));
             right=vnorm(vcross(up,forward));
             if (hand==0) right=vscale(right,-1.0f);
-            grip=trig=0.95f;
+            // Pinch mesh fingertips extend ~7.5 cm from its render origin and
+            // sit ~4.5 cm below it. Place the palm in front of the key while
+            // thumb and index meet at the key, for both mirrored hands.
+            pos=vadd(pos,vadd(vscale(forward,-.075f),vscale(up,.045f)));
+            pos=vadd(pos,vscale(right,hand==0?.025f:-.025f));
+            grip=trig=0.0f;
         } else if (steeringHand) {
             // reference Quest build's car socket is a RenderWare matrix whose Right axis lies
             // along the rim and Forward axis is the wheel normal. Reproduce its
@@ -8959,7 +8963,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
         }
 
         const bool pinch = pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
-            !steeringHand && !drivingWheel.ignitionGrabbed[hand] &&
+            !steeringHand &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand) &&
             g_pinchMesh[hand].loaded && g_pinchMesh[hand].verts.size() == g_handMesh[hand].verts.size();
         const float pinchAmount = pinch ? pinchAmounts[hand] : 0.0f;

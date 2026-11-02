@@ -295,6 +295,17 @@ ignition::Rotation g_ignitionRotation;
 ignition::HintState g_ignitionHint;
 void* g_ignitionVehicle{};
 bool g_ignitionGripDown[2]{};
+bool g_ignitionPinchOwned[2]{};
+
+void PublishIgnitionPinch(const WheelVisualState& visual) {
+    for (int hand=0; hand<2; ++hand) {
+        const bool held=visual.ignitionGrabbed[hand];
+        if (held!=g_ignitionPinchOwned[hand]) {
+            xr::SetHandPinchAmount(hand,held?1.0f:0.0f);
+            g_ignitionPinchOwned[hand]=held;
+        }
+    }
+}
 
 bool EngineOn(const void* vehicle) {
     return (*reinterpret_cast<const std::uint8_t*>(
@@ -1041,6 +1052,7 @@ void UpdateBicycleGestureLocked(const xr::HandPose poses[2]) {
 
 void ClearInteractionLocked() {
     g_visual = WheelVisualState{};
+    PublishIgnitionPinch(g_visual);
     ClearGrabStateLocked();
 }
 
@@ -1714,7 +1726,9 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
     V3 up{visual.up[0],visual.up[1],visual.up[2]};
     V3 normal{visual.normal[0],visual.normal[1],visual.normal[2]};
     V3 center{visual.center[0],visual.center[1],visual.center[2]};
-    center=center+right*(visual.radius*.7f)-up*(visual.radius*.7f);
+    // Keep the key outside both the rim and its hand-grab zones.
+    const float offset=visual.bike ? visual.radius*.7f : visual.radius+.12f;
+    center=center+right*offset-up*offset;
     int adjustment[6]{};
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
@@ -4123,6 +4137,9 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     }
     g_activeBikeAccelerator.store(activeAccelerator,std::memory_order_release);
     std::lock_guard<std::mutex> lock(g_stateMutex);
+    struct PinchPublishOnExit {
+        ~PinchPublishOnExit() { PublishIgnitionPinch(g_visual); }
+    } pinchPublishOnExit;
     const bool wheelVehicleType=activeType==VEHICLE_CAR||
         activeType==VEHICLE_PLANE||activeType==VEHICLE_BOAT;
     if (!wheelVehicleType||!activeVehicle||
