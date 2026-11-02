@@ -1,6 +1,7 @@
 #include "VehicleExit.h"
 #include "VehicleEntry.h"
 #include "VehicleTestArea.h"
+#include "DoorlessVehicle.h"
 #include "Symbols.h"
 #include "Log.h"
 #include <cstring>
@@ -55,7 +56,8 @@ bool TryExit(void* car,int seat,Vec hint,bool emergency){
      (g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2);
  const int door=seat+3;
  if(emergency&&!EmergencyAvailable(car,seat))return false;
- if(!bike&&!emergency){
+ const bool openVehicle=doorless::Find(Read<std::uint16_t>(car,0x32))!=nullptr;
+ if(!bike&&!openVehicle&&!emergency){
  const float open=Read<float>(car,0x770+door*0x18),angle=Read<float>(car,0x77c+door*0x18);
  if(Read<std::uint8_t>(car,0x758+9+door)!=4&&(!std::isfinite(open)||!std::isfinite(angle)||std::abs(open)<.3f||angle/open<.45f))return false;
  }
@@ -114,7 +116,8 @@ bool TryExit(void* car,int seat,Vec hint,bool emergency){
  // and installs PlayerOnFoot immediately, without any leave/close-door task.
  constexpr int nodes[]={10,8,11,9};
  alignas(16) std::uint8_t task[0x28]{};
- outCtor(task,car,nodes[seat+1],false);task[0x1f]=emergency?0:1;
+ const int node=openVehicle?(side<0?10:8):nodes[seat+1];
+ outCtor(task,car,node,false);task[0x1f]=emergency?0:1;
  const bool processed=outProcess(task,ped);outDtor(task);
  if(!processed||vehicleentry::SeatIndex(car,ped)!=-2){LOGI("[vehicle-exit] native detach failed (processed=%d)",processed);return false;}
  if(emergency)return true;

@@ -1,4 +1,5 @@
 #include "VehicleExit.h"
+#include "DoorlessVehicle.h"
 #include "VehicleEntry.h"
 #include "Symbols.h"
 #include <cstring>
@@ -14,10 +15,12 @@ namespace vehicleentry {bool obstructed=true;bool ExitObstructed(void*,int){retu
 using namespace savr;using namespace vehicleexit;using vehicledoors::Vec;
 char car[0xc68]{},ped[0x800]{},pad[0x140]{},matrix[0x40]{},carMatrix[0x40]{},intelligence[0x80]{},drive[8]{},obstacle[8]{};
 void* vtable[6]{};void* current{};int selected{},ctorCalls{},processCalls{},dtorCalls{},removes{},adds{},clears{},taskType{};bool wall{},terrain=true,carOverlap{},pathBlocked{},emergencyTask{},ownRoom{},oppositeRoom{}; void* ignored{}; float expectedX=2;
+int expectedNode=-1;
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 void Setup(int seat){
  std::memset(car,0,sizeof(car));std::memset(ped,0,sizeof(ped));std::memset(pad,0,sizeof(pad));std::memset(intelligence,0,sizeof(intelligence));
  current=car;selected=seat;ctorCalls=processCalls=dtorCalls=removes=adds=clears=0;testarea::active=false;vehicleentry::obstructed=true;wall=false;terrain=true;carOverlap=false;pathBlocked=false;emergencyTask=false;ownRoom=false;oppositeRoom=false;ignored=obstacle;expectedX=2;taskType=725;
+ expectedNode=-1;
  Put(car,seat<0?0x5a0:0x5a8+seat*8,static_cast<void*>(ped));Put(car,0x770+(seat+3)*0x18,1.f);Put(car,0x77c+(seat+3)*0x18,.8f);
  Put(car,0x18,static_cast<void*>(carMatrix));Put(carMatrix,0,Vec{1,0,0});Put(carMatrix,0x10,Vec{0,1,0});Put(carMatrix,0x20,Vec{0,0,1});Put(carMatrix,0x30,Vec{});
  Put(ped,0x18,static_cast<void*>(matrix));Put(ped,0x538,static_cast<void*>(intelligence));
@@ -26,7 +29,7 @@ void Setup(int seat){
  g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3 p,float,void*,bool,bool,bool,bool,bool,bool)->void*{return wall?obstacle:(carOverlap&&p.x<2.2f?car:nullptr);};
  g.CWorld_pIgnoreEntity=&ignored;
  g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void**,bool,bool,bool,bool,bool,bool,bool,bool){CHECK(ignored==car);return pathBlocked;};
- outCtor=[](void* t,void* c,int node,bool){CHECK(c==car);const int nodes[]={10,8,11,9};CHECK(node==nodes[selected+1]);++ctorCalls;std::memset(t,0,0x28);};
+ outCtor=[](void* t,void* c,int node,bool){CHECK(c==car);const int nodes[]={10,8,11,9};CHECK(node==(expectedNode<0?nodes[selected+1]:expectedNode));++ctorCalls;std::memset(t,0,0x28);};
  outProcess=[](void* t,void* p){CHECK(p==ped&&Read<std::uint8_t>(t,0x1f)==(emergencyTask?0:1));++processCalls;Put(car,selected<0?0x5a0:0x5a8+selected*8,static_cast<void*>(nullptr));current=nullptr;return true;};
  outDtor=[](void*){++dtorCalls;};ground=[](GameSymbols::Vec3* p){p->z=1;return terrain;};
  worldRemove=[](void* p){CHECK(p==ped);++removes;};worldAdd=[](void* p){CHECK(p==ped);++adds;CHECK(Read<Vec>(matrix,0x30).x==expectedX&&Read<Vec>(matrix,0x30).z==1);};
@@ -52,5 +55,9 @@ int main(){
   Put(car,0x770+(seat+3)*0x18,0.f);CHECK(TryExit(car,seat,{2,0,1}));}
  Setup(-1);g.CVehicle_GetVehicleAppearance=[](const void*){return 1;};Put(car,0x32,std::uint16_t(471));
  Put(car,0x770+2*0x18,0.f);CHECK(TryExit(car,-1,{2,0,1}));
+ for(int model:{531,424,568,571})for(int side:{-1,1}){
+  Setup(-1);Put(car,0x32,std::uint16_t(model));Put(car,0x77c+2*0x18,0.f);
+  expectedNode=side<0?10:8;expectedX=side*2.f;CHECK(TryExit(car,-1,{side*2.f,0,1}));
+ }
  std::puts("instant exit: four seats, direct detach, on-foot handoff, placement, unchanged door angle, script/control and obstacle gates passed");
 }

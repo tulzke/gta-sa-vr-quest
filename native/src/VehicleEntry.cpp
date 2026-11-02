@@ -170,6 +170,41 @@ void Update(bool usable,std::uint64_t epoch){
    }
    continue;
   }
+  if(const auto* profile=doorless::Find(model);profile&&seated){
+   if(currentSeat< -1||currentSeat>0)continue;
+   for(int index=0;index<2;++index){
+    const float side=index==0?-1.f:1.f;
+    const int sideSeat=index==0?-1:0;
+    if(!profile->single&&sideSeat!=currentSeat&&Read<void*>(car,sideSeat<0?0x5a0:0x5a8))continue;
+    const Vec p=b.Point({side*(profile->halfWidth+.45f),profile->seatY,profile->seatZ});
+    if(Length(p-eye)>2.5f||Length(speed)>.02f||!canStepOut||!canStepOut(car,false)||!ClearExit(eye,p,car))continue;
+    if(icons.count>=icons.kCapacity)continue;
+    Marker m{p,forward,{0,0,1}};m.seatIcon=3;
+    const int icon=icons.count;icons.markers[icons.count++]=m;
+    Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
+    const float direction=distance>.05f?Dot(move,delta)/distance:-1;
+    if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
+     bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=3;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
+    }
+   }
+   if(!profile->single){
+    const int seat=currentSeat==-1?0:-1;
+    if((seat<0||Read<std::uint8_t>(car,0x5ec)>0)&&!Read<void*>(car,seat<0?0x5a0:0x5a8)){
+     float correction[3]{};driving::GetEntryCalibration(model,seat+1,correction);
+     const Vec p=b.Point({(seat<0?-profile->seatX:profile->seatX)+correction[0],profile->seatY+correction[1],profile->seatZ+correction[2]});
+     if(icons.count<icons.kCapacity){
+      Marker m{p,forward,{0,0,1}};m.seatIcon=seat<0?1:2;
+      const int icon=icons.count;icons.markers[icons.count++]=m;
+      Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
+      const float direction=distance>.05f?Dot(move,delta)/distance:-1;
+      if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
+       bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=seat;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
+      }
+     }
+    }
+   }
+   continue;
+  }
   if(const auto* profile=doorless::Find(model);profile&&!seated){
    const Vec localEye=b.Local(eye);
    const float side=localEye.x<0?-1.f:1.f;

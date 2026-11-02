@@ -149,6 +149,16 @@ int main(){
   const int before=boatentry::calls;xr::input.leftStick[0]=-side;
   for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==before+1&&boatentry::seat==seat);
  }
+ // Seated open vehicles show exits; two-seat buggies also show an empty seat.
+ for(int model:{531,424,568}){
+  Put(cars,0x32,std::uint16_t(model));Put(cars,0x5a0,static_cast<void*>(ped));
+  Put(cars,0x5a8,static_cast<void*>(nullptr));current=cars;eyeX=eyeY=0;
+  xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
+  CHECK(icons.count==(model==531?2:3));
+  int exits=0,transfers=0;for(int i=0;i<icons.count;++i){exits+=icons.markers[i].seatIcon==3;transfers+=icons.markers[i].seatIcon==2;}
+  CHECK(exits==2&&transfers==(model==531?0:1));
+  if(model!=531){Put(cars,0x5a8,static_cast<void*>(pad));Tick();CHECK(icons.count==1&&icons.markers[0].seatIcon==3);}
+ }
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

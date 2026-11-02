@@ -436,6 +436,8 @@ bool SeatReachable(void* ped,int door,Vec eye,Vec hand) {
     if (!basis.Valid()) return false;
     const float side=door==2||door==4?-1.f:1.f;
     const Vec localEye=basis.Local(eye),localHand=basis.Local(hand);
+    if (doorless::Find(Read<std::uint16_t>(car,0x32)))
+        return localEye.x*side>.2f&&Length(eye-hand)<1.6f;
     return localEye.x*side>.45f&&localHand.x*side>-.1f&&Length(eye-hand)<1.6f;
 }
 bool FindDoorExit(void* ped,void* car,int door,Vec& destination) {
@@ -445,7 +447,9 @@ bool FindDoorExit(void* ped,void* car,int door,Vec& destination) {
     const Basis basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
     if (!basis.Valid()) return false;
     const auto native=doorPosition(car,nodes[door-2]);
-    const Vec origin{native.x,native.y,native.z};
+    const float sign=door==2||door==4?-1.f:1.f;
+    const auto* profile=doorless::Find(Read<std::uint16_t>(car,0x32));
+    const Vec origin=profile?basis.Point({sign*(profile->halfWidth+.4f),profile->seatY,profile->seatZ}):Vec{native.x,native.y,native.z};
     const Vec carPosition=Position(car);
     if (!Finite(origin)||!Finite(carPosition)||Length(origin-carPosition)>3.f) return false;
     const float side=door==2||door==4?-1.f:1.f;

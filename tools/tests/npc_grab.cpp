@@ -287,6 +287,12 @@ int main() {
         Write(carMatrix,0x30,Vec{float(side)*.6f,0,0});
         CHECK(ExitDoor(npc,player)==(model==531?(side<0?3:2):-1));
     }
+    // A tractor driver can sit well inside the chassis; the head does not
+    // have to cross its centre plane to advertise a reachable strike.
+    Setup();Seat();Write<std::uint16_t>(car,0x32,531);
+    Write(carMatrix,0x30,Vec{.7f,0,0});Write(npc,8,Vec{.95f,.3f,0});
+    CHECK(ExitDoor(npc,player)==2);
+    CHECK(SeatReachable(npc,2,Vec{0,0,1},Vec{.95f,.3f,1}));
     // Choose by the actual clip hierarchy, not the shared 378/379 animation IDs.
     struct Clip { const char* name;unsigned key,id;float pause,ready,landing; } clips[]={
         {"CAR_jackedLHS",1,378,1.f,15.f/30.f,64.f/30.f},
