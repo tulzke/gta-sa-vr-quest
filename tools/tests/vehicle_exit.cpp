@@ -1,5 +1,5 @@
 #include "VehicleExit.h"
-#include "DoorlessVehicle.h"
+#include "VehicleAccess.h"
 #include "VehicleEntry.h"
 #include "Symbols.h"
 #include <cstring>
@@ -59,5 +59,7 @@ int main(){
   Setup(-1);Put(car,0x32,std::uint16_t(model));Put(car,0x77c+2*0x18,0.f);
   expectedNode=side<0?10:8;expectedX=side*2.f;CHECK(TryExit(car,-1,{side*2.f,0,1}));
  }
+ Setup(-1);Put(car,0x758+9+2,std::uint8_t(4));Put(car,0x77c+2*0x18,0.f);
+ CHECK(TryExit(car,-1,{2,0,1}));
  std::puts("instant exit: four seats, direct detach, on-foot handoff, placement, unchanged door angle, script/control and obstacle gates passed");
 }

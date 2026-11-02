@@ -1,7 +1,7 @@
 #include "VehicleExit.h"
 #include "VehicleEntry.h"
 #include "VehicleTestArea.h"
-#include "DoorlessVehicle.h"
+#include "VehicleAccess.h"
 #include "Symbols.h"
 #include "Log.h"
 #include <cstring>
@@ -56,8 +56,8 @@ bool TryExit(void* car,int seat,Vec hint,bool emergency){
      (g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2);
  const int door=seat+3;
  if(emergency&&!EmergencyAvailable(car,seat))return false;
- const bool openVehicle=doorless::Find(Read<std::uint16_t>(car,0x32))!=nullptr;
- if(!bike&&!openVehicle&&!emergency){
+ const bool openVehicle=vehicleaccess::Find(Read<std::uint16_t>(car,0x32))!=nullptr;
+ if(!bike&&!vehicleaccess::DoorAbsent(car,door)&&!emergency){
  const float open=Read<float>(car,0x770+door*0x18),angle=Read<float>(car,0x77c+door*0x18);
  if(Read<std::uint8_t>(car,0x758+9+door)!=4&&(!std::isfinite(open)||!std::isfinite(angle)||std::abs(open)<.3f||angle/open<.45f))return false;
  }

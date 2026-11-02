@@ -1,6 +1,8 @@
 #pragma once
+#include <cstdint>
+#include <cstring>
 
-namespace savr::doorless {
+namespace savr::vehicleaccess {
 // Provisional seat positions in vehicle-local metres; calibrate in Quest.
 struct Profile { int model; bool single; float halfWidth, seatX, seatY, seatZ; };
 inline const Profile* Find(int model) {
@@ -12,5 +14,14 @@ inline const Profile* Find(int model) {
     };
     for (const auto& profile:profiles) if (profile.model==model) return &profile;
     return nullptr;
+}
+// Door index is the engine's eDoors value: 2..5, not a seat index.
+inline bool DoorAbsent(const void* vehicle,int door) {
+    if(!vehicle||door<2||door>5)return false;
+    std::uint16_t model{};std::uint8_t status{};
+    std::memcpy(&model,static_cast<const char*>(vehicle)+0x32,sizeof(model));
+    if(Find(model))return true;
+    std::memcpy(&status,static_cast<const char*>(vehicle)+0x758+9+door,sizeof(status));
+    return status==4;
 }
 }

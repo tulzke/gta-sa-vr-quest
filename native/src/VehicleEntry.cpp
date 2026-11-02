@@ -7,7 +7,7 @@
 #include "Xr.h"
 #include "Driving.h"
 #include "Locomotion.h"
-#include "DoorlessVehicle.h"
+#include "VehicleAccess.h"
 #include <chrono>
 #include <cstring>
 #include <dlfcn.h>
@@ -29,8 +29,7 @@ constexpr int nodes[4]={10,8,11,9};
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 void EndEdit(){if(editHand>=0)driving::SaveDebugCalibration();editHand=-1;claimed=0;}
 bool DoorOpen(void* car,int index){
- const auto status=Read<std::uint8_t>(car,0x758+9+index+2);
- if(status==4)return true; // detached door
+ if(vehicleaccess::DoorAbsent(car,index+2))return true;
  const float open=Read<float>(car,0x770+(index+2)*0x18),angle=Read<float>(car,0x77c+(index+2)*0x18);
  return std::isfinite(open)&&std::isfinite(angle)&&std::abs(open)>.3f&&angle/open>=.45f;
 }
@@ -116,6 +115,16 @@ void Update(bool usable,std::uint64_t epoch){
  for(int h=0;h<2;++h){if(!editing||!hands[h].valid)editLatch[h]=true;else if(hands[h].trigger<.35f)editLatch[h]=false;else if(hands[h].trigger>.55f&&!editLatch[h]){editLatch[h]=true;editFresh[h]=true;}}
  void* bestCar=nullptr;int bestSeat=-1,bestIcon=-1;std::uint8_t bestGeneration{};Vec point{};float bestDirection=-1;float bestDistance=100;
  bool editContinued=false,bestEmergency=false;
+ auto offer=[&](void* car,int seat,Vec p,int iconType,std::uint8_t gen,bool emergency){
+  if(icons.count>=icons.kCapacity)return;
+  Marker m{p,forward,{0,0,1}};m.seatIcon=iconType;
+  const int icon=icons.count;icons.markers[icons.count++]=m;
+  Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
+  const float direction=distance>.05f?Dot(move,delta)/distance:-1;
+  if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
+   bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=seat;point=p;bestGeneration=gen;bestIcon=icon;bestEmergency=emergency;
+  }
+ };
  for(int slot=0;slot<110;++slot){
   if(flags[slot]&0x80)continue;
   void* car=objects+slot*0xc68;
@@ -170,7 +179,7 @@ void Update(bool usable,std::uint64_t epoch){
    }
    continue;
   }
-  if(const auto* profile=doorless::Find(model);profile&&seated){
+  if(const auto* profile=vehicleaccess::Find(model);profile&&seated){
    if(currentSeat< -1||currentSeat>0)continue;
    for(int index=0;index<2;++index){
     const float side=index==0?-1.f:1.f;
@@ -178,34 +187,19 @@ void Update(bool usable,std::uint64_t epoch){
     if(!profile->single&&sideSeat!=currentSeat&&Read<void*>(car,sideSeat<0?0x5a0:0x5a8))continue;
     const Vec p=b.Point({side*(profile->halfWidth+.45f),profile->seatY,profile->seatZ});
     if(Length(p-eye)>2.5f||Length(speed)>.02f||!canStepOut||!canStepOut(car,false)||!ClearExit(eye,p,car))continue;
-    if(icons.count>=icons.kCapacity)continue;
-    Marker m{p,forward,{0,0,1}};m.seatIcon=3;
-    const int icon=icons.count;icons.markers[icons.count++]=m;
-    Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
-    const float direction=distance>.05f?Dot(move,delta)/distance:-1;
-    if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
-     bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=3;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
-    }
+    offer(car,3,p,3,flags[slot],false);
    }
    if(!profile->single){
     const int seat=currentSeat==-1?0:-1;
     if((seat<0||Read<std::uint8_t>(car,0x5ec)>0)&&!Read<void*>(car,seat<0?0x5a0:0x5a8)){
      float correction[3]{};driving::GetEntryCalibration(model,seat+1,correction);
      const Vec p=b.Point({(seat<0?-profile->seatX:profile->seatX)+correction[0],profile->seatY+correction[1],profile->seatZ+correction[2]});
-     if(icons.count<icons.kCapacity){
-      Marker m{p,forward,{0,0,1}};m.seatIcon=seat<0?1:2;
-      const int icon=icons.count;icons.markers[icons.count++]=m;
-      Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
-      const float direction=distance>.05f?Dot(move,delta)/distance:-1;
-      if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
-       bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=seat;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
-      }
-     }
+     offer(car,seat,p,seat<0?1:2,flags[slot],false);
     }
    }
    continue;
   }
-  if(const auto* profile=doorless::Find(model);profile&&!seated){
+  if(const auto* profile=vehicleaccess::Find(model);profile&&!seated){
    const Vec localEye=b.Local(eye);
    const float side=localEye.x<0?-1.f:1.f;
    if(std::abs(localEye.x)<.2f)continue;
@@ -216,14 +210,7 @@ void Update(bool usable,std::uint64_t epoch){
    const Vec p=b.Point({side*profile->seatX+correction[0],profile->seatY+correction[1],profile->seatZ+correction[2]});
    const Vec approach=b.Point({side*profile->halfWidth,profile->seatY,profile->seatZ});
    if(Length(eye-approach)>1.5f||!ClearExit(eye,approach,car)||!ClearExit(eye,p,car))continue;
-   Marker m{p,forward,{0,0,1}};m.seatIcon=seat<0?1:2;
-   if(icons.count>=icons.kCapacity)continue;
-   const int icon=icons.count;icons.markers[icons.count++]=m;
-   Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
-   const float direction=distance>.05f?Dot(move,delta)/distance:-1;
-   if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
-    bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=seat;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=false;
-   }
+   offer(car,seat,p,seat<0?1:2,flags[slot],false);
    continue;
   }
   for(int index=0;index<4;++index){
@@ -267,15 +254,8 @@ void Update(bool usable,std::uint64_t epoch){
     actionable=normal||emergency;
    }
    if(!actionable&&(!editing||exit))continue;
-   Marker m{p,forward,{0,0,1}};m.seatIcon=exit?3:(seat<0?1:2);
-   if(icons.count>=icons.kCapacity)continue;
-   const int icon=icons.count;icons.markers[icons.count++]=m;
-   if(!actionable)continue;
-   Vec delta=p-eye;delta.z=0;const float distance=Length(delta);
-   const float direction=distance>.05f?Dot(move,delta)/distance:-1;
-   if(direction>bestDirection+.01f||(std::abs(direction-bestDirection)<=.01f&&distance<bestDistance)){
-    bestDirection=direction;bestDistance=distance;bestCar=car;bestSeat=exit?3:seat;point=p;bestGeneration=flags[slot];bestIcon=icon;bestEmergency=emergency;
-   }
+   if(actionable)offer(car,exit?3:seat,p,exit?3:(seat<0?1:2),flags[slot],emergency);
+   else if(icons.count<icons.kCapacity){Marker m{p,forward,{0,0,1}};m.seatIcon=seat<0?1:2;icons.markers[icons.count++]=m;}
   }
  }
  if(editHand>=0&&!editContinued)EndEdit();

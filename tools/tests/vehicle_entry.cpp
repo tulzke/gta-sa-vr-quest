@@ -1,5 +1,5 @@
 #include "VehicleEntry.h"
-#include "DoorlessVehicle.h"
+#include "VehicleAccess.h"
 #include "Symbols.h"
 #include <chrono>
 #include <cstring>
@@ -159,6 +159,13 @@ int main(){
   CHECK(exits==2&&transfers==(model==531?0:1));
   if(model!=531){Put(cars,0x5a8,static_cast<void*>(pad));Tick();CHECK(icons.count==1&&icons.markers[0].seatIcon==3);}
  }
+ // Detached doors are passable per side, without changing the other door.
+ current=nullptr;Put(cars,0x32,std::uint16_t(400));Put(cars,0x5a0,static_cast<void*>(nullptr));
+ Put(cars,0x800+10*8,static_cast<void*>(leftMatrix));Put(leftMatrix,0x30,Vec{-1,.35f,.4f});
+ Put(cars,0x758+9+2,std::uint8_t(4));Put(cars,0x77c+2*0x18,0.f);
+ eyeX=-1.3f;xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
+ CHECK(DoorOpen(cars,0));const int beforeDetached=boatentry::calls;xr::input.leftStick[0]=1;
+ for(int i=0;i<12;++i)Tick();CHECK(boatentry::calls==beforeDetached+1&&boatentry::seat==-1);
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

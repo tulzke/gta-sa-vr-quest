@@ -5,7 +5,7 @@
 #include "Symbols.h"
 #include "VehicleDoors.h"
 #include "VehicleDoorMotion.h"
-#include "DoorlessVehicle.h"
+#include "VehicleAccess.h"
 #include "VrCamera.h"
 #include "Xr.h"
 #include "Log.h"
@@ -402,7 +402,7 @@ int ExitDoor(void* ped,void* player) {
     for (int i=0;i<3&&door<0;++i)
         if (Read<void*>(car,0x5a8+i*8)==ped) door=i==0?3:(i==1?4:5);
     if (door<0) return -1;
-    if (const auto* profile=doorless::Find(Read<std::uint16_t>(car,0x32))) {
+    if (const auto* profile=vehicleaccess::Find(Read<std::uint16_t>(car,0x32))) {
         if ((door!=2&&door!=3)||(profile->single&&door!=2)) return -1;
         void* matrix=Read<void*>(car,0x18);
         if (!matrix) return -1;
@@ -414,7 +414,7 @@ int ExitDoor(void* ped,void* player) {
     }
     const auto status=Read<std::uint8_t>(car,0x758+9+door);
     const float angle=Read<float>(car,0x770+door*0x18+0xc);
-    if (status!=3&&!(status<=2&&std::isfinite(angle)&&std::abs(angle)>.45f)) return -1;
+    if (!vehicleaccess::DoorAbsent(car,door)&&status!=3&&!(status<=2&&std::isfinite(angle)&&std::abs(angle)>.45f)) return -1;
     return door;
 }
 bool StartHold(Hold& h) {
@@ -436,7 +436,7 @@ bool SeatReachable(void* ped,int door,Vec eye,Vec hand) {
     if (!basis.Valid()) return false;
     const float side=door==2||door==4?-1.f:1.f;
     const Vec localEye=basis.Local(eye),localHand=basis.Local(hand);
-    if (doorless::Find(Read<std::uint16_t>(car,0x32)))
+    if (vehicleaccess::DoorAbsent(car,door))
         return localEye.x*side>.2f&&Length(eye-hand)<1.6f;
     return localEye.x*side>.45f&&localHand.x*side>-.1f&&Length(eye-hand)<1.6f;
 }
@@ -448,7 +448,7 @@ bool FindDoorExit(void* ped,void* car,int door,Vec& destination) {
     if (!basis.Valid()) return false;
     const auto native=doorPosition(car,nodes[door-2]);
     const float sign=door==2||door==4?-1.f:1.f;
-    const auto* profile=doorless::Find(Read<std::uint16_t>(car,0x32));
+    const auto* profile=vehicleaccess::Find(Read<std::uint16_t>(car,0x32));
     const Vec origin=profile?basis.Point({sign*(profile->halfWidth+.4f),profile->seatY,profile->seatZ}):Vec{native.x,native.y,native.z};
     const Vec carPosition=Position(car);
     if (!Finite(origin)||!Finite(carPosition)||Length(origin-carPosition)>3.f) return false;
@@ -518,7 +518,7 @@ void CancelHit(Animation& a,bool react);
 bool BeginHit(Hold& h,bool preparing=false) {
     const int door=ExitDoor(h.ped,owner);
     void* vehicle=Read<void*>(h.ped,0x708);
-    const bool openVehicle=vehicle&&doorless::Find(Read<std::uint16_t>(vehicle,0x32));
+    const bool openVehicle=vehicleaccess::DoorAbsent(vehicle,door);
     if (!preparing) if (auto* pending=BeforeHit(h.ped)) {
         if (door<0||pending->phase!=Phase::AwaitHit||updated<pending->punchAfter) return false;
         void* anim=VictimAnimation(h.ped);
@@ -685,8 +685,10 @@ bool PunchBikeRider(const Pool& pool,void* player,Vec eye,Vec p,Vec previous) {
 bool ContinuePull(Animation& pending,void* player) {
     if (pending.phase!=Phase::Waiting) return false;
     const int door=ExitDoor(pending.target.ped,player);
-    if (doorless::Find(Read<std::uint16_t>(pending.car,0x32))&&
-        pending.doorNode!=(door==2?10:door==3?8:-1)) return false;
+    if (vehicleaccess::DoorAbsent(pending.car,door)) {
+        constexpr int nodes[]={10,8,11,9};
+        if (door<2||door>5||pending.doorNode!=nodes[door-2]) return false;
+    }
     Vec destination{};
     if (door<0||!FindDoorExit(pending.target.ped,pending.car,door,destination)) return false;
     pending.exitPoint=destination;pending.exitChecked=true;
@@ -1172,7 +1174,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const Vec point=Bone(ped,waiting?4:5);
         if (door<0||!Finite(point)||!SeatReachable(ped,door,eye,point)||
             !Visible(eye,point,ped,Read<void*>(ped,0x708))) continue;
-        const bool openVehicle=doorless::Find(Read<std::uint16_t>(Read<void*>(ped,0x708),0x32));
+        const bool openVehicle=vehicleaccess::DoorAbsent(Read<void*>(ped,0x708),door);
         if (!openVehicle&&!waiting&&!BeforeHit(ped)&&!PreparationBlocked(ped)) {
             Hold target{ped,pool.identity,pool.objects,nullptr,(slot<<8)|pool.flags[slot],5};
             if (!BeginHit(target,true)) continue;

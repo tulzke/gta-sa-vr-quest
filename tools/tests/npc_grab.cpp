@@ -1,5 +1,5 @@
 #include "NpcGrab.h"
-#include "DoorlessVehicle.h"
+#include "VehicleAccess.h"
 #include "NpcGrabVisual.h"
 #include "Symbols.h"
 #include "PlayerLife.h"
@@ -293,6 +293,15 @@ int main() {
     Write(carMatrix,0x30,Vec{.7f,0,0});Write(npc,8,Vec{.95f,.3f,0});
     CHECK(ExitDoor(npc,player)==2);
     CHECK(SeatReachable(npc,2,Vec{0,0,1},Vec{.95f,.3f,1}));
+    // A detached ordinary door follows the same direct strike path, while
+    // its opposite intact door remains subject to its own state.
+    Setup();Seat();Write<std::uint8_t>(car,0x758+9+2,4);
+    Write(animationHierarchy,0,1u);Write(npc,8,Vec{-.6f,.3f,0});
+    CHECK(vehicleaccess::DoorAbsent(car,2)&&!vehicleaccess::DoorAbsent(car,3));
+    Tick();CHECK(worldMarkers.count>0&&!primaryReplaced&&!animationStarts);
+    Pool pool;CHECK(pool.Load());Hold target{npc,pool.identity,pool.objects,nullptr,flags[0],5};
+    CHECK(BeginHit(target)&&animations[0].phase==Phase::Hit&&sceneHits==1);
+    CHECK(Read<float>(reaction,0x38)==15.f/30.f);
     // Choose by the actual clip hierarchy, not the shared 378/379 animation IDs.
     struct Clip { const char* name;unsigned key,id;float pause,ready,landing; } clips[]={
         {"CAR_jackedLHS",1,378,1.f,15.f/30.f,64.f/30.f},
