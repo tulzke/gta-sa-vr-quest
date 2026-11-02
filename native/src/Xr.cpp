@@ -7749,23 +7749,6 @@ void BuildDrivingMenu() {
                     names[field],driving::GetIgnitionCalibration(field),field<3?"CM":"DEG");
                 break;
             }
-            case driving::MENU_IGNITION_HAND:
-                std::snprintf(rows[row],sizeof(rows[row]),"KEY HAND < %s >",
-                              driving::GetIgnitionHand()==0?"LEFT":"RIGHT");
-                break;
-            case driving::MENU_IGNITION_GRIP:
-                std::snprintf(rows[row],sizeof(rows[row]),"KEY GRIP < %s >",
-                              driving::GetIgnitionGrip()==0?"TOP":"BOTTOM");
-                break;
-            case driving::MENU_IGNITION_HAND_X: case driving::MENU_IGNITION_HAND_Y:
-            case driving::MENU_IGNITION_HAND_Z: case driving::MENU_IGNITION_HAND_RX:
-            case driving::MENU_IGNITION_HAND_RY: case driving::MENU_IGNITION_HAND_RZ: {
-                const int field=item-driving::MENU_IGNITION_HAND_X;
-                static const char* const names[]={"SIDE","UP","DEPTH","ROT X","ROT Y","ROT Z"};
-                std::snprintf(rows[row],sizeof(rows[row]),"KEY HAND %s < %+d %s >",names[field],
-                    driving::GetIgnitionHandCalibration(field),field<3?"CM":"DEG");
-                break;
-            }
             case driving::MENU_VEHICLE_TEST_AREA:
                 std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE TEST AREA < %s >",testarea::MenuLabel());
                 break;
@@ -8865,8 +8848,12 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             pos=vadd(pos,vscale(right,hand==0?.025f:-.025f));
             // User calibration is expressed in the turning key frame, so the
             // adjusted pose stays attached while the key rotates.
-            const int* adjustment=drivingWheel.ignitionHandCalibration[hand]
-                [drivingWheel.ignitionReverseGrip[hand]?1:0];
+            // User-calibrated on Quest, in cm/degrees: hand, top/bottom, axis.
+            static constexpr int calibration[2][2][6] = {
+                {{1,0,1,0,80,-180}, {-1,0,1,0,280,180}},
+                {{-10,-1,1,0,80,0}, {9,0,1,0,-80,0}}
+            };
+            const int* adjustment=calibration[hand][drivingWheel.ignitionReverseGrip[hand]?1:0];
             pos=vadd(pos,vadd(vscale(keyRight,adjustment[0]*.01f),
                  vadd(vscale(keyUp,adjustment[1]*.01f),vscale(forward,adjustment[2]*.01f))));
             const XrVector3f axes[3]{keyRight,keyUp,forward};
