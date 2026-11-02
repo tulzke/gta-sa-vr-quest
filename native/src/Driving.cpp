@@ -276,6 +276,7 @@ struct ModelCalibration {
     int control[2][CONTROL_FIELD_COUNT]{};
     int wheel[WHEEL_CAL_FIELD_COUNT]{};
     int ignition[6]{};
+    int ignitionHand[2][6]{};
     int acceleratorMode{BIKE_ACCEL_HOLD_TRIGGER};
 };
 
@@ -296,6 +297,8 @@ ignition::HintState g_ignitionHint;
 void* g_ignitionVehicle{};
 bool g_ignitionGripDown[2]{};
 bool g_ignitionPinchOwned[2]{};
+std::atomic<int> g_ignitionCalibrationHand{1};
+std::atomic<bool> g_ignitionHandPreview{false};
 
 void PublishIgnitionPinch(const WheelVisualState& visual) {
     for (int hand=0; hand<2; ++hand) {
@@ -571,6 +574,9 @@ void Save() {
             for (int field=0; field<6; ++field)
                 std::fprintf(file, "Ignition.%d.%d=%d\n", model, field,
                              calibration.ignition[field]);
+            for (int hand=0;hand<2;++hand) for (int field=0;field<6;++field)
+                std::fprintf(file,"IgnitionHand.%d.%d.%d=%d\n",model,hand,field,
+                             calibration.ignitionHand[hand][field]);
         }
     }
     const bool wrote = std::fflush(file) == 0;
@@ -715,6 +721,11 @@ void Load() {
             else {
                 int model = -1, mode = -1, hand = -1;
                 int door=-1,inside=-1,axis=-1;
+                if (std::sscanf(line,"IgnitionHand.%d.%d.%d=%d",&model,&hand,&axis,&value)==4 &&
+                    model>=400 && model<=611 && hand>=0 && hand<2 && axis>=0 && axis<6) {
+                    g_modelCalibration[model].ignitionHand[hand][axis]=std::clamp(value,-720,720);
+                    continue;
+                }
                 if (std::sscanf(line,"Ignition.%d.%d=%d",&model,&axis,&value)==3 &&
                     model>=400 && model<=611 && axis>=0 && axis<6) {
                     g_modelCalibration[model].ignition[axis]=std::clamp(value,-720,720);
@@ -1734,7 +1745,11 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
         std::lock_guard<std::mutex> lock(g_modelMutex);
         const auto it=g_modelCalibration.find(visual.modelId);
         if (it!=g_modelCalibration.end())
+        {
             std::copy_n(it->second.ignition,6,adjustment);
+            std::memcpy(visual.ignitionHandCalibration,it->second.ignitionHand,
+                        sizeof(visual.ignitionHandCalibration));
+        }
     }
     center=center+right*(adjustment[0]*.01f)+up*(adjustment[1]*.01f)+normal*(adjustment[2]*.01f);
     constexpr float rad=3.14159265358979323846f/180.0f;
@@ -1746,6 +1761,8 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
     up=RotateAroundAxis(up,normal,adjustment[5]*rad);
     if (preview) {
         visual.ignitionVisible=true;
+        if (g_ignitionHandPreview.load(std::memory_order_acquire))
+            visual.ignitionGrabbed[g_ignitionCalibrationHand.load(std::memory_order_acquire)]=true;
         visual.ignitionAngle=EngineOn(vehicle)?1.57079632679f:0.0f;
         const V3 vectors[4]{center,right,up,normal};
         float* fields[4]{visual.ignitionCenter,visual.ignitionRight,visual.ignitionUp,visual.ignitionNormal};
@@ -3287,6 +3304,8 @@ constexpr int kDefaultBikeItems[] = {
     MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM,
     MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
+    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
+    MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY, MENU_IGNITION_HAND_RZ,
     MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultCarItems[] = {
@@ -3297,6 +3316,8 @@ constexpr int kDefaultCarItems[] = {
     MENU_INTERIOR_GLASS, MENU_DRIVEBY_AIM,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
     MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
+    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
+    MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY, MENU_IGNITION_HAND_RZ,
     MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveBikeItems[] = {
@@ -3309,6 +3330,8 @@ constexpr int kImmersiveBikeItems[] = {
     MENU_BIKE_HAND_TILT, MENU_BIKE_BLOCK_WHEELIE, MENU_LOCAL_HORIZON, MENU_BIKE_VISUAL_LEAN,
     MENU_KEEP_RIDER_ON_FLIPS,
     MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
+    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
+    MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY, MENU_IGNITION_HAND_RZ,
     MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveCarItems[] = {
@@ -3320,6 +3343,8 @@ constexpr int kImmersiveCarItems[] = {
     MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
     MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
+    MENU_IGNITION_HAND, MENU_IGNITION_HAND_X, MENU_IGNITION_HAND_Y, MENU_IGNITION_HAND_Z,
+    MENU_IGNITION_HAND_RX, MENU_IGNITION_HAND_RY, MENU_IGNITION_HAND_RZ,
     MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultPlaneItems[] = {
@@ -3408,6 +3433,26 @@ int GetIgnitionCalibration(int field) {
     const auto it=g_modelCalibration.find(model);
     return it==g_modelCalibration.end()?0:it->second.ignition[field];
 }
+int GetIgnitionHand() { return g_ignitionCalibrationHand.load(); }
+void ToggleIgnitionHand() { g_ignitionCalibrationHand.store(1-GetIgnitionHand()); }
+void SetIgnitionHandPreview(bool active) { g_ignitionHandPreview.store(active); }
+int GetIgnitionHandCalibration(int field) {
+    if (field<0||field>=6) return 0;
+    const int model=GetActiveVehicleModelId(),hand=GetIgnitionHand();
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const auto it=g_modelCalibration.find(model);
+    return it==g_modelCalibration.end()?0:it->second.ignitionHand[hand][field];
+}
+void AdjustIgnitionHandCalibration(int field,int direction) {
+    const int model=GetActiveVehicleModelId(),hand=GetIgnitionHand();
+    if (model<400||field<0||field>=6||!direction) return;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        int& value=g_modelCalibration[model].ignitionHand[hand][field];
+        value=std::clamp(value+(direction<0?-1:1),-720,720);
+    }
+    Save();
+}
 void AdjustIgnitionCalibration(int field,int direction) {
     const int model=GetActiveVehicleModelId();
     if (model<400||field<0||field>=6||!direction) return;
@@ -3440,6 +3485,8 @@ const char* GetActiveVehicleModelName() {
     }
 }
 bool IsMenuItemAvailable(int vehicleType,int item) {
+    if (item>=MENU_IGNITION_HAND && item<=MENU_IGNITION_HAND_RZ)
+        return HasCurrentModelForType(vehicleType);
     switch(item) {
         case MENU_MODEL_SIDE:
         case MENU_MODEL_FORWARD:

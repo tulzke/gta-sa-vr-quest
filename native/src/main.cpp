@@ -1406,6 +1406,11 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::AdjustCurrentModelSeatForwardCm(drivingVehicleType,step);
             } else if (item==savr::driving::MENU_MODEL_HEIGHT&&step&&available) {
                 savr::driving::AdjustCurrentModelSeatHeightCm(drivingVehicleType,step);
+            } else if (item==savr::driving::MENU_IGNITION_HAND && (enter||step) && available) {
+                savr::driving::ToggleIgnitionHand();
+            } else if (item>=savr::driving::MENU_IGNITION_HAND_X &&
+                       item<=savr::driving::MENU_IGNITION_HAND_RZ && step && available) {
+                savr::driving::AdjustIgnitionHandCalibration(item-savr::driving::MENU_IGNITION_HAND_X,step);
             } else if (item>=savr::driving::MENU_IGNITION_X &&
                        item<=savr::driving::MENU_IGNITION_RZ && step && available) {
                 savr::driving::AdjustIgnitionCalibration(item-savr::driving::MENU_IGNITION_X,step);
@@ -1841,6 +1846,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         savr::driving::SetMenuPreview(
             menuPage == PG_DRIVING || menuPage == PG_DRIVING_CALIB,
             menuPage == PG_DRIVING_CALIB ? drivingCalibHand : -1);
+        const int ignitionMenuItem=savr::driving::GetMenuItemForRow(drivingVehicleType,drivingSel);
+        savr::driving::SetIgnitionHandPreview(menuPage==PG_DRIVING &&
+            ignitionMenuItem>=savr::driving::MENU_IGNITION_HAND &&
+            ignitionMenuItem<=savr::driving::MENU_IGNITION_HAND_RZ);
         xr::SetDrivingMenu(menuPage == PG_DRIVING,drivingSel,
                            drivingVehicleType);
         xr::SetDrivingCalibrationMenu(menuPage == PG_DRIVING_CALIB,

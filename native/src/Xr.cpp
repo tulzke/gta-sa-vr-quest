@@ -7644,8 +7644,8 @@ void BuildDrivingMenu() {
     const int sel = g_drivingSel.load(std::memory_order_relaxed);
     const int vehicleType=g_drivingVehicleType.load(std::memory_order_relaxed);
     const int rowCount=driving::GetMenuItemCount(vehicleType);
-    char rows[32][96]{};
-    bool available[32]{};
+    char rows[48][96]{};
+    bool available[48]{};
     const bool haveModel=driving::HasCurrentModelForType(vehicleType);
     for (int row=0;row<rowCount;++row) {
         const int item=driving::GetMenuItemForRow(vehicleType,row);
@@ -7747,6 +7747,19 @@ void BuildDrivingMenu() {
                 static const char* const names[]={"SIDE", "UP", "DEPTH", "PITCH", "YAW", "ROLL"};
                 std::snprintf(rows[row],sizeof(rows[row]),"DEBUG KEY %s < %+d %s >",
                     names[field],driving::GetIgnitionCalibration(field),field<3?"CM":"DEG");
+                break;
+            }
+            case driving::MENU_IGNITION_HAND:
+                std::snprintf(rows[row],sizeof(rows[row]),"KEY HAND < %s >",
+                              driving::GetIgnitionHand()==0?"LEFT":"RIGHT");
+                break;
+            case driving::MENU_IGNITION_HAND_X: case driving::MENU_IGNITION_HAND_Y:
+            case driving::MENU_IGNITION_HAND_Z: case driving::MENU_IGNITION_HAND_RX:
+            case driving::MENU_IGNITION_HAND_RY: case driving::MENU_IGNITION_HAND_RZ: {
+                const int field=item-driving::MENU_IGNITION_HAND_X;
+                static const char* const names[]={"SIDE","UP","DEPTH","ROT X","ROT Y","ROT Z"};
+                std::snprintf(rows[row],sizeof(rows[row]),"KEY HAND %s < %+d %s >",names[field],
+                    driving::GetIgnitionHandCalibration(field),field<3?"CM":"DEG");
                 break;
             }
             case driving::MENU_VEHICLE_TEST_AREA:
@@ -8834,6 +8847,8 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             forward={drivingWheel.ignitionNormal[0],drivingWheel.ignitionNormal[1],drivingWheel.ignitionNormal[2]};
             const float a=drivingWheel.ignitionAngle;
             up=vnorm(vadd(vscale(ku,std::cos(a)),vscale(kr,std::sin(a))));
+            const XrVector3f keyUp=up;
+            const XrVector3f keyRight=vnorm(vcross(keyUp,forward));
             // Rotate the pinching hand 90 degrees clockwise around the key axis.
             up=vnorm(vcross(up,forward));
             right=vnorm(vcross(up,forward));
@@ -8843,6 +8858,19 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             // thumb and index meet at the key, for both mirrored hands.
             pos=vadd(pos,vadd(vscale(forward,-.120f),vscale(up,.045f)));
             pos=vadd(pos,vscale(right,hand==0?.025f:-.025f));
+            // User calibration is expressed in the turning key frame, so the
+            // adjusted pose stays attached while the key rotates.
+            const int* adjustment=drivingWheel.ignitionHandCalibration[hand];
+            pos=vadd(pos,vadd(vscale(keyRight,adjustment[0]*.01f),
+                 vadd(vscale(keyUp,adjustment[1]*.01f),vscale(forward,adjustment[2]*.01f))));
+            const XrVector3f axes[3]{keyRight,keyUp,forward};
+            constexpr float degToRad=3.14159265358979323846f/180.0f;
+            for (int axis=0;axis<3;++axis) {
+                const float rotation=adjustment[axis+3]*degToRad;
+                right=RotateAroundAxis(right,axes[axis],rotation);
+                up=RotateAroundAxis(up,axes[axis],rotation);
+                forward=RotateAroundAxis(forward,axes[axis],rotation);
+            }
             grip=trig=0.0f;
         } else if (steeringHand) {
             // reference Quest build's car socket is a RenderWare matrix whose Right axis lies
