@@ -7,6 +7,7 @@
 #include "BikeSteering.h"
 #include "QuadHandlebar.h"
 #include "MissionComfort.h"
+#include "IgnitionState.h"
 
 #include "Locomotion.h"
 
@@ -274,6 +275,7 @@ struct ModelCalibration {
     int seatHeight[MODE_COUNT]{};
     int control[2][CONTROL_FIELD_COUNT]{};
     int wheel[WHEEL_CAL_FIELD_COUNT]{};
+    int ignition[6]{};
     int acceleratorMode{BIKE_ACCEL_HOLD_TRIGGER};
 };
 
@@ -288,6 +290,26 @@ int ClampWheelCalibration(int field, int value) {
 }
 std::mutex g_modelMutex;
 std::map<int, ModelCalibration> g_modelCalibration;
+
+ignition::Rotation g_ignitionRotation;
+ignition::HintState g_ignitionHint;
+void* g_ignitionVehicle{};
+bool g_ignitionGripDown[2]{};
+
+bool EngineOn(const void* vehicle) {
+    return (*reinterpret_cast<const std::uint8_t*>(
+        static_cast<const char*>(vehicle)+0x568) & 0x10u) != 0;
+}
+bool EngineBroken(const void* vehicle) {
+    std::uint64_t flags{};
+    std::memcpy(&flags,static_cast<const char*>(vehicle)+0x568,sizeof(flags));
+    return (flags & (std::uint64_t{1}<<41)) != 0;
+}
+void SetEngineOn(void* vehicle,bool on) {
+    auto* flags=reinterpret_cast<std::uint8_t*>(static_cast<char*>(vehicle)+0x568);
+    if (on && !EngineBroken(vehicle)) *flags|=0x10u;
+    else *flags&=static_cast<std::uint8_t>(~0x10u);
+}
 
 struct ModelWheelPose {
     V3 center{}, right{}, up{}, normal{};
@@ -535,6 +557,9 @@ void Save() {
                 std::fprintf(file, "WheelCalib.%d.%d=%d\n",
                              model, field, calibration.wheel[field]);
             }
+            for (int field=0; field<6; ++field)
+                std::fprintf(file, "Ignition.%d.%d=%d\n", model, field,
+                             calibration.ignition[field]);
         }
     }
     const bool wrote = std::fflush(file) == 0;
@@ -679,6 +704,11 @@ void Load() {
             else {
                 int model = -1, mode = -1, hand = -1;
                 int door=-1,inside=-1,axis=-1;
+                if (std::sscanf(line,"Ignition.%d.%d=%d",&model,&axis,&value)==3 &&
+                    model>=400 && model<=611 && axis>=0 && axis<6) {
+                    g_modelCalibration[model].ignition[axis]=std::clamp(value,-720,720);
+                    continue;
+                }
                 if(std::sscanf(line,"DoorPanel.%d.%d.%d.%d=%d",&model,&door,&inside,&axis,&value)==5 &&
                    model>=400&&model<=611&&door>=0&&door<4&&inside>=0&&inside<2&&axis>=0&&axis<6) {
                     g_modelCalibration[model].doorPanel[door][inside][axis]=std::clamp(value,-200,200);continue;
@@ -1674,6 +1704,86 @@ void FillHandleVisuals(WheelVisualState* visual) {
     }
 }
 
+void UpdateIgnition(WheelVisualState& visual, void* vehicle,
+                    const xr::InputState& input, const xr::HandPose poses[2],
+                    unsigned occupied, bool preview=false) {
+    if (!vehicle || IsBicycleModel(visual.modelId) ||
+        !g.FindPlayerPed || !g.CVehicle_IsDriver ||
+        !g.CVehicle_IsDriver(vehicle,g.FindPlayerPed(-1))) return;
+    V3 right{visual.right[0],visual.right[1],visual.right[2]};
+    V3 up{visual.up[0],visual.up[1],visual.up[2]};
+    V3 normal{visual.normal[0],visual.normal[1],visual.normal[2]};
+    V3 center{visual.center[0],visual.center[1],visual.center[2]};
+    center=center+right*(visual.radius*.7f)-up*(visual.radius*.7f);
+    int adjustment[6]{};
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        const auto it=g_modelCalibration.find(visual.modelId);
+        if (it!=g_modelCalibration.end())
+            std::copy_n(it->second.ignition,6,adjustment);
+    }
+    center=center+right*(adjustment[0]*.01f)+up*(adjustment[1]*.01f)+normal*(adjustment[2]*.01f);
+    constexpr float rad=3.14159265358979323846f/180.0f;
+    up=RotateAroundAxis(up,right,adjustment[3]*rad);
+    normal=RotateAroundAxis(normal,right,adjustment[3]*rad);
+    right=RotateAroundAxis(right,up,adjustment[4]*rad);
+    normal=RotateAroundAxis(normal,up,adjustment[4]*rad);
+    right=RotateAroundAxis(right,normal,adjustment[5]*rad);
+    up=RotateAroundAxis(up,normal,adjustment[5]*rad);
+    if (preview) {
+        visual.ignitionVisible=true;
+        visual.ignitionAngle=EngineOn(vehicle)?1.57079632679f:0.0f;
+        const V3 vectors[4]{center,right,up,normal};
+        float* fields[4]{visual.ignitionCenter,visual.ignitionRight,visual.ignitionUp,visual.ignitionNormal};
+        for (int i=0;i<4;++i) { fields[i][0]=vectors[i].x; fields[i][1]=vectors[i].y; fields[i][2]=vectors[i].z; }
+        return;
+    }
+    if (g_ignitionVehicle!=vehicle) {
+        g_ignitionVehicle=vehicle;
+        g_ignitionRotation={};
+        g_ignitionHint.Leave();
+        g_ignitionGripDown[0]=g_ignitionGripDown[1]=true;
+    }
+    const bool previousHeld=g_ignitionRotation.owners!=0;
+    g_ignitionRotation.SetEngine(EngineOn(vehicle));
+    unsigned mask=g_ignitionRotation.owners;
+    float angles[2]{};
+    for (int h=0;h<2;++h) {
+        const V3 p{poses[h].gripPos[0],poses[h].gripPos[1],poses[h].gripPos[2]};
+        const bool valid=poses[h].valid && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
+        if (!valid || input.grip[h]<=.30f || (occupied&(1u<<h))) mask&=~(1u<<h);
+        if (valid && !(occupied&(1u<<h)) && !g_ignitionGripDown[h] &&
+            input.grip[h]>=.65f && Length(p-center)<.12f) mask|=1u<<h;
+        if (input.grip[h]<=.30f) g_ignitionGripDown[h]=false;
+        else if (input.grip[h]>=.65f) g_ignitionGripDown[h]=true;
+        // Rotate a controller axis into tracking space, then measure its
+        // orientation in the key plane. This works while its hand is pinned.
+        float q[4]{};
+        if (valid && NormalizeQuaternion(poses[h].gripOri,q)) {
+            const V3 v{q[0],q[1],q[2]};
+            const V3 axis=V3{0,1,0}+Cross(v,Cross(v,V3{0,1,0})+V3{0,1,0}*q[3])*2.0f;
+            angles[h]=-PlanarAngle(axis,right,up)/rad;
+        }
+    }
+    if (previousHeld && !mask) {
+        bool released=true;
+        for (int h=0;h<2;++h) if (g_ignitionRotation.owners&(1u<<h))
+            released=released && poses[h].valid && !(occupied&(1u<<h)) && input.grip[h]<=.30f;
+        if (released) SetEngineOn(vehicle,g_ignitionRotation.Release());
+        else { g_ignitionRotation={}; g_ignitionRotation.SetEngine(EngineOn(vehicle)); }
+    }
+    else g_ignitionRotation.Step(mask,angles);
+    const double now=MonotonicSeconds();
+    const auto hint=g_ignitionHint.Update(now,EngineOn(vehicle),mask!=0);
+    visual.ignitionVisible=true;
+    visual.ignitionAngle=g_ignitionRotation.angle*rad;
+    visual.ignitionHint=ignition::HintVisible(now,g_ignitionHint.enteredAt) ? static_cast<int>(hint) : 0;
+    const V3 vectors[4]{center,right,up,normal};
+    float* fields[4]{visual.ignitionCenter,visual.ignitionRight,visual.ignitionUp,visual.ignitionNormal};
+    for (int i=0;i<4;++i) { fields[i][0]=vectors[i].x;fields[i][1]=vectors[i].y;fields[i][2]=vectors[i].z; }
+    for (int h=0;h<2;++h) visual.ignitionGrabbed[h]=(mask&(1u<<h))!=0;
+}
+
 // Android SA 2.11 polls touch widgets inside these queries. Hook the queries,
 // rather than trusting the Java gamepad provider, so Quest input is authoritative.
 using AxisQueryFn=int(*)(void*);
@@ -2023,6 +2133,11 @@ int OnGetAccelerate(void* pad) {
     if (VrGameplayInputAllowed()&&GetControlledVehicle()) {
         xr::InputState input{}; xr::GetInput(input);
         const int appearance=GetRemoteControlledVehicle()?0:GetActiveVehicleAppearance();
+        void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+        if (vehicle && (appearance==1 || appearance==2) && g.FindPlayerPed &&
+            g.CVehicle_IsDriver && g.CVehicle_IsDriver(vehicle,g.FindPlayerPed(-1)) &&
+            !IsBicycleModel(*reinterpret_cast<const std::uint16_t*>(static_cast<char*>(vehicle)+0x32)) &&
+            !EngineOn(vehicle)) return 0;
         if (appearance==2&&ModeForAppearance(appearance)==MODE_IMMERSIVE) {
             std::lock_guard<std::mutex> lock(g_stateMutex);
             const int model=g_activeVehicleModel.load(std::memory_order_acquire);
@@ -2244,6 +2359,22 @@ void* InstallVerifiedTrampoline(void* target,void* replacement,
     if (!PatchAbsoluteJump(target,replacement)) { munmap(trampoline,pageSize); return nullptr; }
     LOGI("[driving] %s VR query hook installed",name);
     return trampoline;
+}
+
+using SetDriverFn=bool(*)(void*,void*);
+SetDriverFn g_origSetDriver{};
+bool OnSetDriver(void* task,void* ped) {
+    void* vehicle{};
+    if (task) std::memcpy(&vehicle,static_cast<char*>(task)+0x20,sizeof(vehicle));
+    const bool player=vehicle && ped && g.FindPlayerPed && ped==g.FindPlayerPed(-1) &&
+        vrcam::IsStereoActive() && g.CVehicle_GetVehicleAppearance &&
+        (g.CVehicle_GetVehicleAppearance(vehicle)==1 || g.CVehicle_GetVehicleAppearance(vehicle)==2) &&
+        !IsBicycleModel(*reinterpret_cast<const std::uint16_t*>(static_cast<char*>(vehicle)+0x32));
+    const bool wasOn=player && EngineOn(vehicle);
+    const bool result=g_origSetDriver(task,ped);
+    if (player && result && g.CVehicle_IsDriver && g.CVehicle_IsDriver(vehicle,ped))
+        SetEngineOn(vehicle,wasOn);
+    return result;
 }
 
 void* InstallSprintTrampoline(void* target,void* replacement) {
@@ -2703,6 +2834,12 @@ bool InstallInputTypePatch() {
 }
 
 void InstallPadHooks() {
+    if (g.LoadBase) {
+        constexpr std::uint32_t entry[4]={0xd101c3ffu,0xa9037bfdu,0xa9045ff8u,0xa90557f6u};
+        g_origSetDriver=reinterpret_cast<SetDriverFn>(InstallVerifiedTrampoline(
+            reinterpret_cast<void*>(g.LoadBase+0x646b0cu),reinterpret_cast<void*>(&OnSetDriver),
+            entry,"CTaskSimpleCarSetPedInAsDriver::ProcessPed"));
+    }
     constexpr std::uint32_t accel[4]={0xD100C3FFu,0xA9017BFDu,0xA9024FF4u,0x910043FDu};
     constexpr std::uint32_t brake[4]={0xD100C3FFu,0xA9017BFDu,0xA9024FF4u,0x910043FDu};
     constexpr std::uint32_t flying[4]={0xd10583ffu,0x6d0d3befu,0x6d0e33edu,0x6d0f2bebu};
@@ -3134,7 +3271,9 @@ constexpr int kDefaultBikeItems[] = {
     MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE,
     MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
-    MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM, MENU_RESET, MENU_BACK
+    MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM,
+    MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
+    MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3142,7 +3281,9 @@ constexpr int kDefaultCarItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_INTERIOR_GLASS, MENU_DRIVEBY_AIM,
-    MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE, MENU_RESET, MENU_BACK
+    MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
+    MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
+    MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveBikeItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3152,7 +3293,9 @@ constexpr int kImmersiveBikeItems[] = {
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
     MENU_BIKE_LEAN_STEERING, MENU_BIKE_LEAN_SENSITIVITY,
     MENU_BIKE_HAND_TILT, MENU_BIKE_BLOCK_WHEELIE, MENU_LOCAL_HORIZON, MENU_BIKE_VISUAL_LEAN,
-    MENU_KEEP_RIDER_ON_FLIPS, MENU_RESET, MENU_BACK
+    MENU_KEEP_RIDER_ON_FLIPS,
+    MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
+    MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3161,7 +3304,9 @@ constexpr int kImmersiveCarItems[] = {
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
     MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS,
-    MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE, MENU_RESET, MENU_BACK
+    MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
+    MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
+    MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultPlaneItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
@@ -3241,6 +3386,23 @@ int GetActiveVehicleType() {
 }
 int GetActiveVehicleModelId() {
     EnsureInit(); return g_activeVehicleModel.load(std::memory_order_acquire);
+}
+int GetIgnitionCalibration(int field) {
+    if (field<0||field>=6) return 0;
+    const int model=GetActiveVehicleModelId();
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const auto it=g_modelCalibration.find(model);
+    return it==g_modelCalibration.end()?0:it->second.ignition[field];
+}
+void AdjustIgnitionCalibration(int field,int direction) {
+    const int model=GetActiveVehicleModelId();
+    if (model<400||field<0||field>=6||!direction) return;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        int& v=g_modelCalibration[model].ignition[field];
+        v=std::clamp(v+(direction<0?-1:1),-720,720);
+    }
+    Save();
 }
 bool HasCurrentModelForType(int vehicleType) {
     return GetActiveVehicleType()==vehicleType&&GetActiveVehicleModelId()>=0;
@@ -3971,11 +4133,17 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
         ClearGrabStateLocked();
         g_grabVehicle=activeVehicle;
     }
+    if (!activeVehicle && g_ignitionVehicle) {
+        g_ignitionVehicle=nullptr;
+        g_ignitionHint.Leave();
+        g_ignitionRotation={};
+    }
     if (!gameplay||!CabinVisualContext()) {
         ClearInteractionLocked();
         return;
     }
     const bool preview = blocked && g_menuPreview.load(std::memory_order_acquire);
+    if (blocked) g_ignitionRotation.owners=0;
     const int activeMode=ModeForAppearance(appearance);
     static int loggedAppearance=-1,loggedMode=-1;
     if (appearance!=loggedAppearance||activeMode!=loggedMode) {
@@ -4010,6 +4178,11 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
             anchor.physicalAngle=0.0f;
             anchor.steering=0.0f;
             anchor.throttleVisual=0.0f;
+            if ((!blocked||preview) && (activeType==VEHICLE_CAR||activeType==VEHICLE_BIKE)) {
+                xr::HandPose hands[2]{}; xr::GetHandPoses(hands);
+                UpdateIgnition(anchor,activeVehicle,input,hands,
+                    physicalweapon::HeldHandMaskRelaxed()|vehicledoors::ClaimedHands(),preview);
+            }
             g_visual=anchor;
         }
         return;
@@ -4062,6 +4235,10 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
             g_menuCalibrationHand.load(std::memory_order_acquire);
         if (calibrationHand>=0&&calibrationHand<2)
             visual.grabbed[calibrationHand]=true;
+        if (activeType==VEHICLE_CAR||activeType==VEHICLE_BIKE) {
+            xr::HandPose hands[2]{}; xr::GetHandPoses(hands);
+            UpdateIgnition(visual,activeVehicle,input,hands,0,true);
+        }
         g_visual=visual;
         return;
     }
@@ -4083,6 +4260,9 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     V3 positions[2]{}; bool poseValid[2]{},justGrabbed[2]{};
     // A hand holding the drawn sidearm cannot also grab a vehicle control. The mask is lock-free.
     const unsigned int weaponHands = physicalweapon::HeldHandMaskRelaxed() | vehicledoors::ClaimedHands();
+    unsigned ignitionOccupied=weaponHands;
+    for (int h=0;h<2;++h) if (g_grabbed[h]) ignitionOccupied|=1u<<h;
+    UpdateIgnition(visual,activeVehicle,input,poses,ignitionOccupied);
     for (int hand=0;hand<2;++hand) {
         positions[hand]={poses[hand].gripPos[0],poses[hand].gripPos[1],poses[hand].gripPos[2]};
         poseValid[hand]=poses[hand].valid&&std::isfinite(positions[hand].x)&&
@@ -4091,7 +4271,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
                          visual.handlePosition[hand][1],
                          visual.handlePosition[hand][2]};
         const float distance=poseValid[hand]?Length(positions[hand]-neutral):1000.0f;
-        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0;
+        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand];
         if (g_grabbed[hand]&&(!poseValid[hand]||input.grip[hand]<=0.30f||
                               holdsWeapon)) {
             g_grabbed[hand]=false; g_angleValid[hand]=false;

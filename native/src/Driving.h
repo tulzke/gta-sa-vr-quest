@@ -113,6 +113,11 @@ struct WheelVisualState {
     float handleRight[2][3]{};
     float handleUp[2][3]{};
     float handleForward[2][3]{};
+    bool ignitionVisible{};
+    bool ignitionGrabbed[2]{};
+    int ignitionHint{};
+    float ignitionCenter[3]{}, ignitionRight[3]{}, ignitionUp[3]{}, ignitionNormal[3]{};
+    float ignitionAngle{};
 };
 
 // Per-vehicle-type camera view for stereo driving. FIRST anchors the eyes at
@@ -158,7 +163,12 @@ enum MenuItem {
     MENU_VEHICLE_DEBUG,
     MENU_VEHICLE_TEST_AREA,
     MENU_VEHICLE_TEST_PAGE
+    , MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z,
+    MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ
 };
+
+int GetIgnitionCalibration(int field);
+void AdjustIgnitionCalibration(int field,int direction);
 
 enum ControlCalibrationField {
     CONTROL_OFFSET_X = 0,

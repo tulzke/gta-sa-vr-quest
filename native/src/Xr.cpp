@@ -6213,7 +6213,8 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     // that same order, before g_headPoseMutex, to avoid the inverse-order
     // deadlock while still publishing it into this exact ring slot below.
     driving::GetWheelVisualState(&drivingWheel);
-    drivingWheel.trackedHandsEnabled = driving::ShouldUseTrackedHands();
+    drivingWheel.trackedHandsEnabled = driving::ShouldUseTrackedHands() ||
+        drivingWheel.ignitionGrabbed[0] || drivingWheel.ignitionGrabbed[1];
     g_lastDashModelId.store(
         (drivingWheel.active || drivingWheel.dashAnchorValid)
             ? drivingWheel.modelId : -1,
@@ -7729,6 +7730,15 @@ void BuildDrivingMenu() {
             case driving::MENU_VEHICLE_DEBUG:
                 std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE DEBUG < %s >",driving::VehicleDebugModeName());
                 break;
+            case driving::MENU_IGNITION_X: case driving::MENU_IGNITION_Y:
+            case driving::MENU_IGNITION_Z: case driving::MENU_IGNITION_RX:
+            case driving::MENU_IGNITION_RY: case driving::MENU_IGNITION_RZ: {
+                const int field=item-driving::MENU_IGNITION_X;
+                static const char* const names[]={"SIDE", "UP", "DEPTH", "PITCH", "YAW", "ROLL"};
+                std::snprintf(rows[row],sizeof(rows[row]),"DEBUG KEY %s < %+d %s >",
+                    names[field],driving::GetIgnitionCalibration(field),field<3?"CM":"DEG");
+                break;
+            }
             case driving::MENU_VEHICLE_TEST_AREA:
                 std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE TEST AREA < %s >",testarea::MenuLabel());
                 break;
@@ -8803,7 +8813,18 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
         bool basketballFlatPalm = false;
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
-        if (steeringHand) {
+        if (drivingWheel.ignitionGrabbed[hand]) {
+            pos={drivingWheel.ignitionCenter[0],drivingWheel.ignitionCenter[1],drivingWheel.ignitionCenter[2]};
+            const XrVector3f kr{drivingWheel.ignitionRight[0],drivingWheel.ignitionRight[1],drivingWheel.ignitionRight[2]};
+            const XrVector3f ku{drivingWheel.ignitionUp[0],drivingWheel.ignitionUp[1],drivingWheel.ignitionUp[2]};
+            forward={drivingWheel.ignitionNormal[0],drivingWheel.ignitionNormal[1],drivingWheel.ignitionNormal[2]};
+            const float a=drivingWheel.ignitionAngle;
+            up=vnorm(vadd(vscale(ku,std::cos(a)),vscale(kr,std::sin(a))));
+            pos=vadd(pos,vscale(up,hand==0?-.020f:.020f));
+            right=vnorm(vcross(up,forward));
+            if (hand==0) right=vscale(right,-1.0f);
+            grip=trig=0.95f;
+        } else if (steeringHand) {
             // reference Quest build's car socket is a RenderWare matrix whose Right axis lies
             // along the rim and Forward axis is the wheel normal. Reproduce its
             // final UltimateXR anatomical decode, including LEFT parity, rather
@@ -10714,6 +10735,63 @@ void DrawDrivingBoxes(const float* mvp, const float* vertices, int vertexCount,
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
+void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
+    if (!w.ignitionVisible) return;
+    const XrVector3f c{w.ignitionCenter[0],w.ignitionCenter[1],w.ignitionCenter[2]};
+    const XrVector3f r=vnorm({w.ignitionRight[0],w.ignitionRight[1],w.ignitionRight[2]});
+    const XrVector3f u=vnorm({w.ignitionUp[0],w.ignitionUp[1],w.ignitionUp[2]});
+    const XrVector3f n=vnorm({w.ignitionNormal[0],w.ignitionNormal[1],w.ignitionNormal[2]});
+    // Flat cylinder: front fan and narrow edge around the back.
+    constexpr int N=24;
+    float verts[(2*N+1)*3]{}; unsigned short idx[N*9]{};
+    verts[0]=c.x;verts[1]=c.y;verts[2]=c.z;
+    for (int i=0;i<N;++i) {
+        const float a=6.2831853f*i/N;
+        const XrVector3f p=vadd(c,vadd(vscale(r,.035f*std::cos(a)),vscale(u,.035f*std::sin(a))));
+        verts[(i+1)*3]=p.x;verts[(i+1)*3+1]=p.y;verts[(i+1)*3+2]=p.z;
+        const XrVector3f back=vadd(p,vscale(n,-.006f));
+        verts[(N+i+1)*3]=back.x;verts[(N+i+1)*3+1]=back.y;verts[(N+i+1)*3+2]=back.z;
+        const auto a0=static_cast<unsigned short>(i+1), a1=static_cast<unsigned short>((i+1)%N+1);
+        const auto b0=static_cast<unsigned short>(N+i+1), b1=static_cast<unsigned short>(N+(i+1)%N+1);
+        const int j=i*9;
+        idx[j]=0;idx[j+1]=a0;idx[j+2]=a1;
+        idx[j+3]=a0;idx[j+4]=b0;idx[j+5]=a1;
+        idx[j+6]=a1;idx[j+7]=b0;idx[j+8]=b1;
+    }
+    DrawDrivingBoxes(mvp,verts,2*N+1,idx,N*9,.35f,.35f,.35f);
+    float boxes[8*3*20]{};unsigned short indices[36*20]{};int vc=0,ic=0;
+    const XrVector3f keyUp=vnorm(vadd(vscale(u,std::cos(w.ignitionAngle)),vscale(r,std::sin(w.ignitionAngle))));
+    const XrVector3f keyRight=vnorm(vcross(keyUp,n));
+    AppendDrivingBox(boxes,vc,indices,ic,vadd(c,vscale(n,.004f)),keyUp,keyRight,n,.030f,.006f,.004f);
+    AppendDrivingBox(boxes,vc,indices,ic,vadd(vadd(c,vscale(keyUp,.020f)),vscale(n,.004f)),keyRight,keyUp,n,.014f,.007f,.004f);
+    DrawDrivingBoxes(mvp,boxes,vc,indices,ic,.72f,.72f,.72f);
+    if (!w.ignitionHint) return;
+    vc=ic=0;
+    if (w.ignitionHint==1) {
+        const XrVector3f start=vadd(c,vscale(u,.12f)),end=vadd(c,vscale(u,.055f));
+        AppendDrivingBox(boxes,vc,indices,ic,vscale(vadd(start,end),.5f),u,r,n,.032f,.004f,.003f);
+        for (int s : {-1,1}) {
+            const XrVector3f d=vnorm(vadd(vscale(u,.7f),vscale(r,s*.7f)));
+            AppendDrivingBox(boxes,vc,indices,ic,vadd(end,vscale(d,.012f)),d,vnorm(vcross(n,d)),n,.014f,.004f,.003f);
+        }
+    } else {
+        const XrVector3f origin=vadd(c,vscale(r,.075f));
+        for (int i=0;i<8;++i) {
+            const float a=1.5707963f*i/8,b=1.5707963f*(i+1)/8;
+            const XrVector3f p=vadd(origin,vadd(vscale(r,.035f*std::sin(a)),vscale(u,.035f*std::cos(a))));
+            const XrVector3f q=vadd(origin,vadd(vscale(r,.035f*std::sin(b)),vscale(u,.035f*std::cos(b))));
+            const XrVector3f d=vsub(q,p);const float len=std::sqrt(vdot(d,d));
+            AppendDrivingBox(boxes,vc,indices,ic,vscale(vadd(p,q),.5f),vscale(d,1.f/len),n,u,len*.5f,.003f,.003f);
+        }
+        const XrVector3f tip=vadd(origin,vscale(r,.035f));
+        for (int s : {-1,1}) {
+            const XrVector3f d=vnorm(vadd(vscale(u,.7f),vscale(r,s*.7f)));
+            AppendDrivingBox(boxes,vc,indices,ic,vadd(tip,vscale(d,.01f)),d,n,vnorm(vcross(n,d)),.013f,.003f,.003f);
+        }
+    }
+    DrawDrivingBoxes(mvp,boxes,vc,indices,ic,1.f,.85f,.05f);
+}
+
 void DrawImmersiveDrivingWheel(const float* mvp,
                                const driving::WheelVisualState& wheel) {
     if (!wheel.active) return;
@@ -11588,6 +11666,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // the closed hands are drawn over it at the exact animated rim sockets.
     if (trackedVisuals && drivingWheel.active)
         DrawImmersiveDrivingWheel(mvp, drivingWheel);
+    if (!scope.active) DrawIgnition(mvp,drivingWheel);
     // Never turn the optional highlight into a wallhack: if the shared game
     // depth cannot be copied this frame, omit it instead of drawing on top.
     if (usingGameDepth)
