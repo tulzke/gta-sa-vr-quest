@@ -61,4 +61,16 @@ inline bool PullDelta(Vec previous, Vec current, float dt, Vec& delta) {
     delta=motion*(-1.f);
     return true;
 }
+inline vehicledoors::Basis PipeHandFrame(Vec axis,Vec heading,float pitch,float roll){
+    using namespace vehicledoors;
+    axis=axis*(1.f/Length(axis));
+    Vec forward=heading-axis*Dot(heading,axis);
+    if(Length(forward)<.05f){forward=Cross(axis,{1,0,0});if(Length(forward)<.05f)forward=Cross(axis,{0,1,0});}
+    forward=forward*(1.f/Length(forward));
+    Vec right=Cross(forward,axis),up=axis;
+    const float p=pitch*.01745329252f,r=roll*.01745329252f;
+    const Vec f=forward;forward=f*std::cos(p)+up*std::sin(p);up=up*std::cos(p)-f*std::sin(p);
+    const Vec oldRight=right;right=right*std::cos(r)+up*std::sin(r);up=up*std::cos(r)-oldRight*std::sin(r);
+    return {right,forward,up,{}};
+}
 }

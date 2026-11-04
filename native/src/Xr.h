@@ -89,6 +89,8 @@ struct HandPose {
     float aimOri[4]{0, 0, 0, 1};
     float grip{};                   // squeeze [0,1]
     float trigger{};                // trigger [0,1]
+    bool climbGrip{};              // render-only conventional hand frame
+    float climbRight[3]{},climbForward[3]{},climbUp[3]{};
 };
 // Copy out both hands' poses (index 0 = left, 1 = right). Safe every frame.
 void GetHandPoses(HandPose out[2]);

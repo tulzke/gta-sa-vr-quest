@@ -182,6 +182,7 @@ void GetRearMirrorCalibration(int model, int out[12]);
 void SetRearMirrorCalibration(int model, const int values[12]);
 
 int ClimbHandOffsetCm(int axis);
+int ClimbHandAngleDeg(int axis); // 0 pitch, 1 roll; global config
 void AdjustClimbHandOffset(int axis,int direction);
 int GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);

@@ -8997,7 +8997,14 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             }
         }
 
-        const bool pinch = pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
+        if(hp[hand].climbGrip){
+            forward={hp[hand].climbForward[0],hp[hand].climbForward[1],hp[hand].climbForward[2]};
+            right={hp[hand].climbRight[0],hp[hand].climbRight[1],hp[hand].climbRight[2]};
+            up={hp[hand].climbUp[0],hp[hand].climbUp[1],hp[hand].climbUp[2]};
+            if(hand==0)right=vscale(right,-1.f);
+            grip=1.f;trig=0.f; // standard Grip asset, independent of trigger
+        }
+        const bool pinch = !hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
             !steeringHand &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand) &&
             g_pinchMesh[hand].loaded && g_pinchMesh[hand].verts.size() == g_handMesh[hand].verts.size();

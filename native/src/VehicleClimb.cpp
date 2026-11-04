@@ -14,6 +14,7 @@ namespace savr::vehicleclimb {
 namespace {
 using namespace vehicledoors;
 Basis visualFrame;
+Vec visualPipeAxis{0,0,1},handHeading[2]{{0,1,0},{0,1,0}};
 template<class T>T Read(void* p,int off){T v{};std::memcpy(&v,static_cast<char*>(p)+off,sizeof(v));return v;}
 template<class T>void Write(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 void (*removeEntity)(void*){};void (*addEntity)(void*){};void* (*ltm)(void*){};
@@ -135,7 +136,25 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
         const Vec shifted=grabWorld[h]+shift;
         const float world[]={shifted.x,shifted.y,shifted.z};float tracking[3]{};
         if(vrcam::WorldPointToTracking(world,tracking)){
-            std::copy_n(tracking,3,hands[h].gripPos);hands[h].grip=1.f;
+            const float* q=hands[h].gripOri;const Vec u{q[0],q[1],q[2]},v{0,0,-1};
+            const float norm=Dot(u,u)+q[3]*q[3];
+            if(std::isfinite(norm)&&norm>.5f){
+                const Vec direction=v+(Cross(u,v)*q[3]+Cross(u,Cross(u,v)))*(2.f/norm);
+                Vec start{},end{};
+                if(World(Raw(hands[h]),start)&&World(Raw(hands[h])+direction,end)){
+                    const Vec heading=end-start-visualPipeAxis*Dot(end-start,visualPipeAxis);
+                    if(Length(heading)>.05f)handHeading[h]=heading;
+                }
+            }
+            const auto frame=PipeHandFrame(visualPipeAxis,handHeading[h],driving::ClimbHandAngleDeg(0),driving::ClimbHandAngleDeg(1));
+            const Vec axes[]={frame.right,frame.forward,frame.up};
+            float* outputs[]={hands[h].climbRight,hands[h].climbForward,hands[h].climbUp};
+            bool validFrame=true;
+            for(int a=0;a<3;++a){const Vec point=shifted+axes[a];const float input[]={point.x,point.y,point.z};float out[3]{};
+                if(!vrcam::WorldPointToTracking(input,out)){validFrame=false;break;}
+                for(int c=0;c<3;++c)outputs[a][c]=out[c]-tracking[c];
+            }
+            std::copy_n(tracking,3,hands[h].gripPos);hands[h].grip=1.f;hands[h].trigger=0.f;hands[h].climbGrip=validFrame;
         }
     }
 }
@@ -211,6 +230,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         if(hbest>=0){edit.Begin(hbest,b.Local(world[hbest]));control=cbest;std::copy_n(c,12,editBase);claimed=1u<<hbest;xr::TriggerHaptic(hbest,.25f,0,30);}
     }
     Vec axis=shape.pipe.top-shape.pipe.bottom;const float length=Length(axis);axis=axis*(1.f/length);
+    visualPipeAxis=b.Vector(axis);
     Vec perpendicular=Cross(axis,{1,0,0});if(Length(perpendicular)<.1f)perpendicular=Cross(axis,{0,1,0});perpendicular=perpendicular*(1.f/Length(perpendicular));
     Bar(b.Point(controls[5]),b.Vector(axis),b.Vector(perpendicular),held[0]||held[1],length);
     auto& pipeMarker=markers.markers[markers.count-1];

@@ -14,11 +14,13 @@ double testNow=1;
 namespace savr {
 GameSymbols g;
 namespace xr {
-struct HandPose {bool valid{true};float gripPos[3]{};float grip{},trigger{};};
+struct HandPose {bool valid{true};float gripPos[3]{};float grip{},trigger{};float gripOri[4]{0,0,0,1};bool climbGrip{};float climbRight[3]{},climbForward[3]{},climbUp[3]{};};
 void TriggerHaptic(int,float,float,float){}
 }
 namespace driving {
 int mode{},saves{},lastCalibrationModel{};int handOffset[3]{};
+int handAngle[2]{};
+int ClimbHandAngleDeg(int a){return handAngle[a];}
 int ClimbHandOffsetCm(int a){return handOffset[a];}float config[2][12]{};
 int GetVehicleDebugMode(){return mode;}
 void SaveDebugCalibration(){++saves;}
@@ -49,6 +51,12 @@ std::uint8_t flags[110];void* poolPtr=pool;void* ignored{};bool wall{};int moves
 xr::HandPose hands[2];
 void Tick(bool usable=true,std::uint64_t epoch=1,unsigned occupied=0){testNow+=.01;Update(usable&&!vrcam::ParachuteStateActive(),hands,epoch,occupied);physicalweapon::AutoEquipParachute();}
 int main(){
+    const auto tiltA=PipeHandFrame({0,0,1},{0,1,.8f},10,20);
+    const auto tiltB=PipeHandFrame({0,0,1},{0,1,-.8f},10,20);
+    const auto yaw=PipeHandFrame({0,0,1},{1,0,.8f},10,20);
+    assert(tiltA.Valid()&&tiltB.Valid()&&yaw.Valid());
+    assert(Length(tiltA.up-tiltB.up)<.0001f&&Length(tiltA.forward-tiltB.forward)<.0001f);
+    assert(Length(tiltA.forward-yaw.forward)>.5f);
     // Regression: the door node lies inside the cab outline. Default pipes
     // must clear the 1.449 m lateral detail on both sides of retail linerun.dff.
     for(int side=0;side<2;++side){float zero[12]{};const float sign=side?1.f:-1.f;
@@ -97,7 +105,8 @@ int main(){
     xr::HandPose rendered[2]={hands[0],hands[1]};vrcam::offsetZ=.12f;
     ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z)<.0001f);
     Tick();assert(std::abs(markers.markers[markers.count-1].pipeHands[0].z-locked.z)<.0001f);
-    assert(rendered[0].grip==1.f);
+    assert(rendered[0].grip==1.f&&rendered[0].trigger==0.f&&rendered[0].climbGrip);
+    assert(std::abs(rendered[0].climbUp[2]-1.f)<.0001f);
     driving::handOffset[2]=5;ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z-.05f)<.0001f);driving::handOffset[2]=0;
     vrcam::offsetZ=0;
     const float still=Position(ped).z;vrcam::offsetZ=.03f;Tick();assert(std::abs(Position(ped).z-still)<.0001f);vrcam::offsetZ=0;

@@ -269,6 +269,7 @@ std::atomic<int> g_vehicleDebugMode{};
 std::atomic<int> g_rearMirrorQuality{1};
 std::atomic<int> g_rearMirrorFov{80};
 std::atomic<int> g_climbHandOffset[3]{};
+std::atomic<int> g_climbHandAngle[2]{};
 struct ModelCalibration {
     int door[4][2][3]{};
     int doorPanel[4][2][6]{};
@@ -532,6 +533,7 @@ void Save() {
                  g_keepRiderOnFlips.load()?1:0);
     std::fprintf(file, "HideInteriorGlass=%d\n",
                  g_hideInteriorGlass.load()?1:0);
+    std::fprintf(file,"ClimbHandPitch=%d\nClimbHandRoll=%d\n",g_climbHandAngle[0].load(),g_climbHandAngle[1].load());
     for(int a=0;a<3;++a)std::fprintf(file,"ClimbHand%d=%d\n",a,g_climbHandOffset[a].load());
     std::fprintf(file, "RearMirror=%d\nRearMirrorFov=%d\n",
                  g_rearMirrorQuality.load()>0?1:0, g_rearMirrorFov.load());
@@ -720,6 +722,8 @@ void Load() {
                 g_rearMirrorQuality.store(value!=0?1:0);
             else if (std::sscanf(line, "RearMirrorQuality=%d", &value)==1)
                 g_rearMirrorQuality.store(std::clamp(value,0,2));
+            else if(std::sscanf(line,"ClimbHandPitch=%d",&value)==1)g_climbHandAngle[0]=std::clamp(value,-180,180);
+            else if(std::sscanf(line,"ClimbHandRoll=%d",&value)==1)g_climbHandAngle[1]=std::clamp(value,-180,180);
             else if (std::sscanf(line,"ClimbHand0=%d",&value)==1)g_climbHandOffset[0]=std::clamp(value,-30,30);
             else if (std::sscanf(line,"ClimbHand1=%d",&value)==1)g_climbHandOffset[1]=std::clamp(value,-30,30);
             else if (std::sscanf(line,"ClimbHand2=%d",&value)==1)g_climbHandOffset[2]=std::clamp(value,-30,30);
@@ -3481,6 +3485,7 @@ int GetActiveVehicleType() {
 int GetActiveVehicleModelId() {
     EnsureInit(); return g_activeVehicleModel.load(std::memory_order_acquire);
 }
+int ClimbHandAngleDeg(int axis){EnsureInit();return axis>=0&&axis<2?g_climbHandAngle[axis].load():0;}
 int ClimbHandOffsetCm(int axis){EnsureInit();return axis>=0&&axis<3?g_climbHandOffset[axis].load():0;}
 void AdjustClimbHandOffset(int axis,int direction){EnsureInit();if(axis<0||axis>2||!direction)return;g_climbHandOffset[axis]=std::clamp(g_climbHandOffset[axis].load()+(direction<0?-1:1),-30,30);Save();}
 int GetIgnitionCalibration(int field) {
