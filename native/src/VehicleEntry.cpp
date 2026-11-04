@@ -1,4 +1,5 @@
 #include "VehicleEntry.h"
+#include "VehicleClimb.h"
 #include "VehicleExit.h"
 #include "PassengerReaction.h"
 #include "BoatEntry.h"
@@ -83,7 +84,7 @@ void Install(void* h){
  healthy=reinterpret_cast<decltype(healthy)>(dlsym(h,"_ZN13CCarEnterExit12IsPedHealthyERK4CPed"));
  canStepOut=reinterpret_cast<decltype(canStepOut)>(dlsym(h,"_ZNK8CVehicle16CanPedStepOutCarEb"));
 }
-bool ConsumesMove(){return started>0||Now()<flashUntil;}
+bool ConsumesMove(){return vehicleclimb::ClaimedHands()!=0||started>0||Now()<flashUntil;}
 void Update(bool usable,std::uint64_t epoch){
  passengerreaction::Update(usable);
  const double now=Now();visible=false;icons={};icons.epoch=epoch;claimed=0;

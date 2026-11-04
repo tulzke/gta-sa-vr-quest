@@ -15,6 +15,7 @@
 
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::exit(1); } } while(0)
 #define LOGI(...) ((void)0)
+namespace savr::vehicleclimb { unsigned ClaimedHands(){return 0;} bool Editing(){return false;} void Update(bool,const xr::HandPose*,std::uint64_t,unsigned){} void Append(vehicledoors::MarkerFrame&){} }
 namespace savr::npcgrab {
 int stopsRequested{};unsigned claimedHands{};
 void OnDoorOpening(void*) {++stopsRequested;}

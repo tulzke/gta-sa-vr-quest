@@ -271,6 +271,7 @@ std::atomic<int> g_rearMirrorFov{80};
 struct ModelCalibration {
     int door[4][2][3]{};
     int doorPanel[4][2][6]{};
+    int climb[2][12]{};
     int entry[4][3]{};
     int seatSide[MODE_COUNT]{};
     int seatForward[MODE_COUNT]{};
@@ -551,6 +552,8 @@ void Save() {
             const ModelCalibration& calibration = entry.second;
             for (int field=0;field<12;++field)
                 std::fprintf(file,"RearMirrorCalib.%d.%d=%d\n",model,field,calibration.rearMirror[field]);
+            for(int side=0;side<2;++side) for(int a=0;a<12;++a)
+                std::fprintf(file,"Climb.%d.%d.%d=%d\n",model,side,a,calibration.climb[side][a]);
             for(int seat=0;seat<4;++seat) for(int axis=0;axis<3;++axis)
                 std::fprintf(file,"EntryCalib.%d.%d.%d=%d\n",model,seat,axis,calibration.entry[seat][axis]);
             for(int door=0;door<4;++door) for(int inside=0;inside<2;++inside) for(int axis=0;axis<3;++axis)
@@ -740,6 +743,9 @@ void Load() {
                     model>=400 && model<=611 && axis>=0 && axis<6) {
                     g_modelCalibration[model].ignition[axis]=std::clamp(value,-720,720);
                     continue;
+                }
+                if(std::sscanf(line,"Climb.%d.%d.%d=%d",&model,&door,&axis,&value)==4 && model>=400&&model<=611&&door>=0&&door<2&&axis>=0&&axis<12) {
+                    g_modelCalibration[model].climb[door][axis]=std::clamp(value,-300,300);continue;
                 }
                 if(std::sscanf(line,"DoorPanel.%d.%d.%d.%d=%d",&model,&door,&inside,&axis,&value)==5 &&
                    model>=400&&model<=611&&door>=0&&door<4&&inside>=0&&inside<2&&axis>=0&&axis<6) {
@@ -3581,6 +3587,18 @@ void SetEntryCalibration(int model,int seat,const float value[3]) {
     for(int a=0;a<3;++a)if(!std::isfinite(value[a]))return;
     std::lock_guard<std::mutex> lock(g_modelMutex);
     for(int a=0;a<3;++a)g_modelCalibration[model].entry[seat][a]=std::lround(std::clamp(value[a],-2.f,2.f)*100);
+}
+void GetClimbCalibration(int model,int side,float out[12]) {
+    EnsureInit();std::fill_n(out,12,0.f);if(side<0||side>1)return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const auto it=g_modelCalibration.find(model);
+    if(it!=g_modelCalibration.end())for(int a=0;a<12;++a)out[a]=it->second.climb[side][a]*.01f;
+}
+void SetClimbCalibration(int model,int side,const float values[12]) {
+    if(model<400||model>611||side<0||side>1)return;
+    for(int a=0;a<12;++a)if(!std::isfinite(values[a]))return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    for(int a=0;a<12;++a)g_modelCalibration[model].climb[side][a]=std::lround(std::clamp(values[a],-3.f,3.f)*100.f);
 }
 void GetDoorCalibration(int model,int door,bool inside,float out[3]) {
     EnsureInit(); std::fill_n(out,3,0.f);

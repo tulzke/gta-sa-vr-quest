@@ -77,6 +77,7 @@ add_library(savr SHARED
     src/PassengerReaction.cpp
     src/VehicleExit.cpp
     src/VehicleEntry.cpp
+    src/VehicleClimb.cpp
     src/VehicleDoors.cpp
     src/VehicleTestArea.cpp
     src/MissionWeaponGrant.cpp

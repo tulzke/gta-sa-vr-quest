@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+namespace savr::vehicleclimb { unsigned ClaimedHands(){return 0;} }
 using savr::vehicledoors::Vec;
 double testNow=1;float eyeX=-1.3f,eyeY=0;int vehicleAppearance=1;bool locksOpen=true;
 namespace savr {

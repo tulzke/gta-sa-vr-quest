@@ -216,6 +216,8 @@ enum WheelCalibrationField {
 int GetVehicleDebugMode();
 void CycleVehicleDebugMode(int direction);
 const char* VehicleDebugModeName();
+void GetClimbCalibration(int model,int side,float out[12]);
+void SetClimbCalibration(int model,int side,const float values[12]);
 void GetDoorCalibration(int model,int door,bool inside,float out[3]);
 void GetDoorPanelCalibration(int model,int door,bool inside,float out[6]);
 void SetDoorPanelCalibration(int model,int door,bool inside,const float value[6]);

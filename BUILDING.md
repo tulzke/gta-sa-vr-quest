@@ -137,6 +137,26 @@ preserved. Build-only commands perform no headset installation or game launch.
 
 ## Vehicle calibration editor
 
+### Tanker climbing MVP
+
+Tanker (514) has a climb pipe and a supporting step on each side. The vehicle
+must be stationary and upright. Squeeze a fresh grip near the pipe and pull
+the controller down to raise CJ; release to let go. Both hands can hold the
+pipe, or the free hand can open the door. A foot entering the step volume
+raises CJ to its surface and holds his height until he walks off. Use the
+existing seat icon/stick action to enter after opening the door.
+
+In VEHICLE DEBUG, drag the step's four corner markers with a trigger to resize
+it in X/Y or move its height. The marker at the centre of the top changes
+thickness by moving the bottom, keeping the top fixed. The pipe's centre moves
+the whole pipe; its two ends change length and inclination. Release the trigger
+to save. Sides are stored independently in `Climb.<model>.<side>.<axis>` in
+`vr_driving.ini` (centimetre offsets). Initial locations need headset calibration.
+Movement of the car cancels support/grabs; this MVP does not carry the player
+on moving vehicles. Dozer's ladder is a separate backlog task.
+
+### Existing controls
+
 Open **VR MENU > VEHICLE SETTINGS > VEHICLE DEBUG** and switch it **ON**.
 Close the menu: door, wheel and seat markers are available together. Bring an
 empty hand to a marker and squeeze its trigger to drag; release to save. With

@@ -107,6 +107,7 @@ struct Marker {
     bool arrowOut{};
     bool doorGrab{};
     bool bikeGrip{};
+    float pipeLength{.11f};
     bool hideArrow{};
     bool panelVolume{};
     Vec halfExtent{}; // local right, forward, up
@@ -135,7 +136,7 @@ inline std::array<Vec,36> PanelVolume(const Marker& m) {
 inline std::array<Vec,144> GripCylinder(const Marker& m) {
     std::array<Vec,144> mesh{};int n=0;
     const Vec axis=m.direction,up=m.up,across=Cross(axis,up);
-    const Vec left=m.position-axis*.055f,right=m.position+axis*.055f;
+    const Vec left=m.position-axis*(m.pipeLength*.5f),right=m.position+axis*(m.pipeLength*.5f);
     for(int i=0;i<12;++i){
         const float a=6.2831853f*i/12,b=6.2831853f*(i+1)/12;
         const Vec r=(up*std::cos(a)+across*std::sin(a))*.022f;
