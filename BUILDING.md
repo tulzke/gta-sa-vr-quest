@@ -137,9 +137,9 @@ preserved. Build-only commands perform no headset installation or game launch.
 
 ## Vehicle calibration editor
 
-### Tanker climbing MVP
+### Linerunner climbing MVP
 
-Tanker (514) has a climb pipe and a supporting step on each side. The vehicle
+Linerunner (403), on the first test-area page, has a climb pipe and a supporting step on each side. The vehicle
 must be stationary and upright. Squeeze a fresh grip near the pipe and pull
 the controller down to raise CJ; release to let go. Both hands can hold the
 pipe, or the free hand can open the door. A foot entering the step volume

@@ -12,6 +12,7 @@
 namespace savr::vehicleclimb {
 namespace {
 using namespace vehicledoors;
+constexpr int kModel=403; // Linerunner, first test-area page
 template<class T>T Read(void* p,int off){T v{};std::memcpy(&v,static_cast<char*>(p)+off,sizeof(v));return v;}
 template<class T>void Write(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 void (*removeEntity)(void*){};void (*addEntity)(void*){};void* (*ltm)(void*){};
@@ -36,12 +37,12 @@ Vec Raw(const xr::HandPose& h){return {h.gripPos[0],h.gripPos[1],h.gripPos[2]};}
 struct Geometry {Step step;Pipe pipe;};
 Geometry Shape(Vec hinge,int side,const float c[12]) {
     const float sign=side?1.f:-1.f;
-    // petro.dff: front door hinge |x|=1.009, fuel tank/cab details reach
-    // |x|=1.431. Keep the pipe at |x|=1.659 and the step outside that shell.
-    const Vec centre=hinge+Vec{sign*.75f,-.65f,-.75f};
+    // linerun.dff: front door hinge |x|=.929, fuel tank/cab details reach
+    // |x|=1.449. Keep the pipe at |x|=1.659 and the step outside that shell.
+    const Vec centre=hinge+Vec{sign*.83f,-.65f,-.75f};
     Geometry result;
     result.step={centre+Vec{-.22f+c[0],-.42f+c[1],-.18f+c[2]},centre+Vec{.22f+c[3],.42f+c[4],c[5]}};
-    const Vec base=hinge+Vec{sign*.65f,-.65f,-.65f};
+    const Vec base=hinge+Vec{sign*.73f,-.65f,-.65f};
     result.pipe={base+Vec{c[6],c[7],c[8]},base+Vec{c[9],c[10],1.05f+c[11]}};
     return result;
 }
@@ -95,11 +96,11 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     float origin[3]{},direction[3]{};if(!vrcam::GetHeadWorldRay(origin,direction)){Reset();return;}
     Vec eye{origin[0],origin[1],origin[2]},root=Position(ped);
     // Keep the retained instance while holding/supporting/editing; otherwise
-    // select only the nearest Tanker and its near side.
+    // select only the nearest Linerunner and its near side.
     if(!activeCar){
         float best=5.f;
         for(int i=0;i<110;++i)if(!(flags[i]&0x80)){
-            void* car=objects+i*0xc68;if(Read<std::uint16_t>(car,0x32)!=514)continue;
+            void* car=objects+i*0xc68;if(Read<std::uint16_t>(car,0x32)!=kModel)continue;
             const float d=Length(Position(car)-eye);if(d<best){best=d;activeCar=car;activeSlot=i;generation=flags[i];activePool=pool;}
         }
         if(!activeCar)return;
@@ -113,7 +114,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     if(!b.Valid()||b.up.z<.98f||!Finite(speed)||Length(speed)>.005f||!Finite(turn)||Length(turn)>.005f||Length(root-b.position)>6.f){Reset();return;}
     void* node=Read<void*>(activeCar,0x800+(activeSide?8:10)*8);void* door=node?ltm(node):nullptr;
     if(!door){Reset();return;}const Vec hinge=b.Local(Read<Vec>(door,0x30));
-    float c[12]{};driving::GetClimbCalibration(514,activeSide,c);
+    float c[12]{};driving::GetClimbCalibration(kModel,activeSide,c);
     Geometry shape=Shape(hinge,activeSide,c);
     if(!shape.step.Valid()||!shape.pipe.Valid()){Reset();return;}
     if(feetCar!=activeCar||feetSide!=activeSide||feetGeneration!=generation)feetValid=false;
@@ -128,7 +129,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         else if(control==5){for(int j:{6,9}){c[j]+=d.x;c[j+1]+=d.y;c[j+2]+=d.z;}}
         else {const int j=control==6?6:9;c[j]+=d.x;c[j+1]+=d.y;c[j+2]+=d.z;}
         const Geometry next=Shape(hinge,activeSide,c);
-        if(next.step.Valid()&&next.pipe.Valid()){driving::SetClimbCalibration(514,activeSide,c);shape=next;dirty=true;}
+        if(next.step.Valid()&&next.pipe.Valid()){driving::SetClimbCalibration(kModel,activeSide,c);shape=next;dirty=true;}
         claimed=1u<<h;if(hands[h].trigger<=.35f)EndEdit();
     }
     Vec controls[8];const Step& s=shape.step;
