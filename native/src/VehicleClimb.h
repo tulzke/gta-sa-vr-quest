@@ -7,4 +7,6 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
 void Append(vehicledoors::MarkerFrame& frame);
 unsigned ClaimedHands();
 bool Editing();
+// Render-only override, evaluated after the current camera anchor is ready.
+void ApplyHandVisuals(xr::HandPose hands[2]);
 }

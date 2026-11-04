@@ -34,6 +34,7 @@
 #include "Swimming.h"
 #include "BoatEntry.h"
 #include "VehicleDoors.h"
+#include "VehicleClimb.h"
 #include "NpcGrab.h"
 #include "VehicleTestArea.h"
 #include "StereoSurfacePolicy.h"
@@ -21315,6 +21316,7 @@ void OnRenderScene(bool underwater) {
     xr::HandPose renderedHandPoses[2]{};
     if (!physicalweapon::GetHandPosesSnapshot(renderedHandPoses))
         xr::GetHandPoses(renderedHandPoses);
+    vehicleclimb::ApplyHandVisuals(renderedHandPoses);
     xr::SetRenderedHandPoses(renderedHandPoses);
     const bool playerInVehicle = g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false);
 

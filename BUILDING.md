@@ -145,6 +145,8 @@ the controller down to raise CJ; release to let go. Both hands can hold the
 pipe, or the free hand can open the door. A foot entering the step volume
 raises CJ to its surface and holds his height until he walks off. Use the
 existing seat icon/stick action to enter after opening the door.
+The rendered grip stays fixed on the pipe. Body displacement follows controller
+travel one-to-one without a speed ramp; collisions still block movement.
 
 In VEHICLE DEBUG, drag the step's four corner markers with a trigger to resize
 it in X/Y or move its height. The marker at the centre of the top changes

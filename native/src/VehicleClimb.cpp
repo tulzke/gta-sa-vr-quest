@@ -24,6 +24,7 @@ std::uint64_t lastEpoch{};
 double lastTime{};
 void* activeCar{};void* activePool{};int activeSlot=-1;std::uint8_t generation{};
 int activeSide{};bool held[2]{};Vec previous[2]{},targetRoot{};
+Vec grabRoot[2]{},grabTracking[2]{},grabLocal[2]{},grabWorld[2]{};
 bool supported{};float supportHeight{};
 Vec previousFeet[2]{};bool feetValid{};
 void* feetCar{};int feetSide{};std::uint8_t feetGeneration{};
@@ -76,6 +77,14 @@ void Install(void* h){
 }
 unsigned ClaimedHands(){return claimed;}
 bool Editing(){return edit.hand>=0;}
+void ApplyHandVisuals(xr::HandPose hands[2]){
+    for(int h=0;h<2;++h)if(held[h]&&hands[h].valid){
+        const float world[]={grabWorld[h].x,grabWorld[h].y,grabWorld[h].z};float tracking[3]{};
+        if(vrcam::WorldPointToTracking(world,tracking)){
+            std::copy_n(tracking,3,hands[h].gripPos);hands[h].grip=1.f;
+        }
+    }
+}
 void Append(MarkerFrame& frame){if(frame.epoch==markers.epoch)for(int i=0;i<markers.count&&frame.count<frame.kCapacity;++i)frame.markers[frame.count++]=markers.markers[i];}
 void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned occupied){
     const double now=Now();const float dt=float(now-lastTime);lastTime=now;
@@ -111,7 +120,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     void* matrix=Read<void*>(activeCar,0x18);if(!matrix){Reset();return;}
     const Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
     const Vec speed=Read<Vec>(activeCar,0x68),turn=Read<Vec>(activeCar,0x74);
-    if(!b.Valid()||b.up.z<.98f||!Finite(speed)||Length(speed)>.005f||!Finite(turn)||Length(turn)>.005f||Length(root-b.position)>6.f){Reset();return;}
+    if(!b.Valid()||b.up.z<.98f||!Finite(speed)||Length(speed)>.02f||!Finite(turn)||Length(turn)>.01f||Length(root-b.position)>6.f){Reset();return;}
     void* node=Read<void*>(activeCar,0x800+(activeSide?8:10)*8);void* door=node?ltm(node):nullptr;
     if(!door){Reset();return;}const Vec hinge=b.Local(Read<Vec>(door,0x30));
     float c[12]{};driving::GetClimbCalibration(kModel,activeSide,c);
@@ -148,25 +157,40 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     Vec perpendicular=Cross(axis,{1,0,0});if(Length(perpendicular)<.1f)perpendicular=Cross(axis,{0,1,0});perpendicular=perpendicular*(1.f/Length(perpendicular));
     Bar(b.Point(controls[5]),b.Vector(axis),b.Vector(perpendicular),held[0]||held[1],length);
     if(edit.hand>=0){held[0]=held[1]=false;return;}
+    const unsigned wasHeld=(held[0]?1u:0u)|(held[1]?2u:0u);
     Vec motion{};int count=0;
     for(int h=0;h<2;++h){
         if(!valid[h]||(occupied&(1u<<h))||hands[h].grip<=.35f)held[h]=false;
         if(valid[h]&&fresh[h]&&!(occupied&(1u<<h))&&shape.pipe.Distance(b.Local(world[h]))<.12f){
             if(!held[0]&&!held[1])targetRoot=root;
             held[h]=true;previous[h]=Raw(hands[h]);xr::TriggerHaptic(h,.25f,0,30);
+            grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);
+            const Vec pipeAxis=shape.pipe.top-shape.pipe.bottom;
+            const Vec local=b.Local(world[h]);
+            grabLocal[h]=shape.pipe.bottom+pipeAxis*std::clamp(Dot(local-shape.pipe.bottom,pipeAxis)/Dot(pipeAxis,pipeAxis),0.f,1.f);
         }
         if(!held[h])continue;
-        Vec delta{},oldWorld{};
-        if(!PullDelta(previous[h],Raw(hands[h]),dt,delta)||!World(previous[h],oldWorld)){held[h]=false;continue;}
+        Vec delta{},startWorld{};
+        if(!PullDelta(previous[h],Raw(hands[h]),dt,delta)||!World(grabTracking[h],startWorld)){held[h]=false;continue;}
         previous[h]=Raw(hands[h]);
-        if(shape.pipe.Distance(b.Local(world[h]))>.65f){held[h]=false;continue;}
-        motion=motion+oldWorld-world[h];++count;claimed|=1u<<h;
+        grabWorld[h]=b.Point(grabLocal[h]);
+        motion=motion+grabRoot[h]+startWorld-world[h];++count;claimed|=1u<<h;
     }
     if(count){
-        motion=motion*(1.f/count);const float n=Length(motion);if(n>dt*.8f)motion=motion*(dt*.8f/n);
-        Vec next=targetRoot+motion;
+        if(count==1&&wasHeld==3){
+            for(int h=0;h<2;++h)if(held[h]){grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);}
+            motion=root;
+        }
+        Vec next=motion*(1.f/count);
         if(supported){Vec local=b.Local(next);local.z=std::max(local.z,supportHeight);next=b.Point(local);}
-        if(Move(ped,root,next)){root=next;targetRoot=next;}else targetRoot=root;
+        if(Move(ped,root,next)){root=next;targetRoot=next;}
+        else {
+            // Consume blocked displacement rather than storing an invisible
+            // spring that launches the player when the obstacle clears.
+            for(int h=0;h<2;++h)if(held[h]){grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);}
+            targetRoot=root;
+        }
+        Write(ped,0x68,Vec{});
     }
     // Native foot bones are used only to acquire support. Once acquired, hold
     // a stable root height so idle foot animation cannot pump the camera.

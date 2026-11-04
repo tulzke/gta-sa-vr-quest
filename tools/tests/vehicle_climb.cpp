@@ -24,6 +24,7 @@ void SetClimbCalibration(int model,int side,const float in[12]){assert(model==40
 namespace vrcam {
 float offsetZ{};
 bool TrackingPointToWorld(const float* a,float* b){std::copy_n(a,3,b);b[2]+=offsetZ;return true;}
+bool WorldPointToTracking(const float* a,float* b){std::copy_n(a,3,b);b[2]-=offsetZ;return true;}
 bool GetHeadWorldRay(float* o,float* d){o[0]=-1.5f;o[1]=0;o[2]=1.6f;d[1]=1;return true;}
 }
 }
@@ -61,7 +62,14 @@ int main(){
     vehicledoors::MarkerFrame published;published.epoch=1;Append(published);
     assert(published.count==1&&published.markers[0].bikeGrip&&published.markers[0].pipeLength>1.f);
     hands[0].grip=1;Tick();assert(ClaimedHands()==1);
-    const float before=Position(ped).z;hands[0].gripPos[2]-=.02f;Tick();assert(Position(ped).z>before);
+    const float before=Position(ped).z;hands[0].gripPos[2]-=.02f;Tick();assert(std::abs(Position(ped).z-before-.02f)<.0001f);
+    // Holding still must restore the anchor after native gravity, and the
+    // rendered grip must stay at the same world point while the camera moves.
+    const Vec locked=grabWorld[0];const Vec stable=Position(ped);
+    Put(pm,0x30,stable-Vec{0,0,.04f});Tick();assert(std::abs(Position(ped).z-stable.z)<.0001f);
+    xr::HandPose rendered[2]={hands[0],hands[1]};vrcam::offsetZ=.12f;
+    ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z)<.0001f);
+    assert(rendered[0].grip==1.f);vrcam::offsetZ=0;
     const float still=Position(ped).z;vrcam::offsetZ=.03f;Tick();assert(std::abs(Position(ped).z-still)<.0001f);vrcam::offsetZ=0;
     hands[1]=hands[0];hands[1].grip=0;Tick();hands[1].grip=1;Tick();assert(ClaimedHands()==3);
     const float dual=Position(ped).z;hands[0].gripPos[2]-=.005f;hands[1].gripPos[2]-=.005f;Tick();assert(std::abs(Position(ped).z-dual-.005f)<.0001f);
@@ -83,6 +91,11 @@ int main(){
     driving::mode=1;hands[0].trigger=0;hands[0].gripPos[0]=-1.97f;hands[0].gripPos[1]=-1.07f;hands[0].gripPos[2]=.75f;Tick();
     hands[0].trigger=1;Tick();assert(Editing());hands[0].gripPos[0]-=.1f;Tick();assert(driving::config[0][0]<-.09f);
     hands[0].trigger=0;Tick();assert(!Editing()&&driving::saves==1);
+    // A long pull is not a distance-to-pipe release. No speed cap discards
+    // controller travel; every 10 cm stroke must move the body by 10 cm.
+    driving::mode=0;hands[0].grip=0;hands[0].gripPos[0]=-1.65f;hands[0].gripPos[1]=-.65f;hands[0].gripPos[2]=1.2f;Tick();
+    hands[0].grip=1;Tick();assert(ClaimedHands()==1);
+    for(int i=0;i<9;++i){const float z=Position(ped).z;hands[0].gripPos[2]-=.1f;Tick();assert(ClaimedHands()==1);assert(std::abs(Position(ped).z-z-.1f)<.0001f);}
     Put(cars,0x74,Vec{.1f,0,0});Tick();assert(!activeCar&&!supported&&!ClaimedHands());
     Put(cars,0x74,Vec{});driving::mode=0;
     Put(cars,0x32,std::uint16_t(514));Tick();assert(markers.count==0);
