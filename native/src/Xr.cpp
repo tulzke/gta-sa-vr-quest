@@ -7743,6 +7743,11 @@ void BuildDrivingMenu() {
                 std::snprintf(rows[row],sizeof(rows[row]),"DEBUG CLIMB HAND %s < %+d CM >",names[axis],driving::ClimbHandOffsetCm(axis));
                 break;
             }
+            case driving::MENU_CLIMB_HAND_PITCH: case driving::MENU_CLIMB_HAND_ROLL: {
+                const int axis=item-driving::MENU_CLIMB_HAND_PITCH;
+                std::snprintf(rows[row],sizeof(rows[row]),"DEBUG CLIMB HAND %s < %+d DEG >",axis?"ROLL":"PITCH",driving::ClimbHandAngleDeg(axis));
+                break;
+            }
             case driving::MENU_VEHICLE_DEBUG:
                 std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE DEBUG < %s >",driving::VehicleDebugModeName());
                 break;

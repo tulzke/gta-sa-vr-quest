@@ -148,6 +148,7 @@ FORWARD/UP follow the vehicle axes. Only the rendered hand moves. Values save
 as ClimbHand0/1/2 in vr_driving.ini for later extraction and hardcoding.
 Global `ClimbHandPitch` and `ClimbHandRoll` in the same config set locked hand
 tilts in degrees (±180, default 0). Rotation around the pipe remains free.
+Adjust them in VEHICLE SETTINGS as DEBUG CLIMB HAND PITCH and ROLL, 1° per step.
 The pipe uses the standard Grip hand pose, independent of trigger presses.
 
 Linerunner (403), on the first test-area page, has a climb pipe and a supporting
