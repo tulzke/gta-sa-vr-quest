@@ -1407,7 +1407,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             } else if (item==savr::driving::MENU_MODEL_HEIGHT&&step&&available) {
                 savr::driving::AdjustCurrentModelSeatHeightCm(drivingVehicleType,step);
             } else if (item==savr::driving::MENU_REAR_MIRROR && (enter||step)) {
-                savr::driving::ToggleRearMirror();
+                savr::driving::CycleRearMirrorQuality(step?step:1);
             } else if (item==savr::driving::MENU_REAR_MIRROR_FOV && step) {
                 savr::driving::AdjustRearMirrorFov(step);
             } else if (item>=savr::driving::MENU_IGNITION_X &&

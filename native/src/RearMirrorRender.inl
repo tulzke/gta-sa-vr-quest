@@ -46,7 +46,7 @@ bool Resolve() {
         g.CModelInfo_ms_modelInfoPtrs&&g.GetFrameNodeName&&
         reinterpret_cast<std::uintptr_t>(g.CRenderer_ScanSectorList)==g.LoadBase+kRetailScanSectorListOffset;
     dlclose(h);
-    LOGI("[mirror] renderer ready=%d 512x160 far=70m map=256 traffic=32 shadows=off",api.ready);
+    LOGI("[mirror] renderer ready=%d 512x160 quality=LOW/MEDIUM shadows=off",api.ready);
     return api.ready;
 }
 void* raster{};
@@ -54,10 +54,12 @@ bool visible{};
 CamBasis rear{},surface{};
 void* owner{};
 float tanX{};
+int quality=1;
+float farClip=policy::Far;
 int atoms{},lods{},requests{},creates{};
 struct Candidate { void* entity{}; float distance{}; };
-std::array<Candidate,policy::MaxMap> map{};
-std::array<Candidate,policy::MaxTraffic> traffic{};
+std::array<Candidate,policy::MediumMap> map{};
+std::array<Candidate,policy::MediumTraffic> traffic{};
 int mapCount{},trafficCount{};
 
 // Position axes stay vehicle-local even when orientation is adjusted.
@@ -95,6 +97,7 @@ bool Prepare(const CamBasis& head) {
          std::fabs(Dot(delta,head.up))>depth*1.8f+.2f ||
          Dot(head.pos-surface.pos,surface.forward)<=0.f))return false;
     if(!Resolve())return false;
+    quality=driving::RearMirrorQuality();farClip=policy::FarFor(quality);
     if(!raster) {raster=g.RwRasterCreate(policy::Width,policy::Height,32,5);return false;}
     if(!EyeRasterTexId(raster))return false;
     visible=true;return true;
@@ -126,14 +129,18 @@ bool Bounds(void* entity,void* mi,float& distance) {
     }
     const V3 d=pos-rear.pos;
     const float radius=Read<float>(collision,0x24);
-    distance=std::sqrt(Dot(d,d));
-    return policy::InView(Dot(d,rear.right),Dot(d,rear.up),Dot(d,rear.forward),radius,tanX)&&
-        !policy::SmallProp(radius,distance);
+    const float centerDistance=std::sqrt(Dot(d,d));
+    // Rank by the closest possible surface, not the origin of a large mesh.
+    // A road underneath the camera must not lose the candidate budget to
+    // smaller objects whose centres happen to be closer.
+    distance=std::max(0.f,centerDistance-radius);
+    return policy::InView(Dot(d,rear.right),Dot(d,rear.up),Dot(d,rear.forward),radius,tanX,farClip)&&
+        (quality>=2||!policy::SmallProp(radius,centerDistance));
 }
-template<std::size_t N> void Insert(std::array<Candidate,N>& entries,int& count,void* entity,float distance) {
+template<std::size_t N> void Insert(std::array<Candidate,N>& entries,int& count,void* entity,float distance,int limit=static_cast<int>(N)) {
     for(int i=0;i<count;++i)if(entries[i].entity==entity)return;
-    if(count<static_cast<int>(N)){entries[count++]={entity,distance};return;}
-    auto farthest=std::max_element(entries.begin(),entries.end(),[](const auto& a,const auto& b){return a.distance<b.distance;});
+    if(count<limit){entries[count++]={entity,distance};return;}
+    auto farthest=std::max_element(entries.begin(),entries.begin()+count,[](const auto& a,const auto& b){return a.distance<b.distance;});
     if(distance<farthest->distance)*farthest={entity,distance};
 }
 // Only the render object is instantiated; no simulation/PreRender/ScanWorld
@@ -141,12 +148,12 @@ template<std::size_t N> void Insert(std::array<Candidate,N>& entries,int& count,
 bool Resident(void* entity,void* mi,bool allowRequest) {
     if(Read<void*>(entity,0x20))return true;
     if(Read<void*>(mi,0x40)) {
-        if(creates>=policy::MaxCreates)return false;
+        if(creates>=(quality>=2?4:policy::MaxCreates))return false;
         ++creates;
         api.createObject(entity);
         return Read<void*>(entity,0x20)!=nullptr;
     }
-    if(allowRequest && requests<policy::MaxRequests && g.CStreaming_RequestModel) {
+    if(allowRequest && requests<(quality>=2?4:policy::MaxRequests) && g.CStreaming_RequestModel) {
         g.CStreaming_RequestModel(Read<std::int16_t>(entity,0x32),0);
         ++requests;
     }
@@ -159,23 +166,28 @@ void Consider(void* entity) {
     float distance{};
     if(type==2) {
         if((Read<std::uint32_t>(entity,0x28)&(1u<<7))&&Read<void*>(entity,0x20)&&Bounds(entity,mi,distance))
-            Insert(traffic,trafficCount,entity,distance);
+            Insert(traffic,trafficCount,entity,distance,quality>=2?policy::MediumTraffic:policy::MaxTraffic);
         return;
     }
     if(!StaticAllowed(entity,mi)||!Bounds(entity,mi,distance))return;
     void* parent=Read<void*>(entity,0x50);
     void* parentModel=parent?Model(parent):nullptr;
-    // Use one parent consistently for all its children, including nearby ones.
-    // Do not draw detail on top of an already selected shared LOD parent.
-    if(StaticAllowed(parent,parentModel)&&Resident(parent,parentModel,true)) {
-        if(Bounds(parent,parentModel,distance))Insert(map,mapCount,parent,distance);
-    } else if(Resident(entity,mi,true)) Insert(map,mapCount,entity,distance);
+    float parentDistance{};
+    // Check the replacement before selecting it. A loaded but off-frustum
+    // parent previously discarded its visible detail child entirely. Also
+    // keep detail for parents whose bounds approach/contain the camera: early
+    // LOD meshes can lack the near road surface at wide FOV.
+    if(quality==1&&StaticAllowed(parent,parentModel)&&
+       Bounds(parent,parentModel,parentDistance)&&parentDistance>15.f&&Resident(parent,parentModel,true)) {
+        Insert(map,mapCount,parent,parentDistance,policy::MaxMap);
+    } else if((quality<2||!(Read<std::uint32_t>(entity,0x28)&0x100u))&&Resident(entity,mi,true))
+        Insert(map,mapCount,entity,distance,quality>=2?policy::MediumMap:policy::MaxMap);
 }
 void Collect() {
     mapCount=trafficCount=requests=creates=lods=atoms=0;
     const auto index=[](float p){return std::clamp(static_cast<int>(std::floor((p+3000.f)/50.f)),0,119);};
-    const int minX=index(rear.pos.x-policy::Far),maxX=index(rear.pos.x+policy::Far);
-    const int minY=index(rear.pos.y-policy::Far),maxY=index(rear.pos.y+policy::Far);
+    const int minX=index(rear.pos.x-farClip),maxX=index(rear.pos.x+farClip);
+    const int minY=index(rear.pos.y-farClip),maxY=index(rear.pos.y+farClip);
     int visited=0;
     for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x) {
         const auto* normal=reinterpret_cast<const char*>(g.LoadBase+kRetailWorldSectorsOffset)+(y*120+x)*0x10;
@@ -212,7 +224,7 @@ void* DrawAtomic(void* atomic,void* data) {
 }
 void DrawEntity(const Candidate& c,bool vehicle) {
     void* object=Read<void*>(c.entity,0x20);if(!object)return;
-    AtomicContext context{vehicle,c.distance>20.f,false};
+    AtomicContext context{vehicle,quality==1&&c.distance>20.f,false};
     bool lit=false;
     if(vehicle){api.setupVehicle(c.entity);lit=api.setupLighting(c.entity);}
     if(Read<std::uint8_t>(object,0)==1)DrawAtomic(object,&context);
@@ -253,13 +265,14 @@ void Render(void* sc,std::uintptr_t cam) {
     *reinterpret_cast<float*>(camera+0x9c)=policy::Width/(tanX*policy::Height);
     *reinterpret_cast<float*>(camera+0xa0)=0.f;
     *reinterpret_cast<float*>(camera+0xa4)=0.f;
-    g.RwCameraSetNearClipPlane(sc,policy::Near);g.RwCameraSetFarClipPlane(sc,policy::Far);
-    *reinterpret_cast<float*>(camera+0xb0)=45.f;
+    g.RwCameraSetNearClipPlane(sc,policy::Near);g.RwCameraSetFarClipPlane(sc,farClip);
+    const float fogStart=farClip*.64f;
+    *reinterpret_cast<float*>(camera+0xb0)=fogStart;
     unsigned char background[4]={110,125,140,255};
     if(fog.valid)for(int i=0;i<3;++i)background[i]=static_cast<unsigned char>(std::clamp(fog.color[i]<=1.5f?fog.color[i]*255.f:fog.color[i],0.f,255.f));
     g.RwCameraClear(sc,background,1|2|4);g.RwCameraBeginUpdate(sc);
     if(g.DefinedState)g.DefinedState();
-    ApplyMobileDistanceFog(fog,45.f,policy::Far);
+    ApplyMobileDistanceFog(fog,fogStart,farClip);
     g.RwRenderStateSet(14,reinterpret_cast<void*>(1));
     api.directionalOff();api.ambient();
     for(int i=0;i<mapCount;++i)DrawEntity(map[i],false);
@@ -276,8 +289,8 @@ void Render(void* sc,std::uintptr_t cam) {
     if(g.skipNonblendRender)*g.skipNonblendRender=savedSkipOpaque;
     if(g.DefinedState)g.DefinedState();
     static unsigned samples=0;
-    if(++samples%180==1)LOGI("[mirror] map=%d traffic=%d lod=%d atoms=%d requests=%d creates=%d cpu=%.3fms fov=%d",
-        mapCount,trafficCount,lods,atoms,requests,creates,perf::ThreadCpuMs()-start,driving::RearMirrorFov());
+    if(++samples%180==1)LOGI("[mirror] quality=%d far=%.0f map=%d traffic=%d lod=%d atoms=%d requests=%d creates=%d cpu=%.3fms fov=%d",
+        quality,farClip,mapCount,trafficCount,lods,atoms,requests,creates,perf::ThreadCpuMs()-start,driving::RearMirrorFov());
 }
 void DrawSurface() {
     if(!visible)return;

@@ -7741,7 +7741,7 @@ void BuildDrivingMenu() {
                 std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE DEBUG < %s >",driving::VehicleDebugModeName());
                 break;
             case driving::MENU_REAR_MIRROR:
-                std::snprintf(rows[row],sizeof(rows[row]),"REAR MIRROR < %s >",driving::RearMirrorEnabled()?"ON":"OFF");
+                std::snprintf(rows[row],sizeof(rows[row]),"REAR MIRROR < %s >",driving::RearMirrorQualityName());
                 break;
             case driving::MENU_REAR_MIRROR_FOV:
                 std::snprintf(rows[row],sizeof(rows[row]),"MIRROR FIELD OF VIEW < %d DEG >",driving::RearMirrorFov());

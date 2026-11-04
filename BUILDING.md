@@ -2,7 +2,7 @@
 
 ## Rear-view mirror prototype
 
-In VR **Vehicle Settings → Cars**, `REAR MIRROR` enables the first-person
+In VR **Vehicle Settings → Cars**, `REAR MIRROR` cycles OFF / ON (LOW) / ON (MEDIUM) for the first-person
 32×10 cm mirror and `MIRROR FIELD OF VIEW` sets its horizontal FOV (40–120°).
 Enable the existing **VEHICLE DEBUG** switch once in the main VR menu. It
 also exposes the mirror and rear-camera handles alongside wheel, seat and
@@ -16,10 +16,17 @@ camera; release saves the same per-model calibration as the cabin proxy.
 Both use the common debug mode;
 there are no separate calibration menu rows or per-car debug switches.
 Calibration is saved per vehicle model in `vr_driving.ini`; `RESET` on the
-car page restores the current model's mirror/camera defaults and global FOV.
+car page restores the current model's mirror/camera defaults, LOW mode and global FOV.
 
-The prototype renders a shared 512×160 rear image every new game frame, with
-a 70 m far clip, early map/vehicle LODs and bounded streaming requests. It
+The prototype renders a shared 512×160 rear image every new game frame.
+LOW uses a 70 m far clip, early map/vehicle LODs and bounded streaming requests.
+MEDIUM uses 110 m, detail geometry without forced LOD/VLO substitutions, and
+limits of 512 map objects / 48 vehicles (LOW: 256 / 32). Both modes keep the
+same texture resolution for comparison. Quality is global and saved in
+`RearMirrorQuality` (0 OFF, 1 LOW, 2 MEDIUM); older ON settings migrate to LOW.
+Nearby geometry is ranked by bounds rather than model origin, and LOW keeps
+detail where the parent LOD bounds approach the camera. An off-screen LOD
+never suppresses a visible detail child. The renderer
 omits shadow passes, pedestrians, water and particles; its background is a
 flat fog colour. The player's car is excluded from the rear camera.
 In normal use an off-screen/back-facing mirror skips its update; debug mode

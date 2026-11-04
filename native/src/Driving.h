@@ -170,7 +170,9 @@ enum MenuItem {
 };
 
 bool RearMirrorEnabled();
-void ToggleRearMirror();
+int RearMirrorQuality(); // 0 OFF, 1 LOW, 2 MEDIUM; shared across car models.
+const char* RearMirrorQualityName();
+void CycleRearMirrorQuality(int direction);
 int RearMirrorFov();
 void AdjustRearMirrorFov(int direction);
 // Local vehicle axes: right, forward, up (cm), then pitch/yaw/roll (degrees).

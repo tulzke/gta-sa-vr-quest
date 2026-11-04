@@ -266,7 +266,7 @@ float g_bicycleTriggerPulse{};
 double g_bicycleTriggerPreviousTime{};
 
 std::atomic<int> g_vehicleDebugMode{};
-std::atomic<bool> g_rearMirrorEnabled{true};
+std::atomic<int> g_rearMirrorQuality{1};
 std::atomic<int> g_rearMirrorFov{80};
 struct ModelCalibration {
     int door[4][2][3]{};
@@ -531,7 +531,8 @@ void Save() {
     std::fprintf(file, "HideInteriorGlass=%d\n",
                  g_hideInteriorGlass.load()?1:0);
     std::fprintf(file, "RearMirror=%d\nRearMirrorFov=%d\n",
-                 g_rearMirrorEnabled.load()?1:0, g_rearMirrorFov.load());
+                 g_rearMirrorQuality.load()>0?1:0, g_rearMirrorFov.load());
+    std::fprintf(file,"RearMirrorQuality=%d\n",g_rearMirrorQuality.load());
     std::fprintf(file, "DrivebyImmersive=%d\n",
                  g_drivebyImmersive.load()?1:0);
     std::fprintf(file, "CarCameraTilt=%d\n",
@@ -711,7 +712,9 @@ void Load() {
             else if (std::sscanf(line, "KeepRiderOnFlips=%d", &value)==1)
                 keepRiderOnFlips=value;
             else if (std::sscanf(line, "RearMirror=%d", &value)==1)
-                g_rearMirrorEnabled.store(value!=0);
+                g_rearMirrorQuality.store(value!=0?1:0);
+            else if (std::sscanf(line, "RearMirrorQuality=%d", &value)==1)
+                g_rearMirrorQuality.store(std::clamp(value,0,2));
             else if (std::sscanf(line, "RearMirrorFov=%d", &value)==1)
                 g_rearMirrorFov.store(std::clamp(value,40,120));
             else if (std::sscanf(line, "HideInteriorGlass=%d", &value)==1)
@@ -3424,8 +3427,16 @@ int GetMenuItemForRow(int vehicleType,int row) {
     return row>=0&&row<count?items[row]:MENU_BACK;
 }
 
-bool RearMirrorEnabled() { EnsureInit(); return g_rearMirrorEnabled.load(); }
-void ToggleRearMirror() { EnsureInit(); g_rearMirrorEnabled.store(!g_rearMirrorEnabled.load()); Save(); }
+int RearMirrorQuality() {EnsureInit();return g_rearMirrorQuality.load();}
+bool RearMirrorEnabled() {return RearMirrorQuality()!=0;}
+const char* RearMirrorQualityName() {
+    static const char* names[]={"OFF","ON (LOW)","ON (MEDIUM)"};
+    return names[RearMirrorQuality()];
+}
+void CycleRearMirrorQuality(int direction) {
+    EnsureInit();if(!direction)return;
+    g_rearMirrorQuality.store((g_rearMirrorQuality.load()+(direction<0?2:1))%3);Save();
+}
 int RearMirrorFov() { EnsureInit(); return g_rearMirrorFov.load(); }
 void AdjustRearMirrorFov(int direction) {
     EnsureInit(); if (!direction) return;
@@ -3809,7 +3820,7 @@ void ResetVehiclePreset(int vehicleType) {
     g_value[forwardField].store(kDefaults[forwardField]);
     g_value[heightField].store(kDefaults[heightField]);
     if (vehicleType==VEHICLE_PLANE) g_planeInvertPitch.store(false);
-    if (vehicleType==VEHICLE_CAR) { g_rearMirrorEnabled.store(true); g_rearMirrorFov.store(80); }
+    if (vehicleType==VEHICLE_CAR) { g_rearMirrorQuality.store(1); g_rearMirrorFov.store(80); }
     if (vehicleType==VEHICLE_BIKE) {
         g_bikeVisualLeanPercent.store(50,std::memory_order_release);
         g_bikeBlockWheelie.store(false);

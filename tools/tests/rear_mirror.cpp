@@ -17,6 +17,7 @@ GameSymbols g{};
 namespace driving {
 bool enabled=true,third=false;int debug=0;
 bool RearMirrorEnabled(){return enabled;}
+int RearMirrorQuality(){return 1;}
 bool ThirdPersonViewActive(){return third;}
 int GetActiveVehicleType(){return VEHICLE_CAR;}
 int RearMirrorFov(){return 80;}
@@ -89,6 +90,25 @@ int main() {
     r::Consider(road.e.data());r::Consider(road.e.data());
     r::Consider(child.e.data());r::Consider(car.e.data());r::Consider(front.e.data());r::Consider(tiny.e.data());
     CHECK(r::mapCount==2&&r::trafficCount==1);CHECK(r::map[1].entity==parent.e.data());
+    // Medium always keeps detail, admits objects beyond LOW's 70 m and does
+    // not prune small scenery. It never substitutes the loaded LOD parent.
+    r::quality=2;r::farClip=FarFor(2);r::mapCount=0;
+    r::Consider(child.e.data());r::Consider(tiny.e.data());
+    Entity distant(8,{0,-95,0},1,3);r::Consider(distant.e.data());
+    CHECK(r::mapCount==3&&r::map[0].entity==child.e.data());
+    r::quality=1;r::farClip=Far;r::mapCount=0;
+    r::Consider(distant.e.data());CHECK(r::mapCount==0);
+    // At 120 degrees, an invisible LOD must not remove a visible child.
+    r::tanX=TanX(120);Put(parent.e.data(),8,V3{0,60,0});
+    r::Consider(child.e.data());CHECK(r::mapCount==1&&r::map[0].entity==child.e.data());
+    // Camera-adjacent road coverage keeps detail even with a resident parent.
+    Put(parent.e.data(),8,V3{0,-10,0});r::mapCount=0;r::Consider(child.e.data());
+    CHECK(r::mapCount==1&&r::map[0].entity==child.e.data());
+    // Large road bounds intersecting the camera have priority over small props.
+    Entity largeRoad(9,{0,-80,0},1,82);float priority=999;
+    CHECK(r::Bounds(largeRoad.e.data(),largeRoad.mi.data(),priority)&&priority==0);
+    Put(parent.e.data(),8,V3{0,-32,0});r::tanX=tx;
+    r::mapCount=0;r::Consider(road.e.data());r::Consider(child.e.data());
     CHECK(r::Read<std::uint32_t>(road.e.data(),0x28)==128);
     // Collision bounds are not necessarily centred on the entity origin.
     Entity offset(7,{0,20,0},1,3);Put(offset.col.data(),0x18,V3{0,-45,0});
