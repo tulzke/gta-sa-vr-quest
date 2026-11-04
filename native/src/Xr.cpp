@@ -11,6 +11,7 @@
 #include "Cheats.h"
 #include "Driving.h"
 #include "VehicleTestArea.h"
+#include "VehicleClimbGeometry.h"
 #include "FrameTarget.h"
 #include "HdWeapons.h"
 #include "ModelSets.h"
@@ -9010,6 +9011,12 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             // direct weapon-support frame. Correct both hands before the
             // per-hand mesh mirroring, otherwise each looks like its opposite.
             if(hand==1)right=vscale(right,-1.f);
+            // Grip mesh pose 1: cross-section through local Z=0 gives the
+            // centre of the finger opening at X=.09869, Y=.01410 metres.
+            // UXR mapping below includes its existing -.055 m wrist offset.
+            // Shift the whole mesh so that this centre is the pipe anchor.
+            const auto pivot=vehicleclimb::GripPivotOffset({forward.x,forward.y,forward.z},{up.x,up.y,up.z});
+            pos=vsub(pos,{pivot.x,pivot.y,pivot.z});
             grip=1.f;trig=0.f; // standard Grip asset, independent of trigger
         }
         const bool pinch = !hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&

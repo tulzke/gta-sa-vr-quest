@@ -15,6 +15,7 @@ namespace {
 using namespace vehicledoors;
 Basis visualFrame;
 Vec visualPipeAxis{0,0,1},handHeading[2]{{0,1,0},{0,1,0}};
+float grabOrientation[2][4]{};
 template<class T>T Read(void* p,int off){T v{};std::memcpy(&v,static_cast<char*>(p)+off,sizeof(v));return v;}
 template<class T>void Write(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 void (*removeEntity)(void*){};void (*addEntity)(void*){};void* (*ltm)(void*){};
@@ -136,17 +137,17 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
         const Vec shifted=grabWorld[h]+shift;
         const float world[]={shifted.x,shifted.y,shifted.z};float tracking[3]{};
         if(vrcam::WorldPointToTracking(world,tracking)){
-            const float* q=hands[h].gripOri;const Vec u{q[0],q[1],q[2]},v{0,0,-1};
-            const float norm=Dot(u,u)+q[3]*q[3];
-            if(std::isfinite(norm)&&norm>.5f){
-                const Vec direction=v+(Cross(u,v)*q[3]+Cross(u,Cross(u,v)))*(2.f/norm);
-                Vec start{},end{};
-                if(World(Raw(hands[h]),start)&&World(Raw(hands[h])+direction,end)){
-                    const Vec heading=end-start-visualPipeAxis*Dot(end-start,visualPipeAxis);
-                    if(Length(heading)>.05f)handHeading[h]=heading;
-                }
-            }
-            const auto frame=PipeHandFrame(visualPipeAxis,handHeading[h],driving::ClimbHandAngleDeg(0),driving::ClimbHandAngleDeg(1));
+            const Vec pipeTip=grabWorld[h]+visualPipeAxis;
+            const float pipePoint[]={pipeTip.x,pipeTip.y,pipeTip.z};float pipeTracking[3]{};
+            const float anchorWorld[]={grabWorld[h].x,grabWorld[h].y,grabWorld[h].z};float anchorTracking[3]{};
+            if(!vrcam::WorldPointToTracking(pipePoint,pipeTracking)||!vrcam::WorldPointToTracking(anchorWorld,anchorTracking))continue;
+            const Vec trackingAxis{pipeTracking[0]-anchorTracking[0],pipeTracking[1]-anchorTracking[1],pipeTracking[2]-anchorTracking[2]};
+            const float twist=ControllerTwist(hands[h].gripOri,grabOrientation[h],trackingAxis);
+            // TrackingToGame is a reflected basis; a positive OpenXR twist
+            // has the opposite world-space rotation around the converted axis.
+            const Vec heading=RotateAround(handHeading[h],visualPipeAxis,-twist);
+            const float mirror=h==0?-1.f:1.f;
+            const auto frame=PipeHandFrame(visualPipeAxis,heading,mirror*float(driving::ClimbHandAngleDeg(0)),mirror*float(driving::ClimbHandAngleDeg(1)));
             const Vec axes[]={frame.right,frame.forward,frame.up};
             float* outputs[]={hands[h].climbRight,hands[h].climbForward,hands[h].climbUp};
             bool validFrame=true;
@@ -249,6 +250,17 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
             held[h]=true;previous[h]=Raw(hands[h]);xr::TriggerHaptic(h,.25f,0,30);
             SuspendPhysics(ped);
             grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);
+            std::copy_n(hands[h].gripOri,4,grabOrientation[h]);
+            const float* q=hands[h].gripOri;const Vec u{q[0],q[1],q[2]},v{0,0,-1};
+            const float norm=Dot(u,u)+q[3]*q[3];
+            Vec start{},end{},heading=b.forward;
+            if(std::isfinite(norm)&&norm>.5f){
+                const Vec direction=v+(Cross(u,v)*q[3]+Cross(u,Cross(u,v)))*(2.f/norm);
+                if(World(Raw(hands[h]),start)&&World(Raw(hands[h])+direction,end))heading=end-start;
+            }
+            const Vec projected=heading-visualPipeAxis*Dot(heading,visualPipeAxis);
+            handHeading[h]=Length(projected)>.05f?projected:b.forward;
+
             const Vec pipeAxis=shape.pipe.top-shape.pipe.bottom;
             const Vec local=b.Local(world[h]);
             grabLocal[h]=shape.pipe.bottom+pipeAxis*std::clamp(Dot(local-shape.pipe.bottom,pipeAxis)/Dot(pipeAxis,pipeAxis),0.f,1.f);

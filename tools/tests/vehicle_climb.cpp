@@ -57,6 +57,20 @@ int main(){
     assert(tiltA.Valid()&&tiltB.Valid()&&yaw.Valid());
     assert(Length(tiltA.up-tiltB.up)<.0001f&&Length(tiltA.forward-tiltB.forward)<.0001f);
     assert(Length(tiltA.forward-yaw.forward)>.5f);
+    const float identity[]={0,0,0,1},turn90[]={0,0,.70710678f,.70710678f};
+    const float tilt90[]={.70710678f,0,0,.70710678f};
+    assert(std::abs(ControllerTwist(turn90,identity,{0,0,1})-1.5707963f)<.0001f);
+    assert(std::abs(ControllerTwist(tilt90,identity,{0,0,1}))<.0001f);
+    const auto left=PipeHandFrame({0,0,1},{0,1,0},-90,0);
+    const auto right=PipeHandFrame({0,0,1},{0,1,0},90,0);
+    assert(left.forward.z<-.99f&&right.forward.z>.99f);
+    for(float a:{0.f,45.f,90.f,180.f}){
+        const auto frame=PipeHandFrame({0,0,1},RotateAround({0,1,0},{0,0,1},a*.01745329252f),0,0);
+        const Vec centre=GripPivotOffset(frame.forward,frame.up);
+        const Vec anchor{};const Vec meshPosition=anchor-centre;
+        assert(Length(meshPosition+GripPivotOffset(frame.forward,frame.up)-anchor)<.00001f);
+        assert(std::abs(Dot(frame.right,{0,0,1})-1.f)<.00001f);
+    }
     // Regression: the door node lies inside the cab outline. Default pipes
     // must clear the 1.449 m lateral detail on both sides of retail linerun.dff.
     for(int side=0;side<2;++side){float zero[12]{};const float sign=side?1.f:-1.f;
@@ -106,7 +120,14 @@ int main(){
     ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z)<.0001f);
     Tick();assert(std::abs(markers.markers[markers.count-1].pipeHands[0].z-locked.z)<.0001f);
     assert(rendered[0].grip==1.f&&rendered[0].trigger==0.f&&rendered[0].climbGrip);
-    assert(std::abs(rendered[0].climbUp[2]-1.f)<.0001f);
+    assert(std::abs(rendered[0].climbRight[2]-1.f)<.0001f);
+    const Vec beforeYaw{rendered[0].climbForward[0],rendered[0].climbForward[1],rendered[0].climbForward[2]};
+    rendered[0].gripOri[2]=.70710678f;rendered[0].gripOri[3]=.70710678f;
+    ApplyHandVisuals(rendered);
+    const Vec afterYaw{rendered[0].climbForward[0],rendered[0].climbForward[1],rendered[0].climbForward[2]};
+    assert(std::abs(Dot(beforeYaw,afterYaw))<.0001f);
+    assert(std::abs(rendered[0].climbRight[2]-1.f)<.0001f);
+    rendered[0].gripOri[2]=0;rendered[0].gripOri[3]=1;
     driving::handOffset[2]=5;ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z-.05f)<.0001f);driving::handOffset[2]=0;
     vrcam::offsetZ=0;
     const float still=Position(ped).z;vrcam::offsetZ=.03f;Tick();assert(std::abs(Position(ped).z-still)<.0001f);vrcam::offsetZ=0;
