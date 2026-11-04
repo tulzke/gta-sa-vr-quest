@@ -36,10 +36,12 @@ Vec Raw(const xr::HandPose& h){return {h.gripPos[0],h.gripPos[1],h.gripPos[2]};}
 struct Geometry {Step step;Pipe pipe;};
 Geometry Shape(Vec hinge,int side,const float c[12]) {
     const float sign=side?1.f:-1.f;
-    const Vec centre=hinge+Vec{sign*.26f,-.45f,-.75f};
+    // petro.dff: front door hinge |x|=1.009, fuel tank/cab details reach
+    // |x|=1.431. Keep the pipe at |x|=1.659 and the step outside that shell.
+    const Vec centre=hinge+Vec{sign*.75f,-.65f,-.75f};
     Geometry result;
     result.step={centre+Vec{-.22f+c[0],-.42f+c[1],-.18f+c[2]},centre+Vec{.22f+c[3],.42f+c[4],c[5]}};
-    const Vec base=hinge+Vec{sign*.19f,-.12f,-.65f};
+    const Vec base=hinge+Vec{sign*.65f,-.65f,-.65f};
     result.pipe={base+Vec{c[6],c[7],c[8]},base+Vec{c[9],c[10],1.05f+c[11]}};
     return result;
 }
