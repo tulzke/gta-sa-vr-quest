@@ -200,7 +200,7 @@ void AtHandle(int hand,int index=0) {
 void Ready(int hand=0) {
     hands[0]={};hands[1]={};AtHandle(hand);
     Tick(); // open hand arms the edge
-    CHECK(xr::published.count==(driving::debugMode?16:2)); // debug adds volume and six handles per door
+    CHECK(driving::debugMode?(xr::published.count==16||xr::published.count==17):xr::published.count==2); // door volumes/handles plus a nearby rear camera
 }
 void GrabIt(int hand=0) {
     Ready(hand);hands[hand].grip=1;Tick();
@@ -634,6 +634,19 @@ int main() {
         CHECK(driving::mirrorValues[offset]==10&&driving::mirrorValues[offset+4]==30);
         CHECK(driving::mirrorValues[kind==6?0:6]==0&&driving::saves==0);
         hands[0].trigger=0;Tick();CHECK(g_edit.hand<0&&driving::saves==1&&ClaimedHands()==0);
+    }
+    // Outside the vehicle, camera calibration is at the actual camera pose.
+    { Setup();driving::debugMode=1;seated=nullptr;hands[0]={};hands[1]={};
+      const int defaults[]={0,45,110,0,0,0,0,-200,100,0,0,0};
+      std::copy_n(defaults,12,driving::mirrorValues);vrcam::eye={0,-2.5f,1.f};
+      hands[0].gripPos[1]=-2.f;hands[0].gripPos[2]=1.f;
+      Tick();bool found=false;for(int i=0;i<xr::published.count;++i)
+          found|=Length(xr::published.markers[i].position-Vec{0,-2,1})<.001f;
+      CHECK(found);hands[0].trigger=1;Tick();CHECK(g_editKind==7&&ClaimedHands()==1);
+      hands[0].gripPos[0]+=.1f;hands[0].gripOri[2]=.258819f;hands[0].gripOri[3]=.965926f;Tick();
+      CHECK(driving::mirrorValues[6]==10&&driving::mirrorValues[10]==30&&driving::mirrorValues[0]==0);
+      hands[0].trigger=0;Tick();CHECK(g_edit.hand<0&&driving::saves==1&&ClaimedHands()==0);
+      Tick();hands[0].trigger=1;Tick();CHECK(g_editKind==7);Tick(false,5,false);CHECK(ClaimedHands()==0&&g_edit.hand<0);
     }
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

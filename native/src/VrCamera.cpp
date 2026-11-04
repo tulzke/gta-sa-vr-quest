@@ -18097,6 +18097,7 @@ void DrawNpcWeaponSnapshots() {
     }
 }
 
+namespace rear_mirror_render { void DrawSurface(); }
 void OnCloudsRender() {
     if (!g_renderingStereoEye && g_origCloudsRender) {
         g_origCloudsRender();                              // retain vanilla non-VR/reflection passes
@@ -18122,6 +18123,9 @@ void OnCloudsRender() {
         // after the flat cloud backdrop and before weapons/roads/world atomics,
         // while the eye camera and its depth target are current.
         RenderHiddenAreaDepthMask();
+        // Retail RenderScene has now restarted this eye camera with its final
+        // near plane. Share that exact depth projection with the cabin mesh.
+        rear_mirror_render::DrawSurface();
     }
     for (int i = 0; i < g_pendingWeaponCount; ++i)
         if (g_pendingWeapons[i].clump)
@@ -21826,7 +21830,7 @@ void OnRenderScene(bool underwater) {
         if (g.DefinedState) g.DefinedState();
         RenderWorldStableSkyPolys(camU, mobileFog);
         graphicsfx::RenderSkyEye(sc, e);
-        rear_mirror_render::DrawSurface();
+        if (!g_cloudsHooked) rear_mirror_render::DrawSurface();
         tSky[e] += NowMs() - tA;
         // Opaque path: the CClouds::Render hook (OnCloudsRender) suppresses the
         // flat eye backdrop and draws the weapon BEFORE world geometry. Fallback

@@ -10,7 +10,10 @@ door handles. In a stationary car, hold a trigger near the mirror handle,
 move/rotate the controller, then release to save. The camera's proxy handle
 is 40 cm to the right and 20 cm below the mirror; it applies relative
 movement/rotation to the camera, so the camera can stay behind the car while
-its handle remains reachable from the seat. Both use the common debug mode;
+its handle remains reachable from the seat. Outside a stationary car, the same debug mode shows an arrow at the actual
+rear-camera position within 2.5 m. Grab it with a trigger to move/rotate the
+camera; release saves the same per-model calibration as the cabin proxy.
+Both use the common debug mode;
 there are no separate calibration menu rows or per-car debug switches.
 Calibration is saved per vehicle model in `vr_driving.ini`; `RESET` on the
 car page restores the current model's mirror/camera defaults and global FOV.
