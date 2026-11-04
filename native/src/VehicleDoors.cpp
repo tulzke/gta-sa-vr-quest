@@ -612,10 +612,12 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 if(!matrix||!b.Valid()||b.up.z<kBikeStableUp||!Finite(angular)||!std::isfinite(mass)||mass<=1.f||mass>=2000.f)
                     g_bikeStable={};
                 else {
-                    // Oppose roll velocity as well as lean, so the restoring
-                    // torque does not carry the bike through the stable zone.
-                    const float rate=-Dot(angular,b.forward);
-                    const float force=mass*std::clamp(-b.right.z*.08f-rate*.20f,-.014f,.014f)*std::clamp(dt*60.f,0.f,2.f);
+                    // Bound the actual roll velocity every frame: torque alone
+                    // cannot reliably brake the stock bike physics near upright.
+                    const float roll=std::atan2(b.right.z,std::hypot(b.right.x,b.right.y));
+                    const float desired=std::clamp(roll*.04f,-.02f,.02f);
+                    Write<Vec>(bike,0x74,angular+b.forward*(desired-Dot(angular,b.forward)));
+                    const float force=mass*std::clamp(-b.right.z*.08f,-.014f,.014f)*std::clamp(dt*60.f,0.f,2.f);
                     const Vec arm=b.right*.5f,f=b.up*force;
                     g_turnForce(bike,f.x,f.y,f.z,arm.x,arm.y,arm.z);
                 }
