@@ -108,6 +108,9 @@ struct Marker {
     bool doorGrab{};
     bool bikeGrip{};
     float pipeLength{.11f};
+    bool climbPipe{},clipPipe{};
+    unsigned pipeHandMask{};
+    Vec pipeHands[2]{};
     bool hideArrow{};
     bool panelVolume{};
     Vec halfExtent{}; // local right, forward, up

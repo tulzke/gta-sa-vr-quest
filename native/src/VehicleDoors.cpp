@@ -430,6 +430,9 @@ void PublishMarkers() {
         if (!ToTracking(world.position,m.position)||!ToTracking(world.position+world.direction,tip)||
             !ToTracking(world.position+world.up,up)) continue;
         m.direction=tip-m.position;m.up=up-m.position;m.held=world.held;
+        if(m.clipPipe)for(int h=0;h<2;++h)if(m.pipeHandMask&(1u<<h)){
+            if(!ToTracking(world.pipeHands[h],m.pipeHands[h]))m.pipeHandMask&=~(1u<<h);
+        }
         frame.markers[frame.count++]=m;
     }
     xr::SetVehicleDoorMarkers(frame);

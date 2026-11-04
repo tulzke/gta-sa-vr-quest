@@ -72,6 +72,9 @@ int main(){
     Tick();Tick();
     vehicledoors::MarkerFrame published;published.epoch=1;Append(published);
     assert(published.count==1&&published.markers[0].bikeGrip&&published.markers[0].pipeLength>1.f);
+    assert(published.markers[0].climbPipe&&published.markers[0].clipPipe);
+    assert(published.markers[0].pipeHandMask==3);
+    assert(std::abs(published.markers[0].pipeHands[0].x-hands[0].gripPos[0])<.0001f);
     const Vec grounded=Position(ped);
     hands[0].grip=1;Tick();assert(ClaimedHands()==1);
     assert(Length(Position(ped)-grounded)<.0001f); // no delayed floor pop
@@ -84,6 +87,7 @@ int main(){
     Put(pm,0x30,stable-Vec{0,0,.04f});Tick();assert(std::abs(Position(ped).z-stable.z)<.0001f);
     xr::HandPose rendered[2]={hands[0],hands[1]};vrcam::offsetZ=.12f;
     ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z)<.0001f);
+    Tick();assert(std::abs(markers.markers[markers.count-1].pipeHands[0].z-locked.z)<.0001f);
     assert(rendered[0].grip==1.f);vrcam::offsetZ=0;
     const float still=Position(ped).z;vrcam::offsetZ=.03f;Tick();assert(std::abs(Position(ped).z-still)<.0001f);vrcam::offsetZ=0;
     hands[1]=hands[0];hands[1].grip=0;Tick();hands[1].grip=1;Tick();assert(ClaimedHands()==3);
@@ -108,6 +112,7 @@ int main(){
     // Editing changes the actual shape and persists once on trigger release.
     driving::mode=1;hands[0].trigger=0;hands[0].gripPos[0]=-1.97f;hands[0].gripPos[1]=-1.07f;hands[0].gripPos[2]=.75f;Tick();
     hands[0].trigger=1;Tick();assert(Editing());hands[0].gripPos[0]-=.1f;Tick();assert(driving::config[0][0]<-.09f);
+    assert(markers.markers[markers.count-1].climbPipe&&!markers.markers[markers.count-1].clipPipe);
     hands[0].trigger=0;Tick();assert(!Editing()&&driving::saves==1);
     // A long pull is not a distance-to-pipe release. No speed cap discards
     // controller travel; every 10 cm stroke must move the body by 10 cm.

@@ -139,8 +139,12 @@ preserved. Build-only commands perform no headset installation or game launch.
 
 ### Linerunner climbing MVP
 
-Linerunner (403), on the first test-area page, has a climb pipe and a supporting step on each side. The vehicle
-must be stationary and upright. Squeeze a fresh grip near the pipe and pull
+Linerunner (403), on the first test-area page, has a climb pipe and a supporting
+step on each side.
+The pipe is white and reveals only the surface within 50 cm of either hand,
+fading over the final 5 cm. While gripping, this follows the anchored rendered
+hand. VEHICLE DEBUG shows the full pipe for calibration.
+The vehicle must be stationary and upright. Squeeze a fresh grip near the pipe and pull
 the controller down to raise CJ; release to let go. Both hands can hold the
 pipe, or the free hand can open the door. A foot entering the step volume
 raises CJ to its surface and holds his height until he walks off. Use the

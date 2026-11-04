@@ -9256,6 +9256,7 @@ void EnsureHandProgram() {
 // Flat-colour program + cube geometry for the holster markers.
 GLuint g_markerProg = 0, g_markerVbo = 0, g_markerEbo = 0;
 GLint  g_markerMvpLoc = -1, g_markerColLoc = -1;
+GLint g_markerClipLoc=-1,g_markerSpheresLoc=-1;
 extern "C" {
 extern const unsigned char savr_fist_png[],savr_fist_png_end[];
 extern const unsigned char savr_grab_png[],savr_grab_png_end[];
@@ -9275,17 +9276,21 @@ void EnsureMarkerProgram() {
     const char* vs = "#version 300 es\n"
                      "layout(location=0) in vec3 aPos;\n"
                      "uniform mat4 uMVP;\n"
-                     "void main(){ gl_Position = uMVP * vec4(aPos,1.0); }\n";
+                     "out highp vec3 vPos;\n"
+                     "void main(){ vPos=aPos; gl_Position = uMVP * vec4(aPos,1.0); }\n";
     const char* fs = "#version 300 es\n"
                      "precision mediump float;\n"
                      "uniform vec4 uCol; out vec4 o;\n"
-                     "void main(){ o = uCol; }\n";
+                     "in highp vec3 vPos; uniform bool uClip; uniform highp vec4 uSpheres[2];\n"
+                     "void main(){ o=uCol; if(uClip){ highp float d=min(distance(vPos,uSpheres[0].xyz)-uSpheres[0].w,distance(vPos,uSpheres[1].xyz)-uSpheres[1].w); if(d>=0.0)discard; o.a*=1.0-smoothstep(-0.05,0.0,d); } }\n";
     const GLuint v = CompileHandShader(GL_VERTEX_SHADER, vs), f = CompileHandShader(GL_FRAGMENT_SHADER, fs);
     g_markerProg = glCreateProgram();
     glAttachShader(g_markerProg, v); glAttachShader(g_markerProg, f); glLinkProgram(g_markerProg);
     glDeleteShader(v); glDeleteShader(f);
     g_markerMvpLoc = glGetUniformLocation(g_markerProg, "uMVP");
     g_markerColLoc = glGetUniformLocation(g_markerProg, "uCol");
+    g_markerClipLoc=glGetUniformLocation(g_markerProg,"uClip");
+    g_markerSpheresLoc=glGetUniformLocation(g_markerProg,"uSpheres[0]");
     glGenBuffers(1, &g_markerVbo); glGenBuffers(1, &g_markerEbo);
 }
 
@@ -9929,10 +9934,22 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
             continue;
         }
         if(marker.bikeGrip){
+            if(marker.clipPipe&&!marker.pipeHandMask)continue;
             const auto mesh=vehicledoors::GripCylinder(marker);
-            glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.95f:.8f);
+            if(marker.climbPipe)glUniform4f(g_markerColLoc,1.f,1.f,1.f,marker.held?.95f:.8f);
+            else glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.95f:.8f);
+            glUniform1i(g_markerClipLoc,marker.clipPipe?1:0);
+            if(marker.clipPipe){
+                float spheres[8]{};
+                for(int h=0;h<2;++h){
+                    spheres[h*4]=marker.pipeHands[h].x;spheres[h*4+1]=marker.pipeHands[h].y;spheres[h*4+2]=marker.pipeHands[h].z;
+                    spheres[h*4+3]=(marker.pipeHandMask&(1u<<h))?.5f:-1.f;
+                }
+                glUniform4fv(g_markerSpheresLoc,2,spheres);
+            }
             glBufferData(GL_ARRAY_BUFFER,mesh.size()*sizeof(vehicledoors::Vec),mesh.data(),GL_DYNAMIC_DRAW);
             glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(mesh.size()));
+            glUniform1i(g_markerClipLoc,0);
             continue;
         }
         if(marker.seatIcon) {

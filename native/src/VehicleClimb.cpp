@@ -206,6 +206,12 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     Vec axis=shape.pipe.top-shape.pipe.bottom;const float length=Length(axis);axis=axis*(1.f/length);
     Vec perpendicular=Cross(axis,{1,0,0});if(Length(perpendicular)<.1f)perpendicular=Cross(axis,{0,1,0});perpendicular=perpendicular*(1.f/Length(perpendicular));
     Bar(b.Point(controls[5]),b.Vector(axis),b.Vector(perpendicular),held[0]||held[1],length);
+    auto& pipeMarker=markers.markers[markers.count-1];
+    pipeMarker.climbPipe=true;pipeMarker.clipPipe=!editing;
+    for(int h=0;h<2;++h)if(valid[h]){
+        pipeMarker.pipeHandMask|=1u<<h;
+        pipeMarker.pipeHands[h]=held[h]?b.Point(grabLocal[h]):world[h];
+    }
     if(edit.hand>=0){held[0]=held[1]=false;supported=false;ResumePhysics();return;}
     const unsigned wasHeld=(held[0]?1u:0u)|(held[1]?2u:0u);
     Vec motion{};int count=0;
