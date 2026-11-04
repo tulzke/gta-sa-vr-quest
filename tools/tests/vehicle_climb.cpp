@@ -1,5 +1,6 @@
 #include "VehicleClimbGeometry.h"
 #include "VehicleClimb.h"
+#include "VehicleClimbProfiles.h"
 #include "VehicleDebugDrag.h"
 #include "Symbols.h"
 #include <chrono>
@@ -17,11 +18,12 @@ struct HandPose {bool valid{true};float gripPos[3]{};float grip{},trigger{};};
 void TriggerHaptic(int,float,float,float){}
 }
 namespace driving {
-int mode{},saves{};float config[2][12]{};
+int mode{},saves{},lastCalibrationModel{};int handOffset[3]{};
+int ClimbHandOffsetCm(int a){return handOffset[a];}float config[2][12]{};
 int GetVehicleDebugMode(){return mode;}
 void SaveDebugCalibration(){++saves;}
-void GetClimbCalibration(int model,int side,float out[12]){assert(model==403);std::copy_n(config[side],12,out);}
-void SetClimbCalibration(int model,int side,const float in[12]){assert(model==403);std::copy_n(in,12,config[side]);}
+void GetClimbCalibration(int model,int side,float out[12]){assert(vehicleclimb::FindProfile(model));lastCalibrationModel=model;std::copy_n(config[side],12,out);}
+void SetClimbCalibration(int model,int side,const float in[12]){assert(vehicleclimb::FindProfile(model));lastCalibrationModel=model;std::copy_n(in,12,config[side]);}
 }
 namespace vrcam {
 float offsetZ{};
@@ -55,6 +57,8 @@ int main(){
         assert(sign*initial.pipe.top.x>1.649f);
         assert(initial.step.Contains({sign*1.759f,1.56f,-.15f}));
     }
+    assert(FindProfile(514)&&FindProfile(444)&&FindProfile(573));
+    assert(!FindProfile(400)&&!FindProfile(406)&&!FindProfile(486)&&!FindProfile(532));
     std::fill_n(flags,110,std::uint8_t(0x80));flags[0]=0;
     Put(pool,0,static_cast<char*>(cars));Put(pool,8,flags);Put(pool,0x10,110);
     Put(cars,0x18,static_cast<void*>(matrix));Put(cars,0x32,std::uint16_t(403));
@@ -68,6 +72,11 @@ int main(){
     g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void**,bool,bool,bool,bool,bool,bool,bool,bool){return wall;};
     g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3,float,void*,bool,bool,bool,bool,bool,bool)->void*{return wall?cars:nullptr;};
     removeEntity=[](void*){++moves;};addEntity=[](void*){};ltm=[](void* p){return p;};healthy=[](const void*){return true;};
+    for(int model=400;model<=611;++model)if(FindProfile(model)){
+        Put(cars,0x32,std::uint16_t(model));Tick();Tick();
+        assert(driving::lastCalibrationModel==model&&markers.count==1);
+    }
+    Put(cars,0x32,std::uint16_t(403));
     hands[0].gripPos[0]=-1.65f;hands[0].gripPos[1]=-.65f;hands[0].gripPos[2]=1.2f;
     Tick();Tick();
     vehicledoors::MarkerFrame published;published.epoch=1;Append(published);
@@ -88,7 +97,9 @@ int main(){
     xr::HandPose rendered[2]={hands[0],hands[1]};vrcam::offsetZ=.12f;
     ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z)<.0001f);
     Tick();assert(std::abs(markers.markers[markers.count-1].pipeHands[0].z-locked.z)<.0001f);
-    assert(rendered[0].grip==1.f);vrcam::offsetZ=0;
+    assert(rendered[0].grip==1.f);
+    driving::handOffset[2]=5;ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z-.05f)<.0001f);driving::handOffset[2]=0;
+    vrcam::offsetZ=0;
     const float still=Position(ped).z;vrcam::offsetZ=.03f;Tick();assert(std::abs(Position(ped).z-still)<.0001f);vrcam::offsetZ=0;
     hands[1]=hands[0];hands[1].grip=0;Tick();hands[1].grip=1;Tick();assert(ClaimedHands()==3);
     const float dual=Position(ped).z;hands[0].gripPos[2]-=.005f;hands[1].gripPos[2]-=.005f;Tick();assert(std::abs(Position(ped).z-dual-.005f)<.0001f);
@@ -125,7 +136,7 @@ int main(){
     Put(cars,0x74,Vec{.1f,0,0});Tick();assert(!activeCar&&!supported&&!ClaimedHands());
     assert(Read<std::uint64_t>(ped,0x28)==0x5001&&Read<std::uint32_t>(ped,0x64)==0x202);
     Put(cars,0x74,Vec{});driving::mode=0;
-    Put(cars,0x32,std::uint16_t(514));Tick();assert(markers.count==0);
+    Put(cars,0x32,std::uint16_t(400));Tick();assert(markers.count==0);
     Put(cars,0x32,std::uint16_t(403));Tick();assert(markers.count==1);
     // Exercise the actual auto-equip -> parachute-state -> input gate chain.
     Put(pm,0x30,Vec{-1.75f,-.65f,1.5f});hands[0].grip=0;hands[0].gripPos[2]=1.2f;Tick();

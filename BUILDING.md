@@ -139,6 +139,14 @@ preserved. Build-only commands perform no headset installation or game launch.
 
 ### Linerunner climbing MVP
 
+Climb profiles now also cover Securicar, Barracks, Packer, Flatbed, Tanker,
+Roadtrain, Cement Truck, Dune, Monster, Monster A and Monster B. Initial positions
+come from model door/wheel geometry and need headset calibration per model.
+Temporary global hand tuning is in VEHICLE SETTINGS: DEBUG CLIMB HAND OUT,
+FORWARD and UP, in 1 cm steps (±30 cm). OUT mirrors outward on opposite sides;
+FORWARD/UP follow the vehicle axes. Only the rendered hand moves. Values save
+as ClimbHand0/1/2 in vr_driving.ini for later extraction and hardcoding.
+
 Linerunner (403), on the first test-area page, has a climb pipe and a supporting
 step on each side.
 The pipe is white and reveals only the surface within 50 cm of either hand,

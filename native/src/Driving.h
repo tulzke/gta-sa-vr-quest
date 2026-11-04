@@ -166,7 +166,8 @@ enum MenuItem {
     MENU_VEHICLE_TEST_PAGE
     , MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z,
     MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
-    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV
+    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
+    MENU_CLIMB_HAND_X, MENU_CLIMB_HAND_Y, MENU_CLIMB_HAND_Z
 };
 
 bool RearMirrorEnabled();
@@ -180,6 +181,8 @@ void AdjustRearMirrorFov(int direction);
 void GetRearMirrorCalibration(int model, int out[12]);
 void SetRearMirrorCalibration(int model, const int values[12]);
 
+int ClimbHandOffsetCm(int axis);
+void AdjustClimbHandOffset(int axis,int direction);
 int GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);
 
