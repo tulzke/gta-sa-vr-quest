@@ -140,5 +140,20 @@ int main(){
     Put(pm,0x30,Vec{-3,-.65f,Position(ped).z});Tick();assert(!Attached());
     for(int i=0;i<50;++i)Tick();assert(physicalweapon::CurrentWeaponSlot(ped)==0);
     for(int i=0;i<30;++i)Tick();assert(physicalweapon::CurrentWeaponSlot(ped)==11&&vrcam::ParachuteStateActive());
+    g.CPedGeometryAnalyser_IsInAir=[](const void*){return false;};
+    Put(ped,0x8dc,std::uint8_t(0));hands[0].grip=0;Tick();hands[0].grip=1;Tick();assert(Attached());
+    PrepareForBoarding();assert(!Attached()&&!ClaimedHands()&&!suspendedPed);
+    assert((Read<std::uint64_t>(ped,0x28)&1)!=0&&(Read<std::uint32_t>(ped,0x64)&2)!=0);
+    // If an external native entry already seated CJ, cancellation must not
+    // restore on-foot collision flags over the native occupant flags.
+    SuspendPhysics(ped);g.FindPlayerVehicle=[](int,bool)->void*{return cars;};
+    PrepareForBoarding();assert((Read<std::uint64_t>(ped,0x28)&1)==0);
+    assert((Read<std::uint32_t>(ped,0x64)&2)==0);
+    g.FindPlayerVehicle=[](int,bool)->void*{return nullptr;};
+    // A lateral collision must preserve a clear vertical component.
+    Put(pm,0x30,Vec{-2,0,1});
+    g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3 p,float,void*,bool,bool,bool,bool,bool,bool)->void*{return p.x> -1.99f?cars:nullptr;};
+    assert(!Move(ped,Position(ped),{-1.8f,0,1.2f}));
+    assert(std::abs(Position(ped).z-1.2f)<.0001f&&Position(ped).x<=-1.99f);
     std::puts("vehicle climb: grip, movement, obstruction, interruption, ownership, pool reuse, support and editing passed");
 }

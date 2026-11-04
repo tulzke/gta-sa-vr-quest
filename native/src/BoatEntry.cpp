@@ -1,4 +1,5 @@
 #include "BoatEntry.h"
+#include "VehicleClimb.h"
 #include "PassengerReaction.h"
 #include "Symbols.h"
 #include "VrCamera.h"
@@ -156,6 +157,7 @@ bool SeatPlayer(void* vehicle,int passenger) {
     if (!intelligence) return false;
     void* drive=g_taskAlloc(0x38);if(!drive)return false;
     g_driveCtor(drive,vehicle);
+    vehicleclimb::PrepareForBoarding();
     if (g.FindPlayerVehicle(-1,false)==vehicle) {
         if(Read<void*>(vehicle,0x5a0)==ped) g_removeDriver(vehicle,false);
         else g_removePassenger(vehicle,ped);

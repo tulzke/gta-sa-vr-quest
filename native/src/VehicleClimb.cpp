@@ -33,7 +33,8 @@ void* suspendedPed{};bool savedCollision{},savedGravity{};
 
 void ResumePhysics(){
     // Player identity can change at respawn. Never restore into a stale ped.
-    if(suspendedPed&&g.FindPlayerPed&&g.FindPlayerPed(-1)==suspendedPed){
+    if(suspendedPed&&g.FindPlayerPed&&g.FindPlayerPed(-1)==suspendedPed&&
+       (!g.FindPlayerVehicle||!g.FindPlayerVehicle(-1,false))){
         auto flags=Read<std::uint64_t>(suspendedPed,0x28);
         Write(suspendedPed,0x28,(flags&~std::uint64_t(1))|(savedCollision?1u:0u));
         auto physical=Read<std::uint32_t>(suspendedPed,0x64);
@@ -80,7 +81,7 @@ void Bar(Vec p,Vec axis,Vec up,bool selected=false,float length=.11f){
 }
 // Reject body obstruction as well as swept torso/head paths. The source car is
 // deliberately included: pulling through its cab must never be allowed.
-bool Move(void* ped,Vec from,Vec to){
+bool MoveDirect(void* ped,Vec from,Vec to){
     if(!Finite(to)||Length(to-from)>.36f||!g.CWorld_ProcessLineOfSight||!g.CWorld_TestSphereAgainstWorld||!g.CWorld_pIgnoreEntity)return false;
     void* old=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=ped;
     bool clear=true;
@@ -95,6 +96,26 @@ bool Move(void* ped,Vec from,Vec to){
     removeEntity(ped);void* matrix=Read<void*>(ped,0x18);Write(matrix?matrix:ped,matrix?0x30:8,to);addEntity(ped);
     Vec speed=Read<Vec>(ped,0x68);speed.z=0;Write(ped,0x68,speed);return true;
 }
+bool Move(void* ped,Vec from,Vec to){
+    if(!Finite(to)||Length(to-from)>.36f)return false;
+    // Resolve short sweeps, retaining accepted travel. A small sideways lean
+    // into the cab must not cancel an otherwise clear upward pull.
+    Vec accepted=from;
+    const auto sweep=[&](Vec end){
+        const Vec start=accepted,delta=end-start;
+        const int steps=std::max(1,int(std::ceil(Length(delta)/.04f)));
+        for(int i=1;i<=steps;++i){const Vec next=start+delta*(float(i)/steps);
+            if(!MoveDirect(ped,accepted,next))break;
+            accepted=next;
+        }
+    };
+    sweep(to);
+    if(Length(to-accepted)>.0001f){
+        sweep({accepted.x,accepted.y,to.z});
+        sweep({to.x,to.y,accepted.z});
+    }
+    return Length(accepted-to)<.0001f;
+}
 }
 void Install(void* h){
     removeEntity=reinterpret_cast<decltype(removeEntity)>(dlsym(h,"_ZN6CWorld6RemoveEP7CEntity"));
@@ -105,6 +126,7 @@ void Install(void* h){
 unsigned ClaimedHands(){return claimed;}
 bool Editing(){return edit.hand>=0;}
 bool Attached(){return held[0]||held[1]||supported;}
+void PrepareForBoarding(){Reset();for(auto& edge:grip)edge.latched=true;}
 void ApplyHandVisuals(xr::HandPose hands[2]){
     for(int h=0;h<2;++h)if(held[h]&&hands[h].valid){
         const float world[]={grabWorld[h].x,grabWorld[h].y,grabWorld[h].z};float tracking[3]{};
@@ -215,6 +237,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         if(supported){Vec local=b.Local(next);local.z=std::max(local.z,supportHeight);next=b.Point(local);}
         if(Move(ped,root,next)){root=next;targetRoot=next;}
         else {
+            root=Position(ped);
             // Consume blocked displacement rather than storing an invisible
             // spring that launches the player when the obstacle clears.
             for(int h=0;h<2;++h)if(held[h]){grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);}

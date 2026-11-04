@@ -9,6 +9,7 @@ unsigned ClaimedHands();
 bool Editing();
 // A grip or the configured step is supporting the player, not freefall.
 bool Attached();
+void PrepareForBoarding();
 // Render-only override, evaluated after the current camera anchor is ready.
 void ApplyHandVisuals(xr::HandPose hands[2]);
 }
