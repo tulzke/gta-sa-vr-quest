@@ -266,6 +266,8 @@ float g_bicycleTriggerPulse{};
 double g_bicycleTriggerPreviousTime{};
 
 std::atomic<int> g_vehicleDebugMode{};
+std::atomic<bool> g_rearMirrorEnabled{true};
+std::atomic<int> g_rearMirrorFov{80};
 struct ModelCalibration {
     int door[4][2][3]{};
     int doorPanel[4][2][6]{};
@@ -276,6 +278,7 @@ struct ModelCalibration {
     int control[2][CONTROL_FIELD_COUNT]{};
     int wheel[WHEEL_CAL_FIELD_COUNT]{};
     int ignition[6]{};
+    int rearMirror[12]{0, 45, 110, 0, 0, 0, 0, -200, 100, 0, 0, 0};
     int acceleratorMode{BIKE_ACCEL_HOLD_TRIGGER};
 };
 
@@ -527,6 +530,8 @@ void Save() {
                  g_keepRiderOnFlips.load()?1:0);
     std::fprintf(file, "HideInteriorGlass=%d\n",
                  g_hideInteriorGlass.load()?1:0);
+    std::fprintf(file, "RearMirror=%d\nRearMirrorFov=%d\n",
+                 g_rearMirrorEnabled.load()?1:0, g_rearMirrorFov.load());
     std::fprintf(file, "DrivebyImmersive=%d\n",
                  g_drivebyImmersive.load()?1:0);
     std::fprintf(file, "CarCameraTilt=%d\n",
@@ -543,6 +548,8 @@ void Save() {
         for (const auto& entry : g_modelCalibration) {
             const int model = entry.first;
             const ModelCalibration& calibration = entry.second;
+            for (int field=0;field<12;++field)
+                std::fprintf(file,"RearMirrorCalib.%d.%d=%d\n",model,field,calibration.rearMirror[field]);
             for(int seat=0;seat<4;++seat) for(int axis=0;axis<3;++axis)
                 std::fprintf(file,"EntryCalib.%d.%d.%d=%d\n",model,seat,axis,calibration.entry[seat][axis]);
             for(int door=0;door<4;++door) for(int inside=0;inside<2;++inside) for(int axis=0;axis<3;++axis)
@@ -703,6 +710,10 @@ void Load() {
                 bikeLeanSensitivity=value;
             else if (std::sscanf(line, "KeepRiderOnFlips=%d", &value)==1)
                 keepRiderOnFlips=value;
+            else if (std::sscanf(line, "RearMirror=%d", &value)==1)
+                g_rearMirrorEnabled.store(value!=0);
+            else if (std::sscanf(line, "RearMirrorFov=%d", &value)==1)
+                g_rearMirrorFov.store(std::clamp(value,40,120));
             else if (std::sscanf(line, "HideInteriorGlass=%d", &value)==1)
                 hideInteriorGlass=value;
             else if (std::sscanf(line, "DrivebyImmersive=%d", &value)==1)
@@ -716,6 +727,12 @@ void Load() {
             else {
                 int model = -1, mode = -1, hand = -1;
                 int door=-1,inside=-1,axis=-1;
+                if (std::sscanf(line,"RearMirrorCalib.%d.%d=%d",&model,&axis,&value)==3 &&
+                    model>=400 && model<=611 && axis>=0 && axis<12) {
+                    g_modelCalibration[model].rearMirror[axis]=std::clamp(value,
+                        axis%6<3?-500:-180,axis%6<3?500:180);
+                    continue;
+                }
                 if (std::sscanf(line,"Ignition.%d.%d=%d",&model,&axis,&value)==3 &&
                     model>=400 && model<=611 && axis>=0 && axis<6) {
                     g_modelCalibration[model].ignition[axis]=std::clamp(value,-720,720);
@@ -3302,6 +3319,11 @@ constexpr int kDefaultBikeItems[] = {
 };
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
+    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
+    MENU_MIRROR_X, MENU_MIRROR_Y, MENU_MIRROR_Z,
+    MENU_MIRROR_PITCH, MENU_MIRROR_YAW, MENU_MIRROR_ROLL,
+    MENU_REAR_CAMERA_X, MENU_REAR_CAMERA_Y, MENU_REAR_CAMERA_Z,
+    MENU_REAR_CAMERA_PITCH, MENU_REAR_CAMERA_YAW, MENU_REAR_CAMERA_ROLL,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3324,6 +3346,11 @@ constexpr int kImmersiveBikeItems[] = {
 };
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
+    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
+    MENU_MIRROR_X, MENU_MIRROR_Y, MENU_MIRROR_Z,
+    MENU_MIRROR_PITCH, MENU_MIRROR_YAW, MENU_MIRROR_ROLL,
+    MENU_REAR_CAMERA_X, MENU_REAR_CAMERA_Y, MENU_REAR_CAMERA_Z,
+    MENU_REAR_CAMERA_PITCH, MENU_REAR_CAMERA_YAW, MENU_REAR_CAMERA_ROLL,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3397,13 +3424,54 @@ void MenuTableForType(int vehicleType, const int** items, int* count) {
 int GetMenuItemCount(int vehicleType) {
     const int* items=nullptr; int count=0;
     MenuTableForType(vehicleType,&items,&count);
-    return count;
+    int visible=0;
+    for (int i=0;i<count;++i)
+        if (GetVehicleDebugMode() || items[i]<MENU_MIRROR_X || items[i]>MENU_REAR_CAMERA_ROLL) ++visible;
+    return visible;
 }
 int GetMenuItemForRow(int vehicleType,int row) {
     const int* items=nullptr; int count=0;
     MenuTableForType(vehicleType,&items,&count);
-    if (row<0||row>=count) return MENU_BACK;
-    return items[row];
+    if (row<0) return MENU_BACK;
+    for (int i=0;i<count;++i) {
+        if (!GetVehicleDebugMode() && items[i]>=MENU_MIRROR_X && items[i]<=MENU_REAR_CAMERA_ROLL) continue;
+        if (row--==0) return items[i];
+    }
+    return MENU_BACK;
+}
+
+bool RearMirrorEnabled() { EnsureInit(); return g_rearMirrorEnabled.load(); }
+void ToggleRearMirror() { EnsureInit(); g_rearMirrorEnabled.store(!g_rearMirrorEnabled.load()); Save(); }
+int RearMirrorFov() { EnsureInit(); return g_rearMirrorFov.load(); }
+void AdjustRearMirrorFov(int direction) {
+    EnsureInit(); if (!direction) return;
+    g_rearMirrorFov.store(std::clamp(g_rearMirrorFov.load()+(direction<0?-5:5),40,120));
+    Save();
+}
+void GetRearMirrorCalibration(int model,int out[12]) {
+    EnsureInit();
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    const auto it=g_modelCalibration.find(model);
+    const ModelCalibration defaults{};
+    const auto& c=it==g_modelCalibration.end()?defaults:it->second;
+    std::copy(std::begin(c.rearMirror),std::end(c.rearMirror),out);
+}
+int GetRearMirrorCalibrationValue(int field) {
+    if (field<0 || field>=12) return 0;
+    int values[12]; GetRearMirrorCalibration(GetActiveVehicleModelId(),values);
+    return values[field];
+}
+void AdjustRearMirrorCalibration(int field,int direction) {
+    const int model=GetActiveVehicleModelId();
+    if (!GetVehicleDebugMode() || GetActiveVehicleType()!=VEHICLE_CAR ||
+        model<400 || model>611 || field<0 || field>=12 || !direction) return;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        int& value=g_modelCalibration[model].rearMirror[field];
+        const int limit=field%6<3?500:180;
+        value=std::clamp(value+(direction<0?-1:1),-limit,limit);
+    }
+    Save();
 }
 
 int GetActiveVehicleType() {
@@ -3451,6 +3519,8 @@ const char* GetActiveVehicleModelName() {
     }
 }
 bool IsMenuItemAvailable(int vehicleType,int item) {
+    if (item>=MENU_MIRROR_X && item<=MENU_REAR_CAMERA_ROLL)
+        return GetVehicleDebugMode() && HasCurrentModelForType(VEHICLE_CAR);
     switch(item) {
         case MENU_MODEL_SIDE:
         case MENU_MODEL_FORWARD:
@@ -3766,6 +3836,7 @@ void ResetVehiclePreset(int vehicleType) {
     g_value[forwardField].store(kDefaults[forwardField]);
     g_value[heightField].store(kDefaults[heightField]);
     if (vehicleType==VEHICLE_PLANE) g_planeInvertPitch.store(false);
+    if (vehicleType==VEHICLE_CAR) { g_rearMirrorEnabled.store(true); g_rearMirrorFov.store(80); }
     if (vehicleType==VEHICLE_BIKE) {
         g_bikeVisualLeanPercent.store(50,std::memory_order_release);
         g_bikeBlockWheelie.store(false);
@@ -3776,6 +3847,10 @@ void ResetVehiclePreset(int vehicleType) {
         const int model=GetActiveVehicleModelId();
         std::lock_guard<std::mutex> lock(g_modelMutex);
         ModelCalibration& calibration=g_modelCalibration[model];
+        if (vehicleType==VEHICLE_CAR) {
+            const ModelCalibration defaults{};
+            std::copy(std::begin(defaults.rearMirror),std::end(defaults.rearMirror),calibration.rearMirror);
+        }
         calibration.seatSide[mode]=0;
         calibration.seatForward[mode]=0;
         calibration.seatHeight[mode]=0;

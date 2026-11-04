@@ -1406,6 +1406,13 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::AdjustCurrentModelSeatForwardCm(drivingVehicleType,step);
             } else if (item==savr::driving::MENU_MODEL_HEIGHT&&step&&available) {
                 savr::driving::AdjustCurrentModelSeatHeightCm(drivingVehicleType,step);
+            } else if (item==savr::driving::MENU_REAR_MIRROR && (enter||step)) {
+                savr::driving::ToggleRearMirror();
+            } else if (item==savr::driving::MENU_REAR_MIRROR_FOV && step) {
+                savr::driving::AdjustRearMirrorFov(step);
+            } else if (item>=savr::driving::MENU_MIRROR_X &&
+                       item<=savr::driving::MENU_REAR_CAMERA_ROLL && step && available) {
+                savr::driving::AdjustRearMirrorCalibration(item-savr::driving::MENU_MIRROR_X,step);
             } else if (item>=savr::driving::MENU_IGNITION_X &&
                        item<=savr::driving::MENU_IGNITION_RZ && step && available) {
                 savr::driving::AdjustIgnitionCalibration(item-savr::driving::MENU_IGNITION_X,step);

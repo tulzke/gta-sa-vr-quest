@@ -11,6 +11,7 @@
 #include "AircraftHlod.h"
 #include "Calib.h"
 #include "Driving.h"
+#include "RearMirrorPolicy.h"
 #include "EyeDepth.h"
 #include "GestureMove.h"
 #include "GraphicsEffects.h"
@@ -21011,6 +21012,8 @@ private:
     int sequence_;
 };
 
+#include "RearMirrorRender.inl"
+
 void OnRenderScene(bool underwater) {
     perf::NotifyRenderSceneEntry();
     g_cullOwnerThread.store(__builtin_thread_pointer(), std::memory_order_relaxed);
@@ -21281,6 +21284,10 @@ void OnRenderScene(bool underwater) {
     // photographic eye basis from the actual head pose before narrowing it.
     // Zoom affects only the frustum; it never moves or rotates this anchor.
     if (PhotoViewActive()) BuildPhotoView(base,true);
+    if (driving::RearMirrorEnabled() && !rear_mirror_render::raster &&
+        driving::GetActiveVehicleType()==driving::VEHICLE_CAR && !driving::ThirdPersonViewActive())
+        closeEnginePreFinish();
+    rear_mirror_render::Prepare(base);
     unsigned char black[4] = {0, 0, 0, 255};
 
     // Build one eye-independent draw list from the physical ownership state. A
@@ -21598,6 +21605,7 @@ void OnRenderScene(bool underwater) {
         ++g_stereoReuseCounters.alphaDedupeFaults;
     }
     tA = NowMs(); g.RwCameraEndUpdate(sc); tEnd += NowMs() - tA;   // end the caller's surface pass
+    rear_mirror_render::Render(sc,camU);
 
     // Pull the near clip in for the eye pass so the close weapon grip isn't clipped
     // (the game default clips it -> a hole that shows the sky through). Restore after.
@@ -21818,6 +21826,7 @@ void OnRenderScene(bool underwater) {
         if (g.DefinedState) g.DefinedState();
         RenderWorldStableSkyPolys(camU, mobileFog);
         graphicsfx::RenderSkyEye(sc, e);
+        rear_mirror_render::DrawSurface();
         tSky[e] += NowMs() - tA;
         // Opaque path: the CClouds::Render hook (OnCloudsRender) suppresses the
         // flat eye backdrop and draws the weapon BEFORE world geometry. Fallback

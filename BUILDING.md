@@ -1,5 +1,26 @@
 # Building
 
+## Rear-view mirror prototype
+
+In VR **Vehicle Settings → Cars**, `REAR MIRROR` enables the first-person
+32×10 cm mirror and `MIRROR FIELD OF VIEW` sets its horizontal FOV (40–120°).
+Enable **VEHICLE DEBUG** in the main VR menu to expose `DEBUG MIRROR` and
+`DEBUG REAR CAM` rows on the car settings page. Each has SIDE/FORWARD/UP
+coordinates in cm from the vehicle origin, followed by PITCH/YAW/ROLL in
+degrees. Position axes remain vehicle-local when orientation changes.
+Calibration is saved per vehicle model in `vr_driving.ini`; `RESET` on the
+car page restores the current model's mirror/camera defaults and global FOV.
+
+The prototype renders a shared 512×160 rear image every new game frame, with
+a 70 m far clip, early map/vehicle LODs and bounded streaming requests. It
+omits shadow passes, pedestrians, water and particles; its background is a
+flat fog colour. The player's car is excluded from the rear camera.
+In normal use an off-screen/back-facing mirror skips its update; debug mode
+keeps updates active for calibration. Host checks: `python tools/test-rear-mirror.py`.
+Visual correctness, comfortable placement and performance still require Quest
+testing, especially with replacement vehicle models. Toggle `REAR MIRROR`
+for an A/B comparison; developer builds also log `[mirror]` CPU/candidate counts.
+
 ## Windows
 
 For routine updates of the already installed personal build, run:
