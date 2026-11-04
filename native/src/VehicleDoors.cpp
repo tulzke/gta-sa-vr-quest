@@ -22,7 +22,7 @@ namespace {
 // Retail 2.11.311 arm64. Pool generation is checked before every retained
 // entity access; the interaction never owns an engine pointer or task.
 constexpr int kPoolSize=110,kStride=0xc68;
-constexpr float kBikeStableUp=.985f;
+constexpr float kBikeStableUp=.8660254f; // cos(30 degrees)
 constexpr int kNodes[4]={10,8,11,9};
 using OpenFn=void(*)(void*,void*,int,int,float,bool);
 using SwingFn=void(*)(void*,int,int);

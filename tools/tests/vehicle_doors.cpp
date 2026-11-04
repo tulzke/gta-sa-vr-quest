@@ -536,15 +536,16 @@ int main() {
         Write<std::uint16_t>(vehicle,0x32,461);Write<float>(vehicle,0xb0,200.f);Write<void*>(vehicle,0x5a0,nullptr);
         StoreBasis(frames[0],{});Write(vehicle,0x758+7*8,static_cast<void*>(frames[0]));
         vrcam::eye={0,-.5f,1.f};Tick();CHECK(xr::published.count==0);
-        const Basis tilted{{.94f,0,-.341174f},{0,1,0},{.341174f,0,.94f},{}};
+        const Basis tilted{{.8f,0,-.6f},{0,1,0},{.6f,0,.8f},{}};
         StoreBasis(matrix,tilted);StoreBasis(frames[0],tilted);
-        const float side=hand?1.f:-1.f;hands[hand].gripPos[0]=side*.31f*.94f;
-        hands[hand].gripPos[1]=.5f;hands[hand].gripPos[2]=.8f-side*.31f*.341174f;
+        const float side=hand?1.f:-1.f;hands[hand].gripPos[0]=side*.31f*.8f;
+        hands[hand].gripPos[1]=.5f;hands[hand].gripPos[2]=.8f-side*.31f*.6f;
         Tick();CHECK(xr::published.count>=2&&xr::published.markers[0].hideArrow);hands[hand].grip=1;Tick();CHECK(ClaimedHands()==(1u<<hand));
         hands[hand].gripPos[2]+=.1f;Tick();CHECK(forceCalls>0);
         if(hand==0){
             CHECK(xr::published.markers[0].highlight==0.f);
-            StoreBasis(matrix,{});StoreBasis(frames[0],{});Tick();CHECK(xr::published.markers[0].highlight==1.f);
+            const Basis within{{.87462f,0,-.48481f},{0,1,0},{.48481f,0,.87462f},{}}; // 29 degrees
+            StoreBasis(matrix,within);StoreBasis(frames[0],within);Tick();CHECK(xr::published.markers[0].highlight==1.f);
             Write<Vec>(vehicle,0x74,{.1f,.2f,.3f});hands[hand].grip=0;Tick();
             CHECK(ClaimedHands()==0&&g_bikeStable.vehicle==vehicle);
             const Vec angular=Read<Vec>(vehicle,0x74);CHECK(std::abs(angular.x-.1f)<1e-5f&&std::abs(angular.y)<1e-5f&&std::abs(angular.z-.3f)<1e-5f);
@@ -562,12 +563,12 @@ int main() {
         g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* out){*out={0,.5f,.8f};};
         g_turnForce=[](void*,float,float,float,float,float,float){};
         Write<std::uint16_t>(vehicle,0x32,461);Write<float>(vehicle,0xb0,200.f);Write<void*>(vehicle,0x5a0,nullptr);
-        const Basis tilted{{.94f,0,-.341174f},{0,1,0},{.341174f,0,.94f},{}};
+        const Basis tilted{{.8f,0,-.6f},{0,1,0},{.6f,0,.8f},{}};
         StoreBasis(matrix,tilted);StoreBasis(frames[0],tilted);Write(vehicle,0x758+7*8,static_cast<void*>(frames[0]));
-        const float side=grip?1.f:-1.f;vrcam::eye={0,-.5f,1.f};hands[0].gripPos[0]=side*.31f*.94f;
-        hands[0].gripPos[1]=.5f;hands[0].gripPos[2]=.8f-side*.31f*.341174f;
+        const float side=grip?1.f:-1.f;vrcam::eye={0,-.5f,1.f};hands[0].gripPos[0]=side*.31f*.8f;
+        hands[0].gripPos[1]=.5f;hands[0].gripPos[2]=.8f-side*.31f*.6f;
         Tick();hands[0].trigger=1;Tick();CHECK(g_bikeEdit.hand==0&&g_bikeEdit.grip==grip);
-        hands[0].gripPos[0]+=.0341174f;hands[0].gripPos[2]+=.094f;Tick();CHECK(std::abs(driving::bikeGrip[grip][2]-.1f)<.001f);
+        hands[0].gripPos[0]+=.06f;hands[0].gripPos[2]+=.08f;Tick();CHECK(std::abs(driving::bikeGrip[grip][2]-.1f)<.001f);
         CHECK(driving::bikeGrip[1-grip][2]==0);hands[0].trigger=0;Tick();
         CHECK(g_bikeEdit.hand<0&&driving::saves==1);
         g.CBike_IsComponentPresent=nullptr;g.CBike_GetComponentWorldPosition=nullptr;g_turnForce=nullptr;
@@ -605,12 +606,12 @@ int main() {
      g.CBike_IsComponentPresent=[](const void*,int node){return node==6;};
      g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* p){*p={0,.5f,.8f};};
      static int forces;forces=0;g_turnForce=[](void*,float,float,float,float,float,float){++forces;};
-     const Basis tilted{{.94f,0,-.341174f},{0,1,0},{.341174f,0,.94f},{0,.5f,.8f}};
+     const Basis tilted{{.8f,0,-.6f},{0,1,0},{.6f,0,.8f},{0,.5f,.8f}};
      StoreBasis(matrix,Basis{tilted.right,tilted.forward,tilted.up,{}});StoreBasis(frames[0],tilted);
      Write(vehicle,model==471?0x888:0x758+6*8,static_cast<void*>(frames[0]));
      Write<std::uint16_t>(vehicle,0x32,static_cast<std::uint16_t>(model));Write<void*>(vehicle,0x5a0,nullptr);Write<float>(vehicle,0xb0,200.f);
-     vrcam::eye={0,-.5f,1.f};hands[0].gripPos[0]=-.31f*.94f;
-     hands[0].gripPos[1]=.5f;hands[0].gripPos[2]=.8f+.31f*.341174f;
+     vrcam::eye={0,-.5f,1.f};hands[0].gripPos[0]=-.31f*.8f;
+     hands[0].gripPos[1]=.5f;hands[0].gripPos[2]=.8f+.31f*.6f;
      Tick();CHECK(xr::published.count==2&&xr::published.markers[0].hideArrow);
      hands[0].grip=1;Tick();CHECK(ClaimedHands()==1);hands[0].gripPos[2]+=.1f;Tick();CHECK(forces>0);
      Tick(false,5,false);CHECK(ClaimedHands()==0);}
