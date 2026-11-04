@@ -4,10 +4,14 @@
 
 In VR **Vehicle Settings → Cars**, `REAR MIRROR` enables the first-person
 32×10 cm mirror and `MIRROR FIELD OF VIEW` sets its horizontal FOV (40–120°).
-Enable **VEHICLE DEBUG** in the main VR menu to expose `DEBUG MIRROR` and
-`DEBUG REAR CAM` rows on the car settings page. Each has SIDE/FORWARD/UP
-coordinates in cm from the vehicle origin, followed by PITCH/YAW/ROLL in
-degrees. Position axes remain vehicle-local when orientation changes.
+Enable the existing **VEHICLE DEBUG** switch once in the main VR menu. It
+also exposes the mirror and rear-camera handles alongside wheel, seat and
+door handles. In a stationary car, hold a trigger near the mirror handle,
+move/rotate the controller, then release to save. The camera's proxy handle
+is 40 cm to the right and 20 cm below the mirror; it applies relative
+movement/rotation to the camera, so the camera can stay behind the car while
+its handle remains reachable from the seat. Both use the common debug mode;
+there are no separate calibration menu rows or per-car debug switches.
 Calibration is saved per vehicle model in `vr_driving.ini`; `RESET` on the
 car page restores the current model's mirror/camera defaults and global FOV.
 

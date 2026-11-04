@@ -3320,10 +3320,6 @@ constexpr int kDefaultBikeItems[] = {
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
-    MENU_MIRROR_X, MENU_MIRROR_Y, MENU_MIRROR_Z,
-    MENU_MIRROR_PITCH, MENU_MIRROR_YAW, MENU_MIRROR_ROLL,
-    MENU_REAR_CAMERA_X, MENU_REAR_CAMERA_Y, MENU_REAR_CAMERA_Z,
-    MENU_REAR_CAMERA_PITCH, MENU_REAR_CAMERA_YAW, MENU_REAR_CAMERA_ROLL,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3347,10 +3343,6 @@ constexpr int kImmersiveBikeItems[] = {
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
-    MENU_MIRROR_X, MENU_MIRROR_Y, MENU_MIRROR_Z,
-    MENU_MIRROR_PITCH, MENU_MIRROR_YAW, MENU_MIRROR_ROLL,
-    MENU_REAR_CAMERA_X, MENU_REAR_CAMERA_Y, MENU_REAR_CAMERA_Z,
-    MENU_REAR_CAMERA_PITCH, MENU_REAR_CAMERA_YAW, MENU_REAR_CAMERA_ROLL,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3424,20 +3416,12 @@ void MenuTableForType(int vehicleType, const int** items, int* count) {
 int GetMenuItemCount(int vehicleType) {
     const int* items=nullptr; int count=0;
     MenuTableForType(vehicleType,&items,&count);
-    int visible=0;
-    for (int i=0;i<count;++i)
-        if (GetVehicleDebugMode() || items[i]<MENU_MIRROR_X || items[i]>MENU_REAR_CAMERA_ROLL) ++visible;
-    return visible;
+    return count;
 }
 int GetMenuItemForRow(int vehicleType,int row) {
     const int* items=nullptr; int count=0;
     MenuTableForType(vehicleType,&items,&count);
-    if (row<0) return MENU_BACK;
-    for (int i=0;i<count;++i) {
-        if (!GetVehicleDebugMode() && items[i]>=MENU_MIRROR_X && items[i]<=MENU_REAR_CAMERA_ROLL) continue;
-        if (row--==0) return items[i];
-    }
-    return MENU_BACK;
+    return row>=0&&row<count?items[row]:MENU_BACK;
 }
 
 bool RearMirrorEnabled() { EnsureInit(); return g_rearMirrorEnabled.load(); }
@@ -3456,22 +3440,13 @@ void GetRearMirrorCalibration(int model,int out[12]) {
     const auto& c=it==g_modelCalibration.end()?defaults:it->second;
     std::copy(std::begin(c.rearMirror),std::end(c.rearMirror),out);
 }
-int GetRearMirrorCalibrationValue(int field) {
-    if (field<0 || field>=12) return 0;
-    int values[12]; GetRearMirrorCalibration(GetActiveVehicleModelId(),values);
-    return values[field];
-}
-void AdjustRearMirrorCalibration(int field,int direction) {
-    const int model=GetActiveVehicleModelId();
-    if (!GetVehicleDebugMode() || GetActiveVehicleType()!=VEHICLE_CAR ||
-        model<400 || model>611 || field<0 || field>=12 || !direction) return;
-    {
-        std::lock_guard<std::mutex> lock(g_modelMutex);
-        int& value=g_modelCalibration[model].rearMirror[field];
-        const int limit=field%6<3?500:180;
-        value=std::clamp(value+(direction<0?-1:1),-limit,limit);
+void SetRearMirrorCalibration(int model,const int values[12]) {
+    if (model<400 || model>611) return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    for(int i=0;i<12;++i) {
+        const int limit=i%6<3?500:180;
+        g_modelCalibration[model].rearMirror[i]=std::clamp(values[i],-limit,limit);
     }
-    Save();
 }
 
 int GetActiveVehicleType() {
@@ -3519,8 +3494,6 @@ const char* GetActiveVehicleModelName() {
     }
 }
 bool IsMenuItemAvailable(int vehicleType,int item) {
-    if (item>=MENU_MIRROR_X && item<=MENU_REAR_CAMERA_ROLL)
-        return GetVehicleDebugMode() && HasCurrentModelForType(VEHICLE_CAR);
     switch(item) {
         case MENU_MODEL_SIDE:
         case MENU_MODEL_FORWARD:

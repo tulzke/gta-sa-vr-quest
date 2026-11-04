@@ -7746,20 +7746,6 @@ void BuildDrivingMenu() {
             case driving::MENU_REAR_MIRROR_FOV:
                 std::snprintf(rows[row],sizeof(rows[row]),"MIRROR FIELD OF VIEW < %d DEG >",driving::RearMirrorFov());
                 break;
-            case driving::MENU_MIRROR_X: case driving::MENU_MIRROR_Y: case driving::MENU_MIRROR_Z:
-            case driving::MENU_MIRROR_PITCH: case driving::MENU_MIRROR_YAW: case driving::MENU_MIRROR_ROLL:
-            case driving::MENU_REAR_CAMERA_X: case driving::MENU_REAR_CAMERA_Y: case driving::MENU_REAR_CAMERA_Z:
-            case driving::MENU_REAR_CAMERA_PITCH: case driving::MENU_REAR_CAMERA_YAW: case driving::MENU_REAR_CAMERA_ROLL: {
-                const int field=item-driving::MENU_MIRROR_X;
-                static const char* const names[]={"SIDE","FORWARD","UP","PITCH","YAW","ROLL"};
-                if (haveModel)
-                    std::snprintf(rows[row],sizeof(rows[row]),"DEBUG %s %s < %+d %s >",
-                        field<6?"MIRROR":"REAR CAM",names[field%6],
-                        driving::GetRearMirrorCalibrationValue(field),field%6<3?"CM":"DEG");
-                else std::snprintf(rows[row],sizeof(rows[row]),"DEBUG %s %s < ENTER CAR >",
-                        field<6?"MIRROR":"REAR CAM",names[field%6]);
-                break;
-            }
             case driving::MENU_IGNITION_X: case driving::MENU_IGNITION_Y:
             case driving::MENU_IGNITION_Z: case driving::MENU_IGNITION_RX:
             case driving::MENU_IGNITION_RY: case driving::MENU_IGNITION_RZ: {

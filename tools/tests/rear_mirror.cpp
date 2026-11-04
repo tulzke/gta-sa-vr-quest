@@ -1,5 +1,6 @@
 #include "RearMirrorPolicy.h"
 #include "VehicleDoorMotion.h"
+#include "VehicleDebugDrag.h"
 #include "Symbols.h"
 #include "Driving.h"
 #include <array>
@@ -110,6 +111,12 @@ int main() {
     const int position[]={100,200,300,0,90,0};const auto pose=r::Pose(basis,position);
     CHECK(std::fabs(pose.pos.x-8)<.001f&&std::fabs(pose.pos.y-21)<.001f&&std::fabs(pose.pos.z-33)<.001f);
     CHECK(std::fabs(Dot(pose.right,pose.forward))<.001f);
+    for(int pitch : {-75,0,65})for(int yaw : {-80,0,70})for(int roll : {-60,0,85}) {
+        const int input[]={pitch,yaw,roll};int output[3]{};
+        const auto b=vehicledoors::MirrorOrientation(input);
+        vehicledoors::MirrorAngles(b,output);
+        CHECK(output[0]==pitch&&output[1]==yaw&&output[2]==roll);
+    }
 
     // A far vehicle with a VLO atomic draws that atomic alone; near vehicles
     // keep high detail, and HD replacements without VLO retain their body.

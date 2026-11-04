@@ -166,11 +166,7 @@ enum MenuItem {
     MENU_VEHICLE_TEST_PAGE
     , MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z,
     MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
-    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
-    MENU_MIRROR_X, MENU_MIRROR_Y, MENU_MIRROR_Z,
-    MENU_MIRROR_PITCH, MENU_MIRROR_YAW, MENU_MIRROR_ROLL,
-    MENU_REAR_CAMERA_X, MENU_REAR_CAMERA_Y, MENU_REAR_CAMERA_Z,
-    MENU_REAR_CAMERA_PITCH, MENU_REAR_CAMERA_YAW, MENU_REAR_CAMERA_ROLL
+    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV
 };
 
 bool RearMirrorEnabled();
@@ -180,8 +176,7 @@ void AdjustRearMirrorFov(int direction);
 // Local vehicle axes: right, forward, up (cm), then pitch/yaw/roll (degrees).
 // First six fields position the surface; the next six position its camera.
 void GetRearMirrorCalibration(int model, int out[12]);
-int GetRearMirrorCalibrationValue(int field);
-void AdjustRearMirrorCalibration(int field, int direction);
+void SetRearMirrorCalibration(int model, const int values[12]);
 
 int GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);

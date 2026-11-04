@@ -24,7 +24,7 @@ namespace savr::vehicleentry { int SeatIndex(void* car,void* ped){ if(!car||!ped
 namespace savr {
 GameSymbols g{};
 namespace xr {
-struct HandPose { bool valid{true};float gripPos[3]{};float grip{};float trigger{}; };
+struct HandPose { bool valid{true};float gripPos[3]{};float grip{};float trigger{};float gripOri[4]{0,0,0,1}; };
 vehicledoors::MarkerFrame published;
 void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& f) { published=f; }
 void TriggerHaptic(int,float,float,float) {}
@@ -70,6 +70,9 @@ int GetCurrentModelSeatSideCm(int) {return 0;}
 int GetCurrentModelSeatForwardCm(int) {return 0;}
 int GetCurrentModelSeatHeightCm(int) {return 0;}
 int GetWheelCalibrationValue(int) {return 0;}
+int mirrorValues[12]{0,45,110,0,0,0,0,-200,100,0,0,0};
+void GetRearMirrorCalibration(int,int out[12]) {std::copy_n(mirrorValues,12,out);}
+void SetRearMirrorCalibration(int,const int values[12]) {std::copy_n(values,12,mirrorValues);}
 int radiusValue{},radiusWrites{};
 void SetDebugWheelRadius(int,int value) {radiusValue=value;++radiusWrites;}
 void SetDebugWheelPitch(int,int) {}
@@ -618,5 +621,19 @@ int main() {
      Tick();hands[0].trigger=1;Tick();CHECK(g_bikeEdit.inside&&g_bikeEdit.grip==grip);
      hands[0].gripPos[2]+=.1f;Tick();CHECK(std::abs(driving::bikeGrip[grip][2]-.1f)<.001f);
      hands[0].trigger=0;Tick();CHECK(g_bikeEdit.hand<0&&driving::saves==1);}
+    // The common debug switch edits both mirror and rear camera with no menu
+    // selection. Camera movement uses its reachable proxy, not the trunk pose.
+    for(int kind:{5,6}) {
+        Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+        const int defaults[]={0,45,110,0,0,0,0,-200,100,0,0,0};
+        std::copy_n(defaults,12,driving::mirrorValues);
+        hands[0].gripPos[0]=kind==5?0.f:.4f;hands[0].gripPos[1]=.45f;hands[0].gripPos[2]=kind==5?1.1f:.9f;
+        Tick();hands[0].trigger=1;Tick();CHECK(g_editKind==kind&&g_edit.hand==0);
+        hands[0].gripPos[0]+=.1f;hands[0].gripOri[2]=.258819f;hands[0].gripOri[3]=.965926f;Tick();
+        const int offset=kind==6?6:0;
+        CHECK(driving::mirrorValues[offset]==10&&driving::mirrorValues[offset+4]==30);
+        CHECK(driving::mirrorValues[kind==6?0:6]==0&&driving::saves==0);
+        hands[0].trigger=0;Tick();CHECK(g_edit.hand<0&&driving::saves==1&&ClaimedHands()==0);
+    }
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }
