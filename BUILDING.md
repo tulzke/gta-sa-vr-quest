@@ -147,6 +147,10 @@ raises CJ to its surface and holds his height until he walks off. Use the
 existing seat icon/stick action to enter after opening the door.
 The rendered grip stays fixed on the pipe. Body displacement follows controller
 travel one-to-one without a speed ramp; collisions still block movement.
+Grip immediately suspends CJ's stock gravity/collision response and clears
+grounded state without lifting the camera. Custom body/head clearance checks
+remain active. Releasing without step support or cancelling restores stock
+physics; standing on the configured step retains suspension until walking off.
 
 In VEHICLE DEBUG, drag the step's four corner markers with a trigger to resize
 it in X/Y or move its height. The marker at the centre of the top changes

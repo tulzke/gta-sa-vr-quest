@@ -51,6 +51,7 @@ int main(){
     Put(matrix,0,Vec{1,0,0});Put(matrix,0x10,Vec{0,1,0});Put(matrix,0x20,Vec{0,0,1});
     Put(door,0x30,Vec{-.929f,0,1.5f});Put(cars,0x800+10*8,static_cast<void*>(door));
     Put(ped,0x18,static_cast<void*>(pm));Put(pm,0x30,Vec{-1.3f,0,.9f});
+    Put(ped,0x28,std::uint64_t(0x4001));Put(ped,0x64,std::uint32_t(0x202));Put(ped,0x584,std::uint8_t(0x81));
     g.CPools_ms_pVehiclePool=&poolPtr;g.FindPlayerPed=[](int)->void*{return ped;};g.FindPlayerVehicle=[](int,bool)->void*{return nullptr;};
     g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned,bool){out->x=10;out->y=0;out->z=0;};
     g.CWorld_pIgnoreEntity=&ignored;
@@ -61,7 +62,11 @@ int main(){
     Tick();Tick();
     vehicledoors::MarkerFrame published;published.epoch=1;Append(published);
     assert(published.count==1&&published.markers[0].bikeGrip&&published.markers[0].pipeLength>1.f);
+    const Vec grounded=Position(ped);
     hands[0].grip=1;Tick();assert(ClaimedHands()==1);
+    assert(Length(Position(ped)-grounded)<.0001f); // no delayed floor pop
+    assert((Read<std::uint64_t>(ped,0x28)&1)==0&&(Read<std::uint32_t>(ped,0x64)&2)==0);
+    assert(Read<std::uint8_t>(ped,0x584)==0x80); // detach at grip, not after pulling
     const float before=Position(ped).z;hands[0].gripPos[2]-=.02f;Tick();assert(std::abs(Position(ped).z-before-.02f)<.0001f);
     // Holding still must restore the anchor after native gravity, and the
     // rendered grip must stay at the same world point while the camera moves.
@@ -76,7 +81,8 @@ int main(){
     hands[1].grip=0;Tick();
     wall=true;const Vec blocked=Position(ped);hands[0].gripPos[2]-=.02f;Tick();assert(Position(ped).z==blocked.z&&ignored==nullptr);wall=false;
     hands[0].gripPos[2]-=1;Tick();assert(!ClaimedHands());
-    Tick(false);hands[0].gripPos[2]=1.2f;Tick();assert(!ClaimedHands());
+    Tick(false);assert(Read<std::uint64_t>(ped,0x28)==0x4001&&Read<std::uint32_t>(ped,0x64)==0x202);
+    hands[0].gripPos[2]=1.2f;Tick();assert(!ClaimedHands());
     hands[0].grip=0;Tick();hands[0].grip=1;Tick(true,1,1);assert(!ClaimedHands());
     hands[0].grip=0;Tick();hands[0].grip=1;Tick();assert(ClaimedHands());flags[0]=2;Tick();assert(!ClaimedHands());
     // Place a native foot inside the step and verify persistent support after
@@ -84,9 +90,11 @@ int main(){
     hands[0].grip=0;
     g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned bone,bool){assert(bone==44||bone==54);out->x=-1.75f;out->y=-.65f;out->z=.65f;};
     Put(pm,0x30,Vec{-1.75f,-.65f,1.5f});Tick();Tick();assert(supported);const float supportedZ=Position(ped).z;
+    assert(suspendedPed==ped&&(Read<std::uint64_t>(ped,0x28)&1)==0);
     g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned,bool){out->x=10;out->z=0;};
     Put(pm,0x30,Vec{-1.75f,-.65f,supportedZ-.02f});Tick();assert(std::abs(Position(ped).z-supportedZ)<.0001f);
-    Put(pm,0x30,Vec{-3,-.45f,supportedZ});Tick();assert(!supported);
+    Put(pm,0x30,Vec{-3,-.45f,supportedZ});Tick();assert(!supported&&!suspendedPed);
+    assert(Read<std::uint64_t>(ped,0x28)==0x4001&&Read<std::uint32_t>(ped,0x64)==0x202);
     // Editing changes the actual shape and persists once on trigger release.
     driving::mode=1;hands[0].trigger=0;hands[0].gripPos[0]=-1.97f;hands[0].gripPos[1]=-1.07f;hands[0].gripPos[2]=.75f;Tick();
     hands[0].trigger=1;Tick();assert(Editing());hands[0].gripPos[0]-=.1f;Tick();assert(driving::config[0][0]<-.09f);
@@ -95,8 +103,12 @@ int main(){
     // controller travel; every 10 cm stroke must move the body by 10 cm.
     driving::mode=0;hands[0].grip=0;hands[0].gripPos[0]=-1.65f;hands[0].gripPos[1]=-.65f;hands[0].gripPos[2]=1.2f;Tick();
     hands[0].grip=1;Tick();assert(ClaimedHands()==1);
-    for(int i=0;i<9;++i){const float z=Position(ped).z;hands[0].gripPos[2]-=.1f;Tick();assert(ClaimedHands()==1);assert(std::abs(Position(ped).z-z-.1f)<.0001f);}
+    for(int i=0;i<9;++i){const float z=Position(ped).z;hands[0].gripPos[2]-=.1f;Tick();assert(ClaimedHands()==1);assert(std::abs(Position(ped).z-z-.1f)<.0001f);assert((Read<std::uint64_t>(ped,0x28)&1)==0&&(Read<std::uint32_t>(ped,0x64)&2)==0);}
+    // A cab obstruction blocks movement while retaining suspended physics.
+    wall=true;hands[0].gripPos[2]-=.02f;Tick();assert(ClaimedHands()==1&&suspendedPed==ped);wall=false;
+    Put(ped,0x28,Read<std::uint64_t>(ped,0x28)|0x1000); // unrelated engine change
     Put(cars,0x74,Vec{.1f,0,0});Tick();assert(!activeCar&&!supported&&!ClaimedHands());
+    assert(Read<std::uint64_t>(ped,0x28)==0x5001&&Read<std::uint32_t>(ped,0x64)==0x202);
     Put(cars,0x74,Vec{});driving::mode=0;
     Put(cars,0x32,std::uint16_t(514));Tick();assert(markers.count==0);
     Put(cars,0x32,std::uint16_t(403));Tick();assert(markers.count==1);

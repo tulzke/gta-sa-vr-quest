@@ -29,10 +29,37 @@ bool supported{};float supportHeight{};
 Vec previousFeet[2]{};bool feetValid{};
 void* feetCar{};int feetSide{};std::uint8_t feetGeneration{};
 DebugDrag edit;int control=-1;float editBase[12]{};bool dirty{};
+void* suspendedPed{};bool savedCollision{},savedGravity{};
+
+void ResumePhysics(){
+    // Player identity can change at respawn. Never restore into a stale ped.
+    if(suspendedPed&&g.FindPlayerPed&&g.FindPlayerPed(-1)==suspendedPed){
+        auto flags=Read<std::uint64_t>(suspendedPed,0x28);
+        Write(suspendedPed,0x28,(flags&~std::uint64_t(1))|(savedCollision?1u:0u));
+        auto physical=Read<std::uint32_t>(suspendedPed,0x64);
+        Write(suspendedPed,0x64,(physical&~2u)|(savedGravity?2u:0u));
+    }
+    suspendedPed=nullptr;
+}
+void SuspendPhysics(void* ped){
+    if(suspendedPed!=ped){
+        ResumePhysics();suspendedPed=ped;
+        savedCollision=(Read<std::uint64_t>(ped,0x28)&1)!=0;
+        savedGravity=(Read<std::uint32_t>(ped,0x64)&2)!=0;
+    }
+    // Retail ARM64 ApplyGravity @4a23d0: +64 bit 1 is gravity, +28 bit 0
+    // is collision. JetPack::ProcessControlInput tests standing at +584 bit 0.
+    // Move() performs our own swept clearance against the world and cab;
+    // stock collision response must not eject CJ from the held position.
+    Write(ped,0x28,Read<std::uint64_t>(ped,0x28)&~std::uint64_t(1));
+    Write(ped,0x64,Read<std::uint32_t>(ped,0x64)&~2u);
+    Write(ped,0x584,std::uint8_t(Read<std::uint8_t>(ped,0x584)&~1u));
+    Write(ped,0x68,Vec{});
+}
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 Vec Position(void* p){void* m=Read<void*>(p,0x18);return Read<Vec>(m?m:p,m?0x30:8);}
 void EndEdit(){if(dirty)driving::SaveDebugCalibration();dirty=false;edit={};control=-1;}
-void Reset(){EndEdit();claimed=0;activeCar=nullptr;activePool=nullptr;activeSlot=-1;supported=false;feetValid=false;held[0]=held[1]=false;}
+void Reset(){ResumePhysics();EndEdit();claimed=0;activeCar=nullptr;activePool=nullptr;activeSlot=-1;supported=false;feetValid=false;held[0]=held[1]=false;}
 bool World(Vec p,Vec& out){float a[]={p.x,p.y,p.z},b[3]{};if(!vrcam::TrackingPointToWorld(a,b))return false;out={b[0],b[1],b[2]};return Finite(out);}
 Vec Raw(const xr::HandPose& h){return {h.gripPos[0],h.gripPos[1],h.gripPos[2]};}
 struct Geometry {Step step;Pipe pipe;};
@@ -156,7 +183,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     Vec axis=shape.pipe.top-shape.pipe.bottom;const float length=Length(axis);axis=axis*(1.f/length);
     Vec perpendicular=Cross(axis,{1,0,0});if(Length(perpendicular)<.1f)perpendicular=Cross(axis,{0,1,0});perpendicular=perpendicular*(1.f/Length(perpendicular));
     Bar(b.Point(controls[5]),b.Vector(axis),b.Vector(perpendicular),held[0]||held[1],length);
-    if(edit.hand>=0){held[0]=held[1]=false;return;}
+    if(edit.hand>=0){held[0]=held[1]=false;supported=false;ResumePhysics();return;}
     const unsigned wasHeld=(held[0]?1u:0u)|(held[1]?2u:0u);
     Vec motion{};int count=0;
     for(int h=0;h<2;++h){
@@ -164,6 +191,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         if(valid[h]&&fresh[h]&&!(occupied&(1u<<h))&&shape.pipe.Distance(b.Local(world[h]))<.12f){
             if(!held[0]&&!held[1])targetRoot=root;
             held[h]=true;previous[h]=Raw(hands[h]);xr::TriggerHaptic(h,.25f,0,30);
+            SuspendPhysics(ped);
             grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);
             const Vec pipeAxis=shape.pipe.top-shape.pipe.bottom;
             const Vec local=b.Local(world[h]);
@@ -177,6 +205,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         motion=motion+grabRoot[h]+startWorld-world[h];++count;claimed|=1u<<h;
     }
     if(count){
+        SuspendPhysics(ped);
         if(count==1&&wasHeld==3){
             for(int h=0;h<2;++h)if(held[h]){grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);}
             motion=root;
@@ -204,6 +233,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
             const Vec next=root+b.up*lift;if(Move(ped,root,next)){root=next;supported=true;supportHeight=b.Local(root).z;targetRoot=root;break;}}}}
     std::copy_n(feet,2,previousFeet);feetValid=true;
     if(supported&&!count){Vec next=b.Local(root);next.z=supportHeight;Move(ped,root,b.Point(next));}
+    if(count||supported)SuspendPhysics(ped);else ResumePhysics();
     if(!count&&!supported&&edit.hand<0){activeCar=nullptr;activeSlot=-1;}
 }
 }
