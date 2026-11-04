@@ -608,10 +608,14 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             else {
                 void* matrix=Read<void*>(bike,0x18);const Basis b=matrix?Matrix(matrix):Basis{};
                 const float mass=Read<float>(bike,0xb0);
-                if(!matrix||!b.Valid()||b.up.z<kBikeStableUp||!std::isfinite(mass)||mass<=1.f||mass>=2000.f)
+                const Vec angular=Read<Vec>(bike,0x74);
+                if(!matrix||!b.Valid()||b.up.z<kBikeStableUp||!Finite(angular)||!std::isfinite(mass)||mass<=1.f||mass>=2000.f)
                     g_bikeStable={};
                 else {
-                    const float force=mass*std::clamp(-b.right.z*.08f,-.014f,.014f)*std::clamp(dt*60.f,0.f,2.f);
+                    // Oppose roll velocity as well as lean, so the restoring
+                    // torque does not carry the bike through the stable zone.
+                    const float rate=-Dot(angular,b.forward);
+                    const float force=mass*std::clamp(-b.right.z*.08f-rate*.20f,-.014f,.014f)*std::clamp(dt*60.f,0.f,2.f);
                     const Vec arm=b.right*.5f,f=b.up*force;
                     g_turnForce(bike,f.x,f.y,f.z,arm.x,arm.y,arm.z);
                 }

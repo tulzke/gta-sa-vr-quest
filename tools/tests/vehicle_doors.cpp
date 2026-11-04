@@ -528,10 +528,11 @@ int main() {
         g.CBike_IsComponentPresent=[](const void*,int){return true;};
         g.CBike_GetComponentWorldPosition=[](void*,int,GameSymbols::Vec3* out){*out={0,.5f,.8f};};
         int forceCalls=0;static int* forceCounter;forceCounter=&forceCalls;
+        static float lastForceZ;
         g_turnForce=[](void*,float x,float y,float z,float ax,float ay,float az){
             CHECK(std::isfinite(z)&&std::abs(z)<=10.1f);
             const Vec torque=Cross({ax,ay,az},{x,y,z});CHECK(std::abs(torque.x)<1e-5f&&std::abs(torque.z)<1e-5f);
-            ++*forceCounter;
+            lastForceZ=z;++*forceCounter;
         };
         Write<std::uint16_t>(vehicle,0x32,461);Write<float>(vehicle,0xb0,200.f);Write<void*>(vehicle,0x5a0,nullptr);
         StoreBasis(frames[0],{});Write(vehicle,0x758+7*8,static_cast<void*>(frames[0]));
@@ -550,6 +551,9 @@ int main() {
             CHECK(ClaimedHands()==0&&g_bikeStable.vehicle==vehicle);
             const Vec angular=Read<Vec>(vehicle,0x74);CHECK(std::abs(angular.x-.1f)<1e-5f&&std::abs(angular.y)<1e-5f&&std::abs(angular.z-.3f)<1e-5f);
             Tick();CHECK(forceCalls>1);
+            StoreBasis(matrix,{});StoreBasis(frames[0],{});
+            Write<Vec>(vehicle,0x74,{0,.05f,0});Tick();CHECK(lastForceZ>0.f);
+            Write<Vec>(vehicle,0x74,{0,-.05f,0});Tick();CHECK(lastForceZ<0.f);
             Write<Vec>(vehicle,0x68,{.1f,0,0});Tick();CHECK(!g_bikeStable.vehicle);
         } else {Tick(false,5,false);CHECK(ClaimedHands()==0&&g_bikeGrab.hand<0);}
         g.CBike_IsComponentPresent=nullptr;g.CBike_GetComponentWorldPosition=nullptr;g_turnForce=nullptr;
