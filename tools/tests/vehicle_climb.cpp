@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
+#include <atomic>
+#define LOGI(...) ((void)0)
 double testNow=1;
 namespace savr {
 GameSymbols g;
@@ -28,14 +30,22 @@ bool WorldPointToTracking(const float* a,float* b){std::copy_n(a,3,b);b[2]-=offs
 bool GetHeadWorldRay(float* o,float* d){o[0]=-1.5f;o[1]=0;o[2]=1.6f;d[1]=1;return true;}
 }
 }
+namespace savr::locomotion { bool AutoParachuteEnabled(){return false;} }
+namespace savr::physicalweapon {
+std::atomic<unsigned> gHeldMaskRelaxed{};
+int CurrentWeaponSlot(void* ped){return *(static_cast<unsigned char*>(ped)+0x8dc);}
+int WeaponTypeInSlot(void* ped,int slot){int type{};std::memcpy(&type,static_cast<char*>(ped)+0x730+slot*0x20,4);return type;}
+double NowSeconds(){return testNow;}
+}
 // PRODUCTION_CLIMB
+// PRODUCTION_PARACHUTE
 using namespace savr;
 using namespace savr::vehicleclimb;
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
-char cars[110*0xc68]{},pool[32]{},matrix[64]{},door[64]{},ped[0x600]{},pm[64]{};
+char cars[110*0xc68]{},pool[32]{},matrix[64]{},door[64]{},ped[0xa00]{},pm[64]{};
 std::uint8_t flags[110];void* poolPtr=pool;void* ignored{};bool wall{};int moves{};
 xr::HandPose hands[2];
-void Tick(bool usable=true,std::uint64_t epoch=1,unsigned occupied=0){testNow+=.01;Update(usable,hands,epoch,occupied);}
+void Tick(bool usable=true,std::uint64_t epoch=1,unsigned occupied=0){testNow+=.01;Update(usable&&!vrcam::ParachuteStateActive(),hands,epoch,occupied);physicalweapon::AutoEquipParachute();}
 int main(){
     // Regression: the door node lies inside the cab outline. Default pipes
     // must clear the 1.449 m lateral detail on both sides of retail linerun.dff.
@@ -112,5 +122,23 @@ int main(){
     Put(cars,0x74,Vec{});driving::mode=0;
     Put(cars,0x32,std::uint16_t(514));Tick();assert(markers.count==0);
     Put(cars,0x32,std::uint16_t(403));Tick();assert(markers.count==1);
+    // Exercise the actual auto-equip -> parachute-state -> input gate chain.
+    Put(pm,0x30,Vec{-1.75f,-.65f,1.5f});hands[0].grip=0;hands[0].gripPos[2]=1.2f;Tick();
+    Put(ped,0x730+11*0x20,46);Put(ped,0x8dc,std::uint8_t(0));
+    g.CPed_SetCurrentWeaponSlot=[](void* p,int slot){Put(p,0x8dc,std::uint8_t(slot));};
+    g.CPedGeometryAnalyser_IsInAir=[](const void*){return true;};
+    hands[0].grip=1;Tick();assert(Attached());
+    for(int i=0;i<120;++i)Tick();
+    assert(ClaimedHands()==1&&physicalweapon::CurrentWeaponSlot(ped)==0);
+    Put(ped,0x8dc,std::uint8_t(11)); // previously selected or external switch
+    assert(!vrcam::ParachuteStateActive());Tick();assert(ClaimedHands()==1&&physicalweapon::CurrentWeaponSlot(ped)==0);
+    g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned,bool){out->x=-1.75f;out->y=-.65f;out->z=.65f;};
+    Tick();Tick();assert(supported);
+    hands[0].grip=0;Tick();assert(Attached()&&!ClaimedHands());
+    for(int i=0;i<120;++i)Tick();assert(physicalweapon::CurrentWeaponSlot(ped)==0);
+    g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned,bool){out->x=10;out->z=0;};
+    Put(pm,0x30,Vec{-3,-.65f,Position(ped).z});Tick();assert(!Attached());
+    for(int i=0;i<50;++i)Tick();assert(physicalweapon::CurrentWeaponSlot(ped)==0);
+    for(int i=0;i<30;++i)Tick();assert(physicalweapon::CurrentWeaponSlot(ped)==11&&vrcam::ParachuteStateActive());
     std::puts("vehicle climb: grip, movement, obstruction, interruption, ownership, pool reuse, support and editing passed");
 }

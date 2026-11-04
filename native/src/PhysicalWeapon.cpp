@@ -12,6 +12,7 @@
 #include "Throwable.h"
 #include "Xr.h"
 #include "VehicleDoors.h"
+#include "VehicleClimb.h"
 #include "VehicleEntry.h"
 #include "VehicleWeaponPolicy.h"
 #include "NpcGrab.h"
@@ -1410,6 +1411,15 @@ void AutoEquipParachute() {
     static double airborneSince = 0.0;
     void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
     if (ped == nullptr) { airborneSince = 0.0; return; }
+    if (vehicleclimb::Attached()) {
+        airborneSince = 0.0;
+        // A previously auto-selected chute must not classify a supported ped
+        // as parachuting and revoke the grip on the following input tick.
+        if (CurrentWeaponSlot(ped) == 11 && g.CPed_SetCurrentWeaponSlot &&
+            gHeldMaskRelaxed.load(std::memory_order_relaxed) == 0)
+            g.CPed_SetCurrentWeaponSlot(ped, 0);
+        return;
+    }
     // AUTO PARACHUTE (locomotion menu): keep one in the inventory at all
     // times so no cheat-menu trip is needed before a jump.
     if (locomotion::AutoParachuteEnabled() && g.CPed_GiveWeapon != nullptr &&

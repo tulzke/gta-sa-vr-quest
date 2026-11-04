@@ -104,6 +104,7 @@ void Install(void* h){
 }
 unsigned ClaimedHands(){return claimed;}
 bool Editing(){return edit.hand>=0;}
+bool Attached(){return held[0]||held[1]||supported;}
 void ApplyHandVisuals(xr::HandPose hands[2]){
     for(int h=0;h<2;++h)if(held[h]&&hands[h].valid){
         const float world[]={grabWorld[h].x,grabWorld[h].y,grabWorld[h].z};float tracking[3]{};

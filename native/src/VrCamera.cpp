@@ -4458,6 +4458,7 @@ std::atomic<bool> g_hideWeaponsForChuteDeploy{false};
 // The skydive/parachute state: on foot, parachute is the active weapon, and
 // the ped is genuinely airborne.
 bool ParachuteStateActive() {
+    if (vehicleclimb::Attached()) return false;
     if (!g.CPedGeometryAnalyser_IsInAir || !g.FindPlayerPed) return false;
     if (g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false)) return false;
     void* ped = g.FindPlayerPed(-1);
@@ -30234,6 +30235,7 @@ struct RoomPending {
 } g_roomPending;
 
 void FinishRoomMovement() {
+    if (vehicleclimb::ClaimedHands()) { g_roomPending.valid=false; return; }
     const auto pending = g_roomPending;
     g_roomPending.valid = false;
     if (!pending.valid || pending.serial != g_cameraResetSerial ||
@@ -30283,7 +30285,7 @@ void OnRoomPlayerControl(void* ped) {
 
     float hp[3]{}, hq[4]{}; std::uint64_t epoch{};
     const bool active = ShouldRunStereo() && !g_inputBlocked.load(std::memory_order_relaxed) &&
-        GroundWalkControlsActive() && !(g.PlayerIsEnteringCar && g.PlayerIsEnteringCar()) &&
+        !vehicleclimb::ClaimedHands() && GroundWalkControlsActive() && !(g.PlayerIsEnteringCar && g.PlayerIsEnteringCar()) &&
         !ScriptedCutsceneRunning() && !jetpack::IsActive() && !ParachuteStateActive() &&
         !g_duckLatched && g_origin.valid && g_vrBaseValid &&
         xr::GetHeadPose(hp,hq,&epoch);

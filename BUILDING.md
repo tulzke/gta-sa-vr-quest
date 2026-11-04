@@ -151,6 +151,10 @@ Grip immediately suspends CJ's stock gravity/collision response and clears
 grounded state without lifting the camera. Custom body/head clearance checks
 remain active. Releasing without step support or cancelling restores stock
 physics; standing on the configured step retains suspension until walking off.
+Climbing and step support suppress automatic parachute selection. Freefall's
+0.7-second timer restarts after releasing without support. Room-scale movement
+and its pending camera correction pause while gripping the pipe; walking on
+the step with both hands released remains available.
 
 In VEHICLE DEBUG, drag the step's four corner markers with a trigger to resize
 it in X/Y or move its height. The marker at the centre of the top changes

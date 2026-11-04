@@ -1,4 +1,4 @@
-"""Host-test production vehicle entry using fake game memory and a deterministic clock."""
+"""Test production climbing and parachute interaction with a deterministic clock."""
 from pathlib import Path
 import os
 import re
@@ -16,7 +16,17 @@ source=re.sub(r'double Now\(\)\{[^\n]*\}', 'double Now(){return testNow;}', sour
 source='\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness=(ROOT / 'tools/tests/vehicle_climb.cpp').read_text(encoding='utf8')
 generated=OUT / 'vehicle_climb.cpp'
-generated.write_text(harness.replace('// PRODUCTION_CLIMB',source),encoding='utf8')
+def function(path, signature):
+    text=(ROOT/path).read_text(encoding='utf8')
+    start=text.index(signature);brace=text.index('{',start);end=brace+1;depth=1
+    while depth:
+        depth+=(text[end]=='{')-(text[end]=='}');end+=1
+    return text[start:end]
+parachute=function('native/src/PhysicalWeapon.cpp','void AutoEquipParachute()')
+state=function('native/src/VrCamera.cpp','bool ParachuteStateActive() {')
+combined=harness.replace('// PRODUCTION_CLIMB',source).replace('// PRODUCTION_PARACHUTE',
+    'namespace savr::physicalweapon {\n'+parachute+'\n}\nnamespace savr::vrcam {\n'+state+'\n}')
+generated.write_text(combined,encoding='utf8')
 exe = OUT / ('vehicle_climb.exe' if os.name == 'nt' else 'vehicle_climb')
 if os.name == 'nt':
     vc = os.environ.get('VS_VCVARS64')
