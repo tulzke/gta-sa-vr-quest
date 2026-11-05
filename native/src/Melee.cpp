@@ -2,6 +2,7 @@
 #include "CombatPolicy.h"
 #include "PunchTrajectory.h"
 #include "PlayerLife.h"
+#include "Combat.h"
 
 #include "Log.h"
 #include "PhysicalWeapon.h"
@@ -497,8 +498,15 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
                                          root.y - centre.y};
         int direction = g.CPed_GetLocalDirection(target, &relative);
         direction = std::clamp(direction, 0, 3);
-        accepted = g.CWeapon_GenerateDamageEvent(
-            target, player, weaponType, finalDamage, piece, direction);
+        {
+            combat::PunchImpactScope noNativePush(weaponType<=1?target:nullptr);
+            accepted = g.CWeapon_GenerateDamageEvent(
+                target, player, weaponType, finalDamage, piece, direction);
+        }
+        if (accepted && weaponType<=1 && punchKind==punch::Kind::Jab) {
+            const float direction[3]{worldTravel.x,worldTravel.y,0};
+            npcgrab::RecordJab(target,direction,speed);
+        } else if (accepted) npcgrab::ResetJabCombo(target);
         // GenerateDamageEvent handles damage/reactions but never calls the
         // audio path normally owned by FireMelee. Our physical fists bypass it.
         if (accepted && weaponType<=1 && gPedAudioEvent) {

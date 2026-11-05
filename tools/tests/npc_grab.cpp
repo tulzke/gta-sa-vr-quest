@@ -1,4 +1,5 @@
 #include "NpcGrab.h"
+#include "JabCombo.h"
 #include "VehicleAccess.h"
 #include "NpcGrabVisual.h"
 #include "Symbols.h"
@@ -687,5 +688,22 @@ int main() {
     Setup();Tick();flags[0]=128;CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
     Setup();Tick();CHECK(!KnockdownFromPunch(player,uppercut));
     const float excessive[3]{0,8,2};CHECK(!KnockdownFromPunch(npc,excessive));
-    std::puts("NPC grab: interactions, bike jacking and pool-safe punch knockdown passed");
+    // Jab combos never shove on the first hit; force is earned per target.
+    const float forwardJab[3]{0,1,0};
+    Setup();Tick();RecordJab(npc,forwardJab,6.f);CHECK(Length(Read<Vec>(npc,0x68))==0);
+    RecordJab(npc,forwardJab,6.f);CHECK(Read<Vec>(npc,0x68).y>.02f&&!fallCalls);
+    const float shove=Read<Vec>(npc,0x68).y;OnCalculateVelocity(npc);
+    CHECK(Read<Vec>(npc,0x68).y==shove&&Read<void*>(intelligence,8)==nullptr);
+    Setup();Tick();RecordJab(npc,forwardJab,1.3f);RecordJab(npc,forwardJab,1.3f);
+    CHECK(Length(Read<Vec>(npc,0x68))==0);
+    Setup();Tick();RecordJab(npc,forwardJab,6.f);ResetJabCombo(npc);RecordJab(npc,forwardJab,6.f);
+    CHECK(Length(Read<Vec>(npc,0x68))==0);
+    Setup();Tick();RecordJab(npc,forwardJab,6.f);++flags[0];RecordJab(npc,forwardJab,6.f);
+    CHECK(Length(Read<Vec>(npc,0x68))==0); // recycled pool reference cannot inherit a combo
+    Setup();Tick();Write<void*>(intelligence,8,fall);RecordJab(npc,forwardJab,6.f);RecordJab(npc,forwardJab,6.f);
+    CHECK(Length(Read<Vec>(npc,0x68))==0&&Read<void*>(intelligence,8)==fall);
+    punch::JabCombo chain;
+    CHECK(chain.Hit(1,20)==0);CHECK(chain.Hit(1.2,6)>0);CHECK(chain.Hit(1.4,20)==0);
+    chain={};CHECK(chain.Hit(1,6)==0);CHECK(chain.Hit(2,6)==0); // timeout starts a new series
+    std::puts("NPC grab: interactions, knockdowns and pool-safe force-weighted jab combos passed");
 }

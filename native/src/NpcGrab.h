@@ -16,4 +16,6 @@ bool BlocksNpcPunch(void* ped,int hand);
 // replacing death tasks; already-dead actors are otherwise excluded.
 bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason=nullptr,
                         bool aliveBeforeHit=false);
+void RecordJab(void* ped,const float direction[3],float speed);
+void ResetJabCombo(void* ped);
 }

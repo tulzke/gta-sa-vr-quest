@@ -28,6 +28,7 @@ float amplitude{},duration{};
 float weaponTilt{};
 int thuds{},nativeHits{},voices{};
 int knockdowns{},heavySounds{},lastSound{};
+int nativeAnimations{},jabContacts{};
 float knockVelocity[3]{};
 template<class T> void Write(void* p,int off,T value) { std::memcpy(static_cast<char*>(p)+off,&value,sizeof(value)); }
 namespace savr {
@@ -62,6 +63,8 @@ namespace npcgrab {
 unsigned ClaimedHands() { return 0; }
 bool BlocksVehicleInteraction(void*,int) { return false; }
 bool BlocksNpcPunch(void*,int) { return false; }
+void RecordJab(void* ped,const float[3],float) { CHECK(ped==enemy);++jabContacts; }
+void ResetJabCombo(void*) {}
 bool KnockdownFromPunch(void* target,const float velocity[3],const char** reason,bool aliveBeforeHit) {
     CHECK(target==enemy);++knockdowns;std::copy_n(velocity,3,knockVelocity);
     CHECK(aliveBeforeHit);
@@ -87,7 +90,7 @@ void Setup() {
     Write<unsigned char>(player,0x5a,3);Write<unsigned char>(enemy,0x5a,3);
     Write(enemy,8,combat::Vec{-.1f,1.2f,0});
     focused=snapshot=true;inVehicle=false;touching=true;epoch=1;testNow=1;slot=-1;
-    nativeCalls=hits=audioCalls=thuds=nativeHits=voices=knockdowns=heavySounds=lastSound=0;
+    nativeCalls=hits=audioCalls=thuds=nativeHits=voices=knockdowns=heavySounds=lastSound=nativeAnimations=jabContacts=0;
     hapticHand=-1;amplitude=duration=weaponTilt=0;
     xr::poses[0]={};xr::poses[1]={};
     xr::poses[0].valid=true;xr::poses[0].grip=1;xr::poses[0].trigger=1;
@@ -103,7 +106,13 @@ void Setup() {
     g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3,float,void*,bool,bool,bool,bool,bool,bool)->void* { return touching?enemy:nullptr; };
     static unsigned char contact[0x2c]{};g.gaTempSphereColPoints=contact;
     static void* ignore{};g.CWorld_pIgnoreEntity=&ignore;
-    g.CWeapon_GenerateDamageEvent=[](void*,void*,int,int damage,int,int) { CHECK(damage==10||damage==15||damage==20);++hits;return true; };
+    g.CWeapon_GenerateDamageEvent=[](void* victim,void* source,int weapon,int damage,int,int direction) {
+        CHECK(damage==10||damage==15||damage==20);++hits;
+        unsigned char event[0x50]{};Write(event,0x18,source);Write(event,0x24,weapon);
+        Write<unsigned char>(event,0x2c,static_cast<unsigned char>(direction));Write<unsigned char>(event,0x2d,2);
+        combat::OnComputeDamageAnim(event,victim,true);
+        return true;
+    };
     g.CVehicle_InflictDamage=[](void*,void*,int,float,GameSymbols::Vec3) {};
     g.CPed_GetLocalDirection=[](void*,const GameSymbols::Vec2*) { return 0; };
     g.CEntity_GetBoundCentre=[](void*,GameSymbols::Vec3* out) { *out={0,1.2f,1.4f}; };
@@ -116,6 +125,9 @@ void Setup() {
     Write(player,0x198+0xa8,static_cast<void*>(player));
     combat::pedHit=[](void*,int,void*,unsigned char,float,unsigned) { ++nativeHits; };
     combat::sayEvent=[](void*,int,std::int16_t,unsigned,float,unsigned char,unsigned char,unsigned char)->std::uint16_t { ++voices;return 7; };
+    combat::computeDamageAnim=[](void*,void* ped,bool) {
+        ++nativeAnimations;Write(ped,0x68,combat::Vec{1,2,3});
+    };
     melee::gPedAudioEvent=[](void* entity,int event,float volume,float speed,void* physical,unsigned char,int,unsigned) {
         CHECK(entity==player+0x198&&physical==enemy);
         CHECK(event==65||event==67||event==121);lastSound=event;++audioCalls;
@@ -142,6 +154,14 @@ int main() {
     Setup();Raise();CHECK(amplitude==.16f&&duration==750);
     float x=1,y=1;combat::LimitMovement(&x,&y);CHECK(std::abs(std::hypot(x,y)-.35f)<.0001f&&x==y);
     Incoming();CHECK(nativeCalls==0&&combat::Read<float>(player,0x6ac)==100);
+    unsigned char blockEvent[0x50]{};Write(blockEvent,0x18,static_cast<void*>(enemy));
+    Write<unsigned char>(blockEvent,0x2c,1);Write<unsigned char>(blockEvent,0x2d,2);
+    Write(player,0x68,combat::Vec{.12f,.03f,-.04f});
+    combat::OnComputeDamageAnim(blockEvent,player,true);
+    CHECK(nativeAnimations==0&&combat::Read<int>(blockEvent,0x34)==29&&!(blockEvent[0x2d]&2));
+    CHECK(combat::Read<float>(player,0x68)==.12f&&combat::Read<float>(player,0x70)==-.04f);
+    // Unrelated NPC reactions still use native impulse/animation handling.
+    combat::OnComputeDamageAnim(blockEvent,enemy,true);CHECK(nativeAnimations==1);
     CHECK(thuds==1);
     combat::OnPedHit(enemy+0x198,65,player,62,0,0);CHECK(nativeHits==0);
     combat::OnPedHit(player+0x198,65,enemy,62,0,0);CHECK(nativeHits==1); // counterpunch retained
@@ -151,6 +171,9 @@ int main() {
     CHECK(amplitude==.9f&&duration==180&&hapticHand==0);CHECK(combat::GetFeedback().block==1);
     Incoming();CHECK(nativeCalls==0); // no cooldown on genuine incoming hits
     Setup();Raise();Incoming(5);CHECK(nativeCalls==1&&combat::Read<float>(player,0x6ac)==92);
+    Write(player,0x68,combat::Vec{.2f,.1f,-.03f});
+    combat::OnComputeDamageAnim(blockEvent,player,true);
+    CHECK(nativeAnimations==0&&combat::Read<float>(player,0x68)==.2f&&combat::Read<float>(player,0x70)==-.03f);
     CHECK(thuds==1&&combat::OnSayEvent(player+0x340,52,345,0,1,0,0,0)==7);
     testNow+=.02;combat::Update(false);CHECK(combat::GetFeedback().damage==1&&combat::GetFeedback().block>0);
     Setup();Raise();Incoming(4);CHECK(combat::Read<float>(player,0x6ac)==87);
@@ -186,6 +209,8 @@ int main() {
     // Production sweep: a fast twitch/contact is insufficient, every punch needs 40 cm.
     Setup();melee::Update(false);testNow+=.02;melee::Update(false);CHECK(hits==0);
     Move(-.05f,7);CHECK(hits==0);Move(-.05f);CHECK(hits==1&&audioCalls==1);
+    CHECK(nativeAnimations==0&&jabContacts==1&&combat::Read<float>(enemy,0x68)==0);
+    CHECK(combat::physicalPunchVictim==nullptr); // scoped suppression cannot leak to the next event
     Move(-.05f,8);CHECK(hits==1); // one continuous pass cannot rehit every 40 cm
     Move(.05f);CHECK(hits==1);Move(.05f,6);CHECK(hits==1);
     Move(.05f);CHECK(hits==2&&audioCalls==2); // full-speed return stroke also needs 40 cm

@@ -28,6 +28,9 @@ Vec Horizontal(Vec a) {
 template<class T> T Read(const void* p,int offset) {
     T value{};std::memcpy(&value,static_cast<const char*>(p)+offset,sizeof(value));return value;
 }
+template<class T> void Store(void* p,int offset,T value) {
+    std::memcpy(static_cast<char*>(p)+offset,&value,sizeof(value));
+}
 double Now() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -45,6 +48,8 @@ float previousHealth{},previousArmour{};
 bool vitalsValid{},ready{};
 std::atomic<double> damageAt{},blockAt{};
 void (*computeDamage)(void*,void*,void*,bool){};
+void (*computeDamageAnim)(void*,void*,bool){};
+thread_local void* physicalPunchVictim{};
 void (*pedHit)(void*,int,void*,unsigned char,float,unsigned){};
 std::uint16_t (*sayEvent)(void*,int,std::int16_t,unsigned,float,unsigned char,unsigned char,unsigned char){};
 struct BlockSound {
@@ -62,6 +67,22 @@ bool BlockSoundCurrent() {
         xr::IsSessionFocused() &&
         std::abs(Read<float>(player,0x6ac)-blockSound.health)<.01f &&
         std::abs(Read<float>(player,0x6b4)-blockSound.armour)<.01f;
+}
+void OnComputeDamageAnim(void* event,void* ped,bool update) {
+    const int weapon=Read<int>(event,0x24);
+    const bool block=ped && ped==blockSound.player && weapon>=0 && weapon<=15 &&
+        Read<void*>(event,0x18)==blockSound.source && BlockSoundCurrent();
+    if (ped && (ped==physicalPunchVictim || block) && !playerlife::Dead(ped)) {
+        // Retail IDs 28..31 are directional partial hit reactions. Unlike
+        // full hit/fall animations they neither call ApplyMoveForce nor
+        // translate the actor away, so movement momentum remains untouched.
+        const int direction=Read<unsigned char>(event,0x2c)&3;
+        Store<int>(event,0x30,0);Store<int>(event,0x34,28+direction);
+        Store<float>(event,0x38,8.f);Store<float>(event,0x3c,1.f);
+        Store<unsigned char>(event,0x2d,Read<unsigned char>(event,0x2d)&~2u);
+        return;
+    }
+    computeDamageAnim(event,ped,update);
 }
 void OnPedHit(void* entity,int event,void* physical,unsigned char surface,float volume,unsigned delay) {
     // FightHitPed emits the attacker's impact AFTER GenerateDamageEvent,
@@ -192,6 +213,7 @@ void Install(void* handle) {
     constexpr std::uint32_t damage[]={0xd10283ff,0xa9067bfd,0xf9003bf7,0xa90857f6};
     constexpr std::uint32_t impact[]={0xd10203ff,0x6d012beb,0x6d0223e9,0xa9037bfd};
     constexpr std::uint32_t speech[]={0xd101c3ff,0xa9017bfd,0xa9026ffc,0xa90367fa};
+    constexpr std::uint32_t animation[]={0xd10243ff,0x6d0223e9,0xa9037bfd,0xa9046ffc};
     void* original{};
     ready=Hook(dlsym(handle,"_ZN28CPedDamageResponseCalculator21ComputeDamageResponseEP4CPedR18CPedDamageResponseb"),
         damage,reinterpret_cast<void*>(&OnComputeDamage),original);
@@ -204,8 +226,14 @@ void Install(void* handle) {
     [[maybe_unused]] const bool speechReady=Hook(dlsym(handle,"_ZN23CAEPedSpeechAudioEntity11AddSayEventEisjfhhh"),
         speech,reinterpret_cast<void*>(&OnSayEvent),original);
     sayEvent=reinterpret_cast<decltype(sayEvent)>(original);
-    LOGI("[combat] block=%d impact=%d speech=%d",ready,impactReady,speechReady);
+    original=nullptr;
+    [[maybe_unused]] const bool animReady=Hook(dlsym(handle,"_ZN12CEventDamage17ComputeDamageAnimEP4CPedb"),
+        animation,reinterpret_cast<void*>(&OnComputeDamageAnim),original);
+    computeDamageAnim=reinterpret_cast<decltype(computeDamageAnim)>(original);
+    LOGI("[combat] block=%d impact=%d speech=%d animation=%d",ready,impactReady,speechReady,animReady);
 }
+PunchImpactScope::PunchImpactScope(void* victim) : previous(physicalPunchVictim) { physicalPunchVictim=victim; }
+PunchImpactScope::~PunchImpactScope() { physicalPunchVictim=previous; }
 void Reset() {
     ClearGuards();owner=nullptr;updated=0;vitalsValid=false;
     blockSound={};

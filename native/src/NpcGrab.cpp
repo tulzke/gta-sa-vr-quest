@@ -1,4 +1,5 @@
 #include "NpcGrab.h"
+#include "JabCombo.h"
 #include "Basketball.h"
 #include "PhysicalWeapon.h"
 #include "PlayerLife.h"
@@ -118,6 +119,7 @@ Hold approach[2];
 Hold headPush[2];
 Hold flights[4];
 unsigned nextFlight{};
+struct JabState { Hold target{};punch::JabCombo combo{};double shoveUntil{}; } jabStates[8];
 Hold preparationBlocked[4];
 unsigned nextPreparationBlocked{};
 bool PreparationBlocked(void* ped) {
@@ -863,6 +865,20 @@ void OnCalculateVelocity(void* ped) {
         if (now>=h.until) { h={};continue; }
         if (apply(h,true)) return;
     }
+    for (auto& jab:jabStates) {
+        if (jab.target.ped!=ped || now>=jab.shoveUntil || !jab.target.Live(pool) ||
+            Seated(ped) || playerlife::Dead(ped)) continue;
+        void* manager=Manager(ped);void* current=manager?Read<void*>(manager,0):nullptr;
+        bool reaction=!current;
+        if (current) for (void* table:punchReactionVtables)
+            if (table&&Read<void*>(current,0)==table) reaction=true;
+        if (!reaction || !Finite(physical)) { jab.shoveUntil=0;continue; }
+        // Preserve the short combo shove through hit-animation braking only.
+        // Native gravity and collisions still own vertical motion and contact.
+        Vec native=Read<Vec>(ped,0x68);native.x=physical.x;native.y=physical.y;
+        Write(ped,0x68,native);Write(ped,0x6bc,physical.x);Write(ped,0x6c0,physical.y);
+        return;
+    }
 }
 // Backlog 11: retail hides peds intersecting the third-person camera near clip.
 // A head-locked VR camera makes that mechanism hide close NPCs during fights and
@@ -1037,6 +1053,40 @@ bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason,bo
     if (reason) *reason=dead?"lethal-impulse":"applied";
     return true;
 }
+void ResetJabCombo(void* ped) {
+    for (auto& jab:jabStates) if (jab.target.ped==ped) jab={};
+}
+void RecordJab(void* ped,const float direction[3],float speed) {
+    if (!ready || !ped || !direction || !xr::IsSessionFocused() || playerlife::Dead(ped) ||
+        Seated(ped) || Animating(ped) || Waiting(ped) || BikeSceneOf(ped)) return;
+    Pool pool;if (!pool.Load()) return;
+    Hold target{};
+    for (int i=0;i<pool.size;++i) {
+        if (pool.flags[i]&128) continue;
+        const int ref=(i<<8)|pool.flags[i];
+        if (getPed(ref)==ped) { target={ped,pool.identity,pool.objects,nullptr,ref,3};break; }
+    }
+    if (!target.Live(pool) || isPlayer(ped)) return;
+    const double now=Now();JabState* state=nullptr;
+    for (auto& jab:jabStates) if (jab.target.ped==ped && jab.target.Live(pool)) { state=&jab;break; }
+    if (!state) for (auto& jab:jabStates)
+        if (!jab.target.Live(pool) || (now-jab.combo.last>.75&&now>=jab.shoveUntil)) {
+            jab={};jab.target=target;state=&jab;break;
+        }
+    if (!state) return;
+    const float shove=state->combo.Hit(now,speed);
+    const Vec planar{direction[0],direction[1],0};const float length=Length(planar);
+    if (shove<=0 || !Finite(planar) || length<.001f) return;
+    void* manager=Manager(ped);void* current=manager?Read<void*>(manager,0):nullptr;
+    bool reaction=manager&&!current;
+    if (current) for (void* table:punchReactionVtables)
+        if (table&&Read<void*>(current,0)==table) reaction=true;
+    if (!reaction) return;
+    const Vec old=Read<Vec>(ped,0x68);
+    if (!Finite(old)) return;
+    Write(ped,0x68,old+planar*(shove*.02f/length));
+    state->shoveUntil=now+.18;
+}
 void OnDoorOpening(void* car) {
     if (!ready||!car||g.CVehicle_GetVehicleAppearance(car)!=1) return;
     const Vec speed=Read<Vec>(car,0x68);
@@ -1113,6 +1163,7 @@ void Reset() {
         else ClearBike(s);
     }
     for (auto& flight:flights) flight={};
+    for (auto& jab:jabStates) jab={};
     claimed.store(0,std::memory_order_relaxed);
     worldMarkers={};xr::SetNpcGrabMarkers({});
 }
