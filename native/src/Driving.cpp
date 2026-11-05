@@ -2,6 +2,7 @@
 #include "BeachDance.h"
 #include "JustBusiness.h"
 #include "Driving.h"
+#include "Combat.h"
 #include "VehicleDoors.h"
 #include "VehicleEntry.h"
 #include "BikeSteering.h"
@@ -2605,7 +2606,7 @@ bool OnGetSprint(void* pad,int sprintType) {
         // Mobile GetSprint bypasses the Java/new-pad Cross state entirely.
         // Consume the same persistent L3 toggle; never reread the held button
         // or weapon trigger here. Ordinary movement axes remain unchanged.
-        return !vrcam::IsCrouched() && locomotion::RunEnabled();
+        return !vrcam::IsCrouched() && !combat::IsBlocking() && locomotion::RunEnabled();
     }
     return g_origSprint?g_origSprint(pad,sprintType):false;
 }

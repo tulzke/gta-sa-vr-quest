@@ -1514,7 +1514,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             break;
         }
         case PG_LOCOMOTION: {
-            constexpr int ROWS=14;
+            constexpr int ROWS=13;
             if (navUp) locomotionSel=(locomotionSel-1+ROWS)%ROWS;
             if (navDown) locomotionSel=(locomotionSel+1)%ROWS;
             const int step=minus?-1:(plus?1:0);
@@ -1529,25 +1529,23 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             else if (locomotionSel==4&&enter)
                 savr::locomotion::ToggleHeadBob();
             else if (locomotionSel==5&&(step||enter))
-                savr::locomotion::ToggleGestureRun();
-            else if (locomotionSel==6&&(step||enter))
                 savr::locomotion::ToggleGestureSwim();
-            else if (locomotionSel==7&&(step||enter))
+            else if (locomotionSel==6&&(step||enter))
                 savr::locomotion::ToggleParachuteCameraFollow();
-            else if (locomotionSel==8&&(step||enter))
+            else if (locomotionSel==7&&(step||enter))
                 savr::locomotion::ToggleParachuteControl();
-            else if (locomotionSel==9&&(step||enter))
+            else if (locomotionSel==8&&(step||enter))
                 savr::locomotion::ToggleAutoParachute();
-            else if (locomotionSel==10&&enter) {
+            else if (locomotionSel==9&&enter) {
                 menuPage=PG_VEHICLE_CAMERA;
                 vehicleCameraSel=0;
             }
-            else if (locomotionSel==11&&enter)
+            else if (locomotionSel==10&&enter)
                 vrcam::RequestRecenter();
-            else if (locomotionSel==12&&enter) {
+            else if (locomotionSel==11&&enter) {
                 menuPage=PG_JETPACK; jetpackSel=0;
             }
-            else if (locomotionSel==13&&enter)
+            else if (locomotionSel==12&&enter)
                 menuPage=PG_MAIN;
             if (back) menuPage=PG_MAIN;
             break;
@@ -2021,7 +2019,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     static bool providerA = false, providerB = false, providerX = false;
     static bool providerUp = false, providerDown = false;
     static bool providerLeft = false, providerRight = false;
-    if (inGameplay && !anyMenu && !grips) {
+    if (inGameplay && !anyMenu && (!grips || savr::combat::IsBlocking())) {
         // The engine's stick Y runs the opposite way to OpenXR's, so it is flipped.
         const bool driving = (g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false)) ||
             savr::driving::GetRemoteControlledVehicle() != nullptr ||
@@ -2049,6 +2047,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             if (savr::vrcam::GetLocalHeadYaw(&localHeadYaw))
                 savr::locomotion::TransformMoveStick(
                     localHeadYaw,&gameMoveX,&gameMoveY);
+            savr::combat::LimitMovement(&gameMoveX,&gameMoveY);
         }
         if (savr::vehicleentry::ConsumesMove()) gameMoveX=gameMoveY=0;
         // Thumbrest D-pad mode: the provider must not see the raw right
@@ -2067,7 +2066,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
 
         const bool sprintHeld = driving ? savr::locomotion::ActionHeld(
             savr::locomotion::BIND_ACT_SPRINT,
-            in.a,in.b,in.x,in.y,in.l3,in.r3,false) : savr::locomotion::RunEnabled();
+            in.a,in.b,in.x,in.y,in.l3,in.r3,false) :
+            savr::locomotion::RunEnabled() && !savr::combat::IsBlocking();
         const bool jumpHeld = savr::locomotion::ActionHeld(
             savr::locomotion::BIND_ACT_JUMP,
             in.a,in.b,in.x,in.y,in.l3,in.r3,!driving);

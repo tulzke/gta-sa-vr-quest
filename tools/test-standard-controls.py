@@ -28,6 +28,7 @@ using namespace savr;
 using namespace savr::locomotion;
 namespace savr {GameSymbols g{};
 namespace vrcam {bool stereo=true,crouched=false;bool IsStereoActive(){return stereo;}bool IsCrouched(){return crouched;}}
+namespace combat {bool blocking=false;bool IsBlocking(){return blocking;}}
 namespace driving {
 std::atomic<bool> g_inputBlocked{};bool vehicle=false;int fallbackCalls=0;
 bool HasPlayerVehicle(){return vehicle;}
@@ -86,6 +87,8 @@ int main(){
  // Exercise the actual mobile CPad hook, not just the toggle state helper.
  UpdateRunToggle(true,false,false,false,false);CHECK(!driving::OnGetSprint(nullptr,0));
  UpdateRunToggle(true,true,false,true,false);CHECK(driving::OnGetSprint(nullptr,0));
+ combat::blocking=true;CHECK(!driving::OnGetSprint(nullptr,0));
+ combat::blocking=false;CHECK(driving::OnGetSprint(nullptr,0)); // toggle survives block
  UpdateRunToggle(true,false,false,false,false);
  for(int i=0;i<100;++i)CHECK(driving::OnGetSprint(nullptr,0)); // survives physical release
  UpdateRunToggle(true,true,false,true,false);CHECK(!driving::OnGetSprint(nullptr,0));

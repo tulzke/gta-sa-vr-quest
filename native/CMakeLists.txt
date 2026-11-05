@@ -79,7 +79,6 @@ add_library(savr SHARED
     src/Jetpack.cpp
     src/Locomotion.cpp
     src/Driving.cpp
-    src/GestureMove.cpp
     src/Swimming.cpp
     src/BoatEntry.cpp
     src/PassengerReaction.cpp

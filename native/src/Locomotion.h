@@ -34,13 +34,8 @@ void AdjustSnapAngle(int direction);
 bool HeadBobEnabled();
 void ToggleHeadBob();
 
-// Arm-swing running: pump both arms up and down to move forward on foot
-// (vigorous swings sprint). Default ON; the toggle is the comfort opt-out.
-bool GestureRunEnabled();
-void ToggleGestureRun();
-
 // Physical swim strokes: a big two-hand stroke throws the swimmer forward,
-// dog-paddling keeps a slow crawl. Same opt-out contract as GestureRun.
+// dog-paddling keeps a slow crawl. The toggle is the comfort opt-out.
 bool GestureSwimEnabled();
 void ToggleGestureSwim();
 

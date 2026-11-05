@@ -24,9 +24,7 @@ std::atomic<int> g_turn{TURN_SMOOTH};
 std::atomic<int> g_turnSensitivity{100};
 std::atomic<int> g_snapAngle{30};
 std::atomic<bool> g_headBob{false};
-// Gesture locomotion (arm-swing run / physical swim strokes). Default ON —
-// they only engage on deliberate motion; the toggles are the comfort opt-out.
-std::atomic<bool> g_gestureRun{true};
+// Physical swimming remains opt-out; automatic arm-swing running was removed.
 std::atomic<bool> g_gestureSwim{true};
 // Default ON: canopy/skydive turns rotate the view with the parachute (the
 // point of physical risers). OFF is the comfort fallback for motion-sensitive
@@ -88,7 +86,6 @@ void Save() {
     std::fprintf(file,"TurnSensitivityPercent=%d\n",g_turnSensitivity.load());
     std::fprintf(file,"SnapAngleDegrees=%d\n",g_snapAngle.load());
     std::fprintf(file,"HeadBob=%d\n",g_headBob.load()?1:0);
-    std::fprintf(file,"GestureRun=%d\n",g_gestureRun.load()?1:0);
     std::fprintf(file,"GestureSwim=%d\n",g_gestureSwim.load()?1:0);
     std::fprintf(file,"ParachuteCameraFollow=%d\n",
                  g_parachuteCameraFollow.load()?1:0);
@@ -118,7 +115,7 @@ void Save() {
 void Load() {
     int movement=MOVEMENT_HEAD,turn=TURN_SMOOTH,sensitivity=100,snap=30,bob=0;
     int chuteFollow=1,autoChute=0,chuteImmersive=0,flightTilt=0;
-    int gestureRun=1,gestureSwim=1;
+    int gestureSwim=1;
     int cutsceneMode=1;
     int gameCutsceneMode=1;
     int welcomeSeen=0;
@@ -135,7 +132,6 @@ void Load() {
             else if (std::sscanf(line,"TurnSensitivityPercent=%d",&value)==1) sensitivity=value;
             else if (std::sscanf(line,"SnapAngleDegrees=%d",&value)==1) snap=value;
             else if (std::sscanf(line,"HeadBob=%d",&value)==1) bob=value;
-            else if (std::sscanf(line,"GestureRun=%d",&value)==1) gestureRun=value;
             else if (std::sscanf(line,"GestureSwim=%d",&value)==1) gestureSwim=value;
             else if (std::sscanf(line,"ParachuteCameraFollow=%d",&value)==1)
                 chuteFollow=value;
@@ -185,7 +181,6 @@ void Load() {
     g_turnSensitivity.store(std::clamp(sensitivity,25,300));
     g_snapAngle.store(std::clamp(snap,15,90));
     g_headBob.store(bob!=0);
-    g_gestureRun.store(gestureRun!=0);
     g_gestureSwim.store(gestureSwim!=0);
     g_parachuteCameraFollow.store(chuteFollow!=0);
     g_autoParachute.store(autoChute!=0);
@@ -361,10 +356,6 @@ void AdjustSnapAngle(int direction) {
 }
 bool HeadBobEnabled() { EnsureInit(); return g_headBob.load(); }
 void ToggleHeadBob() { EnsureInit(); g_headBob.store(!g_headBob.load()); Save(); }
-bool GestureRunEnabled() { EnsureInit(); return g_gestureRun.load(); }
-void ToggleGestureRun() {
-    EnsureInit(); g_gestureRun.store(!g_gestureRun.load()); Save();
-}
 bool GestureSwimEnabled() { EnsureInit(); return g_gestureSwim.load(); }
 void ToggleGestureSwim() {
     EnsureInit(); g_gestureSwim.store(!g_gestureSwim.load()); Save();

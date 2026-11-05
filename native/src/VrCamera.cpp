@@ -13,7 +13,6 @@
 #include "Driving.h"
 #include "RearMirrorPolicy.h"
 #include "EyeDepth.h"
-#include "GestureMove.h"
 #include "GraphicsEffects.h"
 #include "Holster.h"
 #include "HolsterBody.h"
@@ -26,6 +25,7 @@
 #include "PerfTelemetry.h"
 #include "PhysicalWeapon.h"
 #include "Melee.h"
+#include "Combat.h"
 #include "TrackingRecovery.h"
 #include "VehicleCabin.h"
 #include "ScopeAim.h"
@@ -5070,8 +5070,11 @@ void OnUpdatePads() {
         return;
     }
 
+    void* vehicle = g.FindPlayerVehicle ? g.FindPlayerVehicle(-1, false)
+                                        : nullptr;
     float moveX=mappedMoveX,moveY=mappedMoveY;
     locomotion::TransformMoveStick(CurrentLocalHeadYaw(),&moveX,&moveY);
+    if (!vehicle) combat::LimitMovement(&moveX,&moveY);
     if(vehicleentry::ConsumesMove()) moveX=moveY=0;
     ns[0] = static_cast<int16_t>(std::clamp(moveX,-1.0f,1.0f) *  127.0f);
     ns[1] = static_cast<int16_t>(std::clamp(moveY,-1.0f,1.0f) * -127.0f);
@@ -5083,8 +5086,6 @@ void OnUpdatePads() {
     // driving instead fires the physically held weapon through VrFire, so
     // this classic mapping stays out of its way. Both grips = the VR menu
     // chord and never reach the game.
-    void* vehicle = g.FindPlayerVehicle ? g.FindPlayerVehicle(-1, false)
-                                        : nullptr;
     if (vehicle && !driving::VehicleWeaponsImmersive() && !bothGrips) {
         const bool left  = in.b && in.grip[0] >= 0.55f && in.grip[1] < 0.55f;
         const bool right = in.b && in.grip[1] >= 0.55f && in.grip[0] < 0.55f;
@@ -5275,32 +5276,7 @@ void OnUpdatePads() {
     }
 
     if(vehicle==nullptr && GroundWalkControlsActive())
-        ns[16]=locomotion::RunEnabled() && !g_duckLatched ? 255 : 0;
-
-    // Arm-swing running is land-only. Swimming owns native water velocity.
-    // Apply after stick writes so a real stick push wins over arm running.
-    {
-        void* gesturePed = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
-        const bool swimming = missioncontrols::IsSwimming();
-        const bool gestureBlocked = gesturePed == nullptr ||
-            vehicle != nullptr || ParachuteStateActive() || g_duckLatched;
-        gesturemove::Result gm{};
-        gesturemove::Update(gesturePed, swimming, gestureBlocked, gm);
-        if (gm.forward > 0.0f) {
-            const float stickMagnitude =
-                std::abs(mappedMoveX) + std::abs(mappedMoveY);
-            if (stickMagnitude < 0.25f) {
-                float gestureX = 0.0f, gestureY = gm.forward;
-                locomotion::TransformMoveStick(
-                    CurrentLocalHeadYaw(), &gestureX, &gestureY);
-                ns[0] = static_cast<int16_t>(
-                    std::clamp(gestureX, -1.0f, 1.0f) *  127.0f);
-                ns[1] = static_cast<int16_t>(
-                    std::clamp(gestureY, -1.0f, 1.0f) * -127.0f);
-            }
-            if (gm.sprint) ns[16] = 255;   // Cross: sprint / fast stroke
-        }
-    }
+        ns[16]=locomotion::RunEnabled() && !g_duckLatched && !combat::IsBlocking() ? 255 : 0;
 
     // On-foot jump through the remappable bindings (VC default: X).
     // ButtonSquare (ns[14]) is SA's jump.
@@ -5522,9 +5498,8 @@ void OnUpdatePads() {
                 }
             }
         }
-        // TAP-AND-HOLD prompts need a level, not an edge — but R2 is also
-        // sprint, so the hold/touch answers require the movement stick to be
-        // quiet: sprinting past shop widgets must never press them.
+        // TAP-AND-HOLD prompts need a level, not an edge. Require a quiet
+        // movement stick so passing shops cannot activate their HUD prompts.
         const bool stickQuiet = std::abs(in.leftStick[0]) < 0.2f &&
                                 std::abs(in.leftStick[1]) < 0.2f;
         // Model a real finger on the HUD button: press -> JustPressed,

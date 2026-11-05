@@ -33,7 +33,7 @@ double Now() {
 }
 struct Guard {
     bool active{}, weapon{}, sampled{};
-    double candidateSince{}, strongUntil{};
+    double candidateSince{}, strongUntil{}, weakUntil{};
     Vec previous{}, direction{};
 };
 Guard guards[2]{};
@@ -50,7 +50,16 @@ Vec Position(void* entity) {
     void* matrix=Read<void*>(entity,0x18);
     return matrix?Read<Vec>(matrix,0x30):Read<Vec>(entity,8);
 }
-void ClearGuards() { for (auto& guard:guards) guard={}; }
+void StopWeak(int hand,double now) {
+    auto& guard=guards[hand];
+    if (now<guard.weakUntil && now>=guard.strongUntil)
+        xr::TriggerHaptic(hand,0,0,1);
+    guard.weakUntil=0;
+}
+void ClearGuards() {
+    const double now=Now();
+    for (int h=0;h<2;++h) { StopWeak(h,now);guards[h]={}; }
+}
 
 // Retail 2.11.311 constructor stores creator at +0, damage +8, piece +c,
 // weapon +10. ComputeDamageResponse initialises its 12-byte response before
@@ -64,7 +73,7 @@ void OnComputeDamage(void* calculator,void* victim,void* response,bool speak) {
     float head[3]{},orientation[4]{};std::uint64_t epoch{};
     int chosen=-1;
     float best=.55f;
-    if (ready && victim && victim==player && victim==owner &&
+    if (ready && guards[0].active && guards[1].active && victim && victim==player && victim==owner &&
         now-updated>=0 && now-updated<.15 && !playerlife::Dead(victim) &&
         xr::IsSessionFocused() && xr::GetHeadPose(head,orientation,&epoch) && epoch==trackingEpoch &&
         !Read<unsigned char>(response,0xa) && weapon>=0 && weapon<=15 &&
@@ -169,11 +178,14 @@ void Update(bool blocked) {
         !vrcam::TrackingPointToWorld(fwd,worldForward)) { ClearGuards();return; }
     headWorld={worldHead[0],worldHead[1],worldHead[2]};
     forwardWorld=Horizontal(Vec{worldForward[0],worldForward[1],worldForward[2]}-headWorld);
+    bool candidates[2]{};
     for (int h=0;h<2;++h) {
         auto& guard=guards[h];
         float root[3]{},tip[3]{};int weapon{};
         if (!hands[h].valid || !melee::GuardSegment(h,root,tip,&weapon) ||
-            (weapon<=1 && hands[h].grip<.45f)) { guard={};continue; }
+            (weapon<=1 && hands[h].grip<.45f)) {
+            StopWeak(h,now);guard={};continue;
+        }
         const Vec relative{root[0]-head[0],root[1]-head[1],root[2]-head[2]};
         const float speed=guard.sampled && dt>0 && dt<=.15?Length(relative-guard.previous)/static_cast<float>(dt):0;
         guard.previous=relative;guard.sampled=true;
@@ -187,18 +199,35 @@ void Update(bool blocked) {
                 std::copy_n(p,3,point);pose=true;break;
             }
         }
-        pose=pose && std::isfinite(speed) && speed<1.1f;
-        if (!pose) { guard.active=false;guard.candidateSince=0;continue; }
+        const float toHead[3]{head[0]-hands[h].gripPos[0],head[1]-hands[h].gripPos[1],head[2]-hands[h].gripPos[2]};
+        pose=pose && std::isfinite(speed) && speed<1.1f &&
+            combatpolicy::PalmInward(hands[h].gripOri,h,toHead,guard.active);
+        if (!pose) { guard.candidateSince=0;continue; }
         float world[3]{};
-        if (!vrcam::TrackingPointToWorld(point,world)) { guard={};continue; }
+        if (!vrcam::TrackingPointToWorld(point,world)) { guard.candidateSince=0;continue; }
         guard.direction=Horizontal(Vec{world[0],world[1],world[2]}-headWorld);
         guard.weapon=weapon>1;
         if (!guard.candidateSince) guard.candidateSince=now;
-        if (!guard.active && now-guard.candidateSince>=.08) {
-            guard.active=true;
-            if (now>=guard.strongUntil) xr::TriggerHaptic(h,.16f,0,750);
-        }
+        candidates[h]=now-guard.candidateSince>=.08;
     }
+    const bool pairReady=candidates[0] && candidates[1];
+    for (int h=0;h<2;++h) {
+        auto& guard=guards[h];
+        if (pairReady && !guard.active && now>=guard.strongUntil) {
+            xr::TriggerHaptic(h,.16f,0,750);guard.weakUntil=now+.75;
+        }
+        if (!pairReady) StopWeak(h,now);
+        guard.active=pairReady;
+    }
+}
+bool IsBlocking() {
+    const double age=Now()-updated;
+    float head[3]{},q[4]{};std::uint64_t epoch{};
+    return ready && guards[0].active && guards[1].active && age>=0 && age<.15 &&
+        xr::IsSessionFocused() && xr::GetHeadPose(head,q,&epoch) && epoch==trackingEpoch;
+}
+void LimitMovement(float* x,float* y) {
+    combatpolicy::LimitMovement(IsBlocking(),x,y);
 }
 Feedback GetFeedback() {
     const double now=Now();

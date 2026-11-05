@@ -3,18 +3,43 @@
 #include <cmath>
 
 namespace savr::combatpolicy {
-// A new stroke, rather than a timer, permits another full-damage hit.
+// Every strike needs a continuous 40 cm stroke, not accumulated idle jitter.
 struct Swing {
     bool spent{};
     float distance{};
     void Sample(float speed, float threshold, float travel, float directionCos) {
-        if (!spent) return;
-        distance += travel;
-        if (speed < threshold * .4f || (distance >= .08f && directionCos < .15f))
-            spent = false;
+        if (!std::isfinite(speed) || !std::isfinite(travel) ||
+            !std::isfinite(directionCos) || speed < threshold * .4f) {
+            *this={};return;
+        }
+        if (directionCos < .15f) *this={};
+        if (!spent) distance += travel;
+    }
+    bool Ready(float speed,float threshold) const {
+        return !spent && speed>=threshold && distance+1.e-5f>=.40f;
     }
     void Hit() { spent = true; distance = 0; }
 };
+// Mirrored +X grip axis is the anatomical palm normal used by Basketball.
+inline bool PalmInward(const float q[4],int hand,const float toHead[3],bool held) {
+    const float norm=q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3];
+    const float length=std::sqrt(toHead[0]*toHead[0]+toHead[1]*toHead[1]+toHead[2]*toHead[2]);
+    if (!std::isfinite(norm) || norm<.5f || norm>1.5f || !std::isfinite(length) || length<.1f)
+        return false;
+    const float sign=hand==0?1.f:-1.f;
+    const float x=1-2*(q[1]*q[1]+q[2]*q[2])/norm;
+    const float y=2*(q[0]*q[1]+q[3]*q[2])/norm;
+    const float z=2*(q[0]*q[2]-q[3]*q[1])/norm;
+    const float alignment=sign*(x*toHead[0]+y*toHead[1]+z*toHead[2])/length;
+    return alignment>=(held?.30f:.45f);
+}
+inline void LimitMovement(bool blocking,float* x,float* y) {
+    if (!blocking) return;
+    const float length=std::hypot(*x,*y);
+    if (!std::isfinite(length)) { *x=*y=0;return; }
+    constexpr float maximum=.35f;
+    if (length>maximum) { *x*=maximum/length;*y*=maximum/length; }
+}
 inline bool GuardPose(float height, float reach, float forward, bool held) {
     return std::isfinite(height) && std::isfinite(reach) && std::isfinite(forward) &&
         height >= (held ? -.58f : -.48f) && height <= .25f &&

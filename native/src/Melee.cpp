@@ -133,7 +133,7 @@ struct Motion {
     V3 previousTip{};
     double previousAt{};
     combatpolicy::Swing swing{};
-    V3 hitDirection{};
+    V3 previousDirection{};
 };
 
 Motion gMotion[physicalweapon::kHandCount]{};
@@ -704,11 +704,18 @@ void Update(bool interactionsBlocked) {
                                     static_cast<float>(dt);
         const bool deliberate = fist ? rootSpeed >= 0.75f
                                      : rootSpeed >= 0.25f || relativeSpeed >= 0.50f;
-        const V3 direction=Normalized(tipTravel);
-        const float directionCos=direction.x*motion.hitDirection.x+
-            direction.y*motion.hitDirection.y+direction.z*motion.hitDirection.z;
-        motion.swing.Sample(tipSpeed,threshold,Length(tipTravel),directionCos);
-        if (segment.enabled && !motion.swing.spent && tipSpeed>=threshold && deliberate) {
+        // A fist travels with the wrist: rotating its 11 cm probe in place
+        // must not build a punch. Weapons use their working tip, including arcs.
+        const V3 strokeTravel=fist?rootTravel:tipTravel;
+        const float strokeSpeed=fist?rootSpeed:tipSpeed;
+        const V3 direction=Normalized(strokeTravel);
+        const float directionCos=direction.x*motion.previousDirection.x+
+            direction.y*motion.previousDirection.y+direction.z*motion.previousDirection.z;
+        if (segment.enabled)
+            motion.swing.Sample(strokeSpeed,threshold,Length(strokeTravel),directionCos);
+        else motion.swing={};
+        motion.previousDirection=direction;
+        if (segment.enabled && motion.swing.Ready(strokeSpeed,threshold) && deliberate) {
             V3 rootStart{}, rootEnd{}, tipStart{}, tipEnd{};
             if (ToWorld(motion.previousRoot, rootStart) &&
                 ToWorld(segment.root, rootEnd) &&
@@ -720,10 +727,9 @@ void Update(bool interactionsBlocked) {
                                 rootStart, rootEnd, tipStart, tipEnd,
                                 target, contact)) {
                     ApplyContact(player, hand, segment.weaponType,
-                                 tipSpeed,
+                                 strokeSpeed,
                                  rootEnd, target, contact);
                     motion.swing.Hit();
-                    motion.hitDirection=direction;
                 }
             }
         }
