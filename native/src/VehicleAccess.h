@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 
 namespace savr::vehicleaccess {
 // Provisional seat positions in vehicle-local metres; calibrate in Quest.
@@ -28,6 +29,14 @@ inline bool DoorAbsent(const void* vehicle,int door) {
     if(Find(model))return true;
     std::memcpy(&status,static_cast<const char*>(vehicle)+0x758+9+door,sizeof(status));
     return status==4;
+}
+inline bool DoorOpen(const void* vehicle,int door) {
+    if(DoorAbsent(vehicle,door))return true;
+    if(!vehicle||door<2||door>5)return false;
+    float open{},angle{};
+    std::memcpy(&open,static_cast<const char*>(vehicle)+0x770+door*0x18,sizeof(open));
+    std::memcpy(&angle,static_cast<const char*>(vehicle)+0x77c+door*0x18,sizeof(angle));
+    return std::isfinite(open)&&std::isfinite(angle)&&std::abs(open)>.3f&&angle/open>=.45f;
 }
 // The ordinary locked-door state cannot obstruct a physically missing door.
 // Preserve every other native lock state, including player/script locks.

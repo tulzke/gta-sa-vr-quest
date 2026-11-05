@@ -20,6 +20,25 @@ void (*setTask)(void*,void*,int,bool){};
 bool (*healthy)(const void*){};
 bool (*canStepOut)(const void*,bool){};
 bool (*roomToLeave)(const void*,int,GameSymbols::Vec3*){};
+GameSymbols::Vec3 (*doorPosition)(const void*,int){};
+void (*checkDoors)(const void*,int,bool&,bool&){};
+bool (*positionOut)(void*,int,void*,bool){};
+constexpr int nodes[]={10,8,11,9};
+bool DoorsFree(void* car,int node){
+ if(!checkDoors)return false;
+ bool gettingIn=false,gettingOut=false;
+ checkDoors(car,node,gettingIn,gettingOut);
+ return !gettingIn&&!gettingOut;
+}
+bool Bike(void* car){
+ return Read<std::uint16_t>(car,0x32)==471||
+     (g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2);
+}
+int ExitNode(void* car,int seat,Vec hint){
+ if(!vehicleaccess::Find(Read<std::uint16_t>(car,0x32)))return nodes[seat+1];
+ void* matrix=Read<void*>(car,0x18);if(!matrix)return -1;
+ return Dot(hint-Read<Vec>(matrix,0x30),Read<Vec>(matrix,0))<0?10:8;
+}
 }
 void Install(void* h){
 #define LOAD(v,n) v=reinterpret_cast<decltype(v)>(dlsym(h,n))
@@ -32,77 +51,61 @@ void Install(void* h){
  LOAD(healthy,"_ZN13CCarEnterExit12IsPedHealthyERK4CPed");
  LOAD(canStepOut,"_ZNK8CVehicle16CanPedStepOutCarEb");
  LOAD(roomToLeave,"_ZN13CCarEnterExit22IsRoomForPedToLeaveCarERK8CVehicleiP7CVector");
+ LOAD(doorPosition,"_ZN13CCarEnterExit24GetPositionToOpenCarDoorERK8CVehiclei");
+ LOAD(checkDoors,"_ZN37CTaskSimpleCarWaitForDoorNotToBeInUse20CheckDoorsFreeOfPedsERK8CVehicleiRbS3_");
+ LOAD(positionOut,"_ZN4CPed25PositionPedOutOfCollisionEiP8CVehicleb");
 #undef LOAD
 }
 bool EmergencyAvailable(void* car,int seat){
- if(!car||seat<-1||seat>2||!roomToLeave||!vehicleentry::ExitObstructed(car,seat))return false;
- constexpr int nodes[]={10,8,11,9};
+ if(!car||seat<-1||seat>2||!roomToLeave||!checkDoors)return false;
  const int index=seat+1;
- if(roomToLeave(car,nodes[index],nullptr))return false;
+ if(!DoorsFree(car,nodes[index])||roomToLeave(car,nodes[index],nullptr))return false;
  const int opposite=(index^1)-1;
  const bool occupied=Read<void*>(car,opposite<0?0x5a0:0x5a8+opposite*8)!=nullptr;
- return occupied||!roomToLeave(car,nodes[index^1],nullptr);
+ return occupied||!DoorsFree(car,nodes[index^1])||!roomToLeave(car,nodes[index^1],nullptr);
+}
+Mode Check(void* car,int seat,Vec hint){
+ if(!car||seat<-1||seat>2||!Finite(hint)||!outCtor||!outProcess||!outDtor||!ground||!worldRemove||!worldAdd||!setTask||!healthy||!canStepOut||!roomToLeave||!doorPosition||!checkDoors||!g.CWorld_pIgnoreEntity||!g.FindPlayerPed||!g.FindPlayerVehicle||!g.CPad_GetPad)return Mode::Unavailable;
+ void* ped=g.FindPlayerPed(-1);void* pad=g.CPad_GetPad(0);
+ if(!ped||!pad||g.FindPlayerVehicle(-1,false)!=car||vehicleentry::SeatIndex(car,ped)!=seat||!Read<void*>(ped,0x538)||Read<std::uint16_t>(pad,0x110)||Read<std::uint8_t>(pad,0x12d)||!healthy(ped)||!canStepOut(car,false))return Mode::Unavailable;
+ void* matrix=Read<void*>(car,0x18);
+ if(!matrix)return Mode::Unavailable;
+ Basis basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+ if(!basis.Valid())return Mode::Unavailable;
+ const int node=ExitNode(car,seat,hint);
+ if(node<0||!DoorsFree(car,node))return Mode::Unavailable;
+ if(const auto* profile=vehicleaccess::Find(Read<std::uint16_t>(car,0x32));profile&&!profile->single){
+  const int sideSeat=node==10?-1:0;
+  if(sideSeat!=seat&&Read<void*>(car,sideSeat<0?0x5a0:0x5a8))return Mode::Unavailable;
+ }
+ const bool room=roomToLeave(car,node,nullptr);
+ if(room&&(Bike(car)||vehicleaccess::DoorOpen(car,seat+3)))return Mode::Normal;
+ // A closed door alone never enables the native emergency search.
+ if(!room&&positionOut&&!Bike(car)&&!vehicleaccess::Find(Read<std::uint16_t>(car,0x32))&&EmergencyAvailable(car,seat))return Mode::Emergency;
+ return Mode::Unavailable;
 }
 bool TryExit(void* car,int seat,Vec hint,bool emergency){
- if(!car||seat<-1||seat>2||!Finite(hint)||!outCtor||!outProcess||!outDtor||!ground||!worldRemove||!worldAdd||!setTask||!healthy||!canStepOut||!g.FindPlayerPed||!g.FindPlayerVehicle||!g.CPad_GetPad||!g.CWorld_TestSphereAgainstWorld){
-  LOGI("[vehicle-exit] missing dependency or invalid request seat=%d",seat);return false;
+ if(Check(car,seat,hint)!=(emergency?Mode::Emergency:Mode::Normal)){
+  LOGI("[vehicle-exit] native eligibility changed seat=%d emergency=%d",seat,emergency);return false;
  }
- void* ped=g.FindPlayerPed(-1);void* pad=g.CPad_GetPad(0);
- if(!ped||!pad||g.FindPlayerVehicle(-1,false)!=car||vehicleentry::SeatIndex(car,ped)!=seat||Read<std::uint16_t>(pad,0x110)||Read<std::uint8_t>(pad,0x12d)||!healthy(ped)||!canStepOut(car,false)){
-  LOGI("[vehicle-exit] player, seat or controls no longer eligible");return false;
- }
- const Vec speed=Read<Vec>(car,0x68);if(!Finite(speed)||Length(speed)>.02f)return false;
- const bool bike=Read<std::uint16_t>(car,0x32)==471||
-     (g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(car)==2);
- const int door=seat+3;
- if(emergency&&!EmergencyAvailable(car,seat))return false;
- const bool openVehicle=vehicleaccess::Find(Read<std::uint16_t>(car,0x32))!=nullptr;
- if(!bike&&!vehicleaccess::DoorAbsent(car,door)&&!emergency){
- const float open=Read<float>(car,0x770+door*0x18),angle=Read<float>(car,0x77c+door*0x18);
- if(Read<std::uint8_t>(car,0x758+9+door)!=4&&(!std::isfinite(open)||!std::isfinite(angle)||std::abs(open)<.3f||angle/open<.45f))return false;
- }
- void* intelligence=Read<void*>(ped,0x538);if(!intelligence)return false;
- // The marker is just outside the door hinge, but body spheres can overlap a
- // wide car there. Search a short distance outward only when that car blocks
- // the initial point; never skip another obstacle or an obstructed path.
- void* matrix=Read<void*>(car,0x18);
- if(!matrix&&!emergency)return false;
- Basis basis=matrix?Basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)}:Basis{};
- if(!basis.Valid()&&!emergency)return false;
- const float side=Dot(hint-basis.position,basis.right)<0?-1.f:1.f;
+ void* ped=g.FindPlayerPed(-1);
+ const int node=ExitNode(car,seat,hint);
  GameSymbols::Vec3 destination{};
- bool found=false;
- for(float distance:{0.f,.25f,.5f,.75f}) {
-  if(emergency)break;
-  const Vec candidate=hint+basis.right*(side*distance);
-  GameSymbols::Vec3 point{candidate.x,candidate.y,candidate.z};
+ if(!emergency){
+  // CarSetPedOut normally follows the get-out animation. Supply the engine's
+  // door position instead of leaving its collision correction inside the seat.
+  destination=doorPosition(car,node);
+  if(!Finite({destination.x,destination.y,destination.z}))return false;
   float floorZ{};
-  if(testarea::FindExitGround(point.x,point.y,point.z,&floorZ))point.z=floorZ;
-  else if(!ground(&point))break;
-  if(!Finite({point.x,point.y,point.z})||std::abs(point.z-hint.z)>1.5f)break;
-  bool carBlocked=false,otherBlocked=false;
-  for(float height:{-.35f,.35f}) {
-   const GameSymbols::Vec3 centre{point.x,point.y,point.z+height};
-   void* hit=g.CWorld_TestSphereAgainstWorld(centre,.3f,ped,true,true,true,true,true,false);
-   if(hit==car)carBlocked=true;else if(hit)otherBlocked=true;
-  }
-  if(otherBlocked)break;
-  if(carBlocked)continue;
-  if(distance>0) {
-   if(!g.CWorld_ProcessLineOfSight||!g.CWorld_pIgnoreEntity)break;
+  if(testarea::FindExitGround(destination.x,destination.y,destination.z,&floorZ))destination.z=floorZ;
+  else {
    void* previous=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=car;
-   bool blocked=false;
-   for(float height:{-.35f,.35f}) {
-    const GameSymbols::Vec3 from{hint.x,hint.y,point.z+height},to{point.x,point.y,point.z+height};
-    alignas(8) unsigned char col[0x2c]{};void* hit{};
-    if(g.CWorld_ProcessLineOfSight(&from,&to,col,&hit,true,true,true,true,true,false,false,false)) {blocked=true;break;}
-   }
-   *g.CWorld_pIgnoreEntity=previous;
-   if(blocked)break;
+   const bool found=ground(&destination);*g.CWorld_pIgnoreEntity=previous;
+   if(!found){LOGI("[vehicle-exit] native ground lookup failed seat=%d",seat);return false;}
   }
-  destination=point;found=true;break;
+  if(!Finite({destination.x,destination.y,destination.z}))return false;
  }
- if(!found&&!emergency){LOGI("[vehicle-exit] no safe placement near open door");return false;}
+ void* intelligence=Read<void*>(ped,0x538);
  void* manager=static_cast<char*>(intelligence)+8;
  // Remove only a driving primary task. Mission tasks remain owned by the game.
  if(void* task=Read<void*>(manager,3*8)){
@@ -110,23 +113,27 @@ bool TryExit(void* car,int seat,Vec hint,bool emergency){
   const auto type=Read<int(*)(void*)>(vtable,0x28)(task);
   if(type==725||type==711)setTask(manager,nullptr,3,false);
  }
- // Retail ARM64 task is 0x28 bytes; +0x1f skips the engine's perimeter
- // position search for ordinary exits. Emergency exits use that search.
- // ProcessPed detaches the occupant, removes sit animations
- // and installs PlayerOnFoot immediately, without any leave/close-door task.
- constexpr int nodes[]={10,8,11,9};
- alignas(16) std::uint8_t task[0x28]{};
- const int node=openVehicle?(side<0?10:8):nodes[seat+1];
- outCtor(task,car,node,false);task[0x1f]=emergency?0:1;
- const bool processed=outProcess(task,ped);outDtor(task);
- if(!processed||vehicleentry::SeatIndex(car,ped)!=-2){LOGI("[vehicle-exit] native detach failed (processed=%d)",processed);return false;}
- if(emergency)return true;
  worldRemove(ped);
- Vec position{destination.x,destination.y,destination.z};
- matrix=Read<void*>(ped,0x18);
- std::memcpy(static_cast<char*>(matrix?matrix:ped)+(matrix?0x30:8),&position,sizeof(position));
- const Vec zero{};std::memcpy(static_cast<char*>(ped)+0x68,&zero,sizeof(zero));
+ void* previous=*g.CWorld_pIgnoreEntity;
+ if(!emergency){
+  void* matrix=Read<void*>(ped,0x18);
+  const Vec position{destination.x,destination.y,destination.z};
+  std::memcpy(static_cast<char*>(matrix?matrix:ped)+(matrix?0x30:8),&position,sizeof(position));
+ }else {
+  // Unlike the post-animation task correction, this always starts at the
+  // requested door and runs the engine's full emergency placement search.
+  // Retail CarSetPedOut also proceeds when that best-effort search fails.
+  if(!positionOut(ped,node,car,true))LOGI("[vehicle-exit] native emergency search exhausted seat=%d",seat);
+ }
+ // Keep the constructor's native collision correction enabled (+0x1f = 0).
+ // No leave/open/close-door animation task is installed.
+ alignas(16) std::uint8_t task[0x28]{};
+ outCtor(task,car,node,false);
+ const bool processed=outProcess(task,ped);outDtor(task);
+ *g.CWorld_pIgnoreEntity=previous;
  worldAdd(ped);
+ if(!processed||vehicleentry::SeatIndex(car,ped)!=-2){LOGI("[vehicle-exit] native detach failed (processed=%d)",processed);return false;}
+ LOGI("[vehicle-exit] native exit completed seat=%d node=%d emergency=%d",seat,node,emergency);
  return true;
 }
 }

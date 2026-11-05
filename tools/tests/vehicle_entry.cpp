@@ -1,4 +1,5 @@
 #include "VehicleEntry.h"
+#include "VehicleExit.h"
 #include "VehicleAccess.h"
 #include "Symbols.h"
 #include <chrono>
@@ -15,7 +16,16 @@ namespace xr { struct HandPose {bool valid{};float trigger{},gripPos[3]{};};Hand
 namespace driving { int debug{},saves{};float calibration[4][3]{};int GetVehicleDebugMode(){return debug;}void SaveDebugCalibration(){++saves;} void GetEntryCalibration(int,int seat,float* out){for(int i=0;i<3;++i)out[i]=calibration[seat][i];}void SetEntryCalibration(int,int seat,const float* in){for(int i=0;i<3;++i)calibration[seat][i]=in[i];} }
 namespace locomotion { void MapGameplaySticks(float x,float y,float,float,float* mx,float* my,float*,float*){*mx=x;*my=y;} }
 namespace vrcam { int exits{};void RequestVehicleExit(){++exits;}bool TrackingPointToWorld(const float* in,float* out){for(int i=0;i<3;++i)out[i]=in[i];return true;} bool GetHeadWorldRay(float* o,float* f){o[0]=eyeX;o[1]=eyeY;o[2]=.6f;f[0]=0;f[1]=1;f[2]=0;return true;} }
-namespace vehicleexit { bool emergencyAvailable{},lastEmergency{};bool EmergencyAvailable(void*,int){return emergencyAvailable;} bool TryExit(void*,int,vehicledoors::Vec,bool emergency){lastEmergency=emergency;++vrcam::exits;return true;} }
+namespace vehicleexit {
+ bool emergencyAvailable{},lastEmergency{},nativeAllowed=true;
+ Mode Check(void* car,int seat,vehicledoors::Vec){
+  if(!nativeAllowed)return Mode::Unavailable;
+  if(emergencyAvailable)return Mode::Emergency;
+  std::uint16_t model{};std::memcpy(&model,static_cast<char*>(car)+0x32,2);
+  return vehicleAppearance==2||model==471||vehicleaccess::DoorOpen(car,seat+3)?Mode::Normal:Mode::Unavailable;
+ }
+ bool TryExit(void*,int,vehicledoors::Vec,bool emergency){lastEmergency=emergency;++vrcam::exits;return true;}
+}
 namespace boatentry {int calls{},seat{};bool success=true;bool SeatPlayer(void*,int s){++calls;seat=s;return success;} }
 }
 // PRODUCTION_ENTRY
@@ -34,7 +44,6 @@ int main(){
  Put(doorMatrix,0x30,Vec{-1,.35f,.4f});Put(cars,0x800+10*8,static_cast<void*>(doorMatrix));
  Put(cars,0x770+2*0x18,1.f);Put(cars,0x77c+2*0x18,1.f);
  g.CPools_ms_pVehiclePool=&poolPtr;g.CWorld_ProcessLineOfSight=&Ray;
- canStepOut=[](const void*,bool){return true;};
  g.FindPlayerPed=[](int)->void*{return ped;};g.FindPlayerVehicle=[](int,bool)->void*{return current;};
  g.CPad_GetPad=[](int)->void*{return pad;};g.CVehicle_GetVehicleAppearance=[](const void*){return vehicleAppearance;};
  canOpen=[](const void*,const void*){return locksOpen;};healthy=[](const void*){return true;};frameLtm=[](void* p){return p;};
@@ -62,12 +71,10 @@ int main(){
  for(int i=0;i<2;++i)Tick();CHECK(vrcam::exits==1);
  for(int i=0;i<3;++i)Tick();xr::input.leftStick[0]=0;Tick();Put(cars,0x77c+3*0x18,0.f);xr::input.leftStick[0]=1;
  for(int i=0;i<20;++i)Tick();CHECK(vrcam::exits==1);
- // Closed doors are not treated as blocked just because native ground lookup fails.
+ // Exit eligibility comes from the shared native adapter, not the UI rays.
  Put(leftMatrix,0x30,Vec{-1,.35f,.4f});Put(cars,0x800+10*8,static_cast<void*>(leftMatrix));
- blockedLeft=false;blockedRight=false;CHECK(!ExitObstructed(cars,0));
- blockedRight=true;CHECK(!ExitObstructed(cars,0));
- blockedLeft=true;CHECK(ExitObstructed(cars,0));
- blockedLeft=false;Put(cars,0x5a0,static_cast<void*>(ped));CHECK(ExitObstructed(cars,0));
+ blockedLeft=blockedRight=true;xr::input.leftStick[0]=0;Tick();
+ for(int i=0;i<icons.count;++i)CHECK(icons.markers[i].seatIcon!=3);
  Put(cars,0x5a0,static_cast<void*>(nullptr));blockedLeft=blockedRight=false;
  // Debug calibration can show seat markers, but never an unavailable exit beacon.
  driving::debug=1;xr::input.leftStick[0]=0;Tick();
@@ -176,6 +183,19 @@ int main(){
  CHECK(boatentry::calls==beforeLocked+1&&boatentry::seat==-1);
  xr::input.leftStick[0]=0;Put(cars,0x684,std::uint32_t(3));for(int i=0;i<3;++i)Tick();CHECK(icons.count==0);
  Put(cars,0x32,std::uint16_t(400));Put(cars,0x684,std::uint32_t(2));Put(cars,0x758+9+2,std::uint8_t(0));Tick();CHECK(icons.count==0);
+ // A high cab and an arbitrarily distant ENTRY calibration cannot hide an
+ // available exit. Custom UI clearance rays cannot overrule the game either.
+ locksOpen=true;current=cars;Put(cars,0x5a0,static_cast<void*>(ped));
+ Put(cars,0x32,std::uint16_t(514));Put(cars,0x77c+2*0x18,1.f);
+ Put(leftMatrix,0x30,Vec{-1,.35f,3.f});driving::calibration[0][2]=20;
+ blockedLeft=blockedRight=true;xr::input.leftStick[0]=0;for(int i=0;i<3;++i)Tick();
+ bool exitVisible=false;for(int i=0;i<icons.count;++i)exitVisible|=icons.markers[i].seatIcon==3;CHECK(exitVisible);
+ vehicleexit::nativeAllowed=false;Tick();
+ for(int i=0;i<icons.count;++i)CHECK(icons.markers[i].seatIcon!=3);
+ vehicleexit::nativeAllowed=true;xr::input.leftStick[0]=-1;for(int i=0;i<6;++i)Tick();CHECK(started>0);
+ vehicleexit::emergencyAvailable=true;Tick();const int modeSwitchExits=vrcam::exits;
+ for(int i=0;i<5;++i)Tick();CHECK(vrcam::exits==modeSwitchExits);
+ for(int i=0;i<6;++i)Tick();CHECK(vrcam::exits==modeSwitchExits+1&&vehicleexit::lastEmergency);
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 

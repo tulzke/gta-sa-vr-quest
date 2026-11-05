@@ -18,9 +18,8 @@ using namespace vehicledoors;
 template<class T>T Read(void* p,int off){T v{};std::memcpy(&v,static_cast<char*>(p)+off,sizeof(v));return v;}
 bool (*canOpen)(const void*,const void*){};
 bool (*healthy)(const void*){};
-bool (*canStepOut)(const void*,bool){};
 void* (*frameLtm)(void*){};
-void* target{};int targetSeat{};std::uint8_t generation{};
+void* target{};int targetSeat{};std::uint8_t generation{};bool targetEmergency{};
 double started{},last{},flashUntil{};std::uint64_t trackingEpoch{};
 Marker marker{};bool visible{},released{true};
 MarkerFrame icons;
@@ -30,9 +29,7 @@ constexpr int nodes[4]={10,8,11,9};
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 void EndEdit(){if(editHand>=0)driving::SaveDebugCalibration();editHand=-1;claimed=0;}
 bool DoorOpen(void* car,int index){
- if(vehicleaccess::DoorAbsent(car,index+2))return true;
- const float open=Read<float>(car,0x770+(index+2)*0x18),angle=Read<float>(car,0x77c+(index+2)*0x18);
- return std::isfinite(open)&&std::isfinite(angle)&&std::abs(open)>.3f&&angle/open>=.45f;
+ return vehicleaccess::DoorOpen(car,index+2);
 }
 bool ClearExit(Vec eye,Vec p,void* car){
  if(!g.CWorld_ProcessLineOfSight)return false;
@@ -53,36 +50,12 @@ int SeatIndex(void* car,void* ped){
  for(int i=0;i<3;++i)if(Read<void*>(car,0x5a8+i*8)==ped)return i;
  return -2;
 }
-bool ExitObstructed(void* car,int seat){
- if(!car||seat<-1||seat>2||!frameLtm||!g.CWorld_ProcessLineOfSight)return false;
- float origin[3]{},direction[3]{};
- if(!vrcam::GetHeadWorldRay(origin,direction))return false;
- void* matrix=Read<void*>(car,0x18);if(!matrix)return false;
- Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
- if(!b.Valid())return false;
- const Vec eye{origin[0],origin[1],origin[2]};
- auto blocked=[&](int index,bool& result){
-  void* frame=Read<void*>(car,0x800+nodes[index]*8);
-  if(!frame)return false;
-  void* door=frameLtm(frame);if(!door)return false;
-  const Vec hinge=b.Local(Read<Vec>(door,0x30));if(!Finite(hinge))return false;
-  const float side=(index==0||index==2)?-1.f:1.f;
-  const Vec point=b.Point({hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f});
-  result=!ClearExit(eye,point,car);return true;
- };
- const int index=seat+1,opposite=(index^1)-1;
- bool ownBlocked=false,otherBlocked=false;
- if(!blocked(index,ownBlocked)||!ownBlocked)return false;
- if(Read<void*>(car,opposite<0?0x5a0:0x5a8+opposite*8))return true;
- return blocked(index^1,otherBlocked)&&otherBlocked;
-}
 unsigned ClaimedHands(){return claimed;}
 void Install(void* h){
  vehicleexit::Install(h);
  frameLtm=reinterpret_cast<decltype(frameLtm)>(dlsym(h,"_Z13RwFrameGetLTMP7RwFrame"));
  canOpen=reinterpret_cast<decltype(canOpen)>(dlsym(h,"_ZNK8CVehicle15CanPedOpenLocksEPK4CPed"));
  healthy=reinterpret_cast<decltype(healthy)>(dlsym(h,"_ZN13CCarEnterExit12IsPedHealthyERK4CPed"));
- canStepOut=reinterpret_cast<decltype(canStepOut)>(dlsym(h,"_ZNK8CVehicle16CanPedStepOutCarEb"));
 }
 bool ConsumesMove(){return vehicleclimb::ClaimedHands()!=0||started>0||Now()<flashUntil;}
 void Update(bool usable,std::uint64_t epoch){
@@ -137,15 +110,15 @@ void Update(bool usable,std::uint64_t epoch){
   const int model=Read<std::uint16_t>(car,0x32);if(model==431||model==437||model==432||model==539)continue;
   void* matrix=Read<void*>(car,0x18);if(!matrix)continue;
   Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
-  if(!b.Valid()||Length(eye-b.position)>4.5f)continue;
+  if(!b.Valid()||(!seated&&Length(eye-b.position)>4.5f))continue;
   if(appearance==2||model==471){
    if(!seated&&!canOpen(car,ped))continue;
-   if(b.up.z<.94f||Length(speed)>.02f)continue;
+   if(!seated&&(b.up.z<.94f||Length(speed)>.02f))continue;
    if(seated&&currentSeat!= -1&&currentSeat!=0)continue;
    for(int index=0;index<2;++index){
     const bool exit=seated!=nullptr;
     const int seat=exit?currentSeat:index-1;
-    bool actionable=exit?canStepOut&&canStepOut(car,false):
+    bool actionable=exit?true:
       !Read<void*>(car,seat<0?0x5a0:0x5a8);
     if(!exit&&seat==0&&Read<std::uint8_t>(car,0x5ec)==0)actionable=false;
     float correction[3]{};driving::GetEntryCalibration(model,index,correction);
@@ -153,7 +126,8 @@ void Update(bool usable,std::uint64_t epoch){
     Vec local=exit?Vec{side*(model==471?1.4f:.85f),0,.6f}:
       Vec{correction[0],(index==0?.20f:-.55f)+correction[1],.85f+correction[2]};
     Vec p=b.Point(local);
-    if(Length(p-eye)>1.8f)continue;
+    if(!exit&&Length(p-eye)>1.8f)continue;
+    if(exit)actionable=vehicleexit::Check(car,seat,p)==vehicleexit::Mode::Normal;
     if(!exit&&editing){
      for(int h=0;h<2;++h){
       float w[3]{};if(!hands[h].valid||!vrcam::TrackingPointToWorld(hands[h].gripPos,w))continue;
@@ -167,7 +141,7 @@ void Update(bool usable,std::uint64_t epoch){
       }
      }
     }
-    if(!ClearExit(eye,p,car))actionable=false;
+    if(!exit&&!ClearExit(eye,p,car))actionable=false;
     if(!editing&&!actionable)continue;
     Marker m{p,forward,{0,0,1}};m.seatIcon=exit?3:(seat<0?1:2);
     if(icons.count>=icons.kCapacity)continue;
@@ -188,7 +162,7 @@ void Update(bool usable,std::uint64_t epoch){
     const int sideSeat=index==0?-1:0;
     if(!profile->single&&sideSeat!=currentSeat&&Read<void*>(car,sideSeat<0?0x5a0:0x5a8))continue;
     const Vec p=b.Point({side*(profile->halfWidth+.45f),profile->seatY,profile->seatZ});
-    if(Length(p-eye)>2.5f||Length(speed)>.02f||!canStepOut||!canStepOut(car,false)||!ClearExit(eye,p,car))continue;
+    if(vehicleexit::Check(car,currentSeat,p)!=vehicleexit::Mode::Normal)continue;
     offer(car,3,p,3,flags[slot],false);
    }
    if(!profile->single){
@@ -235,7 +209,7 @@ void Update(bool usable,std::uint64_t epoch){
     if(!DoorOpen(car,index)||Dot(eye-b.position,b.right)*side<.2f)actionable=false;
     if(Length(eye-b.Point({hinge.x,hinge.y-.35f,hinge.z}))>1.5f)actionable=false;
    }
-   if(Length(p-eye)>2.5f)continue;
+   if(!exit&&Length(p-eye)>2.5f)continue;
    if(editing){
     for(int h=0;h<2;++h){
      float w[3]{};if(!hands[h].valid||!vrcam::TrackingPointToWorld(hands[h].gripPos,w))continue;
@@ -250,12 +224,10 @@ void Update(bool usable,std::uint64_t epoch){
    }
    if(exit){
     if(editing&&icons.count<icons.kCapacity){Marker calibration{p,forward,{0,0,1}};calibration.seatIcon=seat<0?1:2;icons.markers[icons.count++]=calibration;}
-    const bool canLeave=Length(speed)<=.02f&&canStepOut&&canStepOut(car,false);
     p=b.Point({hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f});
-    const bool clear=ClearExit(eye,p,car);
-    const bool normal=canLeave&&DoorOpen(car,index)&&clear;
-    emergency=canLeave&&!normal&&vehicleexit::EmergencyAvailable(car,currentSeat);
-    actionable=normal||emergency;
+    const auto mode=vehicleexit::Check(car,currentSeat,p);
+    emergency=mode==vehicleexit::Mode::Emergency;
+    actionable=mode!=vehicleexit::Mode::Unavailable;
    }
    if(!actionable&&(!editing||exit))continue;
    if(actionable)offer(car,exit?3:seat,p,exit?3:(seat<0?1:2),flags[slot],emergency);
@@ -265,7 +237,7 @@ void Update(bool usable,std::uint64_t epoch){
  if(editHand>=0&&!editContinued)EndEdit();
  if(editHand>=0){started=0;visible=icons.count>0;return;}
  if(!released||!bestCar){target=nullptr;started=0;return;}
- if(target!=bestCar||targetSeat!=bestSeat||generation!=bestGeneration){started=0;target=bestCar;targetSeat=bestSeat;generation=bestGeneration;}
+ if(target!=bestCar||targetSeat!=bestSeat||generation!=bestGeneration||targetEmergency!=bestEmergency){started=0;target=bestCar;targetSeat=bestSeat;generation=bestGeneration;targetEmergency=bestEmergency;}
  const bool holding=std::isfinite(x)&&std::isfinite(y)&&Length(move)>.65f&&bestDirection>.55f;
  if(!holding)started=0;else if(!started)started=now;
  marker=icons.markers[bestIcon];marker.progress=started?std::clamp(float((now-started)/(bestSeat==3?1.0:0.8)),0.f,1.f):0;
