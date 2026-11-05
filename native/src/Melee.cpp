@@ -137,6 +137,7 @@ struct Motion {
     double previousAt{};
     combatpolicy::Swing swing{};
     V3 previousDirection{};
+    V3 lastHitDirection{};
     punch::Trajectory trajectory{};
 };
 
@@ -470,6 +471,8 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
         const bool aliveBefore=g.CPed_IsAlive(target)&&!playerlife::Dead(target);
         if (piece < 3 || piece > 9) piece = 3; // torso fallback
         int finalDamage = damage;
+        if (weaponType<=1 && punchKind==punch::Kind::Jab)
+            finalDamage=std::max(1,damage/2);
         // Vice City katana rule: a blade crossing at the head is a head
         // strike. VC decapitates through FireMelee's head flag; SA's damage
         // event with PED_PIECE_HEAD keeps the one-swing kill. The collision
@@ -769,6 +772,14 @@ void Update(bool interactionsBlocked) {
                 if (FindContact(player, segment.weaponType,hand,
                                 rootStart, rootEnd, tipStart, tipEnd,
                                 target, contact)) {
+                    const float returnCos=direction.x*motion.lastHitDirection.x+
+                        direction.y*motion.lastHitDirection.y+direction.z*motion.lastHitDirection.z;
+                    if (fist && LengthSquared(motion.lastHitDirection)>.5f && returnCos<-.25f) {
+                        motion.swing.Hit();
+                        motion.lastHitDirection={};
+                        motion.previousRoot=segment.root;motion.previousTip=segment.tip;motion.previousAt=now;
+                        continue;
+                    }
                     punch::Kind kind=punch::Kind::Jab;
                     if (fist) {
                         const V3 right=Normalized(RotateQuaternion(orientation,{1,0,0}));
@@ -783,6 +794,7 @@ void Update(bool interactionsBlocked) {
                                  strokeSpeed,
                                  rootEnd, target, contact,kind,rootEnd-rootStart);
                     motion.swing.Hit();
+                    if (fist) motion.lastHitDirection=direction;
                 }
             }
         }

@@ -660,10 +660,12 @@ int main() {
     CHECK(!bikeTasks);
     // Physical punch knockdown reuses the native fall/flight ownership path.
     Setup();Tick();const float uppercut[3]{0,4,2};const Vec original=Position(npc);
-    CHECK(KnockdownFromPunch(npc,uppercut)&&fallCalls==1&&timer==1000);
+    CHECK(KnockdownFromPunch(npc,uppercut)&&fallCalls==0);
     CHECK(Length(Read<Vec>(npc,0x68)-Vec{0,.08f,.04f})<.0001f);
     CHECK(Length(Position(npc)-original)<.0001f&&!npcgrab::ClaimedHands());
     OnCalculateVelocity(npc);CHECK(Length(Read<Vec>(npc,0x68)-Vec{0,.08f,.04f})<.0001f);
+    for (auto& flight:flights) if (flight.ped==npc) flight.fallAfter=Now()-.01;
+    OnCalculateVelocity(npc);CHECK(fallCalls==1&&timer==1000);
     const int before=allocations;const float hook[3]{-1.8f,0,.2f};
     CHECK(KnockdownFromPunch(npc,hook)&&allocations==before&&fallCalls==1);
     CHECK(Read<Vec>(npc,0x68).x<-.035f);
@@ -673,7 +675,7 @@ int main() {
     Setup();Tick();punchReactionVtables[0]=npcMatrix;
     Write<void*>(fall,0,npcMatrix);Write<void*>(intelligence,8,fall);
     const char* why{};
-    CHECK(KnockdownFromPunch(npc,uppercut,&why)&&fallCalls==1&&!std::strcmp(why,"applied"));
+    CHECK(KnockdownFromPunch(npc,uppercut,&why)&&fallCalls==0&&!std::strcmp(why,"applied"));
     punchReactionVtables[0]=nullptr;Write<void*>(fall,0,nullptr);
     Setup();Tick();Seat();CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
     Setup();Tick();Write(npc,0x6ac,0.f);CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
@@ -691,6 +693,7 @@ int main() {
     // Jab combos never shove on the first hit; force is earned per target.
     const float forwardJab[3]{0,1,0};
     Setup();Tick();RecordJab(npc,forwardJab,6.f);CHECK(Length(Read<Vec>(npc,0x68))==0);
+    RecordJab(npc,forwardJab,6.f);CHECK(Length(Read<Vec>(npc,0x68))==0);
     RecordJab(npc,forwardJab,6.f);CHECK(Read<Vec>(npc,0x68).y>.02f&&!fallCalls);
     const float shove=Read<Vec>(npc,0x68).y;OnCalculateVelocity(npc);
     CHECK(Read<Vec>(npc,0x68).y==shove&&Read<void*>(intelligence,8)==nullptr);
@@ -700,10 +703,10 @@ int main() {
     CHECK(Length(Read<Vec>(npc,0x68))==0);
     Setup();Tick();RecordJab(npc,forwardJab,6.f);++flags[0];RecordJab(npc,forwardJab,6.f);
     CHECK(Length(Read<Vec>(npc,0x68))==0); // recycled pool reference cannot inherit a combo
-    Setup();Tick();Write<void*>(intelligence,8,fall);RecordJab(npc,forwardJab,6.f);RecordJab(npc,forwardJab,6.f);
+    Setup();Tick();Write<void*>(intelligence,8,fall);RecordJab(npc,forwardJab,6.f);RecordJab(npc,forwardJab,6.f);RecordJab(npc,forwardJab,6.f);
     CHECK(Length(Read<Vec>(npc,0x68))==0&&Read<void*>(intelligence,8)==fall);
     punch::JabCombo chain;
-    CHECK(chain.Hit(1,20)==0);CHECK(chain.Hit(1.2,6)>0);CHECK(chain.Hit(1.4,20)==0);
+    CHECK(chain.Hit(1,20)==0);CHECK(chain.Hit(1.2,6)==0);CHECK(chain.Hit(1.4,6)>0);CHECK(chain.Hit(1.6,20)==0);
     chain={};CHECK(chain.Hit(1,6)==0);CHECK(chain.Hit(2,6)==0); // timeout starts a new series
     std::puts("NPC grab: interactions, knockdowns and pool-safe force-weighted jab combos passed");
 }

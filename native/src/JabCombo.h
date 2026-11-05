@@ -11,7 +11,7 @@ struct JabCombo {
         if (!std::isfinite(speed) || speed<1.25f) { *this={};return 0; }
         if (last<=0 || now<last || now-last>.75) { count=0;energy=0; }
         last=now;++count;energy+=std::clamp(speed/4.f,.2f,1.5f);
-        if (count<2 || energy<1.8f) return 0;
+        if (count<3 || energy<2.7f) return 0;
         const float shove=std::clamp(.7f+.35f*energy,1.f,1.8f);
         count=0;energy=0;
         return shove;

@@ -107,7 +107,7 @@ void Setup() {
     static unsigned char contact[0x2c]{};g.gaTempSphereColPoints=contact;
     static void* ignore{};g.CWorld_pIgnoreEntity=&ignore;
     g.CWeapon_GenerateDamageEvent=[](void* victim,void* source,int weapon,int damage,int,int direction) {
-        CHECK(damage==10||damage==15||damage==20);++hits;
+        CHECK(damage==5||damage==7||damage==10||damage==15||damage==20);++hits;
         unsigned char event[0x50]{};Write(event,0x18,source);Write(event,0x24,weapon);
         Write<unsigned char>(event,0x2c,static_cast<unsigned char>(direction));Write<unsigned char>(event,0x2d,2);
         combat::OnComputeDamageAnim(event,victim,true);
@@ -213,7 +213,8 @@ int main() {
     CHECK(combat::physicalPunchVictim==nullptr); // scoped suppression cannot leak to the next event
     Move(-.05f,8);CHECK(hits==1); // one continuous pass cannot rehit every 40 cm
     Move(.05f);CHECK(hits==1);Move(.05f,6);CHECK(hits==1);
-    Move(.05f);CHECK(hits==2&&audioCalls==2); // full-speed return stroke also needs 40 cm
+    Move(.05f);CHECK(hits==1&&audioCalls==1); // returning the fist cannot hit again
+    Move(-.05f,8);CHECK(hits==2&&audioCalls==2); // a new forward stroke can hit
     Setup();melee::Update(false);for (int i=0;i<100;++i) { Move(-.04f);Move(.04f); } CHECK(hits==0);
     // Stop and trigger-release discard the unfinished stroke, not just its speed.
     Setup();melee::Update(false);Move(-.05f,5);Move(0,4);Move(-.05f,3);CHECK(hits==0);

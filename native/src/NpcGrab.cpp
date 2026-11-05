@@ -110,6 +110,7 @@ struct Hold {
     double until{};
     bool aggression{};
     bool punchFlight{};
+    double fallAfter{};
     bool Live(const Pool& p) const {
         return ped&&p.flags&&p.size>0&&p.size<=1024&&p.identity==pool&&p.objects==objects&&ref>=0&&(ref>>8)<p.size&&
             p.flags[ref>>8]==(ref&255)&&!(p.flags[ref>>8]&128)&&getPed(ref)==ped;
@@ -863,6 +864,24 @@ void OnCalculateVelocity(void* ped) {
     for (const auto& h:holds) if (!h.seated&&apply(h,false)) return;
     for (auto& h:flights) {
         if (now>=h.until) { h={};continue; }
+        if (h.ped==ped && h.punchFlight && h.fallAfter>0 && h.Live(pool) && !playerlife::Dead(ped)) {
+            void* manager=Manager(ped);void* current=manager?Read<void*>(manager,0):nullptr;
+            bool safe=manager&&!current;
+            if (current) for (void* table:punchReactionVtables)
+                if (table&&Read<void*>(current,0)==table) safe=true;
+            if (!safe) { h={};continue; }
+            if (now>=h.fallAfter) {
+                void* task=allocate(0x28);
+                if (!task) { h={};continue; }
+                const GameSymbols::Vec2 from{-physical.x,-physical.y};
+                const int direction=g.CPed_GetLocalDirection?std::clamp(g.CPed_GetLocalDirection(ped,&from),0,3):0;
+                fallCtor(task,direction,1000);setTask(manager,task,0,false);
+                h.task=Read<void*>(manager,0)==task?task:nullptr;h.fallAfter=0;
+                if (!h.task) { h={};continue; }
+            }
+            Write(ped,0x68,physical);Write(ped,0x6bc,physical.x);Write(ped,0x6c0,physical.y);
+            return;
+        }
         if (apply(h,true)) return;
     }
     for (auto& jab:jabStates) {
@@ -1025,7 +1044,7 @@ bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason,bo
     const bool dead=playerlife::Dead(ped);
     if (dead&&!aliveBeforeHit) return reject("already-dead");
     Hold* flight=nullptr;
-    for (auto& f:flights) if (f.ped==ped && f.Live(pool) && (OwnTask(f)||(dead&&f.punchFlight))) { flight=&f;break; }
+    for (auto& f:flights) if (f.ped==ped && f.Live(pool) && (OwnTask(f)||(f.punchFlight&&(dead||f.fallAfter>0)))) { flight=&f;break; }
     // Native GenerateDamageEvent can leave an ordinary hit reaction here.
     // Upgrade only those exact task classes, preserving arrest/death/holds.
     void* current=Read<void*>(manager,0);
@@ -1036,7 +1055,10 @@ bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason,bo
     if (!flight) {
         for (auto& f:flights) if (!f.Live(pool) || Now()>=f.until || (!OwnTask(f)&&!f.punchFlight)) { flight=&f;break; }
         if (!flight) return reject("flight-capacity");
-        if (!dead) {
+        if (!dead && speed.z>1.f) {
+            target.task=current;
+            target.fallAfter=Now()+.25;
+        } else if (!dead) {
             void* task=allocate(0x28);if (!task) return reject("allocation");
             const GameSymbols::Vec2 from{-speed.x,-speed.y};
             const int direction=g.CPed_GetLocalDirection?std::clamp(g.CPed_GetLocalDirection(ped,&from),0,3):0;
