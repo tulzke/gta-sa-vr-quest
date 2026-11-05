@@ -820,9 +820,13 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         if(slot<0||!g.CVehicle_IsDriver(seated,ped)||!Finite(Read<Vec>(seated,0x68))||Length(Read<Vec>(seated,0x68))>.01f) { Reset();return; }
         void* matrix=Read<void*>(seated,0x18);
         if(!matrix) { Reset();return; }
-        const Basis car=Matrix(matrix);
+        Basis car=Matrix(matrix);
         driving::WheelVisualState wheel{};
         driving::GetWheelVisualState(&wheel);
+        if(cockpitKind==8) {
+            float frame[12]{};if(!driving::GetIgnitionFrame(seated,wheel.bike,frame)){Reset();return;}
+            car={{frame[0],frame[1],frame[2]},{frame[3],frame[4],frame[5]},{frame[6],frame[7],frame[8]},{frame[9],frame[10],frame[11]}};
+        }
         const int model=Read<std::uint16_t>(seated,0x32);
         const int type=driving::GetActiveVehicleType();
         const int mode=driving::GetModeForVehicleType(type);
@@ -858,7 +862,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 const Vec center=g_keyStart.position+g_edit.delta;
                 const Vec r=rotate(g_keyStart.right),u=rotate(g_keyStart.forward),n=rotate(g_keyStart.up);
                 const float pose[12]{center.x,center.y,center.z,r.x,r.y,r.z,u.x,u.y,u.z,n.x,n.y,n.z};
-                driving::SetIgnitionPose(model,pose);g_editDirty=true;
+                driving::SetIgnitionPose(model,wheel.bike,pose);g_editDirty=true;
             }
             if(cockpitKind==5||cockpitKind==6) {
                 Basis current;if(!DebugHandBasis(hands[h],world[h],car,current)){Reset();return;}

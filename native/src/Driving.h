@@ -180,7 +180,8 @@ void AdjustRearMirrorFov(int direction);
 void GetRearMirrorCalibration(int model, int out[12]);
 void SetRearMirrorCalibration(int model, const int values[12]);
 
-void SetIgnitionPose(int model,const float pose[12]);
+bool GetIgnitionFrame(void* vehicle,bool bike,float out[12]);
+void SetIgnitionPose(int model,bool bike,const float pose[12]);
 int GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);
 
