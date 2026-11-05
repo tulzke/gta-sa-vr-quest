@@ -79,4 +79,12 @@ inline vehicledoors::Basis PipeHandFrame(Vec axis,Vec heading,float pitch,float 
 // contour of both BigHand*.uxrh pose-1 meshes (metres). The hand builder
 // maps local X to forward with a -0.055 m wrist adjustment and Y to -up.
 inline Vec GripPivotOffset(Vec forward,Vec up){return forward*(.09869f-.055f)-up*.01410f;}
+// Both baked Grip meshes have the thumb on positive local Z. Local Z is the
+// pipe axis, so reflecting it for the right hand turns the thumb downward.
+// Mirror the forward axis instead: handedness still differs, but the thumb
+// remains on the same side of the pipe for both hands.
+inline vehicledoors::Basis PipeGripMeshFrame(vehicledoors::Basis frame,int hand){
+    if(hand==1)frame.forward=frame.forward*(-1.f);
+    return frame;
+}
 }

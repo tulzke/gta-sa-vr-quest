@@ -9007,10 +9007,11 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             forward={hp[hand].climbForward[0],hp[hand].climbForward[1],hp[hand].climbForward[2]};
             right={hp[hand].climbRight[0],hp[hand].climbRight[1],hp[hand].climbRight[2]};
             up={hp[hand].climbUp[0],hp[hand].climbUp[1],hp[hand].climbUp[2]};
-            // PipeHandFrame's right axis has the opposite parity to the
-            // direct weapon-support frame. Correct both hands before the
-            // per-hand mesh mirroring, otherwise each looks like its opposite.
-            if(hand==1)right=vscale(right,-1.f);
+            // The two Grip meshes place their thumbs on the same local-Z
+            // side. Preserve that pipe-axis sign when mirroring the hand.
+            const auto frame=vehicleclimb::PipeGripMeshFrame(
+                {{right.x,right.y,right.z},{forward.x,forward.y,forward.z},{up.x,up.y,up.z},{}},hand);
+            forward={frame.forward.x,frame.forward.y,frame.forward.z};
             // Grip mesh pose 1: cross-section through local Z=0 gives the
             // centre of the finger opening at X=.09869, Y=.01410 metres.
             // UXR mapping below includes its existing -.055 m wrist offset.

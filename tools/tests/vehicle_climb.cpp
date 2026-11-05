@@ -45,12 +45,35 @@ double NowSeconds(){return testNow;}
 // PRODUCTION_PARACHUTE
 using namespace savr;
 using namespace savr::vehicleclimb;
+// ACTUAL_GRIP_THUMBS
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 char cars[110*0xc68]{},pool[32]{},matrix[64]{},door[64]{},ped[0xa00]{},pm[64]{};
 std::uint8_t flags[110];void* poolPtr=pool;void* ignored{};bool wall{};int moves{};
 xr::HandPose hands[2];
 void Tick(bool usable=true,std::uint64_t epoch=1,unsigned occupied=0){testNow+=.01;Update(usable&&!vrcam::ParachuteStateActive(),hands,epoch,occupied);physicalweapon::AutoEquipParachute();}
 int main(){
+    // The real left/right Grip meshes both place the thumb cluster at +Z.
+    // Apply the exact renderer frame and the UXR vertex mapping: both thumbs
+    // must end up above the fixed pipe anchor, with opposite mesh parity.
+    for(float angle:{0.f,45.f,90.f,180.f,270.f}){
+        const float radians=angle*.01745329252f;
+        const Vec heading{-std::sin(radians),std::cos(radians),0};
+        const auto left=PipeGripMeshFrame(PipeHandFrame({0,0,1},heading,0,0),0);
+        const auto right=PipeGripMeshFrame(PipeHandFrame({0,0,1},heading*(-1.f),0,0),1);
+        auto point=[](const vehicledoors::Basis& frame,Vec v){
+            return frame.forward*(v.x-.055f)+frame.right*v.z-frame.up*v.y-
+                GripPivotOffset(frame.forward,frame.up);
+        };
+        assert(point(left,thumb0).z>.01f&&point(right,thumb1).z>.01f);
+        assert(vehicledoors::Dot(vehicledoors::Cross(left.right,left.forward),left.up)*
+               vehicledoors::Dot(vehicledoors::Cross(right.right,right.forward),right.up)<0);
+    }
+    for(int calibration:{-90,0,90}){
+        const auto left=PipeGripMeshFrame(PipeHandFrame({0,0,1},{0,1,0},-float(calibration),-float(calibration)),0);
+        const auto right=PipeGripMeshFrame(PipeHandFrame({0,0,1},{0,-1,0},float(calibration),float(calibration)),1);
+        assert(Length(left.right-right.right)<.0001f);
+        assert(thumb0.z>.01f&&thumb1.z>.01f);
+    }
     const auto tiltA=PipeHandFrame({0,0,1},{0,1,.8f},10,20);
     const auto tiltB=PipeHandFrame({0,0,1},{0,1,-.8f},10,20);
     const auto yaw=PipeHandFrame({0,0,1},{1,0,.8f},10,20);
