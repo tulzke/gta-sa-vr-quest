@@ -204,6 +204,7 @@ def lifecycle():
     return r'''
 #include "Driving.h"
 #include "BikeSteering.h"
+#include "IgnitionState.h"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -214,6 +215,9 @@ std::atomic<bool> g_hornPressed{false};
 std::atomic<int> g_bicycleMode{BICYCLE_MOTION};
 WheelVisualState g_visual;
 void* g_grabVehicle{};
+void* g_ignitionVehicle{};
+ignition::HintState g_ignitionHint;
+ignition::Rotation g_ignitionRotation;
 ''' + globals_text + function('void ClearGrabStateLocked(') + r'''
 void ClearInteractionLocked(){ClearGrabStateLocked();}
 void UpdateBicycleGestureLocked(const xr::HandPose*){

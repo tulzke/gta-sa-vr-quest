@@ -895,7 +895,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         const int slot = holster::PointSlot(point);
         for (int hand=0; hand<kHandCount; ++hand) {
             if (!gHands[hand].valid || IsSupportHandLocked(hand) ||
-                (vehicleImmersive && seatWheel.grabbed[hand])) continue;
+                (vehicleImmersive && (seatWheel.grabbed[hand] || seatWheel.ignitionGrabbed[hand] || seatWheel.radioGrabbed[hand]))) continue;
             const bool returning = ValidSlot(gHeldSlot[hand]) && gHeldSlot[hand] == slot;
             const bool drawing = !ValidSlot(gHeldSlot[hand]) && holster::PointGrabbable(point) &&
                 OwnedConfiguredSlot(ped, slot) && (previousOccupied & (1u << slot)) == 0;
@@ -1205,7 +1205,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 (handledHands & (1u << hand)) != 0 ||
                 gHands[hand].grip < kGripClose || gGripLatched[hand] ||
                 (!gDualHoldEnabled && AnyHeldHandLocked() >= 0) ||
-                (vehicleImmersive && seatWheel.grabbed[hand]))
+                (vehicleImmersive && (seatWheel.grabbed[hand] || seatWheel.ignitionGrabbed[hand] || seatWheel.radioGrabbed[hand])))
                 continue;
             float closestDistance = holster::GrabRadiusMetres();
             const int closestSlot = ClosestAvailableHolsterSlotLocked(

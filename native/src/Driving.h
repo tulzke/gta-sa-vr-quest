@@ -113,6 +113,10 @@ struct WheelVisualState {
     float handleRight[2][3]{};
     float handleUp[2][3]{};
     float handleForward[2][3]{};
+    bool radioVisible{};
+    bool radioGrabbed[2]{};
+    float radioCenter[3]{}, radioRight[3]{}, radioUp[3]{}, radioNormal[3]{};
+    float radioAngle{};
     bool ignitionVisible{};
     bool ignitionGrabbed[2]{};
     bool ignitionReverseGrip[2]{};
@@ -182,6 +186,7 @@ void SetRearMirrorCalibration(int model, const int values[12]);
 
 bool GetIgnitionFrame(void* vehicle,bool bike,float out[12]);
 void SetIgnitionPose(int model,bool bike,const float pose[12]);
+void SetRadioPose(int model,const float pose[12]);
 int GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);
 

@@ -6223,7 +6223,8 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     // deadlock while still publishing it into this exact ring slot below.
     driving::GetWheelVisualState(&drivingWheel);
     drivingWheel.trackedHandsEnabled = driving::ShouldUseTrackedHands() ||
-        drivingWheel.ignitionGrabbed[0] || drivingWheel.ignitionGrabbed[1];
+        drivingWheel.ignitionGrabbed[0] || drivingWheel.ignitionGrabbed[1] ||
+        drivingWheel.radioGrabbed[0] || drivingWheel.radioGrabbed[1];
     g_lastDashModelId.store(
         (drivingWheel.active || drivingWheel.dashAnchorValid)
             ? drivingWheel.modelId : -1,
@@ -8872,6 +8873,17 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                 forward=RotateAroundAxis(forward,axes[axis],rotation);
             }
             grip=trig=0.0f;
+        } else if (drivingWheel.radioGrabbed[hand]) {
+            pos={drivingWheel.radioCenter[0],drivingWheel.radioCenter[1],drivingWheel.radioCenter[2]};
+            forward={drivingWheel.radioNormal[0],drivingWheel.radioNormal[1],drivingWheel.radioNormal[2]};
+            const XrVector3f ku{drivingWheel.radioUp[0],drivingWheel.radioUp[1],drivingWheel.radioUp[2]};
+            const XrVector3f kr{drivingWheel.radioRight[0],drivingWheel.radioRight[1],drivingWheel.radioRight[2]};
+            up=vnorm(vadd(vscale(ku,std::cos(drivingWheel.radioAngle)),vscale(kr,std::sin(drivingWheel.radioAngle))));
+            right=vnorm(vcross(up,forward));
+            if (hand==0) right=vscale(right,-1.f);
+            pos=vadd(pos,vadd(vscale(forward,-.0975f),vscale(up,.045f)));
+            pos=vadd(pos,vscale(right,hand==0?.025f:-.025f));
+            grip=trig=0.0f;
         } else if (steeringHand) {
             // reference Quest build's car socket is a RenderWare matrix whose Right axis lies
             // along the rim and Forward axis is the wheel normal. Reproduce its
@@ -10844,6 +10856,20 @@ void DrawDrivingBoxes(const float* mvp, const float* vertices, int vertexCount,
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
+void DrawRadioKnob(const float* mvp,const driving::WheelVisualState& w) {
+    if (!w.radioVisible) return;
+    const XrVector3f c{w.radioCenter[0],w.radioCenter[1],w.radioCenter[2]};
+    const XrVector3f r=vnorm({w.radioRight[0],w.radioRight[1],w.radioRight[2]});
+    const XrVector3f u=vnorm({w.radioUp[0],w.radioUp[1],w.radioUp[2]});
+    const XrVector3f n=vnorm({w.radioNormal[0],w.radioNormal[1],w.radioNormal[2]});
+    float boxes[8*3*3]{}; unsigned short indices[36*3]{}; int vc=0,ic=0;
+    const XrVector3f ru=vadd(vscale(u,std::cos(w.radioAngle)),vscale(r,std::sin(w.radioAngle)));
+    const XrVector3f rr=vadd(vscale(r,std::cos(w.radioAngle)),vscale(u,-std::sin(w.radioAngle)));
+    AppendDrivingBox(boxes,vc,indices,ic,c,r,u,n,.035f,.035f,.006f);
+    AppendDrivingBox(boxes,vc,indices,ic,vadd(c,vscale(n,-.012f)),rr,ru,n,.012f,.026f,.009f);
+    DrawDrivingBoxes(mvp,boxes,vc,indices,ic,.65f,.65f,.65f);
+}
+
 void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
     if (!w.ignitionVisible) return;
     const XrVector3f c{w.ignitionCenter[0],w.ignitionCenter[1],w.ignitionCenter[2]};
@@ -11778,7 +11804,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // the closed hands are drawn over it at the exact animated rim sockets.
     if (trackedVisuals && drivingWheel.active)
         DrawImmersiveDrivingWheel(mvp, drivingWheel);
-    if (!scope.active) DrawIgnition(mvp,drivingWheel);
+    if (!scope.active) { DrawIgnition(mvp,drivingWheel); DrawRadioKnob(mvp,drivingWheel); }
     // Never turn the optional highlight into a wallhack: if the shared game
     // depth cannot be copied this frame, omit it instead of drawing on top.
     if (usingGameDepth)

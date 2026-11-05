@@ -8,6 +8,7 @@
 #include "QuadHandlebar.h"
 #include "MissionComfort.h"
 #include "IgnitionState.h"
+#include "RadioKnobState.h"
 
 #include "Locomotion.h"
 
@@ -282,6 +283,8 @@ struct ModelCalibration {
     float ignitionPose[12]{};
     bool ignitionPoseSet{};
     bool ignitionPoseLean{};
+    float radioPose[12]{};
+    bool radioPoseSet{};
     int rearMirror[12]{0, 45, 110, 0, 0, 0, 0, -200, 100, 0, 0, 0};
     int acceleratorMode{BIKE_ACCEL_HOLD_TRIGGER};
 };
@@ -298,6 +301,11 @@ int ClampWheelCalibration(int field, int value) {
 std::mutex g_modelMutex;
 std::map<int, ModelCalibration> g_modelCalibration;
 
+radio::KnobState g_radioKnob;
+int g_radioKnobHand=-1;
+void* g_radioKnobVehicle{};
+bool g_radioGripDown[2]{true,true};
+std::atomic<int> g_radioKnobNext{0}, g_radioKnobPrev{0};
 ignition::Rotation g_ignitionRotation;
 ignition::HintState g_ignitionHint;
 void* g_ignitionVehicle{};
@@ -307,7 +315,7 @@ bool g_ignitionReverseGrip[2]{};
 
 void PublishIgnitionPinch(const WheelVisualState& visual) {
     for (int hand=0; hand<2; ++hand) {
-        const bool held=visual.ignitionGrabbed[hand];
+        const bool held=visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand];
         if (held!=g_ignitionPinchOwned[hand]) {
             xr::SetHandPinchAmount(hand,held?1.0f:0.0f);
             g_ignitionPinchOwned[hand]=held;
@@ -586,6 +594,9 @@ void Save() {
             for (int field=0; field<6; ++field)
                 std::fprintf(file, "Ignition.%d.%d=%d\n", model, field,
                              calibration.ignition[field]);
+            if (calibration.radioPoseSet)
+                for (int field=0;field<12;++field)
+                    std::fprintf(file,"RadioPose.%d.%d=%.9g\n",model,field,calibration.radioPose[field]);
             if (calibration.ignitionPoseSet) {
                 for (int field=0;field<12;++field)
                     std::fprintf(file,"IgnitionPose.%d.%d=%.9g\n",model,field,calibration.ignitionPose[field]);
@@ -751,6 +762,12 @@ void Load() {
                     g_modelCalibration[model].ignitionPoseLean=value!=0; continue;
                 }
                 float poseValue{};
+                if (std::sscanf(line,"RadioPose.%d.%d=%f",&model,&axis,&poseValue)==3 &&
+                    model>=400 && model<=611 && axis>=0 && axis<12 && std::isfinite(poseValue)) {
+                    g_modelCalibration[model].radioPose[axis]=poseValue;
+                    if (axis==11) g_modelCalibration[model].radioPoseSet=true;
+                    continue;
+                }
                 if (std::sscanf(line,"IgnitionPose.%d.%d=%f",&model,&axis,&poseValue)==3 &&
                     model>=400 && model<=611 && axis>=0 && axis<12 && std::isfinite(poseValue)) {
                     g_modelCalibration[model].ignitionPose[axis]=poseValue;
@@ -1095,8 +1112,12 @@ void UpdateBicycleGestureLocked(const xr::HandPose poses[2]) {
     g_bicycleGestureActive=true;
 }
 
-void ClearInteractionLocked() {
+void ClearInteractionLocked(bool preserveRadio=false) {
     g_visual = WheelVisualState{};
+    if (!preserveRadio) {
+        g_radioKnob.Reset(); g_radioKnobHand=-1;
+        g_radioGripDown[0]=g_radioGripDown[1]=true;
+    }
     PublishIgnitionPinch(g_visual);
     ClearGrabStateLocked();
 }
@@ -1927,6 +1948,80 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
     }
 }
 
+void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
+                     const xr::InputState& input, const xr::HandPose poses[2],
+                     unsigned occupied, bool preview=false) {
+    if (!vehicle || IsBicycleModel(visual.modelId) || !g.FindPlayerPed ||
+        !g.CVehicle_IsDriver || !g.CVehicle_IsDriver(vehicle,g.FindPlayerPed(-1))) {
+        g_radioKnob.Reset(); g_radioKnobHand=-1; return;
+    }
+    V3 right{visual.right[0],visual.right[1],visual.right[2]};
+    V3 up{visual.up[0],visual.up[1],visual.up[2]};
+    V3 normal{visual.normal[0],visual.normal[1],visual.normal[2]};
+    V3 center{visual.center[0],visual.center[1],visual.center[2]};
+    // Above the key, beyond the steering rim and its hand sockets.
+    center=center+right*(visual.radius+.22f)-up*(visual.radius*.15f);
+    float pose[12]{}; bool poseSet=false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        const auto it=g_modelCalibration.find(visual.modelId);
+        if (it!=g_modelCalibration.end() && it->second.radioPoseSet) {
+            std::copy_n(it->second.radioPose,12,pose); poseSet=true;
+        }
+    }
+    if (poseSet) {
+        V3 vr{},vf{},vu{},vp{};
+        if (ReadIgnitionFrame(vehicle,visual.bike,&vr,&vf,&vu,&vp)) {
+            const auto world=[&](int i) {return vp+vr*pose[i]+vf*pose[i+1]+vu*pose[i+2];};
+            V3 c{},r{},u{},n{};
+            if (WorldPointToTracking(world(0),&c) && WorldPointToTracking(world(0)+world(3)-vp,&r) &&
+                WorldPointToTracking(world(0)+world(6)-vp,&u) && WorldPointToTracking(world(0)+world(9)-vp,&n)) {
+                center=c; right=Normalized(r-c); up=Normalized(u-c); normal=Normalized(n-c);
+            }
+        }
+    }
+    if (ignition::FlipFaceNormal(Dot(Cross(right,up),normal))) normal=normal*-1.0f;
+    visual.radioVisible=true;
+    const V3 vectors[4]{center,right,up,normal};
+    float* fields[4]{visual.radioCenter,visual.radioRight,visual.radioUp,visual.radioNormal};
+    for (int i=0;i<4;++i) { fields[i][0]=vectors[i].x; fields[i][1]=vectors[i].y; fields[i][2]=vectors[i].z; }
+    if (preview) { g_radioKnob.Reset(); g_radioKnobHand=-1; return; }
+    if (g_radioKnobVehicle!=vehicle) {
+        g_radioKnobVehicle=vehicle; g_radioKnob.Reset(); g_radioKnobHand=-1;
+        g_radioGripDown[0]=g_radioGripDown[1]=true;
+        g_radioKnobNext.store(0); g_radioKnobPrev.store(0);
+    }
+    for (int h=0;h<2;++h) {
+        const V3 p{poses[h].gripPos[0],poses[h].gripPos[1],poses[h].gripPos[2]};
+        const bool valid=poses[h].valid && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
+        if (g_radioKnobHand==h && (!valid || input.grip[h]<=.30f || (occupied&(1u<<h)))) {
+            g_radioKnob.Reset(); g_radioKnobHand=-1;
+        }
+        if (g_radioKnobHand<0 && valid && !(occupied&(1u<<h)) && !g_radioGripDown[h] &&
+            input.grip[h]>=.65f && Length(p-center)<.10f) g_radioKnobHand=h;
+        if (input.grip[h]<=.30f) g_radioGripDown[h]=false;
+        else if (input.grip[h]>=.65f) g_radioGripDown[h]=true;
+    }
+    if (g_radioKnobHand>=0) {
+        const int hand=g_radioKnobHand;
+        float q[4]{};
+        if (!NormalizeQuaternion(poses[hand].gripOri,q)) { g_radioKnob.Reset(); g_radioKnobHand=-1; }
+        else {
+            const V3 v{q[0],q[1],q[2]};
+            const V3 axis=V3{0,1,0}+Cross(v,Cross(v,V3{0,1,0})+V3{0,1,0}*q[3])*2.0f;
+            constexpr float deg=180.0f/3.14159265358979323846f;
+            const int step=g_radioKnob.Step(true,-PlanarAngle(axis,right,up)*deg);
+            if (step) {
+                auto& pending=step>0?g_radioKnobNext:g_radioKnobPrev;
+                pending.fetch_add(1,std::memory_order_release);
+                xr::TriggerHaptic(hand,.3f,0.f,30.f);
+            }
+            visual.radioGrabbed[hand]=true;
+            visual.radioAngle=g_radioKnob.angle/deg;
+        }
+    }
+}
+
 // Android SA 2.11 polls touch widgets inside these queries. Hook the queries,
 // rather than trusting the Java gamepad provider, so Quest input is authoritative.
 using AxisQueryFn=int(*)(void*);
@@ -2453,7 +2548,13 @@ bool OnGetSprint(void* pad,int sprintType) {
     return g_origSprint?g_origSprint(pad,sprintType):false;
 }
 
+bool ConsumeRadioEvent(std::atomic<int>& pending) {
+    int count=pending.load(std::memory_order_acquire);
+    while (count>0) if (pending.compare_exchange_weak(count,count-1,std::memory_order_acq_rel)) return true;
+    return false;
+}
 bool OnNextStationJustUp(void* pad) {
+    if (VrGameplayInputAllowed() && HasPlayerVehicle() && ConsumeRadioEvent(g_radioKnobNext)) return true;
     if (VrGameplayInputAllowed() && HasPlayerVehicle() &&
         g_radioChangeJustPressed.exchange(false, std::memory_order_acq_rel)) {
         LOGI("[driving] Touch X -> next radio station");
@@ -2462,6 +2563,7 @@ bool OnNextStationJustUp(void* pad) {
     return g_origNextStation ? g_origNextStation(pad) : false;
 }
 bool OnLastStationJustUp(void* pad) {
+    if (VrGameplayInputAllowed() && HasPlayerVehicle() && ConsumeRadioEvent(g_radioKnobPrev)) return true;
     if (VrGameplayInputAllowed() && HasPlayerVehicle() &&
         g_radioPrevJustPressed.exchange(false, std::memory_order_acq_rel)) {
         LOGI("[driving] grip+X -> previous radio station");
@@ -3570,6 +3672,11 @@ void SetIgnitionPose(int model,bool bike,const float pose[12]) {
     std::lock_guard<std::mutex> lock(g_modelMutex);
     auto& c=g_modelCalibration[model]; std::copy_n(pose,12,c.ignitionPose); c.ignitionPoseSet=true; c.ignitionPoseLean=bike&&!IsQuadBikeModelId(model);
 }
+void SetRadioPose(int model,const float pose[12]) {
+    if (model<400||model>611) return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    auto& c=g_modelCalibration[model]; std::copy_n(pose,12,c.radioPose); c.radioPoseSet=true;
+}
 int GetIgnitionCalibration(int field) {
     if (field<0||field>=6) return 0;
     const int model=GetActiveVehicleModelId();
@@ -3962,6 +4069,7 @@ void ResetVehiclePreset(int vehicleType) {
                 std::fill_n(calibration.wheel,
                             WHEEL_CAL_FIELD_COUNT,0);
         }
+        calibration.radioPoseSet=false;
         calibration.ignitionPoseSet=false;
         std::fill_n(calibration.ignition,6,0);
         calibration.acceleratorMode=BIKE_ACCEL_HOLD_TRIGGER;
@@ -4232,6 +4340,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     } else if (!radioAllowed) {
         g_radioChangeJustPressed.store(false, std::memory_order_release);
         g_radioPrevJustPressed.store(false, std::memory_order_release);
+        g_radioKnobNext.store(0); g_radioKnobPrev.store(0);
     }
 
     // Visible radio navigation (player request): show the station name in
@@ -4374,7 +4483,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
                            ? BuildWheelTracking(&anchor)
                            : (appearance==2 ? (IsQuadBikeModelId(activeModel)?BuildQuadTracking(&anchor):BuildBikeTracking(&anchor))
                                             : false));
-        ClearInteractionLocked();
+        ClearInteractionLocked(gameplay && !blocked && anchorBuilt && (activeType==VEHICLE_CAR||activeType==VEHICLE_BIKE));
         if (anchorBuilt) {
             anchor.active=false;
             anchor.visible=false;
@@ -4385,8 +4494,11 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
             anchor.throttleVisual=0.0f;
             if ((!blocked||preview) && (activeType==VEHICLE_CAR||activeType==VEHICLE_BIKE)) {
                 xr::HandPose hands[2]{}; xr::GetHandPoses(hands);
-                UpdateIgnition(anchor,activeVehicle,input,hands,
-                    physicalweapon::HeldHandMaskRelaxed()|vehicledoors::ClaimedHands(),preview);
+                const unsigned occupied=physicalweapon::HeldHandMaskRelaxed()|vehicledoors::ClaimedHands();
+                UpdateIgnition(anchor,activeVehicle,input,hands,occupied | (g_radioKnobHand>=0 ? 1u<<g_radioKnobHand : 0u),preview);
+                unsigned radioOccupied=occupied;
+                for(int h=0;h<2;++h) if(anchor.ignitionGrabbed[h]) radioOccupied|=1u<<h;
+                UpdateRadioKnob(anchor,activeVehicle,input,hands,radioOccupied,preview);
             }
             g_visual=anchor;
         }
@@ -4443,6 +4555,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
         if (activeType==VEHICLE_CAR||activeType==VEHICLE_BIKE) {
             xr::HandPose hands[2]{}; xr::GetHandPoses(hands);
             UpdateIgnition(visual,activeVehicle,input,hands,0,true);
+            UpdateRadioKnob(visual,activeVehicle,input,hands,0,true);
         }
         g_visual=visual;
         return;
@@ -4467,7 +4580,10 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     const unsigned int weaponHands = physicalweapon::HeldHandMaskRelaxed() | vehicledoors::ClaimedHands();
     unsigned ignitionOccupied=weaponHands;
     for (int h=0;h<2;++h) if (g_grabbed[h]) ignitionOccupied|=1u<<h;
-    UpdateIgnition(visual,activeVehicle,input,poses,ignitionOccupied);
+    UpdateIgnition(visual,activeVehicle,input,poses,ignitionOccupied | (g_radioKnobHand>=0 ? 1u<<g_radioKnobHand : 0u));
+    unsigned radioOccupied=ignitionOccupied;
+    for (int h=0;h<2;++h) if (visual.ignitionGrabbed[h]) radioOccupied|=1u<<h;
+    UpdateRadioKnob(visual,activeVehicle,input,poses,radioOccupied);
     for (int hand=0;hand<2;++hand) {
         positions[hand]={poses[hand].gripPos[0],poses[hand].gripPos[1],poses[hand].gripPos[2]};
         poseValid[hand]=poses[hand].valid&&std::isfinite(positions[hand].x)&&
@@ -4476,7 +4592,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
                          visual.handlePosition[hand][1],
                          visual.handlePosition[hand][2]};
         const float distance=poseValid[hand]?Length(positions[hand]-neutral):1000.0f;
-        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand];
+        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand];
         if (g_grabbed[hand]&&(!poseValid[hand]||input.grip[hand]<=0.30f||
                               holdsWeapon)) {
             g_grabbed[hand]=false; g_angleValid[hand]=false;
