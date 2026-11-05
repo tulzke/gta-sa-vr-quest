@@ -1,5 +1,6 @@
 #include "Melee.h"
 #include "CombatPolicy.h"
+#include "PunchTrajectory.h"
 
 #include "Log.h"
 #include "PhysicalWeapon.h"
@@ -134,6 +135,7 @@ struct Motion {
     double previousAt{};
     combatpolicy::Swing swing{};
     V3 previousDirection{};
+    punch::Trajectory trajectory{};
 };
 
 Motion gMotion[physicalweapon::kHandCount]{};
@@ -452,7 +454,8 @@ bool StealthKnife(void* player,void* target,int weaponType) {
 }
 
 void ApplyContact(void* player, int hand, int weaponType, float speed,
-                  V3 root, void* target, const ColPoint& contact) {
+                  V3 root, void* target, const ColPoint& contact,
+                  punch::Kind punchKind=punch::Kind::Jab,V3 worldTravel={}) {
     // These strict type checks are part of the ABI boundary: GenerateDamageEvent
     // immediately dereferences CPed-only fields and must never see another class.
     const int type = EntityType(target);
@@ -496,8 +499,25 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
             target, player, weaponType, finalDamage, piece, direction);
         // GenerateDamageEvent handles damage/reactions but never calls the
         // audio path normally owned by FireMelee. Our physical fists bypass it.
-        if (accepted && weaponType<=1 && gPedAudioEvent)
-            gPedAudioEvent(static_cast<char*>(target)+0x198,65,0.f,1.f,player,0,0,0);
+        if (accepted && weaponType<=1 && gPedAudioEvent) {
+            const bool heavy=punchKind!=punch::Kind::Jab;
+            // Stock martial punch + a quiet, lower-pitched knock-down body
+            // accent. A jab keeps the ordinary high-unarmed impact (65).
+            gPedAudioEvent(static_cast<char*>(player)+0x198,heavy?67:65,
+                heavy?2.f:0.f,1.f,target,0,0,0);
+            if (heavy) gPedAudioEvent(static_cast<char*>(player)+0x198,121,-5.f,.9f,target,0,0,0);
+        }
+        if (accepted && weaponType<=1 && piece!=7 && piece!=8 && punchKind!=punch::Kind::Jab) {
+            V3 horizontal=punchKind==punch::Kind::Uppercut
+                ?EntityPosition(target)-EntityPosition(player):worldTravel;
+            horizontal.z=0;horizontal=Normalized(horizontal);
+            if (LengthSquared(horizontal)>.5f) {
+                const float push=punchKind==punch::Kind::Uppercut?4.f:1.8f;
+                const float velocity[3]{horizontal.x*push,horizontal.y*push,
+                    punchKind==punch::Kind::Uppercut?5.f:.2f};
+                npcgrab::KnockdownFromPunch(target,velocity);
+            }
+        }
     } else if (type == kEntityVehicle) {
         g.CVehicle_InflictDamage(target, player, weaponType,
                                  static_cast<float>(damage), ToGame(impact));
@@ -692,6 +712,7 @@ void Update(bool interactionsBlocked) {
         // Recenter/tracking-loss jumps must never become superhuman attacks.
         if (Length(tipTravel) > 0.65f || Length(rootTravel) > .35f) {
             motion.swing={};
+            motion.trajectory={};motion.previousDirection={};
             motion.previousRoot = segment.root;
             motion.previousTip = segment.tip;
             motion.previousAt = now;
@@ -711,9 +732,13 @@ void Update(bool interactionsBlocked) {
         const V3 direction=Normalized(strokeTravel);
         const float directionCos=direction.x*motion.previousDirection.x+
             direction.y*motion.previousDirection.y+direction.z*motion.previousDirection.z;
-        if (segment.enabled)
+        if (!segment.enabled || strokeSpeed<threshold*.4f || directionCos<.15f)
+            motion.trajectory={};
+        if (segment.enabled) {
             motion.swing.Sample(strokeSpeed,threshold,Length(strokeTravel),directionCos);
-        else motion.swing={};
+            if (!motion.swing.spent)
+                motion.trajectory.Add({strokeTravel.x,strokeTravel.y,strokeTravel.z});
+        } else motion.swing={};
         motion.previousDirection=direction;
         if (segment.enabled && motion.swing.Ready(strokeSpeed,threshold) && deliberate) {
             V3 rootStart{}, rootEnd{}, tipStart{}, tipEnd{};
@@ -726,9 +751,14 @@ void Update(bool interactionsBlocked) {
                 if (FindContact(player, segment.weaponType,hand,
                                 rootStart, rootEnd, tipStart, tipEnd,
                                 target, contact)) {
+                    punch::Kind kind=punch::Kind::Jab;
+                    if (fist) {
+                        const V3 right=Normalized(RotateQuaternion(orientation,{1,0,0}));
+                        kind=motion.trajectory.Classify({right.x,right.y,right.z});
+                    }
                     ApplyContact(player, hand, segment.weaponType,
                                  strokeSpeed,
-                                 rootEnd, target, contact);
+                                 rootEnd, target, contact,kind,rootEnd-rootStart);
                     motion.swing.Hit();
                 }
             }

@@ -9970,10 +9970,10 @@ in vec2 p; uniform vec4 uParams; out vec4 o;
 void main(){
     float r=length(p*uParams.zw)/max(.1,min(uParams.z,uParams.w));
     float red=uParams.x*smoothstep(.48,1.12,r);
-    float blue=uParams.y*smoothstep(.45,.90,r)*(1.0-.5*red);
-    float total=red+blue;
-    vec3 color=(vec3(1.0,.025,.015)*red+vec3(.025,.25,1.0)*blue)/max(total,.0001);
-    o=vec4(color,clamp(red*.55+blue*.42,0.0,.65));
+    float block=uParams.y*smoothstep(.45,.90,r)*(1.0-.5*red);
+    float total=red+block;
+    vec3 color=(vec3(1.0,.025,.015)*red+vec3(.55)*block)/max(total,.0001);
+    o=vec4(color,clamp(red*.55+block*.42,0.0,.65));
 })";
         const GLuint v=CompileHandShader(GL_VERTEX_SHADER,vs),f=CompileHandShader(GL_FRAGMENT_SHADER,fs);
         g_combatProg=glCreateProgram();glAttachShader(g_combatProg,v);glAttachShader(g_combatProg,f);

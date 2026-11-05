@@ -2,6 +2,7 @@
 #include "PhysicalWeapon.h"
 #include "Combat.h"
 #include "CombatPolicy.h"
+#include "PunchTrajectory.h"
 #include "Melee.h"
 #include "PlayerLife.h"
 #include <algorithm>
@@ -24,6 +25,9 @@ float head[3]{0,1.6f,0};
 int slot=-1,nativeCalls{},hits{},audioCalls{},hapticHand=-1;
 float amplitude{},duration{};
 float weaponTilt{};
+int thuds{},nativeHits{},voices{};
+int knockdowns{},heavySounds{},lastSound{};
+float knockVelocity[3]{};
 template<class T> void Write(void* p,int off,T value) { std::memcpy(static_cast<char*>(p)+off,&value,sizeof(value)); }
 namespace savr {
 GameSymbols g{};
@@ -57,6 +61,9 @@ namespace npcgrab {
 unsigned ClaimedHands() { return 0; }
 bool BlocksVehicleInteraction(void*,int) { return false; }
 bool BlocksNpcPunch(void*,int) { return false; }
+bool KnockdownFromPunch(void* target,const float velocity[3]) {
+    CHECK(target==enemy);++knockdowns;std::copy_n(velocity,3,knockVelocity);return true;
+}
 }
 namespace vrcam {
 bool TrackingPointToWorld(const float p[3],float w[3]) { w[0]=p[0];w[1]=-p[2];w[2]=p[1];return true; }
@@ -76,7 +83,8 @@ void Setup() {
     Write<unsigned char>(player,0x5a,3);Write<unsigned char>(enemy,0x5a,3);
     Write(enemy,8,combat::Vec{-.1f,1.2f,0});
     focused=snapshot=true;inVehicle=false;touching=true;epoch=1;testNow=1;slot=-1;
-    nativeCalls=hits=audioCalls=0;hapticHand=-1;amplitude=duration=weaponTilt=0;
+    nativeCalls=hits=audioCalls=thuds=nativeHits=voices=knockdowns=heavySounds=lastSound=0;
+    hapticHand=-1;amplitude=duration=weaponTilt=0;
     xr::poses[0]={};xr::poses[1]={};
     xr::poses[0].valid=true;xr::poses[0].grip=1;xr::poses[0].trigger=1;
     xr::poses[0].gripPos[0]=-.15f;xr::poses[0].gripPos[1]=1.4f;xr::poses[0].gripPos[2]=-.35f;
@@ -95,7 +103,20 @@ void Setup() {
     g.CVehicle_InflictDamage=[](void*,void*,int,float,GameSymbols::Vec3) {};
     g.CPed_GetLocalDirection=[](void*,const GameSymbols::Vec2*) { return 0; };
     g.CEntity_GetBoundCentre=[](void*,GameSymbols::Vec3* out) { *out={0,1.2f,1.4f}; };
-    melee::gPedAudioEvent=[](void*,int event,float,float,void*,unsigned char,int,unsigned) { CHECK(event==65);++audioCalls; };
+    g.AudioEngine=player;
+    g.CAudioEngine_ReportCollision=[](void*,void* a,void* b,unsigned char sa,unsigned char sb,
+        GameSymbols::Vec3*,GameSymbols::Vec3*,float force,float,unsigned char once,unsigned char loop) {
+        CHECK(a==player&&b==enemy&&sa==62&&sb==62&&force==.18f&&once==1&&loop==0);++thuds;
+    };
+    Write(enemy,0x198+0xa8,static_cast<void*>(enemy));
+    Write(player,0x198+0xa8,static_cast<void*>(player));
+    combat::pedHit=[](void*,int,void*,unsigned char,float,unsigned) { ++nativeHits; };
+    combat::sayEvent=[](void*,int,std::int16_t,unsigned,float,unsigned char,unsigned char,unsigned char)->std::uint16_t { ++voices;return 7; };
+    melee::gPedAudioEvent=[](void* entity,int event,float volume,float speed,void* physical,unsigned char,int,unsigned) {
+        CHECK(entity==player+0x198&&physical==enemy);
+        CHECK(event==65||event==67||event==121);lastSound=event;++audioCalls;
+        if (event==121) { CHECK(volume==-5.f&&speed==.9f);++heavySounds; }
+    };
     combat::Reset();combat::ready=true;combat::computeDamage=NativeDamage;melee::Reset();
 }
 void Raise() {
@@ -117,13 +138,24 @@ int main() {
     Setup();Raise();CHECK(amplitude==.16f&&duration==750);
     float x=1,y=1;combat::LimitMovement(&x,&y);CHECK(std::abs(std::hypot(x,y)-.35f)<.0001f&&x==y);
     Incoming();CHECK(nativeCalls==0&&combat::Read<float>(player,0x6ac)==100);
+    CHECK(thuds==1);
+    combat::OnPedHit(enemy+0x198,65,player,62,0,0);CHECK(nativeHits==0);
+    combat::OnPedHit(player+0x198,65,enemy,62,0,0);CHECK(nativeHits==1); // counterpunch retained
+    CHECK(combat::OnSayEvent(player+0x340,52,345,0,1,0,0,0)==0xffff&&voices==0);
+    CHECK(combat::OnSayEvent(player+0x340,52,89,0,1,0,0,0)==7&&voices==1);
+    CHECK(combat::OnSayEvent(enemy+0x340,52,345,0,1,0,0,0)==7&&voices==2);
     CHECK(amplitude==.9f&&duration==180&&hapticHand==0);CHECK(combat::GetFeedback().block==1);
     Incoming();CHECK(nativeCalls==0); // no cooldown on genuine incoming hits
     Setup();Raise();Incoming(5);CHECK(nativeCalls==1&&combat::Read<float>(player,0x6ac)==92);
+    CHECK(thuds==1&&combat::OnSayEvent(player+0x340,52,345,0,1,0,0,0)==7);
     testNow+=.02;combat::Update(false);CHECK(combat::GetFeedback().damage==1&&combat::GetFeedback().block>0);
     Setup();Raise();Incoming(4);CHECK(combat::Read<float>(player,0x6ac)==87);
     Setup();slot=1;Write(player,0x750,5);Raise();Incoming(5);CHECK(nativeCalls==0);
     Setup();Raise();Incoming(22);CHECK(nativeCalls==1); // bullets cannot be hand-blocked
+    Setup();Raise();Incoming();Incoming(22);
+    CHECK(combat::OnSayEvent(player+0x340,52,345,0,1,0,0,0)==7); // real follow-up damage is audible
+    Setup();Raise();Incoming();Write(player,0x6ac,90.f);
+    CHECK(combat::OnSayEvent(player+0x340,52,345,0,1,0,0,0)==7); // non-calculator health loss
     Setup();Raise();Incoming(0,7);CHECK(nativeCalls==1); // raised arms do not cover legs
     Setup();Raise();Write(enemy,8,combat::Vec{0,-1,0});Incoming();CHECK(nativeCalls==1);
     Setup();Raise();testNow+=.2;Incoming();CHECK(nativeCalls==1); // stale pose
@@ -179,5 +211,32 @@ int main() {
         xr::poses[0].gripOri[1]=std::sin(i*.1f);xr::poses[0].gripOri[3]=std::cos(i*.1f);
         testNow+=.02;melee::Update(false);
     } CHECK(hits==0); // wrist rotation in place cannot build a fist stroke
+    // A direct upward punch launches backward; a straight jab never knocks down.
+    Setup();melee::Update(false);
+    for (int i=0;i<8;++i) {
+        xr::poses[0].gripPos[1]+=.05f;xr::poses[0].gripPos[2]-=.02f;
+        testNow+=.02;melee::Update(false);
+    }
+    CHECK(hits==1&&knockdowns==1&&knockVelocity[1]>3.9f&&knockVelocity[2]==5.f&&heavySounds==1);
+    Setup();melee::Update(false);Move(-.05f,8);CHECK(knockdowns==0&&heavySounds==0);
+    // Horizontal arcs, both left and right, topple along their final tangent.
+    for (float side:{-1.f,1.f}) {
+        Setup();xr::poses[0].gripPos[0]=0;xr::poses[0].gripPos[2]=-.7f;melee::Update(false);
+        for (int i=1;i<=10;++i) {
+            const float angle=i*.12f;
+            xr::poses[0].gripPos[0]=side*.5f*std::sin(angle);
+            xr::poses[0].gripPos[2]=-.2f-.5f*std::cos(angle);
+            testNow+=.02;melee::Update(false);
+        }
+        if (!(hits==1&&knockdowns==1&&knockVelocity[0]*side>0&&knockVelocity[2]==.2f&&heavySounds==1))
+            std::fprintf(stderr,"hook side=%.1f hits=%d falls=%d velocity=(%.2f %.2f %.2f) heavy=%d path=%.3f turn=%.3f\n",
+                side,hits,knockdowns,knockVelocity[0],knockVelocity[1],knockVelocity[2],heavySounds,
+                melee::gMotion[0].trajectory.path,melee::gMotion[0].trajectory.turn);
+        CHECK(hits==1&&knockdowns==1&&knockVelocity[0]*side>0&&knockVelocity[2]==.2f&&heavySounds==1);
+    }
+    // A straight lateral strike cannot masquerade as a hook.
+    Setup();melee::Update(false);
+    for (int i=0;i<8;++i) { xr::poses[0].gripPos[0]+=.055f;testNow+=.02;melee::Update(false); }
+    CHECK(hits==1&&knockdowns==0&&heavySounds==0);
     std::puts("Combat: two-hand inward guard, slowdown, feedback and 40 cm stroke checks passed");
 }

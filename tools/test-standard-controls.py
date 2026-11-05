@@ -10,6 +10,7 @@ def fn(s,name):
  while d:d+=(s[p]=='{')-(s[p]=='}');p+=1
  return s[a:p]
 sprint=fn((R/'native/src/Driving.cpp').read_text(encoding='utf8'),'OnGetSprint')
+sprint_edge=fn((R/'native/src/Driving.cpp').read_text(encoding='utf8'),'OnSprintJustDown')
 assert 'ApplyWalkLimit' not in cam and 'ApplyWalkLimit' not in loc
 assert 'ApplyWalkLimit' not in (R/'native/src/main.cpp').read_text(encoding='utf8')
 code=r'''
@@ -34,7 +35,9 @@ std::atomic<bool> g_inputBlocked{};bool vehicle=false;int fallbackCalls=0;
 bool HasPlayerVehicle(){return vehicle;}
 bool Original(void*,int){++fallbackCalls;return true;}
 auto g_origSprint=Original;
-'''+sprint+r'''
+bool OriginalEdge(void*){++fallbackCalls;return true;}
+auto g_origSprintJustDown=OriginalEdge;
+'''+sprint+sprint_edge+r'''
 }}
 
 struct V3{float x{},y{},z{};};
@@ -63,6 +66,11 @@ V3 Sample(V3 vehiclePosition,V3 vehicleRight,V3 vehicleForward,V3 vehicleUp,bool
 }
 void Write(const char* text){FILE* f=std::fopen("test-locomotion.ini","w");CHECK(f);std::fputs(text,f);std::fclose(f);Load();}
 int main(){
+ // Legacy prompt releases would report sprint taps; VR never calls that path.
+ for(int i=0;i<200;++i)CHECK(!driving::OnSprintJustDown(nullptr));
+ CHECK(driving::fallbackCalls==0);
+ vrcam::stereo=false;CHECK(driving::OnSprintJustDown(nullptr));
+ CHECK(driving::fallbackCalls==1);vrcam::stereo=true;driving::fallbackCalls=0;
  Write("BindA=1\nBindB=3\nBindX=2\nBindY=4\nBindL3=5\nBindR3=0\nMovementMode=2\nGestureSwim=0\n");
  CHECK(GetButtonBinding(BIND_SRC_L3)==BIND_ACT_SPRINT && GetButtonBinding(BIND_SRC_R3)==BIND_ACT_CROUCH);
  CHECK(GetButtonBinding(BIND_SRC_A)==BIND_ACT_NONE && GetButtonBinding(BIND_SRC_X)==BIND_ACT_JUMP);

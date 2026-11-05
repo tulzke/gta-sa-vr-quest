@@ -362,6 +362,7 @@ bool ResolveGameSymbols(void* handle) {
         {"_ZN10CPlayerPed23MakeThisPedJoinOurGroupEP4CPed",                      reinterpret_cast<void**>(&g.CPlayerPed_MakeThisPedJoinOurGroup),    false},
         {"_ZN4CPad22GetGroupControlForwardEbb",                                  reinterpret_cast<void**>(&g.CPad_GetGroupControlForward),           false},
         {"_ZN4CPad9GetSprintEi",                                                 reinterpret_cast<void**>(&g.CPad_GetSprint),                        false},
+        {"_ZN4CPad14SprintJustDownEv",                                           reinterpret_cast<void**>(&g.CPad_SprintJustDown),                    false},
         {"_ZN4CPad17NextStationJustUpEv",                                        reinterpret_cast<void**>(&g.CPad_NextStationJustUp),                 false},
         {"_ZN4CPad17LastStationJustUpEv",                                        reinterpret_cast<void**>(&g.CPad_LastStationJustUp),                 false},
         {"_ZN12CAudioEngine24GetCurrentRadioStationIDEv",                        reinterpret_cast<void**>(&g.CAudioEngine_GetCurrentRadioStationID),  false},

@@ -980,6 +980,41 @@ void Install(void* handle) {
         cameraPeds,reinterpret_cast<void*>(&OnCheckCameraCollisionPeds),cameraPedsOriginal);
     LOGI("[npcgrab] available=%d",ready);
 }
+bool KnockdownFromPunch(void* ped,const float velocity[3]) {
+    if (!ready || !ped || !velocity || !xr::IsSessionFocused() ||
+        !g.FindPlayerPed || ped==g.FindPlayerPed(-1) || playerlife::Dead(ped) ||
+        Seated(ped) || Animating(ped) || Waiting(ped) || BikeSceneOf(ped)) return false;
+    const Vec speed{velocity[0],velocity[1],velocity[2]};
+    if (!Finite(speed) || Length(speed)>8.f || Length(speed)<.5f) return false;
+    Pool pool;if (!pool.Load()) return false;
+    Hold target{};
+    for (int i=0;i<pool.size;++i) {
+        if (pool.flags[i]&128) continue;
+        const int ref=(i<<8)|pool.flags[i];
+        if (getPed(ref)==ped) { target={ped,pool.identity,pool.objects,nullptr,ref,3};break; }
+    }
+    if (!target.Live(pool) || isPlayer(ped)) return false;
+    void* manager=Manager(ped);if (!manager) return false;
+    Hold* flight=nullptr;
+    for (auto& f:flights) if (f.ped==ped && f.Live(pool) && OwnTask(f)) { flight=&f;break; }
+    // Do not displace arrest, death, a grabbed NPC or a mission-owned physical task.
+    if (Read<void*>(manager,0) && !flight) return false;
+    if (!flight) {
+        for (auto& f:flights) if (!f.Live(pool) || Now()>=f.until || !OwnTask(f)) { flight=&f;break; }
+        if (!flight) return false;
+        void* task=allocate(0x28);if (!task) return false;
+        const GameSymbols::Vec2 from{-speed.x,-speed.y};
+        const int direction=g.CPed_GetLocalDirection?std::clamp(g.CPed_GetLocalDirection(ped,&from),0,3):0;
+        fallCtor(task,direction,1000);setTask(manager,task,0,false);
+        target.task=Read<void*>(manager,0)==task?task:nullptr;
+        if (!target.task) return false;
+        *flight=target;
+    }
+    flight->until=Now()+.85;
+    // Keep gravity/world collision; never teleport the ped or force a distance.
+    Write(ped,0x68,speed*.02f);
+    return true;
+}
 void OnDoorOpening(void* car) {
     if (!ready||!car||g.CVehicle_GetVehicleAppearance(car)!=1) return;
     const Vec speed=Read<Vec>(car,0x68);

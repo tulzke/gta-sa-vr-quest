@@ -2142,6 +2142,7 @@ using KnockOffAffectsPedFn=bool(*)(const void*,void*);
 AxisQueryFn g_origAccelerate{},g_origBrake{},g_origSteering{},
             g_origSteeringUpDown{},g_origHandBrake{};
 SprintFn g_origSprint{};
+ButtonQueryFn g_origSprintJustDown{};
 ButtonQueryFn g_origNextStation{};
 ButtonQueryFn g_origLastStation{};
 BikePreRenderFn g_origBikePreRender{};
@@ -2610,6 +2611,14 @@ bool OnGetSprint(void* pad,int sprintType) {
     }
     return g_origSprint?g_origSprint(pad,sprintType):false;
 }
+bool OnSprintJustDown(void* pad) {
+    // ControlButtonSprint polls this BEFORE GetSprint. Its retail body reads
+    // IsReleased(168/31), which the R2/L2 dialogue bridge can answer. Every
+    // trigger release then adds sprint energy even with the L3 toggle off.
+    // VR uses the persistent GetSprint toggle; it needs no native tap boost.
+    if (vrcam::IsStereoActive()) return false;
+    return g_origSprintJustDown?g_origSprintJustDown(pad):false;
+}
 
 bool ConsumeRadioEvent(std::atomic<int>& pending) {
     int count=pending.load(std::memory_order_acquire);
@@ -2776,7 +2785,8 @@ void* InstallHandBrakeTrampoline(void* target,void* replacement) {
     return trampoline;
 }
 
-void* InstallStationTrampoline(void* target, void* replacement) {
+void* InstallStationTrampoline(void* target, void* replacement,
+                               const char* label="CPad::NextStationJustUp") {
     if (!target || !replacement) return nullptr;
     constexpr std::uint32_t expected[4]={
         0x79422008u, // LDRH W8,[X0,#0x110]
@@ -2786,8 +2796,8 @@ void* InstallStationTrampoline(void* target, void* replacement) {
     };
     std::uint32_t observed[4]{}; std::memcpy(observed,target,sizeof(observed));
     if (std::memcmp(observed,expected,sizeof(observed))!=0) {
-        LOGE("[driving] CPad::NextStationJustUp prologue mismatch: %08x %08x %08x %08x",
-             observed[0],observed[1],observed[2],observed[3]); return nullptr;
+        LOGE("[driving] %s prologue mismatch: %08x %08x %08x %08x",
+             label,observed[0],observed[1],observed[2],observed[3]); return nullptr;
     }
     const std::uintptr_t pageSize=static_cast<std::uintptr_t>(sysconf(_SC_PAGESIZE));
     void* trampoline=mmap(nullptr,pageSize,PROT_READ|PROT_WRITE|PROT_EXEC,
@@ -2804,7 +2814,7 @@ void* InstallStationTrampoline(void* target, void* replacement) {
         reinterpret_cast<std::uintptr_t>(target)+16);
     __builtin___clear_cache(reinterpret_cast<char*>(t),reinterpret_cast<char*>(t)+32);
     if (!PatchAbsoluteJump(target,replacement)) { munmap(trampoline,pageSize); return nullptr; }
-    LOGI("[driving] CPad::NextStationJustUp VR X-button hook installed");
+    LOGI("[driving] %s VR query hook installed",label);
     return trampoline;
 }
 
@@ -3168,6 +3178,9 @@ void InstallPadHooks() {
         reinterpret_cast<void*>(g.CPad_GetHandBrake),reinterpret_cast<void*>(&OnGetHandBrake)));
     g_origSprint=reinterpret_cast<SprintFn>(InstallSprintTrampoline(
         reinterpret_cast<void*>(g.CPad_GetSprint),reinterpret_cast<void*>(&OnGetSprint)));
+    g_origSprintJustDown=reinterpret_cast<ButtonQueryFn>(InstallStationTrampoline(
+        reinterpret_cast<void*>(g.CPad_SprintJustDown),
+        reinterpret_cast<void*>(&OnSprintJustDown),"CPad::SprintJustDown"));
     g_origNextStation=reinterpret_cast<ButtonQueryFn>(InstallStationTrampoline(
         reinterpret_cast<void*>(g.CPad_NextStationJustUp),
         reinterpret_cast<void*>(&OnNextStationJustUp)));

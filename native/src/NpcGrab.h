@@ -11,4 +11,6 @@ void OnDoorOpening(void* vehicle);
 // Empty-hand contact with this car belongs to the nearby NPC interaction.
 bool BlocksVehicleInteraction(void* vehicle,int hand);
 bool BlocksNpcPunch(void* ped,int hand);
+// World-space metres/second. Native fall task and pool-safe flight lifetime.
+bool KnockdownFromPunch(void* ped,const float velocity[3]);
 }

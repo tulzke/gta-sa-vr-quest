@@ -45,6 +45,50 @@ float previousHealth{},previousArmour{};
 bool vitalsValid{},ready{};
 std::atomic<double> damageAt{},blockAt{};
 void (*computeDamage)(void*,void*,void*,bool){};
+void (*pedHit)(void*,int,void*,unsigned char,float,unsigned){};
+std::uint16_t (*sayEvent)(void*,int,std::int16_t,unsigned,float,unsigned char,unsigned char,unsigned char){};
+struct BlockSound {
+    void* player{};
+    void* source{};
+    double at{};
+    float health{},armour{};
+    bool full{};
+} blockSound;
+
+bool BlockSoundCurrent() {
+    const double age=Now()-blockSound.at;
+    void* player=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    return player && player==blockSound.player && blockSound.at>0 && age>=0 && age<.25 &&
+        xr::IsSessionFocused() &&
+        std::abs(Read<float>(player,0x6ac)-blockSound.health)<.01f &&
+        std::abs(Read<float>(player,0x6b4)-blockSound.armour)<.01f;
+}
+void OnPedHit(void* entity,int event,void* physical,unsigned char surface,float volume,unsigned delay) {
+    // FightHitPed emits the attacker's impact AFTER GenerateDamageEvent,
+    // even when its response contains no damage. Replace only that contact;
+    // CJ's counterpunches and other NPC impacts keep their own sounds.
+    if (BlockSoundCurrent() && physical==blockSound.player && entity &&
+        Read<void*>(entity,0xa8)==blockSound.source) return;
+    pedHit(entity,event,physical,surface,volume,delay);
+}
+std::uint16_t OnSayEvent(void* entity,int event,std::int16_t context,unsigned delay,
+                        float volume,unsigned char a,unsigned char b,unsigned char c) {
+    // Retail IsGlobalContextPain: contexts [0x154,0x167). No blanket speech mute.
+    if (blockSound.full && context>=0x154 && context<0x167 && BlockSoundCurrent() &&
+        entity==static_cast<char*>(blockSound.player)+0x340) return 0xffff;
+    return sayEvent(entity,event,context,delay,volume,a,b,c);
+}
+void ReportBlockThud(void* player,void* source,int hand) {
+    if (!g.AudioEngine || !g.CAudioEngine_ReportCollision) return;
+    const Vec d=guards[hand].direction;
+    GameSymbols::Vec3 point{headWorld.x+d.x*.3f,headWorld.y+d.y*.3f,headWorld.z-.2f};
+    GameSymbols::Vec3 normal{-d.x,-d.y,0};
+    // Low-force body/material collision: a dull thud with no injury sample.
+    // This is the same collision-audio endpoint used for physical props.
+    constexpr unsigned char body=62;
+    g.CAudioEngine_ReportCollision(g.AudioEngine,player,source,body,body,
+        &point,&normal,.18f,.5f,1,0);
+}
 
 Vec Position(void* entity) {
     void* matrix=Read<void*>(entity,0x18);
@@ -88,7 +132,12 @@ void OnComputeDamage(void* calculator,void* victim,void* response,bool speak) {
             }
         }
     }
-    if (chosen<0) { computeDamage(calculator,victim,response,speak);return; }
+    if (chosen<0) {
+        // Clear BEFORE native damage can request a pain voice. A real hit
+        // immediately following a block must always retain its reaction.
+        if (victim==player && !Read<unsigned char>(response,0xa) && damage>0) blockSound={};
+        computeDamage(calculator,victim,response,speak);return;
+    }
 
     const float fraction=combatpolicy::DamageFraction(weapon,guards[chosen].weapon);
     // Do not restore health after native damage: intercept before armour/death
@@ -104,14 +153,15 @@ void OnComputeDamage(void* calculator,void* victim,void* response,bool speak) {
         std::memcpy(reduced+8,&amount,sizeof(amount));
         computeDamage(reduced,victim,response,speak);
     }
+    blockSound={player,source,now,Read<float>(player,0x6ac),Read<float>(player,0x6b4),fraction==0};
+    ReportBlockThud(player,source,chosen);
     blockAt.store(now,std::memory_order_relaxed);
     guards[chosen].strongUntil=now+.22;
     xr::TriggerHaptic(chosen,.9f,0,180);
 }
 
-bool Hook(void* target) {
-    // Relocatable stack/register saves only; reject other game revisions.
-    constexpr std::uint32_t expected[]={0xd10283ff,0xa9067bfd,0xf9003bf7,0xa90857f6};
+bool Hook(void* target,const std::uint32_t (&expected)[4],void* replacement,void*& original) {
+    // Only fingerprints consisting of relocatable stack/register saves.
     if (!target || std::memcmp(target,expected,sizeof(expected))) return false;
     const long page=sysconf(_SC_PAGESIZE);
     if (page<=0) return false;
@@ -128,10 +178,10 @@ bool Hook(void* target) {
     if (mprotect(reinterpret_cast<void*>(start),end-start,PROT_READ|PROT_WRITE|PROT_EXEC)) {
         munmap(trampoline,page);return false;
     }
-    computeDamage=reinterpret_cast<decltype(computeDamage)>(trampoline);
+    original=trampoline;
     auto* code=static_cast<std::uint32_t*>(target);
-    const auto replacement=reinterpret_cast<std::uintptr_t>(&OnComputeDamage);
-    std::memcpy(code+2,&replacement,8);code[1]=0xd61f0220;
+    const auto addressOfHook=reinterpret_cast<std::uintptr_t>(replacement);
+    std::memcpy(code+2,&addressOfHook,8);code[1]=0xd61f0220;
     __atomic_store_n(code,0x58000051,__ATOMIC_RELEASE);
     __builtin___clear_cache(reinterpret_cast<char*>(code),reinterpret_cast<char*>(code)+16);
     return true;
@@ -139,11 +189,26 @@ bool Hook(void* target) {
 }
 
 void Install(void* handle) {
-    ready=Hook(dlsym(handle,"_ZN28CPedDamageResponseCalculator21ComputeDamageResponseEP4CPedR18CPedDamageResponseb"));
-    LOGI("[combat] melee block hook=%d",ready);
+    constexpr std::uint32_t damage[]={0xd10283ff,0xa9067bfd,0xf9003bf7,0xa90857f6};
+    constexpr std::uint32_t impact[]={0xd10203ff,0x6d012beb,0x6d0223e9,0xa9037bfd};
+    constexpr std::uint32_t speech[]={0xd101c3ff,0xa9017bfd,0xa9026ffc,0xa90367fa};
+    void* original{};
+    ready=Hook(dlsym(handle,"_ZN28CPedDamageResponseCalculator21ComputeDamageResponseEP4CPedR18CPedDamageResponseb"),
+        damage,reinterpret_cast<void*>(&OnComputeDamage),original);
+    computeDamage=reinterpret_cast<decltype(computeDamage)>(original);
+    original=nullptr;
+    [[maybe_unused]] const bool impactReady=Hook(dlsym(handle,"_ZN17CAEPedAudioEntity12HandlePedHitEiP9CPhysicalhfj"),
+        impact,reinterpret_cast<void*>(&OnPedHit),original);
+    pedHit=reinterpret_cast<decltype(pedHit)>(original);
+    original=nullptr;
+    [[maybe_unused]] const bool speechReady=Hook(dlsym(handle,"_ZN23CAEPedSpeechAudioEntity11AddSayEventEisjfhhh"),
+        speech,reinterpret_cast<void*>(&OnSayEvent),original);
+    sayEvent=reinterpret_cast<decltype(sayEvent)>(original);
+    LOGI("[combat] block=%d impact=%d speech=%d",ready,impactReady,speechReady);
 }
 void Reset() {
     ClearGuards();owner=nullptr;updated=0;vitalsValid=false;
+    blockSound={};
     damageAt.store(0,std::memory_order_relaxed);blockAt.store(0,std::memory_order_relaxed);
 }
 void Update(bool blocked) {

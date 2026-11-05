@@ -18,7 +18,7 @@ def replace_function(text, signature, replacement=''):
     return text[:start] + replacement + text[end:]
 
 combat = (ROOT / 'native/src/Combat.cpp').read_text(encoding='utf8')
-combat = replace_function(combat, 'bool Hook(void* target)')
+combat = replace_function(combat, 'bool Hook(void* target,')
 combat = replace_function(combat, 'void Install(void* handle)')
 combat = replace_function(combat, 'double Now()', 'double Now() { return testNow; }')
 melee = (ROOT / 'native/src/Melee.cpp').read_text(encoding='utf8')

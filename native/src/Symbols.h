@@ -659,6 +659,7 @@ struct GameSymbols {
     void* CPlayerPed_MakeThisPedJoinOurGroup;
     void* CPad_GetGroupControlForward;
     bool  (*CPad_GetSprint)(void* pad, int sprintType);
+    bool  (*CPad_SprintJustDown)(void* pad);
     bool  (*CPad_NextStationJustUp)(void* pad);
     bool  (*CPad_LastStationJustUp)(void* pad);
     signed char (*CAudioEngine_GetCurrentRadioStationID)(void* audioEngine);

@@ -656,5 +656,21 @@ int main() {
     bikeSeat(-1,{1,0,0});Write(car,0x68,Vec{.1f,0,0});Tick();CHECK(bikePool.Load());
     CHECK(!PunchBikeRider(bikePool,player,h,h,h+Vec{.2f,0,0}));
     CHECK(!bikeTasks);
-    std::puts("NPC grab: hit/wait/grip phases, traffic stop, timeout reaction, holds, throws, hints and bike jacking passed");
+    // Physical punch knockdown reuses the native fall/flight ownership path.
+    Setup();Tick();const float uppercut[3]{0,4,2};const Vec original=Position(npc);
+    CHECK(KnockdownFromPunch(npc,uppercut)&&fallCalls==1&&timer==1000);
+    CHECK(Length(Read<Vec>(npc,0x68)-Vec{0,.08f,.04f})<.0001f);
+    CHECK(Length(Position(npc)-original)<.0001f&&!npcgrab::ClaimedHands());
+    OnCalculateVelocity(npc);CHECK(Length(Read<Vec>(npc,0x68)-Vec{0,.08f,.04f})<.0001f);
+    const int before=allocations;const float hook[3]{-1.8f,0,.2f};
+    CHECK(KnockdownFromPunch(npc,hook)&&allocations==before&&fallCalls==1);
+    CHECK(Read<Vec>(npc,0x68).x<-.035f);
+    // Death/arrest/vehicle/held actors and stale pool slots are never replaced.
+    Setup();Tick();Write<void*>(intelligence,8,fall);CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
+    Setup();Tick();Seat();CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
+    Setup();Tick();Write(npc,0x6ac,0.f);CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
+    Setup();Tick();flags[0]=128;CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
+    Setup();Tick();CHECK(!KnockdownFromPunch(player,uppercut));
+    const float excessive[3]{0,8,2};CHECK(!KnockdownFromPunch(npc,excessive));
+    std::puts("NPC grab: interactions, bike jacking and pool-safe punch knockdown passed");
 }
