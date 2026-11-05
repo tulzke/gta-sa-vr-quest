@@ -52,6 +52,7 @@ void (*pedJacked)(void*,int){};
 void (*pedAudioEvent)(void*,int,float,float,void*,unsigned char,int,unsigned){};
 void (*bikeJackedCtor)(void*,void*,int,int,void*,bool){};
 void (*realPhysics)(void*){};
+void* punchReactionVtables[3]{};
 std::atomic<unsigned> claimed{};
 GripEdge edges[2];
 bool intent[2]{};
@@ -902,6 +903,11 @@ void Install(void* handle) {
     RESOLVE(isPlayer,"_ZNK4CPed8IsPlayerEv");
     RESOLVE(allocate,"_ZN5CTasknwEm");
     RESOLVE(fallCtor,"_ZN24CTaskComplexFallAndGetUpC1Eii");
+    const char* punchReactions[]={"_ZTV23CTaskComplexHitResponse","_ZTV16CTaskSimpleBeHit","_ZTV27CTaskSimpleBeHitWhileMoving"};
+    for (int i=0;i<3;++i) {
+        void* table=dlsym(handle,punchReactions[i]);
+        punchReactionVtables[i]=table?static_cast<char*>(table)+16:nullptr;
+    }
     RESOLVE(standCtor,"_ZN21CTaskSimpleStandStillC1Eibbf");
     RESOLVE(setTask,"_ZN12CTaskManager7SetTaskEP5CTaskib");
     RESOLVE(simplestTask,"_ZN12CTaskManager15GetSimplestTaskEP5CTask");
@@ -980,39 +986,46 @@ void Install(void* handle) {
         cameraPeds,reinterpret_cast<void*>(&OnCheckCameraCollisionPeds),cameraPedsOriginal);
     LOGI("[npcgrab] available=%d",ready);
 }
-bool KnockdownFromPunch(void* ped,const float velocity[3]) {
+bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason) {
+    const auto reject=[&](const char* text) { if (reason) *reason=text;return false; };
     if (!ready || !ped || !velocity || !xr::IsSessionFocused() ||
         !g.FindPlayerPed || ped==g.FindPlayerPed(-1) || playerlife::Dead(ped) ||
-        Seated(ped) || Animating(ped) || Waiting(ped) || BikeSceneOf(ped)) return false;
+        Seated(ped) || Animating(ped) || Waiting(ped) || BikeSceneOf(ped)) return reject("unavailable-or-actor-state");
     const Vec speed{velocity[0],velocity[1],velocity[2]};
-    if (!Finite(speed) || Length(speed)>8.f || Length(speed)<.5f) return false;
-    Pool pool;if (!pool.Load()) return false;
+    if (!Finite(speed) || Length(speed)>8.f || Length(speed)<.5f) return reject("velocity");
+    Pool pool;if (!pool.Load()) return reject("pool");
     Hold target{};
     for (int i=0;i<pool.size;++i) {
         if (pool.flags[i]&128) continue;
         const int ref=(i<<8)|pool.flags[i];
         if (getPed(ref)==ped) { target={ped,pool.identity,pool.objects,nullptr,ref,3};break; }
     }
-    if (!target.Live(pool) || isPlayer(ped)) return false;
-    void* manager=Manager(ped);if (!manager) return false;
+    if (!target.Live(pool) || isPlayer(ped)) return reject("target-reference");
+    void* manager=Manager(ped);if (!manager) return reject("task-manager");
     Hold* flight=nullptr;
     for (auto& f:flights) if (f.ped==ped && f.Live(pool) && OwnTask(f)) { flight=&f;break; }
-    // Do not displace arrest, death, a grabbed NPC or a mission-owned physical task.
-    if (Read<void*>(manager,0) && !flight) return false;
+    // Native GenerateDamageEvent can leave an ordinary hit reaction here.
+    // Upgrade only those exact task classes, preserving arrest/death/holds.
+    void* current=Read<void*>(manager,0);
+    bool hitReaction=false;
+    if (current) for (void* table:punchReactionVtables)
+        if (table && Read<void*>(current,0)==table) hitReaction=true;
+    if (current && !flight && !hitReaction) return reject("owned-physical-task");
     if (!flight) {
         for (auto& f:flights) if (!f.Live(pool) || Now()>=f.until || !OwnTask(f)) { flight=&f;break; }
-        if (!flight) return false;
-        void* task=allocate(0x28);if (!task) return false;
+        if (!flight) return reject("flight-capacity");
+        void* task=allocate(0x28);if (!task) return reject("allocation");
         const GameSymbols::Vec2 from{-speed.x,-speed.y};
         const int direction=g.CPed_GetLocalDirection?std::clamp(g.CPed_GetLocalDirection(ped,&from),0,3):0;
         fallCtor(task,direction,1000);setTask(manager,task,0,false);
         target.task=Read<void*>(manager,0)==task?task:nullptr;
-        if (!target.task) return false;
+        if (!target.task) return reject("fall-task-not-installed");
         *flight=target;
     }
     flight->until=Now()+.85;
     // Keep gravity/world collision; never teleport the ped or force a distance.
     Write(ped,0x68,speed*.02f);
+    if (reason) *reason="applied";
     return true;
 }
 void OnDoorOpening(void* car) {

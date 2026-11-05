@@ -2,6 +2,7 @@
 #include "VehicleAccess.h"
 #include "NpcGrabVisual.h"
 #include "Symbols.h"
+#include "NpcGrab.h"
 #include "PlayerLife.h"
 #include "VehicleDoorMotion.h"
 #include <atomic>
@@ -667,6 +668,12 @@ int main() {
     CHECK(Read<Vec>(npc,0x68).x<-.035f);
     // Death/arrest/vehicle/held actors and stale pool slots are never replaced.
     Setup();Tick();Write<void*>(intelligence,8,fall);CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
+    // Ordinary native hit reactions may be upgraded, unlike unknown tasks.
+    Setup();Tick();punchReactionVtables[0]=npcMatrix;
+    Write<void*>(fall,0,npcMatrix);Write<void*>(intelligence,8,fall);
+    const char* why{};
+    CHECK(KnockdownFromPunch(npc,uppercut,&why)&&fallCalls==1&&!std::strcmp(why,"applied"));
+    punchReactionVtables[0]=nullptr;Write<void*>(fall,0,nullptr);
     Setup();Tick();Seat();CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
     Setup();Tick();Write(npc,0x6ac,0.f);CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
     Setup();Tick();flags[0]=128;CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);

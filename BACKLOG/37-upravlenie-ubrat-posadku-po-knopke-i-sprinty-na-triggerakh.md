@@ -31,3 +31,5 @@ IsReleased(168) и IsReleased(31), которые перехватываются
 а спринт по L3 продолжает работать через GetSprint. Вне VR сохраняется native
 fallback. Проверки: production-хуки в test-standard-controls.py и исходные
 ARM64 инструкции в test-combat-retail.py. Нужен повтор того же сценария в Quest.
+
+2026-11-06, повторная проверка пользователя: спринт от триггеров исправлен.

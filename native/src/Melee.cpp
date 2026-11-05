@@ -515,7 +515,9 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
                 const float push=punchKind==punch::Kind::Uppercut?4.f:1.8f;
                 const float velocity[3]{horizontal.x*push,horizontal.y*push,
                     punchKind==punch::Kind::Uppercut?5.f:.2f};
-                npcgrab::KnockdownFromPunch(target,velocity);
+                const char* reason="unknown";
+                const bool applied=npcgrab::KnockdownFromPunch(target,velocity,&reason);
+                Trace("PUNCH_EFFECT kind=%d applied=%d reason=%s",static_cast<int>(punchKind),applied,reason);
             }
         }
     } else if (type == kEntityVehicle) {
@@ -706,8 +708,14 @@ void Update(bool interactionsBlocked) {
         const V3 rootTravel = segment.root - motion.previousRoot;
         const float tipSpeed = Length(tipTravel) / static_cast<float>(dt);
         const float rootSpeed = Length(rootTravel) / static_cast<float>(dt);
-        const bool fist = segment.slot == 0;
+        const bool fist = segment.weaponType <= 1;
         const float threshold = fist ? 1.25f : 1.10f;
+
+        // GameThread can sample the same XR pose more than once. A duplicate
+        // is not a physical stop halfway through the punch: keep its history
+        // and measure speed over the time to the next genuinely moved pose.
+        const float sampleTravel=std::max(Length(rootTravel),Length(tipTravel));
+        if (segment.enabled && sampleTravel<1.e-5f && dt<.060) continue;
 
         // Recenter/tracking-loss jumps must never become superhuman attacks.
         if (Length(tipTravel) > 0.65f || Length(rootTravel) > .35f) {
@@ -755,6 +763,11 @@ void Update(bool interactionsBlocked) {
                     if (fist) {
                         const V3 right=Normalized(RotateQuaternion(orientation,{1,0,0}));
                         kind=motion.trajectory.Classify({right.x,right.y,right.z});
+                        static unsigned punches{};
+                        if (++punches<=120 || kind!=punch::Kind::Jab || punches%50==0)
+                            Trace("PUNCH hand=%d kind=%d samples=%d path=%.3f rise=%.3f turn=%.3f speed=%.2f",
+                                hand,static_cast<int>(kind),motion.trajectory.samples,motion.trajectory.path,
+                                motion.trajectory.net.y,motion.trajectory.turn,strokeSpeed);
                     }
                     ApplyContact(player, hand, segment.weaponType,
                                  strokeSpeed,

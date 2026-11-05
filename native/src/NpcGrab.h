@@ -12,5 +12,5 @@ void OnDoorOpening(void* vehicle);
 bool BlocksVehicleInteraction(void* vehicle,int hand);
 bool BlocksNpcPunch(void* ped,int hand);
 // World-space metres/second. Native fall task and pool-safe flight lifetime.
-bool KnockdownFromPunch(void* ped,const float velocity[3]);
+bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason=nullptr);
 }

@@ -25,21 +25,21 @@ struct Trajectory {
         previousHorizontal=direction;horizontalPath+=h;
     }
     Kind Classify(Vec headRight) const {
-        if (samples<3 || path<.399f) return Kind::Jab;
+        if (samples<2 || path<.399f) return Kind::Jab;
         const float lastLength=Length(last);
         // Uppercut must both climb over the stroke and still travel upward
         // at contact. Raising the hand and then jabbing is not an uppercut.
-        if (net.y>=.24f && net.y>=.55f*path && lastLength>0 && last.y>=.5f*lastLength)
+        if (net.y>=.16f && net.y>=.35f*path && lastLength>0 && last.y>=.35f*lastLength)
             return Kind::Uppercut;
         const float chord=std::hypot(net.x,net.z),lastHorizontal=std::hypot(last.x,last.z);
         const float lateral=std::abs(net.x*headRight.x+net.z*headRight.z);
         const float sideAtContact=lastHorizontal>.001f
             ?std::abs(last.x*headRight.x+last.z*headRight.z)/lastHorizontal:0;
-        // A sideward straight punch is still a jab: require several curved
-        // samples, a coherent signed bend and arc longer than its chord.
-        if (curves>=2 && horizontalPath>=.32f && std::abs(net.y)<.20f &&
-            std::abs(turn)>=.60f && std::abs(turn)>=.8f*absoluteTurn &&
-            horizontalPath>=1.02f*chord && lateral>=.16f && sideAtContact>=.65f)
+        // A sideward straight punch is still a jab: three positions must
+        // show a coherent signed bend and an arc longer than its chord.
+        if (curves>=1 && horizontalPath>=.30f && std::abs(net.y)<.25f &&
+            std::abs(turn)>=.35f && std::abs(turn)>=.65f*absoluteTurn &&
+            horizontalPath>=1.01f*chord && lateral>=.12f && sideAtContact>=.45f)
             return Kind::Hook;
         return Kind::Jab;
     }

@@ -4,6 +4,7 @@
 #include "CombatPolicy.h"
 #include "PunchTrajectory.h"
 #include "Melee.h"
+#include "NpcGrab.h"
 #include "PlayerLife.h"
 #include <algorithm>
 #include <atomic>
@@ -61,8 +62,10 @@ namespace npcgrab {
 unsigned ClaimedHands() { return 0; }
 bool BlocksVehicleInteraction(void*,int) { return false; }
 bool BlocksNpcPunch(void*,int) { return false; }
-bool KnockdownFromPunch(void* target,const float velocity[3]) {
-    CHECK(target==enemy);++knockdowns;std::copy_n(velocity,3,knockVelocity);return true;
+bool KnockdownFromPunch(void* target,const float velocity[3],const char** reason) {
+    CHECK(target==enemy);++knockdowns;std::copy_n(velocity,3,knockVelocity);
+    if (reason) *reason="host-applied";
+    return true;
 }
 }
 namespace vrcam {
@@ -99,7 +102,7 @@ void Setup() {
     g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3,float,void*,bool,bool,bool,bool,bool,bool)->void* { return touching?enemy:nullptr; };
     static unsigned char contact[0x2c]{};g.gaTempSphereColPoints=contact;
     static void* ignore{};g.CWorld_pIgnoreEntity=&ignore;
-    g.CWeapon_GenerateDamageEvent=[](void*,void*,int,int damage,int,int) { CHECK(damage==10||damage==20);++hits;return true; };
+    g.CWeapon_GenerateDamageEvent=[](void*,void*,int,int damage,int,int) { CHECK(damage==10||damage==15||damage==20);++hits;return true; };
     g.CVehicle_InflictDamage=[](void*,void*,int,float,GameSymbols::Vec3) {};
     g.CPed_GetLocalDirection=[](void*,const GameSymbols::Vec2*) { return 0; };
     g.CEntity_GetBoundCentre=[](void*,GameSymbols::Vec3* out) { *out={0,1.2f,1.4f}; };
@@ -187,7 +190,9 @@ int main() {
     Move(.05f);CHECK(hits==2&&audioCalls==2); // full-speed return stroke also needs 40 cm
     Setup();melee::Update(false);for (int i=0;i<100;++i) { Move(-.04f);Move(.04f); } CHECK(hits==0);
     // Stop and trigger-release discard the unfinished stroke, not just its speed.
-    Setup();melee::Update(false);Move(-.05f,5);Move(0);Move(-.05f,3);CHECK(hits==0);
+    Setup();melee::Update(false);Move(-.05f,5);Move(0,4);Move(-.05f,3);CHECK(hits==0);
+    // A repeated XR sample between producer ticks is not a physical stop.
+    Setup();melee::Update(false);Move(-.05f,5);Move(0);Move(-.05f,3);CHECK(hits==1);
     Setup();melee::Update(false);Move(-.05f,5);xr::poses[0].trigger=0;Move(-.05f);
     xr::poses[0].trigger=1;Move(-.05f,3);CHECK(hits==0);
     // Detection distance is invariant across 30/60/72/90 Hz sample rates.
@@ -218,6 +223,15 @@ int main() {
         testNow+=.02;melee::Update(false);
     }
     CHECK(hits==1&&knockdowns==1&&knockVelocity[1]>3.9f&&knockVelocity[2]==5.f&&heavySounds==1);
+    // A natural diagonal uppercut, and a fast uppercut in only two samples.
+    for (int count:{2,8}) {
+        Setup();melee::Update(false);
+        for (int i=0;i<count;++i) {
+            xr::poses[0].gripPos[1]+=.20f/count;xr::poses[0].gripPos[2]-=.4f/count;
+            testNow+=.02;melee::Update(false);
+        }
+        CHECK(hits==1&&knockdowns==1&&knockVelocity[2]==5.f&&heavySounds==1);
+    }
     Setup();melee::Update(false);Move(-.05f,8);CHECK(knockdowns==0&&heavySounds==0);
     // Horizontal arcs, both left and right, topple along their final tangent.
     for (float side:{-1.f,1.f}) {
@@ -234,6 +248,24 @@ int main() {
                 melee::gMotion[0].trajectory.path,melee::gMotion[0].trajectory.turn);
         CHECK(hits==1&&knockdowns==1&&knockVelocity[0]*side>0&&knockVelocity[2]==.2f&&heavySounds==1);
     }
+    // Coarse XR sampling: three positions already establish a real lateral arc.
+    for (float side:{-1.f,1.f}) {
+        Setup();xr::poses[0].gripPos[0]=0;xr::poses[0].gripPos[2]=-.7f;melee::Update(false);
+        for (int i=1;i<=2;++i) {
+            const float angle=i*.45f;
+            xr::poses[0].gripPos[0]=side*.5f*std::sin(angle);
+            xr::poses[0].gripPos[2]=-.2f-.5f*std::cos(angle);
+            testNow+=.02;melee::Update(false);
+        }
+        CHECK(hits==1&&knockdowns==1&&knockVelocity[0]*side>0&&heavySounds==1);
+    }
+    // A brass knuckle is still classified as a fist even if physically held.
+    Setup();slot=1;Write(player,0x750,1);melee::Update(false);
+    for (int i=0;i<2;++i) {
+        xr::poses[0].gripPos[1]+=.1f;xr::poses[0].gripPos[2]-=.2f;
+        testNow+=.02;melee::Update(false);
+    }
+    CHECK(hits==1&&knockdowns==1&&heavySounds==1);
     // A straight lateral strike cannot masquerade as a hook.
     Setup();melee::Update(false);
     for (int i=0;i<8;++i) { xr::poses[0].gripPos[0]+=.055f;testNow+=.02;melee::Update(false); }
