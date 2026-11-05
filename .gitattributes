@@ -4,9 +4,4 @@
 *.uxrh -text
 *.png -text
 *.rgba -text
-/assets/radio/*.blend filter=lfs diff=lfs merge=lfs -text
-/assets/radio/runtime/*.uxrh filter=lfs diff=lfs merge=lfs -text
-/assets/radio/runtime/*.png filter=lfs diff=lfs merge=lfs -text
-/assets/radio/runtime/*.rgba filter=lfs diff=lfs merge=lfs -text
-
-assets/radio/** !text !filter !merge !diff
+/assets/radio/*.blend -text
