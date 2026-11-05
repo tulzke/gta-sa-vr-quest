@@ -59,3 +59,7 @@ Thumbs.db
 Desktop.ini
 *~
 *.swp
+
+# Local hand animation source/exports, pending explicit asset versioning
+/assets/vrhands/BothHands.blend*
+/assets/vrhands/animations/
