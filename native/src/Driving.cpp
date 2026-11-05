@@ -305,6 +305,7 @@ radio::KnobState g_radioKnob;
 int g_radioKnobHand=-1;
 void* g_radioKnobVehicle{};
 bool g_radioGripDown[2]{true,true};
+bool g_radioReverseGrip[2]{};
 std::atomic<int> g_radioKnobNext{0}, g_radioKnobPrev{0};
 ignition::Rotation g_ignitionRotation;
 ignition::HintState g_ignitionHint;
@@ -1998,7 +1999,10 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
             g_radioKnob.Reset(); g_radioKnobHand=-1;
         }
         if (g_radioKnobHand<0 && valid && !(occupied&(1u<<h)) && !g_radioGripDown[h] &&
-            input.grip[h]>=.65f && Length(p-center)<.10f) g_radioKnobHand=h;
+            input.grip[h]>=.65f && Length(p-center)<.10f) {
+            g_radioKnobHand=h;
+            g_radioReverseGrip[h]=ignition::ReverseGrip(Dot(p-center,up));
+        }
         if (input.grip[h]<=.30f) g_radioGripDown[h]=false;
         else if (input.grip[h]>=.65f) g_radioGripDown[h]=true;
     }
@@ -2017,6 +2021,7 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
                 xr::TriggerHaptic(hand,.3f,0.f,30.f);
             }
             visual.radioGrabbed[hand]=true;
+            visual.radioReverseGrip[hand]=g_radioReverseGrip[hand];
             visual.radioAngle=g_radioKnob.angle/deg;
         }
     }

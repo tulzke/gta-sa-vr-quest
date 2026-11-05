@@ -8835,18 +8835,24 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
         bool basketballFlatPalm = false;
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
-        if (drivingWheel.ignitionGrabbed[hand]) {
-            pos={drivingWheel.ignitionCenter[0],drivingWheel.ignitionCenter[1],drivingWheel.ignitionCenter[2]};
-            const XrVector3f kr{drivingWheel.ignitionRight[0],drivingWheel.ignitionRight[1],drivingWheel.ignitionRight[2]};
-            const XrVector3f ku{drivingWheel.ignitionUp[0],drivingWheel.ignitionUp[1],drivingWheel.ignitionUp[2]};
-            forward={drivingWheel.ignitionNormal[0],drivingWheel.ignitionNormal[1],drivingWheel.ignitionNormal[2]};
-            const float a=drivingWheel.ignitionAngle;
+        if (drivingWheel.ignitionGrabbed[hand] || drivingWheel.radioGrabbed[hand]) {
+            const bool radio=drivingWheel.radioGrabbed[hand];
+            const float* center=radio?drivingWheel.radioCenter:drivingWheel.ignitionCenter;
+            const float* frameRight=radio?drivingWheel.radioRight:drivingWheel.ignitionRight;
+            const float* frameUp=radio?drivingWheel.radioUp:drivingWheel.ignitionUp;
+            const float* frameNormal=radio?drivingWheel.radioNormal:drivingWheel.ignitionNormal;
+            const bool reverse=radio?drivingWheel.radioReverseGrip[hand]:drivingWheel.ignitionReverseGrip[hand];
+            pos={center[0],center[1],center[2]};
+            const XrVector3f kr{frameRight[0],frameRight[1],frameRight[2]};
+            const XrVector3f ku{frameUp[0],frameUp[1],frameUp[2]};
+            forward={frameNormal[0],frameNormal[1],frameNormal[2]};
+            const float a=radio?drivingWheel.radioAngle:drivingWheel.ignitionAngle;
             up=vnorm(vadd(vscale(ku,std::cos(a)),vscale(kr,std::sin(a))));
             const XrVector3f keyUp=up;
             const XrVector3f keyRight=vnorm(vcross(keyUp,forward));
             // Rotate the pinching hand 90 degrees clockwise around the key axis.
             up=vnorm(vcross(up,forward));
-            if (drivingWheel.ignitionReverseGrip[hand]) up=vscale(up,-1.0f);
+            if (reverse) up=vscale(up,-1.0f);
             right=vnorm(vcross(up,forward));
             if (hand==0) right=vscale(right,-1.0f);
             // Pinch mesh fingertips extend ~7.5 cm from its render origin and
@@ -8861,7 +8867,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                 {{1,0,1,0,80,-180}, {-1,0,1,0,280,180}},
                 {{-10,-1,1,0,80,0}, {9,0,1,0,-80,0}}
             };
-            const int* adjustment=calibration[hand][drivingWheel.ignitionReverseGrip[hand]?1:0];
+            const int* adjustment=calibration[hand][reverse?1:0];
             pos=vadd(pos,vadd(vscale(keyRight,adjustment[0]*.01f),
                  vadd(vscale(keyUp,adjustment[1]*.01f),vscale(forward,adjustment[2]*.01f))));
             const XrVector3f axes[3]{keyRight,keyUp,forward};
@@ -8872,17 +8878,6 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                 up=RotateAroundAxis(up,axes[axis],rotation);
                 forward=RotateAroundAxis(forward,axes[axis],rotation);
             }
-            grip=trig=0.0f;
-        } else if (drivingWheel.radioGrabbed[hand]) {
-            pos={drivingWheel.radioCenter[0],drivingWheel.radioCenter[1],drivingWheel.radioCenter[2]};
-            forward={drivingWheel.radioNormal[0],drivingWheel.radioNormal[1],drivingWheel.radioNormal[2]};
-            const XrVector3f ku{drivingWheel.radioUp[0],drivingWheel.radioUp[1],drivingWheel.radioUp[2]};
-            const XrVector3f kr{drivingWheel.radioRight[0],drivingWheel.radioRight[1],drivingWheel.radioRight[2]};
-            up=vnorm(vadd(vscale(ku,std::cos(drivingWheel.radioAngle)),vscale(kr,std::sin(drivingWheel.radioAngle))));
-            right=vnorm(vcross(up,forward));
-            if (hand==0) right=vscale(right,-1.f);
-            pos=vadd(pos,vadd(vscale(forward,-.0975f),vscale(up,.045f)));
-            pos=vadd(pos,vscale(right,hand==0?.025f:-.025f));
             grip=trig=0.0f;
         } else if (steeringHand) {
             // reference Quest build's car socket is a RenderWare matrix whose Right axis lies
@@ -10862,12 +10857,38 @@ void DrawRadioKnob(const float* mvp,const driving::WheelVisualState& w) {
     const XrVector3f r=vnorm({w.radioRight[0],w.radioRight[1],w.radioRight[2]});
     const XrVector3f u=vnorm({w.radioUp[0],w.radioUp[1],w.radioUp[2]});
     const XrVector3f n=vnorm({w.radioNormal[0],w.radioNormal[1],w.radioNormal[2]});
-    float boxes[8*3*3]{}; unsigned short indices[36*3]{}; int vc=0,ic=0;
+    // Two separate cylinders keep the bezel and rotating knob legible even
+    // without lighting or a texture. The front faces point toward the driver.
+    const auto cylinder=[&](XrVector3f front,float radius,float depth,
+                            float faceR,float faceG,float faceB,
+                            float edgeR,float edgeG,float edgeB) {
+        constexpr int N=32;
+        float vertices[(2*N+1)*3]{};
+        unsigned short face[N*3]{}, edge[N*6]{};
+        vertices[0]=front.x; vertices[1]=front.y; vertices[2]=front.z;
+        for (int i=0;i<N;++i) {
+            const float a=6.2831853f*i/N;
+            const XrVector3f p=vadd(front,vadd(vscale(r,radius*std::cos(a)),vscale(u,radius*std::sin(a))));
+            const XrVector3f back=vadd(p,vscale(n,depth));
+            vertices[(i+1)*3]=p.x; vertices[(i+1)*3+1]=p.y; vertices[(i+1)*3+2]=p.z;
+            vertices[(N+i+1)*3]=back.x; vertices[(N+i+1)*3+1]=back.y; vertices[(N+i+1)*3+2]=back.z;
+            const auto a0=static_cast<unsigned short>(i+1), a1=static_cast<unsigned short>((i+1)%N+1);
+            const auto b0=static_cast<unsigned short>(N+i+1), b1=static_cast<unsigned short>(N+(i+1)%N+1);
+            face[i*3]=0; face[i*3+1]=a0; face[i*3+2]=a1;
+            edge[i*6]=a0; edge[i*6+1]=b0; edge[i*6+2]=a1;
+            edge[i*6+3]=a1; edge[i*6+4]=b0; edge[i*6+5]=b1;
+        }
+        DrawDrivingBoxes(mvp,vertices,2*N+1,edge,N*6,edgeR,edgeG,edgeB);
+        DrawDrivingBoxes(mvp,vertices,2*N+1,face,N*3,faceR,faceG,faceB);
+    };
+    cylinder(c,.040f,.006f,.12f,.14f,.16f,.08f,.09f,.10f);
+    cylinder(vadd(c,vscale(n,-.020f)),.027f,.020f,.72f,.74f,.76f,.35f,.38f,.41f);
+    float boxes[8*3]{}; unsigned short indices[36]{}; int vc=0,ic=0;
     const XrVector3f ru=vadd(vscale(u,std::cos(w.radioAngle)),vscale(r,std::sin(w.radioAngle)));
     const XrVector3f rr=vadd(vscale(r,std::cos(w.radioAngle)),vscale(u,-std::sin(w.radioAngle)));
-    AppendDrivingBox(boxes,vc,indices,ic,c,r,u,n,.035f,.035f,.006f);
-    AppendDrivingBox(boxes,vc,indices,ic,vadd(c,vscale(n,-.012f)),rr,ru,n,.012f,.026f,.009f);
-    DrawDrivingBoxes(mvp,boxes,vc,indices,ic,.65f,.65f,.65f);
+    const XrVector3f mark=vadd(vadd(c,vscale(n,-.021f)),vscale(ru,.014f));
+    AppendDrivingBox(boxes,vc,indices,ic,mark,rr,ru,n,.0025f,.008f,.001f);
+    DrawDrivingBoxes(mvp,boxes,vc,indices,ic,.95f,.48f,.08f);
 }
 
 void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
