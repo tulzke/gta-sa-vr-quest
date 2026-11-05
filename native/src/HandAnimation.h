@@ -168,7 +168,9 @@ inline Selection FreeHand(float grip, float trigger) {
         return {Gesture::Grip,Gesture::Fist,grip,grip>0.f?trigger/grip:0.f};
     return {Gesture::Point,Gesture::Fist,trigger,grip/trigger};
 }
-inline bool Pistol(int weaponType) { return weaponType>=22 && weaponType<=24; }
+inline bool Firearm(int weaponType) {
+    return (weaponType>=22 && weaponType<=34) || weaponType==38;
+}
 
 struct Context {
     bool climb{}, pinchGrab{}, steering{}, ball{}, support{}, holdsWeapon{};
@@ -184,7 +186,7 @@ inline Selection Select(float grip, float trigger, const Context& context) {
     if (context.ball) return fixed(Gesture::OpenPalm);
     if (context.support) return fixed(Gesture::Grip,grip);
     if (context.holdsWeapon) {
-        if (Pistol(context.weaponType)) return fixed(Gesture::GripPistolShoot,trigger);
+        if (Firearm(context.weaponType)) return fixed(Gesture::GripPistolShoot,trigger);
         return fixed(Gesture::Grip);
     }
     return FreeHand(grip,trigger);

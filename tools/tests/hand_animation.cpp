@@ -21,12 +21,17 @@ int main(int argc,char** argv) {
     const auto middle=FreeHand(.4f,.4f);
     assert(Near(middle.progress,.4f) && middle.blend==1);
     assert(FreeHand(std::numeric_limits<float>::quiet_NaN(),0).progress==0);
-    for (int type=0;type<48;++type) assert(Pistol(type)==(type>=22 && type<=24));
+    for (int type=0;type<48;++type) {
+        const bool firearm=(type>=22 && type<=34)||type==38;
+        assert(Firearm(type)==firearm);
+        const auto selected=Select(1,.7f,{false,false,false,false,false,true,type});
+        assert(selected.first==(firearm?Gesture::GripPistolShoot:Gesture::Grip));
+    }
     Context context;
     context.holdsWeapon=true;context.weaponType=22;
     assert(Select(1,.5f,context).first==Gesture::GripPistolShoot);
     assert(Near(Select(1,.5f,context).progress,.5f));
-    context.weaponType=25;
+    context.weaponType=8; // Katana keeps the ordinary grip.
     assert(Select(1,1,context).first==Gesture::Grip);
     context.support=true;context.weaponType=22;
     assert(Select(1,1,context).first==Gesture::Grip); // Offhand is not assigned.

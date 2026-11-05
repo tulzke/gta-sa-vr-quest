@@ -40,6 +40,7 @@ std::uintptr_t g_driveDoorStatusReturn{};
 GripEdge g_edges[2];
 GripEdge g_editEdges[2];
 std::atomic<unsigned> g_claimed{};
+std::atomic<unsigned> g_debugPinchHands{};
 std::uint64_t g_epoch{};
 double g_updated{};
 MarkerFrame g_worldMarkers{};
@@ -383,6 +384,8 @@ void AddPanelCorners(MarkerFrame& frame,const Door& d,int held=-1) {
     }
 }
 void Publish(const MarkerFrame& frame) {
+    const bool pinch=(g_editKind==8||g_editKind==9)&&g_edit.hand>=0&&g_edit.hand<2;
+    g_debugPinchHands.store(pinch?(1u<<g_edit.hand):0u,std::memory_order_relaxed);
     g_worldMarkers=frame;PublishMarkers();
 }
 } // namespace
@@ -421,6 +424,7 @@ void Install(void* handle) {
     else LOGE("[doors] required symbols or verified hook unavailable; hand interaction disabled");
 }
 unsigned ClaimedHands() { return g_claimed.load(std::memory_order_relaxed)|vehicleclimb::ClaimedHands(); }
+unsigned DebugPinchHands() { return g_debugPinchHands.load(std::memory_order_relaxed); }
 void InteriorDistances(void* vehicle,const xr::HandPose hands[2],float distances[2]) {
     distances[0]=distances[1]=1e6f;
     if (!g_ready||!vehicle||!g.FindPlayerPed||!g.FindPlayerVehicle||
@@ -462,6 +466,7 @@ void PublishMarkers() {
     xr::SetVehicleDoorMarkers(frame);
 }
 void EndDebugEdit() {
+    g_debugPinchHands.store(0,std::memory_order_relaxed);
     if(g_editDirty||g_bikeEdit.dirty) driving::SaveDebugCalibration();
     g_bikeEdit={};
     g_edit={}; g_editDirty=false; g_editVehicle=nullptr;

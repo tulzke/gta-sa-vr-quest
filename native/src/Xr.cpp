@@ -3,6 +3,7 @@
 #include "TrackingRecovery.h"
 #include "TheaterScreen.h"
 #include "HandAnimation.h"
+#include "VehicleDoors.h"
 
 #include "Appearance.h"
 #include "Basketball.h"
@@ -665,6 +666,7 @@ float g_handPinchAmount[2]{};
 float g_stereoHandPinchAmount[kStereoSets][2]{};
 int g_handWeaponTypes[2]{};
 int g_stereoHandWeaponTypes[kStereoSets][2]{};
+unsigned g_stereoDebugPinchHands[kStereoSets]{};
 TwoHandVisualState g_twoHandVisualState{};
 TwoHandVisualState g_stereoTwoHandVisualState[kStereoSets]{};
 // Scope state is captured beside the exact eye pixels it affected. The consumer
@@ -6232,9 +6234,10 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     // that same order, before g_headPoseMutex, to avoid the inverse-order
     // deadlock while still publishing it into this exact ring slot below.
     driving::GetWheelVisualState(&drivingWheel);
+    const unsigned debugPinchHands=vehicledoors::DebugPinchHands();
     drivingWheel.trackedHandsEnabled = driving::ShouldUseTrackedHands() ||
         drivingWheel.ignitionGrabbed[0] || drivingWheel.ignitionGrabbed[1] ||
-        drivingWheel.radioGrabbed[0] || drivingWheel.radioGrabbed[1];
+        drivingWheel.radioGrabbed[0] || drivingWheel.radioGrabbed[1] || debugPinchHands!=0;
     g_lastDashModelId.store(
         (drivingWheel.active || drivingWheel.dashAnchorValid)
             ? drivingWheel.modelId : -1,
@@ -6252,6 +6255,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         g_stereoHandPinchAmount[ws][1] = g_handPinchAmount[1];
         g_stereoHandWeaponTypes[ws][0] = g_handWeaponTypes[0];
         g_stereoHandWeaponTypes[ws][1] = g_handWeaponTypes[1];
+        g_stereoDebugPinchHands[ws] = debugPinchHands;
         g_stereoTwoHandVisualState[ws] = g_twoHandVisualState;
         // Capture markers with the eye textures containing their socket models.
         // The compositor reuses this immutable batch for both eyes.
@@ -8832,7 +8836,7 @@ int            g_hIndexCount[2] = {0, 0};
 void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                      const driving::WheelVisualState& drivingWheel,
                      const BallHandLock& ballLock, unsigned int weaponHandMask,
-                     const float pinchAmounts[2], const int weaponTypes[2]) {
+                     const float pinchAmounts[2], const int weaponTypes[2], unsigned debugPinchHands) {
     g_hVc = 0; g_hIc = 0;
     g_hFirstIndex[0] = g_hFirstIndex[1] = 0;
     g_hIndexCount[0] = g_hIndexCount[1] = 0;
@@ -9063,12 +9067,14 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             pos=vsub(pos,{pivot.x,pivot.y,pivot.z});
             grip=1.f;trig=0.f; // standard Grip asset, independent of trigger
         }
-        const bool pinch = !hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
+        const bool debugPinch=(debugPinchHands&(1u<<hand))!=0;
+        if (debugPinch) grip=trig=0.f;
+        const bool pinch = debugPinch || (!hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
             !steeringHand &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand) &&
             (g_handAnimationsLoaded || (g_pinchMesh[hand].loaded &&
-             g_pinchMesh[hand].verts.size() == g_handMesh[hand].verts.size()));
-        const float pinchAmount = pinch ? pinchAmounts[hand] : 0.0f;
+             g_pinchMesh[hand].verts.size() == g_handMesh[hand].verts.size())));
+        const float pinchAmount = debugPinch ? 1.f : (pinch ? pinchAmounts[hand] : 0.0f);
         const float pinchWeight = pinchAmount * (1.0f - grip);
         const float pinchFrame = pinchAmount * 4.0f;
         const int pinchSegment = std::min(static_cast<int>(pinchFrame), 3);
@@ -9083,7 +9089,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
         using Gesture = handanimation::Gesture;
         const auto selected = handanimation::Select(grip,trig,{
             hp[hand].climbGrip,
-            drivingWheel.radioGrabbed[hand] || drivingWheel.ignitionGrabbed[hand],
+            debugPinch || drivingWheel.radioGrabbed[hand] || drivingWheel.ignitionGrabbed[hand],
             steeringHand, basketballFlatPalm,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand,
             (weaponHandMask & (1u<<hand))!=0,weaponTypes[hand]});
@@ -9114,7 +9120,8 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                                        v.nrm[2][1], v.nrm[3][1]);
             float nz = component(v.nrm[0][2], v.nrm[1][2],
                                        v.nrm[2][2], v.nrm[3][2]);
-            if (pinchWeight > 0.0f && !useAuthored) {
+            if (pinchWeight > 0.0f && !useAuthored && g_pinchMesh[hand].loaded &&
+                g_pinchMesh[hand].verts.size()==m.verts.size()) {
                 const UxrhVertex& target = g_pinchMesh[hand].verts[vertex];
                 const float rest = 1.0f - pinchWeight;
                 const auto pinchComponent = [&](bool normal, int axis) {
@@ -12285,6 +12292,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     unsigned int bakedWeaponHandMask = 0;
     float bakedPinchAmounts[2]{};
     int bakedHandWeaponTypes[2]{};
+    unsigned bakedDebugPinchHands{};
     bool haveRenderPose = false;
     {
         std::lock_guard<std::mutex> lock(g_headPoseMutex);
@@ -12315,6 +12323,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedPinchAmounts[1] = g_stereoHandPinchAmount[set][1];
         bakedHandWeaponTypes[0] = g_stereoHandWeaponTypes[set][0];
         bakedHandWeaponTypes[1] = g_stereoHandWeaponTypes[set][1];
+        bakedDebugPinchHands = g_stereoDebugPinchHands[set];
     }
     const bool shaderCopyMayRun = fxaaStats.requested ||
         underWaterness > 0.001f || mobileColor.mode != 0;
@@ -12326,7 +12335,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
 
     if (!bakedScope.active) {
         BuildHandMeshes(bakedHands, bakedTwoHand, drivingWheel,
-                        ballHandLock, bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes); // same ring pose + cockpit/support correction
+                        ballHandLock, bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes, bakedDebugPinchHands); // same ring pose + cockpit/support correction
         BuildWeaponMesh(bakedHands);   // (weapon-mesh path; dead until Approach-B geometry exists)
     }
     BulletTracer liveTracers[kMaxBulletTracers]{};

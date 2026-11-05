@@ -676,5 +676,15 @@ int main() {
       hands[0].trigger=0;Tick();CHECK(g_edit.hand<0&&driving::saves==1&&ClaimedHands()==0);
       Tick();hands[0].trigger=1;Tick();CHECK(g_editKind==7);Tick(false,5,false);CHECK(ClaimedHands()==0&&g_edit.hand<0);
     }
+    // Debug key/radio dragging owns a visual pinch independently of trigger's
+    // free-hand Point gesture. Other calibration markers keep normal gestures.
+    for(int kind:{8,9}) for(int hand=0;hand<2;++hand) {
+        Setup();g_editKind=kind;g_edit.hand=hand;Publish({});
+        CHECK(DebugPinchHands()==(1u<<hand));
+        EndDebugEdit();CHECK(DebugPinchHands()==0);
+        g_editKind=kind;g_edit.hand=hand;Publish({});
+        Reset();CHECK(DebugPinchHands()==0);
+    }
+    Setup();g_editKind=5;g_edit.hand=0;Publish({});CHECK(DebugPinchHands()==0);Reset();
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }
