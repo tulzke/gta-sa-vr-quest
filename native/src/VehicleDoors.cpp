@@ -360,6 +360,7 @@ void AddMarker(MarkerFrame& frame,const Door& door,bool held,bool inside=false) 
     if (frame.count>=MarkerFrame::kCapacity) return;
     Marker marker{door.handle,door.tangent,door.car.up,held};
     marker.doorGrab=true;
+    if (held) marker.highlight=1.f;
     marker.hideArrow=inside;
     frame.markers[frame.count++]=inside?ReverseArrow(marker):marker;
 }
@@ -420,6 +421,28 @@ void Install(void* handle) {
     else LOGE("[doors] required symbols or verified hook unavailable; hand interaction disabled");
 }
 unsigned ClaimedHands() { return g_claimed.load(std::memory_order_relaxed)|vehicleclimb::ClaimedHands(); }
+void InteriorDistances(void* vehicle,const xr::HandPose hands[2],float distances[2]) {
+    distances[0]=distances[1]=1e6f;
+    if (!g_ready||!vehicle||!g.FindPlayerPed||!g.FindPlayerVehicle||
+        g.FindPlayerVehicle(-1,false)!=vehicle||!vrcam::VehicleDoorControlsActive()) return;
+    void* ped=g.FindPlayerPed(-1); Pool pool;
+    if (!ped||!pool.ReadCurrent()) return;
+    int slot=-1;
+    for (int i=0;i<kPoolSize;++i) if (!(pool.flags[i]&0x80)&&pool.objects+i*kStride==vehicle) {slot=i;break;}
+    const int i=vehicleentry::SeatIndex(vehicle,ped)+1;
+    if (slot<0||i<0||i>=4) return;
+    const Target t{vehicle,pool.identity,pool.objects,pool.flags,slot,i+2,kNodes[i],pool.flags[slot]};
+    Door d;float origin[3]{},forward[3]{};
+    if (!ReadDoor(t,ped,d,true)||!vrcam::GetHeadWorldRay(origin,forward)) return;
+    const Vec eye{origin[0],origin[1],origin[2]};
+    if (Length(eye-d.handle)>2.2f||!Visible(eye,d.handle,vehicle)) return;
+    for (int h=0;h<2;++h) {
+        Vec world{};
+        if (!hands[h].valid||!ToWorld(hands[h].gripPos,world)) continue;
+        const float distance=PanelDistance(d.panel.Local(world),d.panelX,d.ymin,d.ymax,d.zmin,d.zmax);
+        if (distance<d.thickness) distances[h]=distance;
+    }
+}
 bool DebugEditActive() { return g_edit.hand>=0||g_bikeEdit.hand>=0||vehicleclimb::Editing(); }
 void PublishMarkers() {
     MarkerFrame worldFrame=g_worldMarkers;
@@ -506,10 +529,10 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             if (m.Done()) g_release={};
         }
     }
+    driving::WheelVisualState cabin{};
     if (seated) {
-        driving::WheelVisualState wheel{};
-        driving::GetWheelVisualState(&wheel);
-        for (int h=0;h<2;++h) if (wheel.grabbed[h] || wheel.ignitionGrabbed[h] || wheel.radioGrabbed[h]) occupied|=1u<<h;
+        driving::GetWheelVisualState(&cabin);
+        for (int h=0;h<2;++h) if (cabin.grabbed[h] || cabin.ignitionGrabbed[h] || cabin.radioGrabbed[h]) occupied|=1u<<h;
     }
     for (int h=0;h<2;++h) if (physicalweapon::IsSupportHand(h)) occupied|=1u<<h;
     Vec world[2]{};bool valid[2]{};
@@ -1035,6 +1058,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         if (!ReadDoor(t,ped,d,seated!=nullptr)||Length(eye-d.handle)>2.2f||
             (!seated && Dot(eye-d.car.position,d.car.right)*((i==0||i==2)?-1.f:1.f)<-.12f)||
             !Visible(eye,d.handle,t.vehicle)) continue;
+        const int markerIndex=markers.count<MarkerFrame::kCapacity?markers.count:-1;
         AddMarker(markers,d,false,seated!=nullptr);
         if(editMode)AddPanelCorners(markers,d);
         for (int h=0;h<2;++h) {
@@ -1042,7 +1066,9 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const float distance=Length(world[h]-d.handle);
             const Vec local=d.panel.Local(world[h]);
             const float panelDistance=PanelDistance(local,d.panelX,d.ymin,d.ymax,d.zmin,d.zmax);
-            if (fresh[h]&&panelDistance<d.thickness&&panelDistance<best) { best=panelDistance;chosen=t;chosenDoor=d;chosenHand=h; }
+            const bool selected=!seated||!cabin.dashAnchorValid||cabin.interactionTarget[h]==4;
+            if (selected&&panelDistance<d.thickness&&markerIndex>=0) markers.markers[markerIndex].highlight=1.f;
+            if (selected&&fresh[h]&&panelDistance<d.thickness&&panelDistance<best) { best=panelDistance;chosen=t;chosenDoor=d;chosenHand=h; }
             if (editMode&&editFresh[h]&&distance<bestEdit) {bestEdit=distance;editTarget=t;editDoor=d;editHand=h;editCorner=-1;}
             if(editMode&&editFresh[h]) for(int corner=0;corner<4;++corner) {
                 const float cd=Length(world[h]-PanelCorner(d,corner));

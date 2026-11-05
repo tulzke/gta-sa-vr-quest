@@ -99,6 +99,8 @@ struct WheelVisualState {
     bool trackedHandsEnabled{true};
     bool grabbed[2]{};
     bool markerVisible[2]{};
+    // 0 none, 1 ignition, 2 radio, 3 wheel, 4 door.
+    int interactionTarget[2]{};
     int modelId{-1};
     float center[3]{};
     float right[3]{};

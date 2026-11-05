@@ -2,6 +2,7 @@
 #include "VehicleDoors.h"
 #include "VehicleDebugDrag.h"
 #include "Driving.h"
+#include "CockpitSelection.h"
 #include <map>
 #include <array>
 #include "Symbols.h"
@@ -83,7 +84,7 @@ void SetDebugWheelPitch(int,int) {}
 int positions[3]{},positionWrites{};
 void SetDebugPosition(int,int,bool,const int value[3]) { std::copy_n(value,3,positions);++positionWrites; }
 
-unsigned grabbed{};
+unsigned grabbed{}; int interactionTarget=4;
 bool GetWheelVisualState(WheelVisualState* out) {
     for(int i=0;i<2;++i)out->grabbed[i]=(grabbed&(1u<<i))!=0;
     if(bikeWheel){out->active=true;out->bike=true;out->dashAnchorValid=true;out->modelId=461;
@@ -92,7 +93,7 @@ bool GetWheelVisualState(WheelVisualState* out) {
         for(int i=0;i<2;++i){out->handlePosition[i][0]=(i?1.f:-1.f)*.31f+bikeGrip[i][0];
             out->handlePosition[i][1]=.5f+bikeGrip[i][1];out->handlePosition[i][2]=.8f+bikeGrip[i][2];}
         return true;}
-    out->dashAnchorValid=true;out->modelId=400;out->radius=.2f;out->center[0]=-.4f;out->center[1]=.2f;out->center[2]=1.f;return true;
+    out->dashAnchorValid=true;out->interactionTarget[0]=out->interactionTarget[1]=interactionTarget;out->modelId=400;out->radius=.2f;out->center[0]=-.4f;out->center[1]=.2f;out->center[2]=1.f;return true;
 }
 }
 namespace vrcam {
@@ -212,6 +213,14 @@ void GrabIt(int hand=0) {
 }
 }
 int main() {
+    {
+        float d[5]{1e6f,.08f,.05f,.07f,.06f};
+        CHECK(driving::SelectCockpitTarget(d,0)==2);
+        CHECK(driving::SelectCockpitTarget(d,4)==4); // retain close previous target
+        d[4]=.09f;CHECK(driving::SelectCockpitTarget(d,4)==2);
+        for(int i=1;i<=4;++i)d[i]=1e6f;
+        CHECK(driving::SelectCockpitTarget(d,4)==0);
+    }
     { Marker box{};box.direction={0,1,0};box.up={0,0,1};box.halfExtent={.1f,.5f,.3f};
       const auto mesh=PanelVolume(box);for(const Vec p:mesh) {
           CHECK(std::abs(std::abs(p.x)-.1f)<1e-5f&&std::abs(std::abs(p.y)-.5f)<1e-5f&&std::abs(std::abs(p.z)-.3f)<1e-5f);
@@ -357,6 +366,12 @@ int main() {
     const Vec inner{-1.f+.34f,.6f-1.2f*.82f,.7f};
     std::memcpy(hands[0].gripPos,&inner,12);Tick();CHECK(xr::published.count==1);
     CHECK(xr::published.markers[0].doorGrab&&xr::published.markers[0].hideArrow); // only grip icon inside
+    CHECK(xr::published.markers[0].highlight==1.f);
+    float interiorDistance[2]{};InteriorDistances(vehicle,hands,interiorDistance);
+    CHECK(interiorDistance[0]<.2f);
+    driving::interactionTarget=1;Tick();CHECK(xr::published.markers[0].highlight==0.f);
+    hands[0].grip=1;Tick();CHECK(ClaimedHands()==0);
+    hands[0].grip=0;driving::interactionTarget=4;Tick();
     CHECK(xr::published.markers[0].direction.x<-.9f); // arrow points toward the door
     CHECK(Length(xr::published.markers[0].position-(inner+Vec{.18f,0,0}))<1e-5f);
     driving::grabbed=1;hands[0].grip=1;Tick();CHECK(ClaimedHands()==0);

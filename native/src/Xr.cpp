@@ -10974,11 +10974,19 @@ bool DrawRadioModel(const float* mvp,const driving::WheelVisualState& w) {
 
 void DrawRadioKnob(const float* mvp,const driving::WheelVisualState& w) {
     if (!w.radioVisible) return;
-    if (DrawRadioModel(mvp,w)) return;
     const XrVector3f c{w.radioCenter[0],w.radioCenter[1],w.radioCenter[2]};
     const XrVector3f r=vnorm({w.radioRight[0],w.radioRight[1],w.radioRight[2]});
     const XrVector3f u=vnorm({w.radioUp[0],w.radioUp[1],w.radioUp[2]});
     const XrVector3f n=vnorm({w.radioNormal[0],w.radioNormal[1],w.radioNormal[2]});
+    if (w.interactionTarget[0]==2||w.interactionTarget[1]==2) {
+        float v[8*3*4]{}; unsigned short idx[36*4]{}; int vc=0,ic=0;
+        for (int side : {-1,1}) {
+            AppendDrivingBox(v,vc,idx,ic,vadd(c,vadd(vscale(r,side*.05f),vscale(n,-.025f))),u,r,n,.052f,.002f,.002f);
+            AppendDrivingBox(v,vc,idx,ic,vadd(c,vadd(vscale(u,side*.05f),vscale(n,-.025f))),r,u,n,.052f,.002f,.002f);
+        }
+        DrawDrivingBoxes(mvp,v,vc,idx,ic,.14f,.78f,1.f);
+    }
+    if (DrawRadioModel(mvp,w)) return;
     // Two separate cylinders keep the bezel and rotating knob legible even
     // without lighting or a texture. The front faces point toward the driver.
     const auto cylinder=[&](XrVector3f front,float radius,float depth,
@@ -11036,7 +11044,8 @@ void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
         idx[j+3]=a0;idx[j+4]=b0;idx[j+5]=a1;
         idx[j+6]=a1;idx[j+7]=b0;idx[j+8]=b1;
     }
-    DrawDrivingBoxes(mvp,verts,2*N+1,idx,N*9,.35f,.35f,.35f);
+    const bool selected=w.interactionTarget[0]==1||w.interactionTarget[1]==1;
+    DrawDrivingBoxes(mvp,verts,2*N+1,idx,N*9,selected?.14f:.35f,selected?.78f:.35f,selected?1.f:.35f);
     float boxes[8*3*20]{};unsigned short indices[36*20]{};int vc=0,ic=0;
     const XrVector3f keyUp=vnorm(vadd(vscale(u,std::cos(w.ignitionAngle)),vscale(r,std::sin(w.ignitionAngle))));
     const XrVector3f keyRight=vnorm(vcross(keyUp,n));
@@ -11172,7 +11181,9 @@ void DrawImmersiveDrivingWheel(const float* mvp,
             marker.up={normal.x,normal.y,normal.z};
             const auto mesh=vehicledoors::GripCylinder(marker);
             unsigned short indices[144]{};for(int i=0;i<144;++i)indices[i]=static_cast<unsigned short>(i);
-            DrawDrivingBoxes(mvp,reinterpret_cast<const float*>(mesh.data()),144,indices,144,1.f,.86f,.08f);
+            const bool selected=wheel.interactionTarget[hand]==3;
+            DrawDrivingBoxes(mvp,reinterpret_cast<const float*>(mesh.data()),144,indices,144,
+                             selected?.14f:1.f,selected?.78f:.86f,selected?1.f:.08f);
             continue;
         }
         float vertices[8*3]{}; unsigned short indices[36]{};
@@ -11184,6 +11195,8 @@ void DrawImmersiveDrivingWheel(const float* mvp,
         if (wheel.grabbed[hand])
             DrawDrivingBoxes(mvp,vertices,vertexCount,indices,indexCount,
                              70.0f/255.0f,245.0f/255.0f,125.0f/255.0f);
+        else if (wheel.interactionTarget[hand]==3)
+            DrawDrivingBoxes(mvp,vertices,vertexCount,indices,indexCount,1.f,.88f,.2f);
         else
             DrawDrivingBoxes(mvp,vertices,vertexCount,indices,indexCount,
                              35.0f/255.0f,180.0f/255.0f,245.0f/255.0f);
