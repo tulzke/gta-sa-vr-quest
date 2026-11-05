@@ -1,6 +1,7 @@
 #include "Melee.h"
 #include "CombatPolicy.h"
 #include "PunchTrajectory.h"
+#include "PlayerLife.h"
 
 #include "Log.h"
 #include "PhysicalWeapon.h"
@@ -465,6 +466,7 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
     int piece = contact.PieceB();
 
     if (type == kEntityPed) {
+        const bool aliveBefore=g.CPed_IsAlive(target)&&!playerlife::Dead(target);
         if (piece < 3 || piece > 9) piece = 3; // torso fallback
         int finalDamage = damage;
         // Vice City katana rule: a blade crossing at the head is a head
@@ -516,7 +518,7 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
                 const float velocity[3]{horizontal.x*push,horizontal.y*push,
                     punchKind==punch::Kind::Uppercut?5.f:.2f};
                 const char* reason="unknown";
-                const bool applied=npcgrab::KnockdownFromPunch(target,velocity,&reason);
+                const bool applied=npcgrab::KnockdownFromPunch(target,velocity,&reason,aliveBefore);
                 Trace("PUNCH_EFFECT kind=%d applied=%d reason=%s",static_cast<int>(punchKind),applied,reason);
             }
         }
@@ -767,7 +769,7 @@ void Update(bool interactionsBlocked) {
                         if (++punches<=120 || kind!=punch::Kind::Jab || punches%50==0)
                             Trace("PUNCH hand=%d kind=%d samples=%d path=%.3f rise=%.3f turn=%.3f speed=%.2f",
                                 hand,static_cast<int>(kind),motion.trajectory.samples,motion.trajectory.path,
-                                motion.trajectory.net.y,motion.trajectory.turn,strokeSpeed);
+                                motion.trajectory.rise,motion.trajectory.turn,strokeSpeed);
                     }
                     ApplyContact(player, hand, segment.weaponType,
                                  strokeSpeed,

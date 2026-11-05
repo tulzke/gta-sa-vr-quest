@@ -62,8 +62,9 @@ namespace npcgrab {
 unsigned ClaimedHands() { return 0; }
 bool BlocksVehicleInteraction(void*,int) { return false; }
 bool BlocksNpcPunch(void*,int) { return false; }
-bool KnockdownFromPunch(void* target,const float velocity[3],const char** reason) {
+bool KnockdownFromPunch(void* target,const float velocity[3],const char** reason,bool aliveBeforeHit) {
     CHECK(target==enemy);++knockdowns;std::copy_n(velocity,3,knockVelocity);
+    CHECK(aliveBeforeHit);
     if (reason) *reason="host-applied";
     return true;
 }
@@ -270,5 +271,28 @@ int main() {
     Setup();melee::Update(false);
     for (int i=0;i<8;++i) { xr::poses[0].gripPos[0]+=.055f;testNow+=.02;melee::Update(false); }
     CHECK(hits==1&&knockdowns==0&&heavySounds==0);
+    // Preparation must not dilute the final uppercut with earlier downward travel.
+    punch::Trajectory prepared;
+    for (int i=0;i<20;++i) prepared.Add({0,-.025f,-.04f});
+    for (int i=0;i<8;++i) prepared.Add({0,.03f,-.05f});
+    CHECK(prepared.path<=.601f&&prepared.Classify({1,0,0})==punch::Kind::Uppercut);
+    // Natural sideways arcs remain hooks despite small vertical/controller noise.
+    for (float side:{-1.f,1.f}) {
+        punch::Trajectory arc;
+        for (int i=0;i<60;++i) arc.Add({.01f,-.01f,-.02f});
+        float px=0,pz=-.5f;
+        for (int i=1;i<=12;++i) {
+            const float a=i*.10f,xx=side*.5f*std::sin(a),zz=-.5f*std::cos(a);
+            arc.Add({xx-px,(i%2?.004f:-.004f),zz-pz});px=xx;pz=zz;
+        }
+        CHECK(arc.Classify({1,0,0})==punch::Kind::Hook);
+    }
+    punch::Trajectory elevatedJab;
+    for (int i=0;i<5;++i) elevatedJab.Add({0,.05f,0});
+    for (int i=0;i<9;++i) elevatedJab.Add({0,0,-.05f});
+    CHECK(elevatedJab.Classify({1,0,0})==punch::Kind::Jab);
+    punch::Trajectory noisySideJab;
+    for (int i=0;i<12;++i) noisySideJab.Add({.04f,0,(i%2?.003f:-.003f)});
+    CHECK(noisySideJab.Classify({1,0,0})==punch::Kind::Jab);
     std::puts("Combat: two-hand inward guard, slowdown, feedback and 40 cm stroke checks passed");
 }

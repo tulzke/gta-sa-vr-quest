@@ -676,6 +676,14 @@ int main() {
     punchReactionVtables[0]=nullptr;Write<void*>(fall,0,nullptr);
     Setup();Tick();Seat();CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
     Setup();Tick();Write(npc,0x6ac,0.f);CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
+    // A punch that just killed the NPC can launch it, keeping the death task.
+    Setup();Tick();Write(npc,0x6ac,0.f);Write<void*>(intelligence,8,fall);
+    const int beforeLethal=allocations;
+    CHECK(KnockdownFromPunch(npc,uppercut,&why,true)&&!std::strcmp(why,"lethal-impulse"));
+    CHECK(!fallCalls&&allocations==beforeLethal&&Read<void*>(intelligence,8)==fall);
+    Write<void*>(intelligence,8,taskMemory[31]); // native death event replaces its task later
+    OnCalculateVelocity(npc);CHECK(Length(Read<Vec>(npc,0x68)-Vec{0,.08f,.04f})<.0001f);
+    CHECK(Read<void*>(intelligence,8)==taskMemory[31]);
     Setup();Tick();flags[0]=128;CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
     Setup();Tick();CHECK(!KnockdownFromPunch(player,uppercut));
     const float excessive[3]{0,8,2};CHECK(!KnockdownFromPunch(npc,excessive));

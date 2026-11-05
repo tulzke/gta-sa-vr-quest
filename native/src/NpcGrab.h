@@ -12,5 +12,8 @@ void OnDoorOpening(void* vehicle);
 bool BlocksVehicleInteraction(void* vehicle,int hand);
 bool BlocksNpcPunch(void* ped,int hand);
 // World-space metres/second. Native fall task and pool-safe flight lifetime.
-bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason=nullptr);
+// aliveBeforeHit allows an impulse after this hit kills the NPC, without
+// replacing death tasks; already-dead actors are otherwise excluded.
+bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason=nullptr,
+                        bool aliveBeforeHit=false);
 }
