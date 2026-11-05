@@ -10882,7 +10882,7 @@ extern const unsigned char savr_radio_knob_rgba[],savr_radio_knob_rgba_end[];
 struct RadioPart { HandMesh mesh; GLuint texture{}; };
 RadioPart g_radioParts[2];
 GLuint g_radioProgram{},g_radioVbo{},g_radioEbo{};
-GLint g_radioMvp=-1,g_radioSampler=-1;
+GLint g_radioMvp=-1,g_radioSampler=-1,g_radioHighlight=-1;
 bool g_radioAssetsTried=false;
 
 bool LoadEmbeddedRadioMesh(const unsigned char* begin,const unsigned char* end,HandMesh& mesh) {
@@ -10923,8 +10923,8 @@ bool EnsureRadioAssets() {
     if (!ready) { LOGE("[radio] embedded model or texture invalid; using fallback"); return false; }
     const char* vs="#version 300 es\nlayout(location=0) in vec3 aPos;layout(location=1) in vec2 aUv;"
         "uniform mat4 uMVP;out vec2 uv;void main(){uv=aUv;gl_Position=uMVP*vec4(aPos,1.0);}";
-    const char* fs="#version 300 es\nprecision mediump float;in vec2 uv;uniform sampler2D uTex;"
-        "out vec4 o;void main(){o=vec4(texture(uTex,uv).rgb,1.0);}";
+    const char* fs="#version 300 es\nprecision mediump float;in vec2 uv;uniform sampler2D uTex;uniform float uHighlight;"
+        "out vec4 o;void main(){vec3 c=texture(uTex,uv).rgb;o=vec4(mix(c,vec3(1.0),uHighlight),1.0);}";
     const GLuint v=CompileHandShader(GL_VERTEX_SHADER,vs), f=CompileHandShader(GL_FRAGMENT_SHADER,fs);
     g_radioProgram=glCreateProgram(); glAttachShader(g_radioProgram,v); glAttachShader(g_radioProgram,f);
     glLinkProgram(g_radioProgram); glDeleteShader(v); glDeleteShader(f);
@@ -10932,6 +10932,7 @@ bool EnsureRadioAssets() {
     if (!linked) { LOGE("[radio] shader link failed; using fallback"); glDeleteProgram(g_radioProgram); g_radioProgram=0; return false; }
     g_radioMvp=glGetUniformLocation(g_radioProgram,"uMVP");
     g_radioSampler=glGetUniformLocation(g_radioProgram,"uTex");
+    g_radioHighlight=glGetUniformLocation(g_radioProgram,"uHighlight");
     glGenBuffers(1,&g_radioVbo); glGenBuffers(1,&g_radioEbo);
     return true;
 }
@@ -10950,6 +10951,7 @@ bool DrawRadioModel(const float* mvp,const driving::WheelVisualState& w) {
     glBindBuffer(GL_ARRAY_BUFFER,g_radioVbo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,g_radioEbo);
     glEnableVertexAttribArray(0); glEnableVertexAttribArray(1);
     for (int part=0;part<2;++part) {
+        glUniform1f(g_radioHighlight,part==0&&(w.interactionTarget[0]==2||w.interactionTarget[1]==2)?.12f:0.f);
         const auto& model=g_radioParts[part];
         const float a=part?w.radioAngle:0.0f, cs=std::cos(a), sn=std::sin(a);
         std::vector<Vertex> vertices; vertices.reserve(model.mesh.verts.size());
@@ -10978,14 +10980,6 @@ void DrawRadioKnob(const float* mvp,const driving::WheelVisualState& w) {
     const XrVector3f r=vnorm({w.radioRight[0],w.radioRight[1],w.radioRight[2]});
     const XrVector3f u=vnorm({w.radioUp[0],w.radioUp[1],w.radioUp[2]});
     const XrVector3f n=vnorm({w.radioNormal[0],w.radioNormal[1],w.radioNormal[2]});
-    if (w.interactionTarget[0]==2||w.interactionTarget[1]==2) {
-        float v[8*3*4]{}; unsigned short idx[36*4]{}; int vc=0,ic=0;
-        for (int side : {-1,1}) {
-            AppendDrivingBox(v,vc,idx,ic,vadd(c,vadd(vscale(r,side*.05f),vscale(n,-.025f))),u,r,n,.052f,.002f,.002f);
-            AppendDrivingBox(v,vc,idx,ic,vadd(c,vadd(vscale(u,side*.05f),vscale(n,-.025f))),r,u,n,.052f,.002f,.002f);
-        }
-        DrawDrivingBoxes(mvp,v,vc,idx,ic,.14f,.78f,1.f);
-    }
     if (DrawRadioModel(mvp,w)) return;
     // Two separate cylinders keep the bezel and rotating knob legible even
     // without lighting or a texture. The front faces point toward the driver.
@@ -11011,7 +11005,9 @@ void DrawRadioKnob(const float* mvp,const driving::WheelVisualState& w) {
         DrawDrivingBoxes(mvp,vertices,2*N+1,edge,N*6,edgeR,edgeG,edgeB);
         DrawDrivingBoxes(mvp,vertices,2*N+1,face,N*3,faceR,faceG,faceB);
     };
-    cylinder(c,.040f,.006f,.12f,.14f,.16f,.08f,.09f,.10f);
+    const bool selected=w.interactionTarget[0]==2||w.interactionTarget[1]==2;
+    cylinder(c,.040f,.006f,selected?.23f:.12f,selected?.24f:.14f,selected?.26f:.16f,
+             selected?.19f:.08f,selected?.20f:.09f,selected?.21f:.10f);
     cylinder(vadd(c,vscale(n,-.020f)),.027f,.020f,.72f,.74f,.76f,.35f,.38f,.41f);
     float boxes[8*3]{}; unsigned short indices[36]{}; int vc=0,ic=0;
     const XrVector3f ru=vadd(vscale(u,std::cos(w.radioAngle)),vscale(r,std::sin(w.radioAngle)));
@@ -11045,7 +11041,7 @@ void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
         idx[j+6]=a1;idx[j+7]=b0;idx[j+8]=b1;
     }
     const bool selected=w.interactionTarget[0]==1||w.interactionTarget[1]==1;
-    DrawDrivingBoxes(mvp,verts,2*N+1,idx,N*9,selected?.14f:.35f,selected?.78f:.35f,selected?1.f:.35f);
+    DrawDrivingBoxes(mvp,verts,2*N+1,idx,N*9,selected?.43f:.35f,selected?.43f:.35f,selected?.43f:.35f);
     float boxes[8*3*20]{};unsigned short indices[36*20]{};int vc=0,ic=0;
     const XrVector3f keyUp=vnorm(vadd(vscale(u,std::cos(w.ignitionAngle)),vscale(r,std::sin(w.ignitionAngle))));
     const XrVector3f keyRight=vnorm(vcross(keyUp,n));
@@ -11183,7 +11179,7 @@ void DrawImmersiveDrivingWheel(const float* mvp,
             unsigned short indices[144]{};for(int i=0;i<144;++i)indices[i]=static_cast<unsigned short>(i);
             const bool selected=wheel.interactionTarget[hand]==3;
             DrawDrivingBoxes(mvp,reinterpret_cast<const float*>(mesh.data()),144,indices,144,
-                             selected?.14f:1.f,selected?.78f:.86f,selected?1.f:.08f);
+                             1.f,selected?.91f:.86f,selected?.20f:.08f);
             continue;
         }
         float vertices[8*3]{}; unsigned short indices[36]{};
@@ -11196,7 +11192,8 @@ void DrawImmersiveDrivingWheel(const float* mvp,
             DrawDrivingBoxes(mvp,vertices,vertexCount,indices,indexCount,
                              70.0f/255.0f,245.0f/255.0f,125.0f/255.0f);
         else if (wheel.interactionTarget[hand]==3)
-            DrawDrivingBoxes(mvp,vertices,vertexCount,indices,indexCount,1.f,.88f,.2f);
+            DrawDrivingBoxes(mvp,vertices,vertexCount,indices,indexCount,
+                             55.0f/255.0f,195.0f/255.0f,1.f);
         else
             DrawDrivingBoxes(mvp,vertices,vertexCount,indices,indexCount,
                              35.0f/255.0f,180.0f/255.0f,245.0f/255.0f);

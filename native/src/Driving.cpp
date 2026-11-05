@@ -1790,6 +1790,24 @@ void FillHandleVisuals(WheelVisualState* visual) {
     }
 }
 
+// Match the rendered hand frame: the thumb/index contact is ahead of the
+// grip origin and below it, rather than at the controller's palm centre.
+V3 CockpitFingerPoint(const xr::HandPose& hand,int index) {
+    const V3 origin{hand.gripPos[0],hand.gripPos[1],hand.gripPos[2]};
+    float grip[4]{},aim[4]{};
+    if (!NormalizeQuaternion(hand.gripOri,grip)) return origin;
+    const auto rotate=[](const float q[4],V3 axis) {
+        const V3 v{q[0],q[1],q[2]};
+        return axis+Cross(v,Cross(v,axis)+axis*q[3])*2.f;
+    };
+    V3 forward=hand.aimValid&&NormalizeQuaternion(hand.aimOri,aim)
+        ?Normalized(rotate(aim,{0,0,-1})):Normalized(rotate(grip,{0,1,0}));
+    V3 up=rotate(grip,{1,0,0})*(index==0?-1.f:1.f);
+    up=Normalized(up-forward*Dot(up,forward));
+    if (Length(forward)<.5f||Length(up)<.5f) return origin;
+    return origin+forward*.075f-up*.045f;
+}
+
 void UpdateIgnition(WheelVisualState& visual, void* vehicle,
                     const xr::InputState& input, const xr::HandPose poses[2],
                     unsigned occupied, bool preview=false) {
@@ -1907,7 +1925,7 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
     unsigned mask=g_ignitionRotation.owners;
     float angles[2]{};
     for (int h=0;h<2;++h) {
-        const V3 p{poses[h].gripPos[0],poses[h].gripPos[1],poses[h].gripPos[2]};
+        const V3 p=CockpitFingerPoint(poses[h],h);
         const bool valid=poses[h].valid && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
         if (!valid || input.grip[h]<=.30f || (occupied&(1u<<h))) mask&=~(1u<<h);
         if (valid && !(occupied&(1u<<h)) && !g_ignitionGripDown[h] &&
@@ -1994,7 +2012,7 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
         g_radioKnobNext.store(0); g_radioKnobPrev.store(0);
     }
     for (int h=0;h<2;++h) {
-        const V3 p{poses[h].gripPos[0],poses[h].gripPos[1],poses[h].gripPos[2]};
+        const V3 p=CockpitFingerPoint(poses[h],h);
         const bool valid=poses[h].valid && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
         if (g_radioKnobHand==h && (!valid || input.grip[h]<=.30f || (occupied&(1u<<h)))) {
             g_radioKnob.Reset(); g_radioKnobHand=-1;
@@ -2049,8 +2067,9 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
         const V3 key{geometry.ignitionCenter[0],geometry.ignitionCenter[1],geometry.ignitionCenter[2]};
         const V3 radio{geometry.radioCenter[0],geometry.radioCenter[1],geometry.radioCenter[2]};
         const V3 wheel{visual.handlePosition[h][0],visual.handlePosition[h][1],visual.handlePosition[h][2]};
-        float d[5]{1e6f,geometry.ignitionVisible?Length(p-key):1e6f,
-                   geometry.radioVisible && g_radioKnobHand<0?Length(p-radio):1e6f,
+        const V3 fingers=CockpitFingerPoint(poses[h],h);
+        float d[5]{1e6f,geometry.ignitionVisible?Length(fingers-key):1e6f,
+                   geometry.radioVisible && g_radioKnobHand<0?Length(fingers-radio):1e6f,
                    wheelAvailable?Length(p-wheel):1e6f,doorDistance[h]};
         if (d[1]>=.12f) d[1]=1e6f;
         if (d[2]>=.10f) d[2]=1e6f;

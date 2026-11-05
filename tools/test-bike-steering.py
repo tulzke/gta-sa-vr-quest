@@ -189,6 +189,33 @@ def main():
         source = output/'lifecycle.cpp'
         source.write_text(lifecycle(), encoding='utf8')
         compile_run(source, 'bike-lifecycle', output)
+        source = output/'cockpit-fingers.cpp'
+        source.write_text(fingers(), encoding='utf8')
+        compile_run(source, 'cockpit-fingers', output)
+
+
+def fingers():
+    vector_math=SOURCE[SOURCE.index('struct V3 {'):SOURCE.index('double MonotonicSeconds()')]
+    return r'''
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+namespace xr { struct HandPose {
+    bool valid{},aimValid{}; float gripPos[3]{},gripOri[4]{0,0,0,1},aimOri[4]{0,0,0,1};
+}; }
+''' + vector_math + function('bool NormalizeQuaternion(') + function('V3 CockpitFingerPoint(') + r'''
+bool near(float a,float b){return std::abs(a-b)<.0001f;}
+int main(){
+    xr::HandPose h{};h.aimValid=true;
+    V3 l=CockpitFingerPoint(h,0),r=CockpitFingerPoint(h,1);
+    if(!near(l.x,.045f)||!near(r.x,-.045f)||!near(l.z,-.075f)||!near(r.z,-.075f))return 1;
+    h.aimValid=false;V3 fallback=CockpitFingerPoint(h,0);
+    if(!near(fallback.y,.075f)||!near(fallback.x,.045f))return 2;
+    h.gripOri[3]=0;h.gripPos[0]=1;V3 invalid=CockpitFingerPoint(h,0);
+    if(!near(invalid.x,1)||!near(invalid.y,0))return 3;
+    std::puts("PASS: cockpit fingertip target, mirroring and tracking fallback");
+}
+'''
 
 
 def lifecycle():
