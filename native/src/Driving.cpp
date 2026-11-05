@@ -1951,7 +1951,7 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
 
 void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
                      const xr::InputState& input, const xr::HandPose poses[2],
-                     unsigned occupied, bool preview=false) {
+                     unsigned occupied, bool preview=false, bool probe=false) {
     if (!vehicle || IsBicycleModel(visual.modelId) || !g.FindPlayerPed ||
         !g.CVehicle_IsDriver || !g.CVehicle_IsDriver(vehicle,g.FindPlayerPed(-1))) {
         g_radioKnob.Reset(); g_radioKnobHand=-1; return;
@@ -1986,7 +1986,7 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
     const V3 vectors[4]{center,right,up,normal};
     float* fields[4]{visual.radioCenter,visual.radioRight,visual.radioUp,visual.radioNormal};
     for (int i=0;i<4;++i) { fields[i][0]=vectors[i].x; fields[i][1]=vectors[i].y; fields[i][2]=vectors[i].z; }
-    if (preview) { g_radioKnob.Reset(); g_radioKnobHand=-1; return; }
+    if (preview) { if (!probe) { g_radioKnob.Reset(); g_radioKnobHand=-1; } return; }
     if (g_radioKnobVehicle!=vehicle) {
         g_radioKnobVehicle=vehicle; g_radioKnob.Reset(); g_radioKnobHand=-1;
         g_radioGripDown[0]=g_radioGripDown[1]=true;
@@ -2025,6 +2025,33 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
             visual.radioAngle=g_radioKnob.angle/deg;
         }
     }
+}
+
+// Resolve overlapping controls before either consumes a fresh grip.
+void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
+                           const xr::InputState& input, const xr::HandPose poses[2],
+                           unsigned occupied) {
+    WheelVisualState geometry=visual;
+    UpdateIgnition(geometry,vehicle,input,poses,occupied,true);
+    UpdateRadioKnob(geometry,vehicle,input,poses,occupied,true,true);
+    unsigned keyBlocked=occupied, radioBlocked=occupied;
+    for (int h=0;h<2;++h) {
+        const unsigned bit=1u<<h;
+        if (g_ignitionRotation.owners&bit) { radioBlocked|=bit; continue; }
+        if (g_radioKnobHand==h) { keyBlocked|=bit; continue; }
+        const V3 p{poses[h].gripPos[0],poses[h].gripPos[1],poses[h].gripPos[2]};
+        if (!poses[h].valid || !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
+        const V3 key{geometry.ignitionCenter[0],geometry.ignitionCenter[1],geometry.ignitionCenter[2]};
+        const V3 radio{geometry.radioCenter[0],geometry.radioCenter[1],geometry.radioCenter[2]};
+        const float dk=geometry.ignitionVisible?Length(p-key):1e6f;
+        const float dr=geometry.radioVisible && g_radioKnobHand<0?Length(p-radio):1e6f;
+        if (dk<.12f && dr<.10f) {
+            if (dk<=dr) radioBlocked|=bit; else keyBlocked|=bit;
+        }
+    }
+    UpdateIgnition(visual,vehicle,input,poses,keyBlocked);
+    for (int h=0;h<2;++h) if (visual.ignitionGrabbed[h]) radioBlocked|=1u<<h;
+    UpdateRadioKnob(visual,vehicle,input,poses,radioBlocked);
 }
 
 // Android SA 2.11 polls touch widgets inside these queries. Hook the queries,
@@ -4500,10 +4527,10 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
             if ((!blocked||preview) && (activeType==VEHICLE_CAR||activeType==VEHICLE_BIKE)) {
                 xr::HandPose hands[2]{}; xr::GetHandPoses(hands);
                 const unsigned occupied=physicalweapon::HeldHandMaskRelaxed()|vehicledoors::ClaimedHands();
-                UpdateIgnition(anchor,activeVehicle,input,hands,occupied | (g_radioKnobHand>=0 ? 1u<<g_radioKnobHand : 0u),preview);
-                unsigned radioOccupied=occupied;
-                for(int h=0;h<2;++h) if(anchor.ignitionGrabbed[h]) radioOccupied|=1u<<h;
-                UpdateRadioKnob(anchor,activeVehicle,input,hands,radioOccupied,preview);
+                if (preview) {
+                    UpdateIgnition(anchor,activeVehicle,input,hands,occupied,true);
+                    UpdateRadioKnob(anchor,activeVehicle,input,hands,occupied,true);
+                } else UpdateCockpitControls(anchor,activeVehicle,input,hands,occupied);
             }
             g_visual=anchor;
         }
@@ -4585,10 +4612,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     const unsigned int weaponHands = physicalweapon::HeldHandMaskRelaxed() | vehicledoors::ClaimedHands();
     unsigned ignitionOccupied=weaponHands;
     for (int h=0;h<2;++h) if (g_grabbed[h]) ignitionOccupied|=1u<<h;
-    UpdateIgnition(visual,activeVehicle,input,poses,ignitionOccupied | (g_radioKnobHand>=0 ? 1u<<g_radioKnobHand : 0u));
-    unsigned radioOccupied=ignitionOccupied;
-    for (int h=0;h<2;++h) if (visual.ignitionGrabbed[h]) radioOccupied|=1u<<h;
-    UpdateRadioKnob(visual,activeVehicle,input,poses,radioOccupied);
+    UpdateCockpitControls(visual,activeVehicle,input,poses,ignitionOccupied);
     for (int hand=0;hand<2;++hand) {
         positions[hand]={poses[hand].gripPos[0],poses[hand].gripPos[1],poses[hand].gripPos[2]};
         poseValid[hand]=poses[hand].valid&&std::isfinite(positions[hand].x)&&
