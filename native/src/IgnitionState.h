@@ -5,6 +5,12 @@
 
 namespace savr::ignition {
 
+// The key face points opposite cross(right, up). Bike steering frames have
+// the opposite handedness from car wheels, including saved debug poses.
+inline bool FlipFaceNormal(float handedness) {
+    return std::isfinite(handedness) && handedness > 0.0f;
+}
+
 // A grab from below the key uses the reverse pose. The caller latches the
 // choice at the grip edge so movement while held cannot flip the hand.
 inline bool ReverseGrip(float heightAlongKey) {

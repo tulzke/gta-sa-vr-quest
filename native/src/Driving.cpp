@@ -1831,6 +1831,7 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
             }
         }
     }
+    if (ignition::FlipFaceNormal(Dot(Cross(right,up),normal))) normal=normal*-1.0f;
     if (preview) {
         visual.ignitionVisible=true;
         visual.ignitionAngle=EngineOn(vehicle)?1.57079632679f:0.0f;

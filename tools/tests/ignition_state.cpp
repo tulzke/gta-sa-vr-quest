@@ -6,6 +6,9 @@
 using namespace savr::ignition;
 
 int main() {
+    assert(!FlipFaceNormal(-1.0f)); // car and already corrected poses
+    assert(FlipFaceNormal(1.0f)); // bike, including saved poses
+    assert(!FlipFaceNormal(std::numeric_limits<float>::quiet_NaN()));
     assert(!ReleasedEngineOn(0));
     assert(!ReverseGrip(0.01f) && ReverseGrip(-0.01f));
     assert(!ReverseGrip(0.0f));
