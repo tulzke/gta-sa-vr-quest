@@ -48,7 +48,7 @@ using namespace savr::vehicleclimb;
 // ACTUAL_GRIP_THUMBS
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 char cars[110*0xc68]{},pool[32]{},matrix[64]{},door[64]{},ped[0xa00]{},pm[64]{};
-std::uint8_t flags[110];void* poolPtr=pool;void* ignored{};bool wall{};int moves{};
+std::uint8_t flags[110];void* poolPtr=pool;void* ignored{};bool wall{},carBlocks{};int moves{};
 xr::HandPose hands[2];
 void Tick(bool usable=true,std::uint64_t epoch=1,unsigned occupied=0){testNow+=.01;Update(usable&&!vrcam::ParachuteStateActive(),hands,epoch,occupied);physicalweapon::AutoEquipParachute();}
 int main(){
@@ -113,8 +113,12 @@ int main(){
     g.CPools_ms_pVehiclePool=&poolPtr;g.FindPlayerPed=[](int)->void*{return ped;};g.FindPlayerVehicle=[](int,bool)->void*{return nullptr;};
     g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned,bool){out->x=10;out->y=0;out->z=0;};
     g.CWorld_pIgnoreEntity=&ignored;
-    g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void**,bool,bool,bool,bool,bool,bool,bool,bool){return wall;};
-    g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3,float,void*,bool,bool,bool,bool,bool,bool)->void*{return wall?cars:nullptr;};
+    g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,bool,bool,bool,bool,bool,bool,bool,bool){
+        if(carBlocks&&ignored!=cars){*hit=cars;return true;}return wall;
+    };
+    g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3,float,void* exclude,bool,bool,bool,bool,bool,bool)->void*{
+        return wall||(carBlocks&&exclude!=cars)?cars:nullptr;
+    };
     removeEntity=[](void*){++moves;};addEntity=[](void*){};ltm=[](void* p){return p;};healthy=[](const void*){return true;};
     for(int model=400;model<=611;++model)if(FindProfile(model)){
         Put(cars,0x32,std::uint16_t(model));Tick();Tick();
@@ -210,15 +214,29 @@ int main(){
     Put(ped,0x28,Read<std::uint64_t>(ped,0x28)|0x1000); // unrelated engine change
     Put(cars,0x68,Vec{.1f,0,0});Put(cars,0x74,Vec{0,0,.1f});Tick();assert(activeCar&&ClaimedHands()==1);
     const Vec beforeCarMove=Position(ped);
-    Put(matrix,0x30,Vec{.05f,0,0});Tick();
+    carBlocks=true; // own cab intersects the sweep unless explicitly ignored
+    const Vec oldPipe=markers.markers[markers.count-1].position;
+    Put(matrix,0x30,Vec{.05f,0,0});FollowBeforeCamera();
+    vehicledoors::MarkerFrame late;late.epoch=1;Append(late);
+    assert(late.count==1&&std::abs(late.markers[0].position.x-oldPipe.x-.05f)<.0001f);
+    xr::HandPose lateHands[2]={hands[0],hands[1]};ApplyHandVisuals(lateHands);
+    assert(std::abs(lateHands[0].gripPos[0]-(grabLocal[0].x+.05f))<.0001f);
+    Tick();
     assert(ClaimedHands()==1&&std::abs(Position(ped).x-beforeCarMove.x-.05f)<.0001f);
-    const Vec priorFastMove=Position(ped);Put(matrix,0x30,Vec{.65f,0,0});Tick();
+    const Vec stillOutside=Position(ped);
+    assert(!Move(ped,stillOutside,stillOutside+Vec{0,0,.05f})&&Length(Position(ped)-stillOutside)<.0001f);
+    const int movesBeforeFast=moves;const Vec priorFastMove=Position(ped);Put(matrix,0x30,Vec{.65f,0,0});Tick();
     assert(ClaimedHands()==1&&std::abs(Position(ped).x-priorFastMove.x-.60f)<.0001f);
+    assert(moves==movesBeforeFast+1); // all sweep probes, one world remove/add
     const Vec localBefore=Position(ped)-Vec{.65f,0,0};const float angle=.02f;
     Put(matrix,0,Vec{std::cos(angle),std::sin(angle),0});
     Put(matrix,0x10,Vec{-std::sin(angle),std::cos(angle),0});Tick();
     const Vec expected{.65f+localBefore.x*std::cos(angle)-localBefore.y*std::sin(angle),localBefore.x*std::sin(angle)+localBefore.y*std::cos(angle),localBefore.z};
     assert(ClaimedHands()==1&&Length(Position(ped)-expected)<.0001f);
+    // A real wall must still prevent transport, and the global ignore pointer
+    // must be restored even on the blocked path.
+    wall=true;const Vec blockedCarry=Position(ped);Put(matrix,0x30,Vec{.70f,0,0});FollowBeforeCamera();
+    assert(Length(Position(ped)-blockedCarry)<.0001f&&ignored==nullptr);wall=false;carBlocks=false;
     hands[0].grip=0;Tick();assert(!activeCar&&!ClaimedHands());
     assert(Read<std::uint64_t>(ped,0x28)==0x5001&&Read<std::uint32_t>(ped,0x64)==0x202);
     Put(cars,0x68,Vec{});Put(cars,0x74,Vec{});Put(matrix,0,Vec{1,0,0});Put(matrix,0x10,Vec{0,1,0});Put(matrix,0x30,Vec{});driving::mode=0;

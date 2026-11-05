@@ -9,6 +9,8 @@ unsigned ClaimedHands();
 bool Editing();
 // A hand is gripping the pipe, not freefall.
 bool Attached();
+// Reconcile the held player after vehicle physics, before the VR camera anchor.
+void FollowBeforeCamera();
 void PrepareForBoarding();
 // Render-only override, evaluated after the current camera anchor is ready.
 void ApplyHandVisuals(xr::HandPose hands[2]);

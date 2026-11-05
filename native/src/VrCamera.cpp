@@ -3568,6 +3568,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
     if (stereo && !inHook && self == g.TheCamera) {
         inHook = true;
         FinishRoomMovement();
+        vehicleclimb::FollowBeforeCamera();
         float hp[3], hq[4];
         std::uint64_t epoch{};
         if (xr::GetHeadPose(hp, hq, &epoch)) {

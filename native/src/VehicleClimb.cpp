@@ -27,6 +27,9 @@ double lastTime{};
 void* activeCar{};void* activePool{};int activeSlot=-1;std::uint8_t generation{};
 int activeSide{};bool held[2]{};Vec previous[2]{},targetRoot{};
 Vec grabRootLocal[2]{},grabTracking[2]{},grabLocal[2]{},grabWorld[2]{};
+Basis lastCarBasis{},markerBasis{};
+Vec visualPipeLocal{0,0,1};
+bool lastCarBasisValid{},markerBasisValid{};
 DebugDrag edit;int control=-1;float editBase[12]{};bool dirty{};
 void* suspendedPed{};bool savedCollision{},savedGravity{};
 
@@ -59,7 +62,7 @@ void SuspendPhysics(void* ped){
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 Vec Position(void* p){void* m=Read<void*>(p,0x18);return Read<Vec>(m?m:p,m?0x30:8);}
 void EndEdit(){if(dirty)driving::SaveDebugCalibration();dirty=false;edit={};control=-1;}
-void Reset(){ResumePhysics();EndEdit();claimed=0;activeCar=nullptr;activePool=nullptr;activeSlot=-1;held[0]=held[1]=false;}
+void Reset(){ResumePhysics();EndEdit();claimed=0;activeCar=nullptr;activePool=nullptr;activeSlot=-1;held[0]=held[1]=false;lastCarBasisValid=markerBasisValid=false;}
 bool World(Vec p,Vec& out){float a[]={p.x,p.y,p.z},b[3]{};if(!vrcam::TrackingPointToWorld(a,b))return false;out={b[0],b[1],b[2]};return Finite(out);}
 Vec Raw(const xr::HandPose& h){return {h.gripPos[0],h.gripPos[1],h.gripPos[2]};}
 struct Geometry {Pipe pipe;};
@@ -79,23 +82,22 @@ void Bar(Vec p,Vec axis,Vec up,bool selected=false,float length=.11f){
 }
 // Reject body obstruction as well as swept torso/head paths. The source car is
 // deliberately included: pulling through its cab must never be allowed.
-bool MoveDirect(void* ped,Vec from,Vec to){
+bool ClearSegment(void* ped,Vec from,Vec to,void* ignoredVehicle=nullptr){
     if(!Finite(to)||Length(to-from)>.36f||!g.CWorld_ProcessLineOfSight||!g.CWorld_TestSphereAgainstWorld||!g.CWorld_pIgnoreEntity)return false;
-    void* old=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=ped;
+    void* old=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=ignoredVehicle?ignoredVehicle:ped;
     bool clear=true;
     for(float z:{-.25f,.45f}){
         GameSymbols::Vec3 a{from.x,from.y,from.z+z},b{to.x,to.y,to.z+z};
         alignas(8) unsigned char col[0x2c]{};void* hit{};
         if(g.CWorld_ProcessLineOfSight(&a,&b,col,&hit,true,true,true,true,true,false,false,false)||
-           g.CWorld_TestSphereAgainstWorld(b,.22f,ped,true,true,true,true,true,false)){clear=false;break;}
+           g.CWorld_TestSphereAgainstWorld(b,.22f,ignoredVehicle?ignoredVehicle:ped,true,true,true,true,true,false)){clear=false;break;}
     }
     *g.CWorld_pIgnoreEntity=old;
-    if(!clear)return false;
-    removeEntity(ped);void* matrix=Read<void*>(ped,0x18);Write(matrix?matrix:ped,matrix?0x30:8,to);addEntity(ped);
-    Vec speed=Read<Vec>(ped,0x68);speed.z=0;Write(ped,0x68,speed);return true;
+    return clear;
 }
-bool Move(void* ped,Vec from,Vec to){
+bool Move(void* ped,Vec from,Vec to,void* ignoredVehicle=nullptr){
     if(!Finite(to)||!Finite(from))return false;
+    if(Length(to-from)<.00001f)return true;
     // Resolve short sweeps, retaining accepted travel. A small sideways lean
     // into the cab must not cancel an otherwise clear upward pull.
     Vec accepted=from;
@@ -103,7 +105,7 @@ bool Move(void* ped,Vec from,Vec to){
         const Vec start=accepted,delta=end-start;
         const int steps=std::max(1,int(std::ceil(Length(delta)/.04f)));
         for(int i=1;i<=steps;++i){const Vec next=start+delta*(float(i)/steps);
-            if(!MoveDirect(ped,accepted,next))break;
+            if(!ClearSegment(ped,accepted,next,ignoredVehicle))break;
             accepted=next;
         }
     };
@@ -112,7 +114,31 @@ bool Move(void* ped,Vec from,Vec to){
         sweep({accepted.x,accepted.y,to.z});
         sweep({to.x,to.y,accepted.z});
     }
+    if(Length(accepted-from)>.00001f){
+        // Sweep all samples first, then update world membership just once.
+        removeEntity(ped);void* matrix=Read<void*>(ped,0x18);
+        Write(matrix?matrix:ped,matrix?0x30:8,accepted);addEntity(ped);
+        Vec speed=Read<Vec>(ped,0x68);speed.z=0;Write(ped,0x68,speed);
+    }
     return Length(accepted-to)<.0001f;
+}
+bool CurrentCarBasis(Basis& basis){
+    void* pool=g.CPools_ms_pVehiclePool?*g.CPools_ms_pVehiclePool:nullptr;
+    if(!activeCar||!pool||pool!=activePool||activeSlot<0||activeSlot>=110||Read<int>(pool,0x10)!=110)return false;
+    const auto objects=Read<char*>(pool,0);const auto flags=Read<std::uint8_t*>(pool,8);
+    if(!objects||!flags||objects+activeSlot*0xc68!=activeCar||flags[activeSlot]!=generation||(generation&0x80))return false;
+    void* matrix=Read<void*>(activeCar,0x18);if(!matrix)return false;
+    basis={Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+    return basis.Valid()&&basis.up.z>=.98f;
+}
+void FollowVehicle(void* ped,const Basis& current){
+    if(lastCarBasisValid&&(held[0]||held[1])){
+        const Vec from=Position(ped),to=current.Point(lastCarBasis.Local(from));
+        // This is a rigid carry in the car's frame, not motion through its
+        // body. Ignore that car only; walls and all other entities still block.
+        if(Finite(to)&&Length(to-from)<20.f)Move(ped,from,to,activeCar);
+    }
+    lastCarBasis=current;lastCarBasisValid=true;
 }
 }
 void Install(void* h){
@@ -124,8 +150,19 @@ void Install(void* h){
 unsigned ClaimedHands(){return claimed;}
 bool Editing(){return edit.hand>=0;}
 bool Attached(){return held[0]||held[1];}
+void FollowBeforeCamera(){
+    if(!Attached()||!lastCarBasisValid||!g.FindPlayerPed||!g.FindPlayerVehicle||g.FindPlayerVehicle(-1,false))return;
+    void* ped=g.FindPlayerPed(-1);Basis current;
+    if(ped&&ped==suspendedPed&&CurrentCarBasis(current))FollowVehicle(ped,current);
+}
 void PrepareForBoarding(){Reset();for(auto& edge:grip)edge.latched=true;}
 void ApplyHandVisuals(xr::HandPose hands[2]){
+    Basis current;
+    if(Attached()&&CurrentCarBasis(current)){
+        visualFrame=current;visualFrame.right=current.right*(activeSide?1.f:-1.f);
+        visualPipeAxis=current.Vector(visualPipeLocal);
+        for(int h=0;h<2;++h)if(held[h])grabWorld[h]=current.Point(grabLocal[h]);
+    }
     for(int h=0;h<2;++h)if(held[h]&&hands[h].valid){
         const Vec shift=visualFrame.Vector({driving::ClimbHandOffsetCm(0)*.01f,driving::ClimbHandOffsetCm(1)*.01f,driving::ClimbHandOffsetCm(2)*.01f});
         const Vec shifted=grabWorld[h]+shift;
@@ -160,7 +197,19 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
         }
     }
 }
-void Append(MarkerFrame& frame){if(frame.epoch==markers.epoch)for(int i=0;i<markers.count&&frame.count<frame.kCapacity;++i)frame.markers[frame.count++]=markers.markers[i];}
+void Append(MarkerFrame& frame){
+    if(frame.epoch!=markers.epoch)return;
+    Basis current;const bool rebase=Attached()&&markerBasisValid&&CurrentCarBasis(current);
+    for(int i=0;i<markers.count&&frame.count<frame.kCapacity;++i){
+        Marker m=markers.markers[i];
+        if(rebase){
+            const auto vector=[&](Vec v){return current.Vector({Dot(v,markerBasis.right),Dot(v,markerBasis.forward),Dot(v,markerBasis.up)});};
+            m.position=current.Point(markerBasis.Local(m.position));m.direction=vector(m.direction);m.up=vector(m.up);
+            for(int h=0;h<2;++h)if(held[h]&&(m.pipeHandMask&(1u<<h)))m.pipeHands[h]=current.Point(grabLocal[h]);
+        }
+        frame.markers[frame.count++]=m;
+    }
+}
 void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned occupied){
     const double now=Now();const float dt=float(now-lastTime);lastTime=now;
     markers={};markers.epoch=epoch;claimed=0;
@@ -195,7 +244,9 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     void* matrix=Read<void*>(activeCar,0x18);if(!matrix){Reset();return;}
     const Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
     const Vec speed=Read<Vec>(activeCar,0x68),turn=Read<Vec>(activeCar,0x74);
-    if(!b.Valid()||b.up.z<.98f||!Finite(speed)||!Finite(turn)||Length(root-b.position)>6.f){Reset();return;}
+    if(!b.Valid()||b.up.z<.98f||!Finite(speed)||!Finite(turn)){Reset();return;}
+    FollowVehicle(ped,b);root=Position(ped);
+    if(Length(root-b.position)>6.f){Reset();return;}
     void* node=Read<void*>(activeCar,0x800+(activeSide?8:10)*8);void* door=node?ltm(node):nullptr;
     if(!door){Reset();return;}const Vec hinge=b.Local(Read<Vec>(door,0x30));
     const int model=Read<std::uint16_t>(activeCar,0x32);
@@ -224,6 +275,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         if(hbest>=0){edit.Begin(hbest,b.Local(world[hbest]));control=cbest;std::copy_n(c,12,editBase);claimed=1u<<hbest;xr::TriggerHaptic(hbest,.25f,0,30);}
     }
     Vec axis=shape.pipe.top-shape.pipe.bottom;const float length=Length(axis);axis=axis*(1.f/length);
+    visualPipeLocal=axis;markerBasis=b;markerBasisValid=true;
     visualPipeAxis=b.Vector(axis);
     Vec perpendicular=Cross(axis,{1,0,0});if(Length(perpendicular)<.1f)perpendicular=Cross(axis,{0,1,0});perpendicular=perpendicular*(1.f/Length(perpendicular));
     Bar(b.Point(controls[5]),b.Vector(axis),b.Vector(perpendicular),held[0]||held[1],length);
@@ -274,6 +326,6 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         Write(ped,0x68,Vec{});
     }
     if(count)SuspendPhysics(ped);else ResumePhysics();
-    if(!count&&edit.hand<0){activeCar=nullptr;activeSlot=-1;}
+    if(!count&&edit.hand<0){activeCar=nullptr;activeSlot=-1;lastCarBasisValid=false;}
 }
 }
