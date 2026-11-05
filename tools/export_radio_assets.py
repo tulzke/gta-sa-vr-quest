@@ -12,6 +12,8 @@ import sys
 
 import bpy
 from mathutils import Vector
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from radio_png import rgba_png
 
 
 def export_mesh(obj, pivot, destination):
@@ -86,6 +88,10 @@ def main():
         texture.write_bytes(bytes(image.packed_file.data))
         if not texture.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
             raise ValueError(f'{obj.name}: packed image is not PNG')
+        width, height, rgba = rgba_png(texture.read_bytes())
+        if [width, height] != list(image.size):
+            raise ValueError(f'{obj.name}: PNG dimensions differ from Blender image')
+        (out / f'{name}.rgba').write_bytes(rgba)
         info = export_mesh(obj, pivot, out / f'{name}.uxrh')
         info.update(texture=texture.name, texture_size=list(image.size), source_object=obj.name)
         manifest['parts'][name] = info

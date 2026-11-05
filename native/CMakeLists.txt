@@ -54,10 +54,10 @@ set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S" PROPERTY OBJE
 
 set(RADIO_BASE_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/base.uxrh")
 set(RADIO_KNOB_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/knob.uxrh")
-set(RADIO_BASE_PNG "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/base.png")
-set(RADIO_KNOB_PNG "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/knob.png")
+set(RADIO_BASE_RGBA "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/base.rgba")
+set(RADIO_KNOB_RGBA "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/knob.rgba")
 configure_file(src/RadioAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" @ONLY)
-set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" PROPERTY OBJECT_DEPENDS "${RADIO_BASE_MESH};${RADIO_KNOB_MESH};${RADIO_BASE_PNG};${RADIO_KNOB_PNG}")
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" PROPERTY OBJECT_DEPENDS "${RADIO_BASE_MESH};${RADIO_KNOB_MESH};${RADIO_BASE_RGBA};${RADIO_KNOB_RGBA}")
 
 add_library(savr SHARED
     "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S"

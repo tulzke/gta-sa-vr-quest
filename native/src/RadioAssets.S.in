@@ -16,18 +16,18 @@ savr_radio_knob_mesh:
     .hidden savr_radio_knob_mesh_end
 savr_radio_knob_mesh_end:
     .balign 16
-    .global savr_radio_base_png
-    .hidden savr_radio_base_png
-savr_radio_base_png:
-    .incbin "@RADIO_BASE_PNG@"
-    .global savr_radio_base_png_end
-    .hidden savr_radio_base_png_end
-savr_radio_base_png_end:
+    .global savr_radio_base_rgba
+    .hidden savr_radio_base_rgba
+savr_radio_base_rgba:
+    .incbin "@RADIO_BASE_RGBA@"
+    .global savr_radio_base_rgba_end
+    .hidden savr_radio_base_rgba_end
+savr_radio_base_rgba_end:
     .balign 16
-    .global savr_radio_knob_png
-    .hidden savr_radio_knob_png
-savr_radio_knob_png:
-    .incbin "@RADIO_KNOB_PNG@"
-    .global savr_radio_knob_png_end
-    .hidden savr_radio_knob_png_end
-savr_radio_knob_png_end:
+    .global savr_radio_knob_rgba
+    .hidden savr_radio_knob_rgba
+savr_radio_knob_rgba:
+    .incbin "@RADIO_KNOB_RGBA@"
+    .global savr_radio_knob_rgba_end
+    .hidden savr_radio_knob_rgba_end
+savr_radio_knob_rgba_end:

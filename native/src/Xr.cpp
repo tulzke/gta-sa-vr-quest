@@ -10854,8 +10854,8 @@ void DrawDrivingBoxes(const float* mvp, const float* vertices, int vertexCount,
 extern "C" {
 extern const unsigned char savr_radio_base_mesh[],savr_radio_base_mesh_end[];
 extern const unsigned char savr_radio_knob_mesh[],savr_radio_knob_mesh_end[];
-extern const unsigned char savr_radio_base_png[],savr_radio_base_png_end[];
-extern const unsigned char savr_radio_knob_png[],savr_radio_knob_png_end[];
+extern const unsigned char savr_radio_base_rgba[],savr_radio_base_rgba_end[];
+extern const unsigned char savr_radio_knob_rgba[],savr_radio_knob_rgba_end[];
 }
 
 struct RadioPart { HandMesh mesh; GLuint texture{}; };
@@ -10881,36 +10881,25 @@ bool LoadEmbeddedRadioMesh(const unsigned char* begin,const unsigned char* end,H
 bool EnsureRadioAssets() {
     if (g_radioAssetsTried) return g_radioProgram!=0;
     g_radioAssetsTried=true;
-    const auto create=reinterpret_cast<int(*)(const void*,size_t,void**)>(dlsym(RTLD_DEFAULT,"AImageDecoder_createFromBuffer"));
-    const auto decode=reinterpret_cast<int(*)(void*,void*,size_t,size_t)>(dlsym(RTLD_DEFAULT,"AImageDecoder_decodeImage"));
-    const auto destroy=reinterpret_cast<void(*)(void*)>(dlsym(RTLD_DEFAULT,"AImageDecoder_delete"));
-    const auto unpremultiply=reinterpret_cast<int(*)(void*,bool)>(dlsym(RTLD_DEFAULT,"AImageDecoder_setUnpremultipliedRequired"));
-    if (!create||!decode||!destroy||!unpremultiply) return false;
     const unsigned char* meshes[]{savr_radio_base_mesh,savr_radio_knob_mesh};
     const unsigned char* meshesEnd[]{savr_radio_base_mesh_end,savr_radio_knob_mesh_end};
-    const unsigned char* pngs[]{savr_radio_base_png,savr_radio_knob_png};
-    const unsigned char* pngsEnd[]{savr_radio_base_png_end,savr_radio_knob_png_end};
+    const unsigned char* pixels[]{savr_radio_base_rgba,savr_radio_knob_rgba};
+    const unsigned char* pixelsEnd[]{savr_radio_base_rgba_end,savr_radio_knob_rgba_end};
     const int widths[]{128,512},heights[]{128,256};
     GLint oldTexture=0; glGetIntegerv(GL_TEXTURE_BINDING_2D,&oldTexture);
     bool ready=true;
     for(int i=0;i<2 && ready;++i) {
         if (!LoadEmbeddedRadioMesh(meshes[i],meshesEnd[i],g_radioParts[i].mesh)) { ready=false; break; }
-        void* decoder{};
-        if (create(pngs[i],static_cast<size_t>(pngsEnd[i]-pngs[i]),&decoder)!=0||!decoder) { ready=false; break; }
-        const size_t stride=static_cast<size_t>(widths[i])*4;
-        std::vector<unsigned char> pixels(stride*heights[i]);
-        ready=unpremultiply(decoder,true)==0 && decode(decoder,pixels.data(),stride,pixels.size())==0;
-        destroy(decoder);
-        if (!ready) break;
+        if (static_cast<size_t>(pixelsEnd[i]-pixels[i])!=static_cast<size_t>(widths[i])*heights[i]*4) { ready=false; break; }
         glGenTextures(1,&g_radioParts[i].texture); glBindTexture(GL_TEXTURE_2D,g_radioParts[i].texture);
-        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,widths[i],heights[i],0,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,widths[i],heights[i],0,GL_RGBA,GL_UNSIGNED_BYTE,pixels[i]);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     }
     glBindTexture(GL_TEXTURE_2D,static_cast<GLuint>(oldTexture));
-    if (!ready) { LOGW("[radio] model or texture unavailable; using fallback"); return false; }
+    if (!ready) { LOGE("[radio] embedded model or texture invalid; using fallback"); return false; }
     const char* vs="#version 300 es\nlayout(location=0) in vec3 aPos;layout(location=1) in vec2 aUv;"
         "uniform mat4 uMVP;out vec2 uv;void main(){uv=aUv;gl_Position=uMVP*vec4(aPos,1.0);}";
     const char* fs="#version 300 es\nprecision mediump float;in vec2 uv;uniform sampler2D uTex;"
@@ -10919,7 +10908,7 @@ bool EnsureRadioAssets() {
     g_radioProgram=glCreateProgram(); glAttachShader(g_radioProgram,v); glAttachShader(g_radioProgram,f);
     glLinkProgram(g_radioProgram); glDeleteShader(v); glDeleteShader(f);
     GLint linked=0; glGetProgramiv(g_radioProgram,GL_LINK_STATUS,&linked);
-    if (!linked) { glDeleteProgram(g_radioProgram); g_radioProgram=0; return false; }
+    if (!linked) { LOGE("[radio] shader link failed; using fallback"); glDeleteProgram(g_radioProgram); g_radioProgram=0; return false; }
     g_radioMvp=glGetUniformLocation(g_radioProgram,"uMVP");
     g_radioSampler=glGetUniformLocation(g_radioProgram,"uTex");
     glGenBuffers(1,&g_radioVbo); glGenBuffers(1,&g_radioEbo);
@@ -10947,7 +10936,7 @@ bool DrawRadioModel(const float* mvp,const driving::WheelVisualState& w) {
             const float x=v.pos[0][0],y=v.pos[0][1],z=v.pos[0][2];
             const XrVector3f p=vadd(center,vadd(vscale(right,scale*(x*cs+y*sn)),
                 vadd(vscale(up,scale*(y*cs-x*sn)),vscale(normal,-scale*z))));
-            // PNG decoder returns top row first; Blender UV origin is bottom-left.
+            // Embedded RGBA is top-down; Blender UV origin is bottom-left.
             vertices.push_back({p.x,p.y,p.z,v.u,1.0f-v.v});
         }
         glBindTexture(GL_TEXTURE_2D,model.texture);

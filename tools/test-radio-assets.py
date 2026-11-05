@@ -3,6 +3,9 @@ import json
 import math
 from pathlib import Path
 import struct
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from radio_png import rgba_png
 
 root = Path(__file__).resolve().parents[1] / 'assets/radio/runtime'
 manifest = json.loads((root / 'manifest.json').read_text(encoding='utf8'))
@@ -23,4 +26,7 @@ for name, info in manifest['parts'].items():
     png = (root / info['texture']).read_bytes()
     assert png[:8] == b'\x89PNG\r\n\x1a\n'
     assert list(struct.unpack_from('>II', png, 16)) == info['texture_size']
+    width, height, rgba = rgba_png(png)
+    assert [width, height] == info['texture_size']
+    assert (root / f'{name}.rgba').read_bytes() == rgba
     print(f'{name}: {vertices} vertices, {indices // 3} triangles, PNG {info["texture_size"]}')
