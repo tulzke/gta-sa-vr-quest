@@ -10,6 +10,7 @@
 #include "AnimatedTextures.h"
 #include "Cheats.h"
 #include "Driving.h"
+#include "RadioHandAttachment.h"
 #include "VehicleTestArea.h"
 #include "VehicleClimbGeometry.h"
 #include "FrameTarget.h"
@@ -8809,9 +8810,14 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
     g_hVc = 0; g_hIc = 0;
     g_hFirstIndex[0] = g_hFirstIndex[1] = 0;
     g_hIndexCount[0] = g_hIndexCount[1] = 0;
-    if (!drivingWheel.trackedHandsEnabled) return;
+    static radio::HandAttachment radioHands[2];
+    if (!drivingWheel.trackedHandsEnabled) {
+        for (auto& attachment:radioHands) attachment.Reset();
+        return;
+    }
     EnsureHandAssets();
     for (int hand = 0; hand < 2; ++hand) {
+        if (!drivingWheel.radioGrabbed[hand] || !hp[hand].valid) radioHands[hand].Reset();
         if (!hp[hand].valid || !g_handMesh[hand].loaded) continue;
         const XrQuaternionf gq{hp[hand].gripOri[0], hp[hand].gripOri[1], hp[hand].gripOri[2], hp[hand].gripOri[3]};
         const XrQuaternionf aq{hp[hand].aimOri[0], hp[hand].aimOri[1], hp[hand].aimOri[2], hp[hand].aimOri[3]};
@@ -8835,18 +8841,33 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
         bool basketballFlatPalm = false;
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
-        if (drivingWheel.ignitionGrabbed[hand] || drivingWheel.radioGrabbed[hand]) {
-            const bool radio=drivingWheel.radioGrabbed[hand];
-            const float* center=radio?drivingWheel.radioCenter:drivingWheel.ignitionCenter;
-            const float* frameRight=radio?drivingWheel.radioRight:drivingWheel.ignitionRight;
-            const float* frameUp=radio?drivingWheel.radioUp:drivingWheel.ignitionUp;
-            const float* frameNormal=radio?drivingWheel.radioNormal:drivingWheel.ignitionNormal;
-            const bool reverse=radio?drivingWheel.radioReverseGrip[hand]:drivingWheel.ignitionReverseGrip[hand];
+        if (drivingWheel.radioGrabbed[hand]) {
+            const XrVector3f r{drivingWheel.radioRight[0],drivingWheel.radioRight[1],drivingWheel.radioRight[2]};
+            const XrVector3f u{drivingWheel.radioUp[0],drivingWheel.radioUp[1],drivingWheel.radioUp[2]};
+            const XrVector3f n{drivingWheel.radioNormal[0],drivingWheel.radioNormal[1],drivingWheel.radioNormal[2]};
+            const float cs=std::cos(drivingWheel.radioAngle),sn=std::sin(drivingWheel.radioAngle);
+            const XrVector3f rotatingRight=vadd(vscale(r,cs),vscale(u,-sn));
+            const XrVector3f rotatingUp=vadd(vscale(u,cs),vscale(r,sn));
+            const auto vec=[](XrVector3f v) { return radio::HandVector{v.x,v.y,v.z}; };
+            const auto xrvec=[](radio::HandVector v) { return XrVector3f{v.x,v.y,v.z}; };
+            const radio::HandFrame frame{{drivingWheel.radioCenter[0],drivingWheel.radioCenter[1],drivingWheel.radioCenter[2]},
+                vec(rotatingRight),vec(rotatingUp),vec(n)};
+            const radio::HandPose tracked{vec(pos),vec(right),vec(up),vec(forward)};
+            const auto pinned=radioHands[hand].Update(drivingWheel.radioGrabId[hand],frame,tracked);
+            pos=xrvec(pinned.position); right=xrvec(pinned.right);
+            up=xrvec(pinned.up); forward=xrvec(pinned.forward);
+            grip=trig=0.0f;
+        } else if (drivingWheel.ignitionGrabbed[hand]) {
+            const float* center=drivingWheel.ignitionCenter;
+            const float* frameRight=drivingWheel.ignitionRight;
+            const float* frameUp=drivingWheel.ignitionUp;
+            const float* frameNormal=drivingWheel.ignitionNormal;
+            const bool reverse=drivingWheel.ignitionReverseGrip[hand];
             pos={center[0],center[1],center[2]};
             const XrVector3f kr{frameRight[0],frameRight[1],frameRight[2]};
             const XrVector3f ku{frameUp[0],frameUp[1],frameUp[2]};
             forward={frameNormal[0],frameNormal[1],frameNormal[2]};
-            const float a=radio?drivingWheel.radioAngle:drivingWheel.ignitionAngle;
+            const float a=drivingWheel.ignitionAngle;
             up=vnorm(vadd(vscale(ku,std::cos(a)),vscale(kr,std::sin(a))));
             const XrVector3f keyUp=up;
             const XrVector3f keyRight=vnorm(vcross(keyUp,forward));

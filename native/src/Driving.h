@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 namespace savr::xr {
 struct InputState;
@@ -115,7 +116,7 @@ struct WheelVisualState {
     float handleForward[2][3]{};
     bool radioVisible{};
     bool radioGrabbed[2]{};
-    bool radioReverseGrip[2]{};
+    std::uint64_t radioGrabId[2]{};
     float radioCenter[3]{}, radioRight[3]{}, radioUp[3]{}, radioNormal[3]{};
     float radioAngle{};
     bool ignitionVisible{};
