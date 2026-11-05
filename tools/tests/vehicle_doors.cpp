@@ -71,6 +71,7 @@ int GetCurrentModelSeatSideCm(int) {return 0;}
 int GetCurrentModelSeatForwardCm(int) {return 0;}
 int GetCurrentModelSeatHeightCm(int) {return 0;}
 int GetWheelCalibrationValue(int) {return 0;}
+void SetIgnitionPose(int,const float*) {}
 int mirrorValues[12]{0,45,110,0,0,0,0,-200,100,0,0,0};
 void GetRearMirrorCalibration(int,int out[12]) {std::copy_n(mirrorValues,12,out);}
 void SetRearMirrorCalibration(int,const int values[12]) {std::copy_n(values,12,mirrorValues);}

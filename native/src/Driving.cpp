@@ -279,6 +279,8 @@ struct ModelCalibration {
     int control[2][CONTROL_FIELD_COUNT]{};
     int wheel[WHEEL_CAL_FIELD_COUNT]{};
     int ignition[6]{};
+    float ignitionPose[12]{};
+    bool ignitionPoseSet{};
     int rearMirror[12]{0, 45, 110, 0, 0, 0, 0, -200, 100, 0, 0, 0};
     int acceleratorMode{BIKE_ACCEL_HOLD_TRIGGER};
 };
@@ -583,6 +585,9 @@ void Save() {
             for (int field=0; field<6; ++field)
                 std::fprintf(file, "Ignition.%d.%d=%d\n", model, field,
                              calibration.ignition[field]);
+            if (calibration.ignitionPoseSet)
+                for (int field=0;field<12;++field)
+                    std::fprintf(file,"IgnitionPose.%d.%d=%.9g\n",model,field,calibration.ignitionPose[field]);
         }
     }
     const bool wrote = std::fflush(file) == 0;
@@ -737,6 +742,13 @@ void Load() {
                     model>=400 && model<=611 && axis>=0 && axis<12) {
                     g_modelCalibration[model].rearMirror[axis]=std::clamp(value,
                         axis%6<3?-500:-180,axis%6<3?500:180);
+                    continue;
+                }
+                float poseValue{};
+                if (std::sscanf(line,"IgnitionPose.%d.%d=%f",&model,&axis,&poseValue)==3 &&
+                    model>=400 && model<=611 && axis>=0 && axis<12 && std::isfinite(poseValue)) {
+                    g_modelCalibration[model].ignitionPose[axis]=poseValue;
+                    if (axis==11) g_modelCalibration[model].ignitionPoseSet=true;
                     continue;
                 }
                 if (std::sscanf(line,"Ignition.%d.%d=%d",&model,&axis,&value)==3 &&
@@ -1773,6 +1785,52 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
     normal=RotateAroundAxis(normal,up,adjustment[4]*rad);
     right=RotateAroundAxis(right,normal,adjustment[5]*rad);
     up=RotateAroundAxis(up,normal,adjustment[5]*rad);
+    float absolutePose[12]{}; bool absoluteSet=false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        const auto it=g_modelCalibration.find(visual.modelId);
+        if (it!=g_modelCalibration.end() && it->second.ignitionPoseSet) {
+            std::copy_n(it->second.ignitionPose,12,absolutePose); absoluteSet=true;
+        }
+    }
+    // Migrate an existing non-default wheel-relative calibration once the
+    // actual wheel and vehicle frames are available, preserving its pose.
+    if (!absoluteSet && std::any_of(adjustment,adjustment+6,[](int v){return v!=0;})) {
+        V3 vr{},vf{},vu{},vp{};
+        const auto toWorld=[](V3 v,V3& out) {
+            const float in[3]{v.x,v.y,v.z};float result[3]{};
+            if (!vrcam::TrackingPointToWorld(in,result)) return false;
+            out={result[0],result[1],result[2]};return true;
+        };
+        V3 c{},r{},u{},n{};
+        if (ReadEntityMatrix(vehicle,&vr,&vf,&vu,&vp) && toWorld(center,c) &&
+            toWorld(center+right,r) && toWorld(center+up,u) && toWorld(center+normal,n)) {
+            const V3 vectors[4]{c-vp,r-c,u-c,n-c};
+            for(int i=0;i<4;++i) {
+                absolutePose[i*3]=Dot(vectors[i],vr);
+                absolutePose[i*3+1]=Dot(vectors[i],vf);
+                absolutePose[i*3+2]=Dot(vectors[i],vu);
+            }
+            {
+                std::lock_guard<std::mutex> lock(g_modelMutex);
+                auto& calibration=g_modelCalibration[visual.modelId];
+                std::copy_n(absolutePose,12,calibration.ignitionPose);
+                calibration.ignitionPoseSet=true;
+            }
+            absoluteSet=true; Save();
+        }
+    }
+    if (absoluteSet) {
+        V3 vr{},vf{},vu{},vp{};
+        if (ReadEntityMatrix(vehicle,&vr,&vf,&vu,&vp)) {
+            const auto world=[&](int i) {return vp+vr*absolutePose[i]+vf*absolutePose[i+1]+vu*absolutePose[i+2];};
+            V3 c{},r{},u{},n{};
+            if (WorldPointToTracking(world(0),&c) && WorldPointToTracking(world(0)+world(3)-vp,&r) &&
+                WorldPointToTracking(world(0)+world(6)-vp,&u) && WorldPointToTracking(world(0)+world(9)-vp,&n)) {
+                center=c; right=Normalized(r-c); up=Normalized(u-c); normal=Normalized(n-c);
+            }
+        }
+    }
     if (preview) {
         visual.ignitionVisible=true;
         visual.ignitionAngle=EngineOn(vehicle)?1.57079632679f:0.0f;
@@ -3323,7 +3381,6 @@ constexpr int kDefaultBikeItems[] = {
     MENU_MODEL_SIDE,
     MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_KEEP_RIDER_ON_FLIPS, MENU_DRIVEBY_AIM,
-    MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
     MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultCarItems[] = {
@@ -3334,7 +3391,6 @@ constexpr int kDefaultCarItems[] = {
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_INTERIOR_GLASS, MENU_DRIVEBY_AIM,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
-    MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
     MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveBikeItems[] = {
@@ -3346,7 +3402,6 @@ constexpr int kImmersiveBikeItems[] = {
     MENU_BIKE_LEAN_STEERING, MENU_BIKE_LEAN_SENSITIVITY,
     MENU_BIKE_HAND_TILT, MENU_BIKE_BLOCK_WHEELIE, MENU_LOCAL_HORIZON, MENU_BIKE_VISUAL_LEAN,
     MENU_KEEP_RIDER_ON_FLIPS,
-    MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
     MENU_RESET, MENU_BACK
 };
 constexpr int kImmersiveCarItems[] = {
@@ -3358,7 +3413,6 @@ constexpr int kImmersiveCarItems[] = {
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
     MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
-    MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z, MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
     MENU_RESET, MENU_BACK
 };
 constexpr int kDefaultPlaneItems[] = {
@@ -3471,6 +3525,11 @@ int GetActiveVehicleType() {
 }
 int GetActiveVehicleModelId() {
     EnsureInit(); return g_activeVehicleModel.load(std::memory_order_acquire);
+}
+void SetIgnitionPose(int model,const float pose[12]) {
+    if (model<400||model>611) return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    auto& c=g_modelCalibration[model]; std::copy_n(pose,12,c.ignitionPose); c.ignitionPoseSet=true;
 }
 int GetIgnitionCalibration(int field) {
     if (field<0||field>=6) return 0;
@@ -3864,6 +3923,8 @@ void ResetVehiclePreset(int vehicleType) {
                 std::fill_n(calibration.wheel,
                             WHEEL_CAL_FIELD_COUNT,0);
         }
+        calibration.ignitionPoseSet=false;
+        std::fill_n(calibration.ignition,6,0);
         calibration.acceleratorMode=BIKE_ACCEL_HOLD_TRIGGER;
     }
     Save(); ResetInteraction();
