@@ -1413,10 +1413,6 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             } else if (item>=savr::driving::MENU_IGNITION_X &&
                        item<=savr::driving::MENU_IGNITION_RZ && step && available) {
                 savr::driving::AdjustIgnitionCalibration(item-savr::driving::MENU_IGNITION_X,step);
-            } else if(item>=savr::driving::MENU_CLIMB_HAND_X&&item<=savr::driving::MENU_CLIMB_HAND_Z&&step){
-                savr::driving::AdjustClimbHandOffset(item-savr::driving::MENU_CLIMB_HAND_X,step);
-            } else if(item>=savr::driving::MENU_CLIMB_HAND_PITCH&&item<=savr::driving::MENU_CLIMB_HAND_ROLL&&step){
-                savr::driving::AdjustClimbHandAngle(item-savr::driving::MENU_CLIMB_HAND_PITCH,step);
             } else if (item==savr::driving::MENU_VEHICLE_DEBUG&&(enter||step)) {
                 savr::driving::CycleVehicleDebugMode(step?step:1);
             } else if (item==savr::driving::MENU_VEHICLE_TEST_AREA&&(enter||step)) {

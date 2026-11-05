@@ -13,7 +13,6 @@
 namespace savr::vehicleclimb {
 namespace {
 using namespace vehicledoors;
-Basis visualFrame;
 Vec visualPipeAxis{0,0,1},handHeading[2]{{0,1,0},{0,1,0}};
 template<class T>T Read(void* p,int off){T v{};std::memcpy(&v,static_cast<char*>(p)+off,sizeof(v));return v;}
 template<class T>void Write(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
@@ -159,13 +158,11 @@ void PrepareForBoarding(){Reset();for(auto& edge:grip)edge.latched=true;}
 void ApplyHandVisuals(xr::HandPose hands[2]){
     Basis current;
     if(Attached()&&CurrentCarBasis(current)){
-        visualFrame=current;visualFrame.right=current.right*(activeSide?1.f:-1.f);
         visualPipeAxis=current.Vector(visualPipeLocal);
         for(int h=0;h<2;++h)if(held[h])grabWorld[h]=current.Point(grabLocal[h]);
     }
     for(int h=0;h<2;++h)if(held[h]&&hands[h].valid){
-        const Vec shift=visualFrame.Vector({driving::ClimbHandOffsetCm(0)*.01f,driving::ClimbHandOffsetCm(1)*.01f,driving::ClimbHandOffsetCm(2)*.01f});
-        const Vec shifted=grabWorld[h]+shift;
+        const Vec shifted=grabWorld[h];
         const float world[]={shifted.x,shifted.y,shifted.z};float tracking[3]{};
         if(vrcam::WorldPointToTracking(world,tracking)){
             // Match the standard hand renderer's palm normal: it uses the
@@ -184,8 +181,7 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
                 }
             }
             const Vec heading=handHeading[h];
-            const float mirror=h==0?-1.f:1.f;
-            const auto frame=PipeHandFrame(visualPipeAxis,heading,mirror*float(driving::ClimbHandAngleDeg(0)),mirror*float(driving::ClimbHandAngleDeg(1)));
+            const auto frame=PipeHandFrame(visualPipeAxis,heading,0.f,0.f);
             const Vec axes[]={frame.right,frame.forward,frame.up};
             float* outputs[]={hands[h].climbRight,hands[h].climbForward,hands[h].climbUp};
             bool validFrame=true;
@@ -251,7 +247,6 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     if(!door){Reset();return;}const Vec hinge=b.Local(Read<Vec>(door,0x30));
     const int model=Read<std::uint16_t>(activeCar,0x32);
     const auto* profile=FindProfile(model);if(!profile){Reset();return;}
-    visualFrame=b;visualFrame.right=b.right*(activeSide?1.f:-1.f);
     float c[12]{};driving::GetClimbCalibration(model,activeSide,c);
     Geometry shape=Shape(hinge,activeSide,c,profile->pipeX);
     if(!shape.pipe.Valid()){Reset();return;}

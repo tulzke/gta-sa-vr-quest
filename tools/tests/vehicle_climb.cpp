@@ -18,10 +18,7 @@ struct HandPose {bool valid{true};float gripPos[3]{};float grip{},trigger{};floa
 void TriggerHaptic(int,float,float,float){}
 }
 namespace driving {
-int mode{},saves{},lastCalibrationModel{};int handOffset[3]{};
-int handAngle[2]{};
-int ClimbHandAngleDeg(int a){return handAngle[a];}
-int ClimbHandOffsetCm(int a){return handOffset[a];}float config[2][12]{};
+int mode{},saves{},lastCalibrationModel{};float config[2][12]{};
 int GetVehicleDebugMode(){return mode;}
 void SaveDebugCalibration(){++saves;}
 void GetClimbCalibration(int model,int side,float out[12]){assert(vehicleclimb::FindProfile(model));lastCalibrationModel=model;std::copy_n(config[side],12,out);}
@@ -156,7 +153,6 @@ int main(){
     assert(std::abs(Dot(beforeYaw,afterYaw))<.0001f);
     assert(std::abs(rendered[0].climbRight[2]-1.f)<.0001f);
     rendered[0].gripOri[2]=0;rendered[0].gripOri[3]=1;
-    driving::handOffset[2]=5;ApplyHandVisuals(rendered);assert(std::abs(rendered[0].gripPos[2]+.12f-locked.z-.05f)<.0001f);driving::handOffset[2]=0;
     vrcam::offsetZ=0;
     const float still=Position(ped).z;vrcam::offsetZ=.03f;Tick();assert(std::abs(Position(ped).z-still)<.0001f);vrcam::offsetZ=0;
     hands[1]=hands[0];hands[1].grip=0;Tick();hands[1].grip=1;Tick();assert(ClaimedHands()==3);
@@ -170,11 +166,10 @@ int main(){
         const Vec rightUp{visual[1].climbUp[0],visual[1].climbUp[1],visual[1].climbUp[2]};
         assert(Length(leftUp+expected)<.0001f&&Length(rightUp-expected)<.0001f);
     }
-    // Equal controller poses must produce mirrored hand frames, including at
-    // large calibration angles. Repeated calls use the live pose, not the
+    // Equal controller poses must produce mirrored hand frames. Repeated calls
+    // use the live pose, not the
     // orientation at which the grip was initially acquired.
-    for(int angle:{0,90,-90}){
-        driving::handAngle[0]=angle;driving::handAngle[1]=angle;
+    {
         xr::HandPose visual[2]={hands[0],hands[1]};ApplyHandVisuals(visual);
         const Vec lf{visual[0].climbForward[0],visual[0].climbForward[1],visual[0].climbForward[2]};
         const Vec rf{visual[1].climbForward[0],visual[1].climbForward[1],visual[1].climbForward[2]};
@@ -185,7 +180,6 @@ int main(){
         visual[0].gripOri[2]=0;visual[0].gripOri[3]=1;ApplyHandVisuals(visual);
         assert(Length(Vec{visual[0].climbForward[0],visual[0].climbForward[1],visual[0].climbForward[2]}-lf)<.0001f);
     }
-    driving::handAngle[0]=driving::handAngle[1]=0;
     const float dual=Position(ped).z;hands[0].gripPos[2]-=.005f;hands[1].gripPos[2]-=.005f;Tick();assert(std::abs(Position(ped).z-dual-.005f)<.0001f);
     hands[1].grip=0;Tick();
     wall=true;const Vec blocked=Position(ped);hands[0].gripPos[2]-=.02f;Tick();assert(Position(ped).z==blocked.z&&ignored==nullptr);wall=false;

@@ -7,6 +7,26 @@ import struct
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+defaults = (ROOT / 'defaults/quest/vr_driving.ini').read_text(encoding='utf8').splitlines()
+calibration = {}
+for line in defaults:
+    if line.startswith('Climb.'):
+        key, value = line.split('=', 1)
+        assert key not in calibration
+        calibration[key] = int(value)
+expected = {
+    (403, 0): (44, -38, -6, 45, -38, 10),
+    (403, 1): (-45, -39, -6, -46, -39, 7),
+    (433, 0): (63, -43, 16, 64, -43, 32),
+    (444, 0): (70, -58, -55, 71, -54, -14),
+    (514, 0): (44, -53, 3, 44, -53, 3),
+    (514, 1): (-44, -53, 4, -43, -53, 2),
+    (515, 0): (67, -33, -8, 67, -33, 4),
+    (515, 1): (-67, -34, -6, -67, -34, 2),
+}
+assert calibration == {f'Climb.{model}.{side}.{axis+6}': value
+                       for (model, side), values in expected.items()
+                       for axis, value in enumerate(values)}
 OUT = ROOT / 'build/vehicle-climb-tests'
 OUT.mkdir(parents=True, exist_ok=True)
 source = (ROOT / 'native/src/VehicleClimb.cpp').read_text(encoding='utf8')

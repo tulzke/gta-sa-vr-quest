@@ -142,14 +142,9 @@ preserved. Build-only commands perform no headset installation or game launch.
 Climb profiles now also cover Securicar, Barracks, Packer, Flatbed, Tanker,
 Roadtrain, Cement Truck, Dune, Monster, Monster A and Monster B. Initial positions
 come from model door/wheel geometry and need headset calibration per model.
-Temporary global hand tuning is in VEHICLE SETTINGS: DEBUG CLIMB HAND OUT,
-FORWARD and UP, in 1 cm steps (±30 cm). OUT mirrors outward on opposite sides;
-FORWARD/UP follow the vehicle axes. Only the rendered hand moves. Values save
-as ClimbHand0/1/2 in vr_driving.ini for later extraction and hardcoding.
-Global `ClimbHandPitch` and `ClimbHandRoll` in the same config set locked hand
-tilts in degrees (±180, default 0). Rotation around the pipe remains free.
-Adjust them in VEHICLE SETTINGS as DEBUG CLIMB HAND PITCH and ROLL, 1° per step.
 The pipe uses the standard Grip hand pose, independent of trigger presses.
+The confirmed hand offsets and locked tilt angles are zero and fixed in code;
+rotation around the pipe follows the controller.
 
 Linerunner (403), on the first test-area page, has a climb pipe on each side.
 The pipe is white and reveals only the surface within 50 cm of either hand,
