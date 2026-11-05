@@ -1,0 +1,33 @@
+    .section .rodata.savr_radio,"a",@progbits
+    .balign 16
+    .global savr_radio_base_mesh
+    .hidden savr_radio_base_mesh
+savr_radio_base_mesh:
+    .incbin "@RADIO_BASE_MESH@"
+    .global savr_radio_base_mesh_end
+    .hidden savr_radio_base_mesh_end
+savr_radio_base_mesh_end:
+    .balign 16
+    .global savr_radio_knob_mesh
+    .hidden savr_radio_knob_mesh
+savr_radio_knob_mesh:
+    .incbin "@RADIO_KNOB_MESH@"
+    .global savr_radio_knob_mesh_end
+    .hidden savr_radio_knob_mesh_end
+savr_radio_knob_mesh_end:
+    .balign 16
+    .global savr_radio_base_png
+    .hidden savr_radio_base_png
+savr_radio_base_png:
+    .incbin "@RADIO_BASE_PNG@"
+    .global savr_radio_base_png_end
+    .hidden savr_radio_base_png_end
+savr_radio_base_png_end:
+    .balign 16
+    .global savr_radio_knob_png
+    .hidden savr_radio_knob_png
+savr_radio_knob_png:
+    .incbin "@RADIO_KNOB_PNG@"
+    .global savr_radio_knob_png_end
+    .hidden savr_radio_knob_png_end
+savr_radio_knob_png_end:
