@@ -50,6 +50,7 @@ transitions = transitions[:-1]
 markers = physical[physical.index('    holstermarker::Marker markers['):physical.index('        // Current reference Quest build exposes the model-bound foregrip')]
 prefix = r'''
 #include "HolsterMarker.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <cstdint>
@@ -66,7 +67,7 @@ Hand gHands[2]; Drop gDropped[2]; int gHeldSlot[2]={-1,-1};
 bool gGripLatched[2]{},gAwaitFirstGrip[2]{},gGripLock{},gDualHoldEnabled=true;
 bool enabled=true,interactionsBlocked=false,showHolsterMarkersWhileBlocked=false,showSupportMarkerWhileBlocked=false;
 bool vehicleImmersive=false,scriptedGunner=false;
-struct {bool grabbed[2]{};} seatWheel;
+struct {bool grabbed[2]{}, ignitionGrabbed[2]{}, radioGrabbed[2]{};} seatWheel;
 float anchors[7][3]{};bool anchorValid[7]={true,true,true,true,true,true,true};
 int slots[7]={1,2,3,4,5,6,7}, visibility[7]{};
 int types[13]={0,1,2,3,4,5,6,7,8,9,10,11,12};
@@ -103,25 +104,27 @@ marker_fn = 'int Publish(holstermarker::Marker out[8]) {void* ped=nullptr;\n' + 
 tests = r'''
 int main(){
     for(int p=0;p<7;++p)anchors[p][0]=float(p);
-    holstermarker::Marker m[8];CHECK(Publish(m)==7);
+    holstermarker::Marker m[8];CHECK(Publish(m)==0);
+    slots[6]=-1; gHands[0].pos={6,0,0}; CHECK(Publish(m)==1 && m[0].kind==holstermarker::Kind::Empty && m[0].opacity > 0.34f);
+    gHands[0].pos={0,0,0}; CHECK(Publish(m)==1 && m[0].opacity < 0.16f); slots[6]=7;
     // Both hands grab different sockets using the real nearest-available filter.
     for(int h=0;h<2;++h){gHands[h].grip=1;gHands[h].pos={float(h),0,0};}
     Transition();CHECK(gHeldSlot[0]==1&&gHeldSlot[1]==2);
-    CHECK(Publish(m)==7);CHECK(m[0].kind==holstermarker::Kind::Return&&m[1].kind==holstermarker::Kind::Return);
+    CHECK(Publish(m)==2);CHECK(m[0].kind==holstermarker::Kind::Return&&m[1].kind==holstermarker::Kind::Return);
     // Hand-to-hand ownership state retains the same return point and count.
     gHeldSlot[1]=-1;gHeldSlot[0]=2;
-    CHECK(Publish(m)==7);CHECK(m[0].kind==holstermarker::Kind::Grab&&m[1].kind==holstermarker::Kind::Return);
+    CHECK(Publish(m)==1);CHECK(m[0].kind==holstermarker::Kind::Return);
     // Release into its own socket returns; a different socket is a drop.
     gHands[0].pos={1,0,0};gHands[0].grip=0;Transition();CHECK(gHeldSlot[0]==-1&&gDropped[0].slot==-1);
-    CHECK(Publish(m)==7&&m[1].kind==holstermarker::Kind::Grab);
+    CHECK(Publish(m)==0);
     gHeldSlot[0]=2;gHands[0].pos={0,0,0};Transition();CHECK(gDropped[0].slot==2);
-    CHECK(Publish(m)==6);for(int i=0;i<6;++i)CHECK(m[i].kind!=holstermarker::Kind::Return);
-    gDropped[0].slot=-1;CHECK(Publish(m)==7); // expired/caught drop is distinct from held
+    CHECK(Publish(m)==0);
+    gDropped[0].slot=-1;CHECK(Publish(m)==0); // expired/caught drop is distinct from held
     // Grip lock retains a gun away from the socket, but permits return nearby.
     gHeldSlot[0]=2;gGripLock=true;Transition();CHECK(gHeldSlot[0]==2);
     gHands[0].pos={1,0,0};visibility[1]=2;Transition();CHECK(gHeldSlot[0]==-1);
-    CHECK(Publish(m)==6); // OFF hides the marker but retains the existing return contract
-    visibility[0]=1;gHeldSlot[0]=1;CHECK(Publish(m)==5); // HIDE also hides return hints
+    CHECK(Publish(m)==0); // OFF hides the marker but retains the existing return contract
+    visibility[0]=1;gHeldSlot[0]=1;CHECK(Publish(m)==0); // HIDE also hides return hints
     enabled=false;CHECK(Publish(m)==0);
     interactionsBlocked=true;showHolsterMarkersWhileBlocked=true;enabled=true;
     slots[6]=-1;types[4]=0;CHECK(Publish(m)==7); // preview includes empty/hidden/occupied sockets
@@ -134,7 +137,7 @@ int main(){
     gHeldSlot[0]=-1;gDropped[0].slot=1;gGripLatched[1]=false;Transition();CHECK(gHeldSlot[1]==-1);
     // Invalid socket cannot be grabbed and cannot produce a marker.
     anchorValid[0]=false;gDropped[0].slot=-1;gGripLatched[1]=false;Transition();CHECK(gHeldSlot[1]==-1);
-    CHECK(Publish(m)==6);
+    CHECK(Publish(m)==0);
     std::puts("PASS: production grab/release and marker branches, both owners, return vs drop, lock, visibility and calibration");
 }
 '''

@@ -1253,6 +1253,20 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             for (int point = 0; point < holster::PointCount(); ++point) {
                 const int slot = holster::PointSlot(point);
                 if (!anchorValid[point]) continue;
+                if (gameplayMarkers && slot < 0 && holster::PointVisible(point)) {
+                    auto& marker = markers[markerCount++];
+                    marker.kind = holstermarker::Kind::Empty;
+                    std::memcpy(marker.position, anchors[point], sizeof(marker.position));
+                    float nearest = 1.0f;
+                    for (int hand = 0; hand < kHandCount; ++hand) {
+                        if (!gHands[hand].valid || ValidSlot(gHeldSlot[hand])) continue;
+                        nearest = std::min(nearest, Distance(GripPosition(gHands[hand]),
+                            {anchors[point][0], anchors[point][1], anchors[point][2]}));
+                    }
+                    const float proximity = std::clamp((0.45f - nearest) / 0.20f, 0.0f, 1.0f);
+                    marker.opacity = 0.15f + 0.20f * proximity;
+                    continue;
+                }
                 // Holster calibration is spatial: every valid socket (including
                 // EMPTY and the occupied preview socket) must remain visible.
                 // Gameplay distinguishes available, held and flying slots.
@@ -1263,6 +1277,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                     VehicleSidearmWeaponType(WeaponTypeInSlot(ped, slot));
                 if (!holstermarker::Visible(holster::GripMarkersEnabled(), holsterCalibrationMarkers,
                         holster::PointVisible(point), owned, held, dropped, true)) continue;
+                if (gameplayMarkers && !held) continue;
                 markers[markerCount].unavailable=!drawable;
                 markers[markerCount].kind = holsterCalibrationMarkers ? holstermarker::Kind::Preview :
                     held ? holstermarker::Kind::Return : holstermarker::Kind::Grab;

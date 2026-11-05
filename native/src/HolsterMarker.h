@@ -5,8 +5,8 @@
 #include <cstdint>
 
 namespace savr::holstermarker {
-enum class Kind { Grab, Return, Support, Preview };
-struct Marker { float position[3]{}; Kind kind{Kind::Grab}; bool unavailable{}; };
+enum class Kind { Grab, Return, Support, Preview, Empty };
+struct Marker { float position[3]{}; Kind kind{Kind::Grab}; bool unavailable{}; float opacity{0.15f}; };
 constexpr int kCapacity = 8;
 struct Frame {
     std::array<Marker, kCapacity> markers{};
