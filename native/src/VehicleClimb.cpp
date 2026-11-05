@@ -27,9 +27,6 @@ double lastTime{};
 void* activeCar{};void* activePool{};int activeSlot=-1;std::uint8_t generation{};
 int activeSide{};bool held[2]{};Vec previous[2]{},targetRoot{};
 Vec grabRoot[2]{},grabTracking[2]{},grabLocal[2]{},grabWorld[2]{};
-bool supported{};float supportHeight{};
-Vec previousFeet[2]{};bool feetValid{};
-void* feetCar{};int feetSide{};std::uint8_t feetGeneration{};
 DebugDrag edit;int control=-1;float editBase[12]{};bool dirty{};
 void* suspendedPed{};bool savedCollision{},savedGravity{};
 
@@ -62,18 +59,16 @@ void SuspendPhysics(void* ped){
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 Vec Position(void* p){void* m=Read<void*>(p,0x18);return Read<Vec>(m?m:p,m?0x30:8);}
 void EndEdit(){if(dirty)driving::SaveDebugCalibration();dirty=false;edit={};control=-1;}
-void Reset(){ResumePhysics();EndEdit();claimed=0;activeCar=nullptr;activePool=nullptr;activeSlot=-1;supported=false;feetValid=false;held[0]=held[1]=false;}
+void Reset(){ResumePhysics();EndEdit();claimed=0;activeCar=nullptr;activePool=nullptr;activeSlot=-1;held[0]=held[1]=false;}
 bool World(Vec p,Vec& out){float a[]={p.x,p.y,p.z},b[3]{};if(!vrcam::TrackingPointToWorld(a,b))return false;out={b[0],b[1],b[2]};return Finite(out);}
 Vec Raw(const xr::HandPose& h){return {h.gripPos[0],h.gripPos[1],h.gripPos[2]};}
-struct Geometry {Step step;Pipe pipe;};
+struct Geometry {Pipe pipe;};
 Geometry Shape(Vec hinge,int side,const float c[12],float pipeX=0.f) {
     const float sign=side?1.f:-1.f;
     // linerun.dff: front door hinge |x|=.929, fuel tank/cab details reach
-    // |x|=1.449. Keep the pipe at |x|=1.659 and the step outside that shell.
+    // |x|=1.449. Keep the pipe at |x|=1.659 outside that shell.
     const float outward=pipeX>0?pipeX-std::abs(hinge.x):.73f;
-    const Vec centre=hinge+Vec{sign*(outward+.10f),-.65f,-.75f};
     Geometry result;
-    result.step={centre+Vec{-.22f+c[0],-.42f+c[1],-.18f+c[2]},centre+Vec{.22f+c[3],.42f+c[4],c[5]}};
     const Vec base=hinge+Vec{sign*outward,-.65f,-.65f};
     result.pipe={base+Vec{c[6],c[7],c[8]},base+Vec{c[9],c[10],1.05f+c[11]}};
     return result;
@@ -128,7 +123,7 @@ void Install(void* h){
 }
 unsigned ClaimedHands(){return claimed;}
 bool Editing(){return edit.hand>=0;}
-bool Attached(){return held[0]||held[1]||supported;}
+bool Attached(){return held[0]||held[1];}
 void PrepareForBoarding(){Reset();for(auto& edge:grip)edge.latched=true;}
 void ApplyHandVisuals(xr::HandPose hands[2]){
     for(int h=0;h<2;++h)if(held[h]&&hands[h].valid){
@@ -171,7 +166,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     markers={};markers.epoch=epoch;claimed=0;
     void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
     usable=usable&&epoch==lastEpoch&&dt>0&&dt<.15f&&ped&&removeEntity&&addEntity&&ltm&&healthy&&healthy(ped)&&
-        g.FindPlayerVehicle&&!g.FindPlayerVehicle(-1,false)&&g.CPed_GetBonePosition;
+        g.FindPlayerVehicle&&!g.FindPlayerVehicle(-1,false);
     lastEpoch=epoch;
     bool fresh[2]{},editFresh[2]{};const bool editing=driving::GetVehicleDebugMode()!=0;
     for(int h=0;h<2;++h){fresh[h]=grip[h].Step(hands[h].grip,usable&&hands[h].valid);editFresh[h]=trigger[h].Step(hands[h].trigger,usable&&editing&&hands[h].valid);}
@@ -184,7 +179,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     if(!editing)EndEdit();
     float origin[3]{},direction[3]{};if(!vrcam::GetHeadWorldRay(origin,direction)){Reset();return;}
     Vec eye{origin[0],origin[1],origin[2]},root=Position(ped);
-    // Keep the retained instance while holding/supporting/editing; otherwise
+    // Keep the retained instance while holding/editing; otherwise
     // select only the nearest supported high vehicle and its near side.
     if(!activeCar){
         float best=5.f;
@@ -208,31 +203,23 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     visualFrame=b;visualFrame.right=b.right*(activeSide?1.f:-1.f);
     float c[12]{};driving::GetClimbCalibration(model,activeSide,c);
     Geometry shape=Shape(hinge,activeSide,c,profile->pipeX);
-    if(!shape.step.Valid()||!shape.pipe.Valid()){Reset();return;}
-    if(feetCar!=activeCar||feetSide!=activeSide||feetGeneration!=generation)feetValid=false;
-    feetCar=activeCar;feetSide=activeSide;feetGeneration=generation;
+    if(!shape.pipe.Valid()){Reset();return;}
     Vec world[2]{};bool valid[2]{};for(int h=0;h<2;++h)valid[h]=hands[h].valid&&World(Raw(hands[h]),world[h]);
     if(edit.hand>=0){
         const int h=edit.hand;
         if(!valid[h]||!edit.Step(b.Local(world[h]))){Reset();return;}
         std::copy_n(editBase,12,c);const Vec d=edit.delta;
-        if(control<4){const int x=(control&1)?3:0,y=(control&2)?4:1;c[x]+=d.x;c[y]+=d.y;c[2]+=d.z;c[5]+=d.z;}
-        else if(control==4)c[2]+=d.z;
-        else if(control==5){for(int j:{6,9}){c[j]+=d.x;c[j+1]+=d.y;c[j+2]+=d.z;}}
+        if(control==5){for(int j:{6,9}){c[j]+=d.x;c[j+1]+=d.y;c[j+2]+=d.z;}}
         else {const int j=control==6?6:9;c[j]+=d.x;c[j+1]+=d.y;c[j+2]+=d.z;}
         const Geometry next=Shape(hinge,activeSide,c,profile->pipeX);
-        if(next.step.Valid()&&next.pipe.Valid()){driving::SetClimbCalibration(model,activeSide,c);shape=next;dirty=true;}
+        if(next.pipe.Valid()){driving::SetClimbCalibration(model,activeSide,c);shape=next;dirty=true;}
         claimed=1u<<h;if(hands[h].trigger<=.35f)EndEdit();
     }
-    Vec controls[8];const Step& s=shape.step;
-    for(int i=0;i<4;++i)controls[i]={(i&1)?s.max.x:s.min.x,(i&2)?s.max.y:s.min.y,s.max.z};
-    controls[4]={(s.min.x+s.max.x)*.5f,(s.min.y+s.max.y)*.5f,s.max.z};
+    Vec controls[8]{};
     controls[5]=(shape.pipe.bottom+shape.pipe.top)*.5f;controls[6]=shape.pipe.bottom;controls[7]=shape.pipe.top;
     if(editing){
-        Marker volume{b.Point((s.min+s.max)*.5f),b.forward,b.up};volume.panelVolume=true;volume.halfExtent=(s.max-s.min)*.5f;
-        if(markers.count<markers.kCapacity)markers.markers[markers.count++]=volume;
         float best=.13f;int hbest=-1,cbest=-1;
-        for(int i=0;i<8;++i){Bar(b.Point(controls[i]),b.right,b.up,control==i&&edit.hand>=0);
+        for(int i=5;i<8;++i){Bar(b.Point(controls[i]),b.right,b.up,control==i&&edit.hand>=0);
             for(int h=0;h<2;++h)if(valid[h]&&editFresh[h]&&!(occupied&(1u<<h))&&edit.hand<0){const float d=Length(world[h]-b.Point(controls[i]));if(d<best){best=d;hbest=h;cbest=i;}}}
         if(hbest>=0){edit.Begin(hbest,b.Local(world[hbest]));control=cbest;std::copy_n(c,12,editBase);claimed=1u<<hbest;xr::TriggerHaptic(hbest,.25f,0,30);}
     }
@@ -246,7 +233,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         pipeMarker.pipeHandMask|=1u<<h;
         pipeMarker.pipeHands[h]=held[h]?b.Point(grabLocal[h]):world[h];
     }
-    if(edit.hand>=0){held[0]=held[1]=false;supported=false;ResumePhysics();return;}
+    if(edit.hand>=0){held[0]=held[1]=false;ResumePhysics();return;}
     const unsigned wasHeld=(held[0]?1u:0u)|(held[1]?2u:0u);
     Vec motion{};int count=0;
     for(int h=0;h<2;++h){
@@ -276,7 +263,6 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
             motion=root;
         }
         Vec next=motion*(1.f/count);
-        if(supported){Vec local=b.Local(next);local.z=std::max(local.z,supportHeight);next=b.Point(local);}
         if(Move(ped,root,next)){root=next;targetRoot=next;}
         else {
             root=Position(ped);
@@ -287,19 +273,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         }
         Write(ped,0x68,Vec{});
     }
-    // Native foot bones are used only to acquire support. Once acquired, hold
-    // a stable root height so idle foot animation cannot pump the camera.
-    if(supported){const Vec p=b.Local(root);if(p.x<s.min.x-.12f||p.x>s.max.x+.12f||p.y<s.min.y-.12f||p.y>s.max.y+.12f||p.z>supportHeight+.15f)supported=false;}
-    Vec feet[2]{};
-    // Sole contact uses toe tags 44/54, below the ankle/foot tags 43/53.
-    // https://github.com/gta-reversed/gta-reversed/blob/master/source/game_sa/Enums/eBoneTag.h
-    for(int i=0;i<2;++i){GameSymbols::Vec3 foot{};g.CPed_GetBonePosition(ped,&foot,i?54:44,true);feet[i]=b.Local({foot.x,foot.y,foot.z});}
-    if(!supported){for(int i=0;i<2;++i){float lift{};
-        if(s.Contact(feetValid?previousFeet[i]:feet[i],feet[i],lift)){
-            const Vec next=root+b.up*lift;if(Move(ped,root,next)){root=next;supported=true;supportHeight=b.Local(root).z;targetRoot=root;break;}}}}
-    std::copy_n(feet,2,previousFeet);feetValid=true;
-    if(supported&&!count){Vec next=b.Local(root);next.z=supportHeight;Move(ped,root,b.Point(next));}
-    if(count||supported)SuspendPhysics(ped);else ResumePhysics();
-    if(!count&&!supported&&edit.hand<0){activeCar=nullptr;activeSlot=-1;}
+    if(count)SuspendPhysics(ped);else ResumePhysics();
+    if(!count&&edit.hand<0){activeCar=nullptr;activeSlot=-1;}
 }
 }

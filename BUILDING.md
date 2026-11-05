@@ -151,34 +151,28 @@ tilts in degrees (±180, default 0). Rotation around the pipe remains free.
 Adjust them in VEHICLE SETTINGS as DEBUG CLIMB HAND PITCH and ROLL, 1° per step.
 The pipe uses the standard Grip hand pose, independent of trigger presses.
 
-Linerunner (403), on the first test-area page, has a climb pipe and a supporting
-step on each side.
+Linerunner (403), on the first test-area page, has a climb pipe on each side.
 The pipe is white and reveals only the surface within 50 cm of either hand,
 fading over the final 5 cm. While gripping, this follows the anchored rendered
 hand. VEHICLE DEBUG shows the full pipe for calibration.
 The vehicle must be stationary and upright. Squeeze a fresh grip near the pipe and pull
 the controller down to raise CJ; release to let go. Both hands can hold the
-pipe, or the free hand can open the door. A foot entering the step volume
-raises CJ to its surface and holds his height until he walks off. Use the
-existing seat icon/stick action to enter after opening the door.
+pipe, or the free hand can open the door. Use the existing seat icon/stick
+action to enter after opening the door.
 The rendered grip stays fixed on the pipe. Body displacement follows controller
 travel one-to-one without a speed ramp; collisions still block movement.
 Grip immediately suspends CJ's stock gravity/collision response and clears
 grounded state without lifting the camera. Custom body/head clearance checks
-remain active. Releasing without step support or cancelling restores stock
-physics; standing on the configured step retains suspension until walking off.
-Climbing and step support suppress automatic parachute selection. Freefall's
-0.7-second timer restarts after releasing without support. Room-scale movement
-and its pending camera correction pause while gripping the pipe; walking on
-the step with both hands released remains available.
+remain active. Releasing the last hand or cancelling restores stock physics.
+Climbing suppresses automatic parachute selection. Freefall's 0.7-second timer
+restarts after release. Room-scale movement and its pending camera correction
+pause while gripping the pipe.
 
-In VEHICLE DEBUG, drag the step's four corner markers with a trigger to resize
-it in X/Y or move its height. The marker at the centre of the top changes
-thickness by moving the bottom, keeping the top fixed. The pipe's centre moves
-the whole pipe; its two ends change length and inclination. Release the trigger
+In VEHICLE DEBUG, the pipe's centre moves the whole pipe; its two ends change
+length and inclination. Release the trigger
 to save. Sides are stored independently in `Climb.<model>.<side>.<axis>` in
 `vr_driving.ini` (centimetre offsets). Initial locations need headset calibration.
-Movement of the car cancels support/grabs; this MVP does not carry the player
+Movement of the car cancels grabs; this MVP does not carry the player
 on moving vehicles. Dozer's ladder is a separate backlog task.
 
 ### Existing controls

@@ -97,7 +97,9 @@ int main(){
         const auto initial=Shape({sign*.929f,2.21f,.664f},side,zero);
         assert(sign*initial.pipe.bottom.x>1.649f);
         assert(sign*initial.pipe.top.x>1.649f);
-        assert(initial.step.Contains({sign*1.759f,1.56f,-.15f}));
+        zero[0]=1;zero[1]=-1;zero[2]=.5f;zero[3]=.8f;zero[4]=.7f;zero[5]=-.4f;
+        const auto oldStep=Shape({sign*.929f,2.21f,.664f},side,zero);
+        assert(Length(oldStep.pipe.bottom-initial.pipe.bottom)<.0001f&&Length(oldStep.pipe.top-initial.pipe.top)<.0001f);
     }
     assert(FindProfile(514)&&FindProfile(444)&&FindProfile(573));
     assert(!FindProfile(400)&&!FindProfile(406)&&!FindProfile(486)&&!FindProfile(532));
@@ -186,19 +188,14 @@ int main(){
     hands[0].gripPos[2]=1.2f;Tick();assert(!ClaimedHands());
     hands[0].grip=0;Tick();hands[0].grip=1;Tick(true,1,1);assert(!ClaimedHands());
     hands[0].grip=0;Tick();hands[0].grip=1;Tick();assert(ClaimedHands());flags[0]=2;Tick();assert(!ClaimedHands());
-    // Place a native foot inside the step and verify persistent support after
-    // the animated foot moves away, followed by clean release on walking off.
-    hands[0].grip=0;
-    g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned bone,bool){assert(bone==44||bone==54);out->x=-1.75f;out->y=-.65f;out->z=.65f;};
-    Put(pm,0x30,Vec{-1.75f,-.65f,1.5f});Tick();Tick();assert(supported);const float supportedZ=Position(ped).z;
-    assert(suspendedPed==ped&&(Read<std::uint64_t>(ped,0x28)&1)==0);
-    g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned,bool){out->x=10;out->z=0;};
-    Put(pm,0x30,Vec{-1.75f,-.65f,supportedZ-.02f});Tick();assert(std::abs(Position(ped).z-supportedZ)<.0001f);
-    Put(pm,0x30,Vec{-3,-.45f,supportedZ});Tick();assert(!supported&&!suspendedPed);
+    // There is no support volume: releasing restores physics even if a foot
+    // would have intersected the former step.
+    hands[0].grip=0;Tick();assert(!Attached()&&!suspendedPed);
     assert(Read<std::uint64_t>(ped,0x28)==0x4001&&Read<std::uint32_t>(ped,0x64)==0x202);
     // Editing changes the actual shape and persists once on trigger release.
-    driving::mode=1;hands[0].trigger=0;hands[0].gripPos[0]=-1.97f;hands[0].gripPos[1]=-1.07f;hands[0].gripPos[2]=.75f;Tick();
-    hands[0].trigger=1;Tick();assert(Editing());hands[0].gripPos[0]-=.1f;Tick();assert(driving::config[0][0]<-.09f);
+    driving::mode=1;hands[0].trigger=0;hands[0].gripPos[0]=-1.659f;hands[0].gripPos[1]=-.65f;hands[0].gripPos[2]=1.375f;Tick();
+    assert(markers.count==4); // centre, both ends, full pipe; no step markers
+    hands[0].trigger=1;Tick();assert(Editing());hands[0].gripPos[0]-=.1f;Tick();assert(driving::config[0][6]<-.09f&&driving::config[0][9]<-.09f);
     assert(markers.markers[markers.count-1].climbPipe&&!markers.markers[markers.count-1].clipPipe);
     hands[0].trigger=0;Tick();assert(!Editing()&&driving::saves==1);
     // A long pull is not a distance-to-pipe release. No speed cap discards
@@ -209,7 +206,7 @@ int main(){
     // A cab obstruction blocks movement while retaining suspended physics.
     wall=true;hands[0].gripPos[2]-=.02f;Tick();assert(ClaimedHands()==1&&suspendedPed==ped);wall=false;
     Put(ped,0x28,Read<std::uint64_t>(ped,0x28)|0x1000); // unrelated engine change
-    Put(cars,0x74,Vec{.1f,0,0});Tick();assert(!activeCar&&!supported&&!ClaimedHands());
+    Put(cars,0x74,Vec{.1f,0,0});Tick();assert(!activeCar&&!ClaimedHands());
     assert(Read<std::uint64_t>(ped,0x28)==0x5001&&Read<std::uint32_t>(ped,0x64)==0x202);
     Put(cars,0x74,Vec{});driving::mode=0;
     Put(cars,0x32,std::uint16_t(400));Tick();assert(markers.count==0);
@@ -224,12 +221,7 @@ int main(){
     assert(ClaimedHands()==1&&physicalweapon::CurrentWeaponSlot(ped)==0);
     Put(ped,0x8dc,std::uint8_t(11)); // previously selected or external switch
     assert(!vrcam::ParachuteStateActive());Tick();assert(ClaimedHands()==1&&physicalweapon::CurrentWeaponSlot(ped)==0);
-    g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned,bool){out->x=-1.75f;out->y=-.65f;out->z=.65f;};
-    Tick();Tick();assert(supported);
-    hands[0].grip=0;Tick();assert(Attached()&&!ClaimedHands());
-    for(int i=0;i<120;++i)Tick();assert(physicalweapon::CurrentWeaponSlot(ped)==0);
-    g.CPed_GetBonePosition=[](void*,GameSymbols::Vec3* out,unsigned,bool){out->x=10;out->z=0;};
-    Put(pm,0x30,Vec{-3,-.65f,Position(ped).z});Tick();assert(!Attached());
+    hands[0].grip=0;Tick();assert(!Attached()&&!ClaimedHands());
     for(int i=0;i<50;++i)Tick();assert(physicalweapon::CurrentWeaponSlot(ped)==0);
     for(int i=0;i<30;++i)Tick();assert(physicalweapon::CurrentWeaponSlot(ped)==11&&vrcam::ParachuteStateActive());
     g.CPedGeometryAnalyser_IsInAir=[](const void*){return false;};
@@ -247,5 +239,5 @@ int main(){
     g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3 p,float,void*,bool,bool,bool,bool,bool,bool)->void*{return p.x> -1.99f?cars:nullptr;};
     assert(!Move(ped,Position(ped),{-1.8f,0,1.2f}));
     assert(std::abs(Position(ped).z-1.2f)<.0001f&&Position(ped).x<=-1.99f);
-    std::puts("vehicle climb: grip, movement, obstruction, interruption, ownership, pool reuse, support and editing passed");
+    std::puts("vehicle climb: grip, movement, obstruction, interruption, ownership, pool reuse, release and editing passed");
 }

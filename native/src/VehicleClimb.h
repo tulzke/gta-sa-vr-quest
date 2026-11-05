@@ -7,7 +7,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
 void Append(vehicledoors::MarkerFrame& frame);
 unsigned ClaimedHands();
 bool Editing();
-// A grip or the configured step is supporting the player, not freefall.
+// A hand is gripping the pipe, not freefall.
 bool Attached();
 void PrepareForBoarding();
 // Render-only override, evaluated after the current camera anchor is ready.
