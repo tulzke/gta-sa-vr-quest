@@ -51,7 +51,7 @@ def main():
     reference_uvs = [struct.unpack_from('<2f', reference, 16+i*104+96) for i in range(vc)]
     reference_indices = struct.unpack_from(f'<{ic}H', reference, 16+vc*104)
     expected_names = {'Grip', 'Pinch', 'Point', 'OpenPalm', 'Beckon',
-                      'GripPistol', 'GripPistolOffhand'}
+                      'GripPistol', 'GripPistolOffhand', 'Fist', 'GripPistolShoot'}
     assert {c['name'] for c in manifest['clips']} == expected_names
     assert len(manifest['clips']) == len(expected_names)
     total_samples, total_blocks = 0, 0
@@ -59,6 +59,10 @@ def main():
     for clip in manifest['clips']:
         samples = clip['samples']
         frames = [sample['frame'] for sample in samples]
+        timing = (root / clip['name'] / 'timing.txt').read_text(encoding='ascii').split()
+        assert timing[:2] == ['UXRA', '1'] and int(timing[2]) == len(samples)
+        assert abs(float(timing[3])-manifest['fps']) < 1e-5
+        assert [float(v) for v in timing[4:]] == frames
         assert frames == sorted(set(frames))
         assert frames[0] == clip['start'] and frames[-1] == clip['end']
         assert all(b-a <= 1 for a, b in zip(frames, frames[1:]))
@@ -94,10 +98,12 @@ def main():
         assert max(math.dist(a, b) for a, b in zip(poses[0], poses[-1])) > .001, clip['name']
         # Authored dimensions are in metres, not source centimetres.
         assert max(abs(x) for pose in poses for v in pose for x in v) < .5
-        starts.append(poses[0])
+        if clip['name'] != 'GripPistolShoot':
+            starts.append(poses[0])
         endpoints.append(poses[-1])
         print(f"PASS {clip['name']}: {len(samples)} samples, frames {frames[0]:g}..{frames[-1]:g}")
-    # All authored transitions share the same initial open hand.
+    # Ordinary transitions share an open start. The shooting Action may start
+    # from the held pistol pose instead; it must retain its own authored start.
     assert max(math.dist(a, b) for pose in starts for a, b in zip(starts[0], pose)) < 1e-5
     # Distinct named gestures must not accidentally export the same current Action.
     for i, pose in enumerate(endpoints):

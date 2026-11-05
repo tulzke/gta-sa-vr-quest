@@ -106,6 +106,9 @@ void SetRenderedHandPoses(const HandPose poses[2]);
 // Publish a contextual pinch amount: hand 0 = left, 1 = right; 0 clears it,
 // 1 selects the authored pinch. The caller owns transitions and must clear it.
 void SetHandPinchAmount(int hand, float amount);
+// Weapon types captured with the same stereo frame as hand poses. Zero clears
+// a hand; the support hand is not a second pistol owner.
+void SetHandWeaponTypes(int leftType, int rightType);
 
 // Basketball palm lock: while the ball is held, the rendered hand(s) are
 // pinned onto the ball surface with an open palm (wheel-grab pattern), so

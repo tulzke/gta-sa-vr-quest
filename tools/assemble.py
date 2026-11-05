@@ -77,6 +77,46 @@ HAND_FILES = (
     "BigHandRightPinch.uxrh",
     "BigHandsAlbedo.rgba",
 )
+
+
+def hand_animation_files(root: Path) -> list[str]:
+    """Optional local Blender exports; the renderer falls back when absent.
+
+    Only the canonical right blocks are needed on Quest: its wrist bases
+    already mirror the mesh for the left hand. Keep all authored clips,
+    including gestures which have no automatic gameplay assignment yet.
+    """
+    folder = root / "animations"
+    manifest = folder / "manifest.json"
+    if not manifest.is_file():
+        return []
+    try:
+        doc = json.loads(manifest.read_text(encoding="utf-8"))
+        names = {"Grip", "Pinch", "Point", "OpenPalm", "Beckon", "Fist",
+                 "GripPistol", "GripPistolOffhand", "GripPistolShoot"}
+        clips = doc["clips"]
+        if doc["version"] != 1 or len(clips) != len(names) or {c["name"] for c in clips} != names:
+            raise ValueError("expected all nine Blender Actions")
+        result = []
+        for clip in clips:
+            name = clip["name"]
+            count = len(clip["samples"])
+            if count < 2 or count > 512 or len(clip["blocks"]) != (count+3)//4:
+                raise ValueError(f"invalid samples for {name}")
+            result.append(f"animations/{name}/timing.txt")
+            for i, block in enumerate(clip["blocks"]):
+                expected = f"{name}/BigHandRight-{i:03d}.uxrh"
+                if block["right"]["path"] != expected:
+                    raise ValueError(f"invalid block path for {name}")
+                result.append(f"animations/{expected}")
+        for relative in result:
+            if not (root / relative).is_file():
+                raise ValueError(f"missing {relative}; rerun export_hand_actions.py")
+        return result
+    except (KeyError, TypeError, ValueError) as error:
+        raise KitError(f"invalid local hand animations: {error}") from error
+
+
 OFFICIAL_ARM64_LIBS = {
     "lib/arm64-v8a/libapp.so",
     "lib/arm64-v8a/libc++_shared.so",
@@ -1424,11 +1464,11 @@ def stage_payload(
     hands_source = ROOT / "assets" / "vrhands"
     hands_root = staging / "vrhands"
     hand_entries: list[dict] = []
-    for name in HAND_FILES:
+    for name in (*HAND_FILES, *hand_animation_files(hands_source)):
         source = hands_source / name
         if not source.is_file():
             raise KitError(f"required VR hand asset is missing: {source}")
-        hands_root.mkdir(parents=True, exist_ok=True)
+        (hands_root / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, hands_root / name)
         hand_entries.append(
             {"path": name, "size": source.stat().st_size, "sha256": sha256_file(source)}

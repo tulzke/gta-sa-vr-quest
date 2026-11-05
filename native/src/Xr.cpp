@@ -2,6 +2,7 @@
 #include "NpcGrabVisual.h"
 #include "TrackingRecovery.h"
 #include "TheaterScreen.h"
+#include "HandAnimation.h"
 
 #include "Appearance.h"
 #include "Basketball.h"
@@ -662,6 +663,8 @@ bool     g_renderedHandPoseValid = false;
 unsigned int g_stereoWeaponHandMask[kStereoSets]{};
 float g_handPinchAmount[2]{};
 float g_stereoHandPinchAmount[kStereoSets][2]{};
+int g_handWeaponTypes[2]{};
+int g_stereoHandWeaponTypes[kStereoSets][2]{};
 TwoHandVisualState g_twoHandVisualState{};
 TwoHandVisualState g_stereoTwoHandVisualState[kStereoSets]{};
 // Scope state is captured beside the exact eye pixels it affected. The consumer
@@ -5762,6 +5765,12 @@ void SetHandPinchAmount(int hand, float amount) {
     g_handPinchAmount[hand] = std::isfinite(amount) ? std::clamp(amount, 0.0f, 1.0f) : 0.0f;
 }
 
+void SetHandWeaponTypes(int leftType, int rightType) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_handWeaponTypes[0] = leftType;
+    g_handWeaponTypes[1] = rightType;
+}
+
 void SetBallHandLock(const BallHandLock& lock) {
     std::lock_guard<std::mutex> guard(g_headPoseMutex);
     g_ballHandLock = lock;
@@ -6241,6 +6250,8 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         g_stereoWeaponHandMask[ws]  = g_weaponHandMask.load(std::memory_order_relaxed);
         g_stereoHandPinchAmount[ws][0] = g_handPinchAmount[0];
         g_stereoHandPinchAmount[ws][1] = g_handPinchAmount[1];
+        g_stereoHandWeaponTypes[ws][0] = g_handWeaponTypes[0];
+        g_stereoHandWeaponTypes[ws][1] = g_handWeaponTypes[1];
         g_stereoTwoHandVisualState[ws] = g_twoHandVisualState;
         // Capture markers with the eye textures containing their socket models.
         // The compositor reuses this immutable batch for both eyes.
@@ -8743,6 +8754,8 @@ struct HandMesh   { std::vector<UxrhVertex> verts; std::vector<unsigned short> i
 HandMesh g_handMesh[2];
 HandMesh g_ballPalmMesh[2];
 HandMesh g_pinchMesh[2];
+handanimation::Library g_handAnimations;
+bool g_handAnimationsLoaded = false;
 GLuint   g_handTex = 0;
 bool     g_handAssetsTried = false;
 
@@ -8792,6 +8805,19 @@ void EnsureHandAssets() {
     std::snprintf(path, sizeof(path), "%sBigHandLeftPinch.uxrh", dir); LoadUxrh(path, g_pinchMesh[0]);
     std::snprintf(path, sizeof(path), "%sBigHandRightPinch.uxrh", dir); LoadUxrh(path, g_pinchMesh[1]);
     std::snprintf(path, sizeof(path), "%sBigHandsAlbedo.rgba", dir); g_handTex = LoadRgbaTexture(path, 1024, 1024);
+    g_handAnimationsLoaded = g_handAnimations.Load(std::string(dir) + "animations");
+    if (g_handAnimationsLoaded) {
+        const auto& clip = g_handAnimations.Get(handanimation::Gesture::Grip);
+        g_handAnimationsLoaded = g_handMesh[1].loaded &&
+            clip.uv.size() == g_handMesh[1].verts.size() && clip.indices == g_handMesh[1].idx;
+        if (g_handAnimationsLoaded) {
+            for (size_t i=0;i<clip.uv.size();++i) {
+                const auto& v=g_handMesh[1].verts[i];
+                if (clip.uv[i] != handanimation::Uv{v.u,v.v}) {g_handAnimationsLoaded=false;break;}
+            }
+        }
+    }
+    LOGI("[hands] authored Blender animations loaded=%d", g_handAnimationsLoaded);
 }
 
 constexpr int  kHandMaxV = 5000, kHandMaxI = 27000;
@@ -8806,7 +8832,7 @@ int            g_hIndexCount[2] = {0, 0};
 void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                      const driving::WheelVisualState& drivingWheel,
                      const BallHandLock& ballLock, unsigned int weaponHandMask,
-                     const float pinchAmounts[2]) {
+                     const float pinchAmounts[2], const int weaponTypes[2]) {
     g_hVc = 0; g_hIc = 0;
     g_hFirstIndex[0] = g_hFirstIndex[1] = 0;
     g_hIndexCount[0] = g_hIndexCount[1] = 0;
@@ -9040,15 +9066,33 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
         const bool pinch = !hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
             !steeringHand &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand) &&
-            g_pinchMesh[hand].loaded && g_pinchMesh[hand].verts.size() == g_handMesh[hand].verts.size();
+            (g_handAnimationsLoaded || (g_pinchMesh[hand].loaded &&
+             g_pinchMesh[hand].verts.size() == g_handMesh[hand].verts.size()));
         const float pinchAmount = pinch ? pinchAmounts[hand] : 0.0f;
         const float pinchWeight = pinchAmount * (1.0f - grip);
         const float pinchFrame = pinchAmount * 4.0f;
         const int pinchSegment = std::min(static_cast<int>(pinchFrame), 3);
         const float pinchFraction = pinchFrame - pinchSegment;
         const float wO = (1 - grip) * (1 - trig), wG = grip * (1 - trig), wT = (1 - grip) * trig, wB = grip * trig;
-        const HandMesh& m = basketballFlatPalm && g_ballPalmMesh[hand].loaded
-            ? g_ballPalmMesh[hand] : g_handMesh[hand];
+        // Both hands use the canonical right topology. The existing per-hand
+        // wrist basis already mirrors it; reflecting local Y again would undo
+        // that anatomical mirroring. Offline Left blocks are not used here.
+        const bool useAuthored = g_handAnimationsLoaded;
+        const HandMesh& m = useAuthored ? g_handMesh[1] :
+            (basketballFlatPalm && g_ballPalmMesh[hand].loaded ? g_ballPalmMesh[hand] : g_handMesh[hand]);
+        using Gesture = handanimation::Gesture;
+        const auto selected = handanimation::Select(grip,trig,{
+            hp[hand].climbGrip,
+            drivingWheel.radioGrabbed[hand] || drivingWheel.ignitionGrabbed[hand],
+            steeringHand, basketballFlatPalm,
+            TwoHandStateUsable(twoHand) && hand==twoHand.supportHand,
+            (weaponHandMask & (1u<<hand))!=0,weaponTypes[hand]});
+        const auto& firstClip = g_handAnimations.Get(selected.first);
+        const auto& secondClip = g_handAnimations.Get(selected.second);
+        const auto& pinchClip = g_handAnimations.Get(Gesture::Pinch);
+        const auto firstSegment = firstClip.At(selected.progress);
+        const auto secondSegment = secondClip.At(selected.progress);
+        const auto authoredPinchSegment = pinchClip.At(pinchAmount);
         const int base = g_hVc;
         for (size_t vertex = 0; vertex < m.verts.size(); ++vertex) {
             const UxrhVertex& v = m.verts[vertex];
@@ -9070,7 +9114,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                                        v.nrm[2][1], v.nrm[3][1]);
             float nz = component(v.nrm[0][2], v.nrm[1][2],
                                        v.nrm[2][2], v.nrm[3][2]);
-            if (pinchWeight > 0.0f) {
+            if (pinchWeight > 0.0f && !useAuthored) {
                 const UxrhVertex& target = g_pinchMesh[hand].verts[vertex];
                 const float rest = 1.0f - pinchWeight;
                 const auto pinchComponent = [&](bool normal, int axis) {
@@ -9086,6 +9130,14 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                 nx = nx * rest + pinchComponent(true, 0) * pinchWeight;
                 ny = ny * rest + pinchComponent(true, 1) * pinchWeight;
                 nz = nz * rest + pinchComponent(true, 2) * pinchWeight;
+            }
+            if (useAuthored) {
+                auto value = handanimation::Mix(firstClip.Sample(firstSegment,vertex),
+                    secondClip.Sample(secondSegment,vertex),selected.blend);
+                if (pinchWeight>0.f)
+                    value=handanimation::Mix(value,pinchClip.Sample(authoredPinchSegment,vertex),pinchWeight);
+                lx=value.pos[0]; ly=value.pos[1]; lz=value.pos[2];
+                nx=value.normal[0]; ny=value.normal[1]; nz=value.normal[2];
             }
             // UXR local axes: X->forward (wrist pulled 5.5cm back), Z->right, Y->-up.
             const XrVector3f wp = vadd(vadd(vadd(pos, vscale(forward, lx - 0.055f)), vscale(right, lz)), vscale(up, -ly));
@@ -12232,6 +12284,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     ThrowableTrajectory throwableTrajectory[2]{};
     unsigned int bakedWeaponHandMask = 0;
     float bakedPinchAmounts[2]{};
+    int bakedHandWeaponTypes[2]{};
     bool haveRenderPose = false;
     {
         std::lock_guard<std::mutex> lock(g_headPoseMutex);
@@ -12260,6 +12313,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedWeaponHandMask = g_stereoWeaponHandMask[set];
         bakedPinchAmounts[0] = g_stereoHandPinchAmount[set][0];
         bakedPinchAmounts[1] = g_stereoHandPinchAmount[set][1];
+        bakedHandWeaponTypes[0] = g_stereoHandWeaponTypes[set][0];
+        bakedHandWeaponTypes[1] = g_stereoHandWeaponTypes[set][1];
     }
     const bool shaderCopyMayRun = fxaaStats.requested ||
         underWaterness > 0.001f || mobileColor.mode != 0;
@@ -12271,7 +12326,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
 
     if (!bakedScope.active) {
         BuildHandMeshes(bakedHands, bakedTwoHand, drivingWheel,
-                        ballHandLock, bakedWeaponHandMask, bakedPinchAmounts); // same ring pose + cockpit/support correction
+                        ballHandLock, bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes); // same ring pose + cockpit/support correction
         BuildWeaponMesh(bakedHands);   // (weapon-mesh path; dead until Approach-B geometry exists)
     }
     BulletTracer liveTracers[kMaxBulletTracers]{};

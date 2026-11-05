@@ -21412,6 +21412,7 @@ void OnRenderScene(bool underwater) {
         physicalweapon::SupportCalibrationPrimaryHand();
     int preferredType = 0;
     unsigned int renderedHeldMask = 0;
+    int renderedWeaponTypes[2]{};
     xr::TwoHandVisualState twoHandVisualState{};
 
     // Immersive driving, or ordinary driving with immersive drive-by, keeps
@@ -21455,6 +21456,7 @@ void OnRenderScene(bool underwater) {
             queueWeapon(heldClump, heldMatrix);
             if (heldClump) {
                 renderedHeldMask |= 1u << hand;
+                renderedWeaponTypes[hand] = weaponType;
                 // During PG_CALIB, pin the otherwise free visual hand to the
                 // live support socket even without a real grip relation. A zero
                 // angle keeps the weapon under the primary controller while the
@@ -21572,6 +21574,7 @@ void OnRenderScene(bool underwater) {
     }
 
     if (preferredType != 0) calib::SetActiveWeapon(preferredType);
+    xr::SetHandWeaponTypes(renderedWeaponTypes[0],renderedWeaponTypes[1]);
     xr::SetTwoHandVisualState(twoHandVisualState);
     xr::SetWeaponHeldHands(renderedHeldMask,
                            preferredType != 0 && preferredHand >= 0 &&

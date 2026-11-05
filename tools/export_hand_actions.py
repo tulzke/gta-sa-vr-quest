@@ -25,7 +25,7 @@ from mathutils import Matrix
 
 ROOT = Path(__file__).resolve().parents[1]
 ACTIONS = ("Grip", "Pinch", "Point", "OpenPalm", "Beckon",
-           "GripPistol", "GripPistolOffhand")
+           "GripPistol", "GripPistolOffhand", "Fist", "GripPistolShoot")
 
 
 def action_key(name):
@@ -219,6 +219,11 @@ def main():
                 info["path"] = f"{name}/{info['path']}"
                 block[side.lower()] = info
             clip["blocks"].append(block)
+        # Small, strictly parsed timing table for the native consumer. Block
+        # paths are derived from the known clip name, never read from JSON.
+        (folder / "timing.txt").write_text(
+            f"UXRA 1 {len(frames)} {manifest['fps']:.9g}\n"
+            + " ".join(f"{frame:.9g}" for frame in frames) + "\n", encoding="ascii")
         manifest["clips"].append(clip)
     (args.output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"EXPORTED {len(clips)} Actions to {args.output}")
