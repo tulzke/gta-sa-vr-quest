@@ -155,7 +155,7 @@ Linerunner (403), on the first test-area page, has a climb pipe on each side.
 The pipe is white and reveals only the surface within 50 cm of either hand,
 fading over the final 5 cm. While gripping, this follows the anchored rendered
 hand. VEHICLE DEBUG shows the full pipe for calibration.
-The vehicle must be stationary and upright. Squeeze a fresh grip near the pipe and pull
+The vehicle must be upright. Squeeze a fresh grip near the pipe and pull
 the controller down to raise CJ; release to let go. Both hands can hold the
 pipe, or the free hand can open the door. Use the existing seat icon/stick
 action to enter after opening the door.
@@ -172,8 +172,10 @@ In VEHICLE DEBUG, the pipe's centre moves the whole pipe; its two ends change
 length and inclination. Release the trigger
 to save. Sides are stored independently in `Climb.<model>.<side>.<axis>` in
 `vr_driving.ini` (centimetre offsets). Initial locations need headset calibration.
-Movement of the car cancels grabs; this MVP does not carry the player
-on moving vehicles. Dozer's ladder is a separate backlog task.
+While holding the pipe, CJ follows the vehicle's translation and rotation;
+ordinary obstacle checks remain active. The upright requirement and tracking
+interruption safeguards remain. Door opening at speed is a separate task.
+Dozer's ladder is a separate backlog task.
 
 ### Existing controls
 

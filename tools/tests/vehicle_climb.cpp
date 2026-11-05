@@ -129,7 +129,9 @@ int main(){
     assert(published.markers[0].pipeHandMask==3);
     assert(std::abs(published.markers[0].pipeHands[0].x-hands[0].gripPos[0])<.0001f);
     const Vec grounded=Position(ped);
+    Put(cars,0x68,Vec{.1f,0,0});Put(cars,0x74,Vec{0,0,.1f});
     hands[0].grip=1;Tick();assert(ClaimedHands()==1);
+    Put(cars,0x68,Vec{});Put(cars,0x74,Vec{});
     assert(Length(Position(ped)-grounded)<.0001f); // no delayed floor pop
     assert((Read<std::uint64_t>(ped,0x28)&1)==0&&(Read<std::uint32_t>(ped,0x64)&2)==0);
     assert(Read<std::uint8_t>(ped,0x584)==0x80); // detach at grip, not after pulling
@@ -206,9 +208,20 @@ int main(){
     // A cab obstruction blocks movement while retaining suspended physics.
     wall=true;hands[0].gripPos[2]-=.02f;Tick();assert(ClaimedHands()==1&&suspendedPed==ped);wall=false;
     Put(ped,0x28,Read<std::uint64_t>(ped,0x28)|0x1000); // unrelated engine change
-    Put(cars,0x74,Vec{.1f,0,0});Tick();assert(!activeCar&&!ClaimedHands());
+    Put(cars,0x68,Vec{.1f,0,0});Put(cars,0x74,Vec{0,0,.1f});Tick();assert(activeCar&&ClaimedHands()==1);
+    const Vec beforeCarMove=Position(ped);
+    Put(matrix,0x30,Vec{.05f,0,0});Tick();
+    assert(ClaimedHands()==1&&std::abs(Position(ped).x-beforeCarMove.x-.05f)<.0001f);
+    const Vec priorFastMove=Position(ped);Put(matrix,0x30,Vec{.65f,0,0});Tick();
+    assert(ClaimedHands()==1&&std::abs(Position(ped).x-priorFastMove.x-.60f)<.0001f);
+    const Vec localBefore=Position(ped)-Vec{.65f,0,0};const float angle=.02f;
+    Put(matrix,0,Vec{std::cos(angle),std::sin(angle),0});
+    Put(matrix,0x10,Vec{-std::sin(angle),std::cos(angle),0});Tick();
+    const Vec expected{.65f+localBefore.x*std::cos(angle)-localBefore.y*std::sin(angle),localBefore.x*std::sin(angle)+localBefore.y*std::cos(angle),localBefore.z};
+    assert(ClaimedHands()==1&&Length(Position(ped)-expected)<.0001f);
+    hands[0].grip=0;Tick();assert(!activeCar&&!ClaimedHands());
     assert(Read<std::uint64_t>(ped,0x28)==0x5001&&Read<std::uint32_t>(ped,0x64)==0x202);
-    Put(cars,0x74,Vec{});driving::mode=0;
+    Put(cars,0x68,Vec{});Put(cars,0x74,Vec{});Put(matrix,0,Vec{1,0,0});Put(matrix,0x10,Vec{0,1,0});Put(matrix,0x30,Vec{});driving::mode=0;
     Put(cars,0x32,std::uint16_t(400));Tick();assert(markers.count==0);
     Put(cars,0x32,std::uint16_t(403));Tick();assert(markers.count==1);
     // Exercise the actual auto-equip -> parachute-state -> input gate chain.

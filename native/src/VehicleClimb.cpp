@@ -26,7 +26,7 @@ std::uint64_t lastEpoch{};
 double lastTime{};
 void* activeCar{};void* activePool{};int activeSlot=-1;std::uint8_t generation{};
 int activeSide{};bool held[2]{};Vec previous[2]{},targetRoot{};
-Vec grabRoot[2]{},grabTracking[2]{},grabLocal[2]{},grabWorld[2]{};
+Vec grabRootLocal[2]{},grabTracking[2]{},grabLocal[2]{},grabWorld[2]{};
 DebugDrag edit;int control=-1;float editBase[12]{};bool dirty{};
 void* suspendedPed{};bool savedCollision{},savedGravity{};
 
@@ -95,7 +95,7 @@ bool MoveDirect(void* ped,Vec from,Vec to){
     Vec speed=Read<Vec>(ped,0x68);speed.z=0;Write(ped,0x68,speed);return true;
 }
 bool Move(void* ped,Vec from,Vec to){
-    if(!Finite(to)||Length(to-from)>.36f)return false;
+    if(!Finite(to)||!Finite(from))return false;
     // Resolve short sweeps, retaining accepted travel. A small sideways lean
     // into the cab must not cancel an otherwise clear upward pull.
     Vec accepted=from;
@@ -195,7 +195,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     void* matrix=Read<void*>(activeCar,0x18);if(!matrix){Reset();return;}
     const Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
     const Vec speed=Read<Vec>(activeCar,0x68),turn=Read<Vec>(activeCar,0x74);
-    if(!b.Valid()||b.up.z<.98f||!Finite(speed)||Length(speed)>.02f||!Finite(turn)||Length(turn)>.01f||Length(root-b.position)>6.f){Reset();return;}
+    if(!b.Valid()||b.up.z<.98f||!Finite(speed)||!Finite(turn)||Length(root-b.position)>6.f){Reset();return;}
     void* node=Read<void*>(activeCar,0x800+(activeSide?8:10)*8);void* door=node?ltm(node):nullptr;
     if(!door){Reset();return;}const Vec hinge=b.Local(Read<Vec>(door,0x30));
     const int model=Read<std::uint16_t>(activeCar,0x32);
@@ -242,7 +242,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
             if(!held[0]&&!held[1])targetRoot=root;
             held[h]=true;previous[h]=Raw(hands[h]);xr::TriggerHaptic(h,.25f,0,30);
             SuspendPhysics(ped);
-            grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);
+            grabRootLocal[h]=b.Local(root);grabTracking[h]=Raw(hands[h]);
             handHeading[h]=b.forward;
 
             const Vec pipeAxis=shape.pipe.top-shape.pipe.bottom;
@@ -254,12 +254,12 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
         if(!PullDelta(previous[h],Raw(hands[h]),dt,delta)||!World(grabTracking[h],startWorld)){held[h]=false;continue;}
         previous[h]=Raw(hands[h]);
         grabWorld[h]=b.Point(grabLocal[h]);
-        motion=motion+grabRoot[h]+startWorld-world[h];++count;claimed|=1u<<h;
+        motion=motion+b.Point(grabRootLocal[h])+startWorld-world[h];++count;claimed|=1u<<h;
     }
     if(count){
         SuspendPhysics(ped);
         if(count==1&&wasHeld==3){
-            for(int h=0;h<2;++h)if(held[h]){grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);}
+            for(int h=0;h<2;++h)if(held[h]){grabRootLocal[h]=b.Local(root);grabTracking[h]=Raw(hands[h]);}
             motion=root;
         }
         Vec next=motion*(1.f/count);
@@ -268,7 +268,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
             root=Position(ped);
             // Consume blocked displacement rather than storing an invisible
             // spring that launches the player when the obstacle clears.
-            for(int h=0;h<2;++h)if(held[h]){grabRoot[h]=root;grabTracking[h]=Raw(hands[h]);}
+            for(int h=0;h<2;++h)if(held[h]){grabRootLocal[h]=b.Local(root);grabTracking[h]=Raw(hands[h]);}
             targetRoot=root;
         }
         Write(ped,0x68,Vec{});
