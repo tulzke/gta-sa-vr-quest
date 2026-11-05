@@ -1,4 +1,5 @@
 #include "Xr.h"
+#include "Combat.h"
 #include "NpcGrabVisual.h"
 #include "TrackingRecovery.h"
 #include "TheaterScreen.h"
@@ -9952,6 +9953,57 @@ void DrawScopeOverlay(int width, int height,
     glDisable(GL_BLEND);
 }
 
+// Head-centred peripheral feedback; sampled once per stereo pair. No world
+// texture, camera motion or depth writes, and the centre remains transparent.
+GLuint g_combatProg=0,g_combatVao=0;
+GLint g_combatParams=-1;
+void DrawCombatHalo(int width,int height,float tanX,float tanY,const combat::Feedback& fx) {
+    if (fx.damage<=0 && fx.block<=0) return;
+    if (!g_combatProg) {
+        const char* vs=R"(#version 300 es
+out vec2 p;
+void main(){
+    p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2))*2.0-1.0;
+    gl_Position=vec4(p,0.0,1.0);
+})";
+        const char* fs=R"(#version 300 es
+precision highp float;
+in vec2 p; uniform vec4 uParams; out vec4 o;
+void main(){
+    float r=length(p*uParams.zw)/max(.1,min(uParams.z,uParams.w));
+    float red=uParams.x*smoothstep(.48,1.12,r);
+    float blue=uParams.y*smoothstep(.45,.90,r)*(1.0-.5*red);
+    float total=red+blue;
+    vec3 color=(vec3(1.0,.025,.015)*red+vec3(.025,.25,1.0)*blue)/max(total,.0001);
+    o=vec4(color,clamp(red*.55+blue*.42,0.0,.65));
+})";
+        const GLuint v=CompileHandShader(GL_VERTEX_SHADER,vs),f=CompileHandShader(GL_FRAGMENT_SHADER,fs);
+        g_combatProg=glCreateProgram();glAttachShader(g_combatProg,v);glAttachShader(g_combatProg,f);
+        glLinkProgram(g_combatProg);glDeleteShader(v);glDeleteShader(f);
+        GLint linked{};glGetProgramiv(g_combatProg,GL_LINK_STATUS,&linked);
+        if (!linked) {
+            LOGE("[combat] halo shader link failed");
+            glDeleteProgram(g_combatProg);g_combatProg=0;return;
+        }
+        g_combatParams=glGetUniformLocation(g_combatProg,"uParams");
+        glGenVertexArrays(1,&g_combatVao);
+    }
+    GLint program{},vao{};
+    glGetIntegerv(GL_CURRENT_PROGRAM,&program);glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&vao);
+    GLboolean depthMask{},colorMask[4]{};
+    glGetBooleanv(GL_DEPTH_WRITEMASK,&depthMask);glGetBooleanv(GL_COLOR_WRITEMASK,colorMask);
+    glDisable(GL_DEPTH_TEST);glDisable(GL_CULL_FACE);glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_STENCIL_TEST);glDisable(GL_RASTERIZER_DISCARD);
+    glDepthMask(GL_FALSE);glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    glEnable(GL_BLEND);glBlendEquation(GL_FUNC_ADD);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+    glViewport(0,0,width,height);glUseProgram(g_combatProg);glBindVertexArray(g_combatVao);
+    glUniform4f(g_combatParams,fx.damage,fx.block,tanX,tanY);
+    glDrawArrays(GL_TRIANGLES,0,3);
+    glBindVertexArray(static_cast<GLuint>(vao));glUseProgram(static_cast<GLuint>(program));
+    glDepthMask(depthMask);glColorMask(colorMask[0],colorMask[1],colorMask[2],colorMask[3]);
+    glDisable(GL_BLEND);
+}
+
 // Draw the holster marker cubes (uses the depth already set up by the hand pass).
 void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
     const auto& markers = frame.markers;
@@ -12325,8 +12377,10 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedHandWeaponTypes[1] = g_stereoHandWeaponTypes[set][1];
         bakedDebugPinchHands = g_stereoDebugPinchHands[set];
     }
+    const combat::Feedback combatFx=IsSessionFocused() && !IsMenuVisible()
+        ? combat::GetFeedback() : combat::Feedback{};
     const bool shaderCopyMayRun = fxaaStats.requested ||
-        underWaterness > 0.001f || mobileColor.mode != 0;
+        underWaterness > 0.001f || mobileColor.mode != 0 || combatFx.damage>0 || combatFx.block>0;
     // Submit projection layers with their recorded render pose; use theater until that pose is available.
     if (!haveRenderPose) {
         outcome = perf::StereoProjectionOutcome::MissingPose;
@@ -12511,6 +12565,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             }
         }
         DrawScopeOverlay(chain.width, chain.height, bakedScope);
+        DrawCombatHalo(chain.width,chain.height,tanX,tanY,combatFx);
         EndXrGpuStage(overlayGpuTimer);
         RecordXrCpuStage(e, XrCpuStage::OverlaySubmit, overlayWallStartMs,
                          overlayCpuStartMs);

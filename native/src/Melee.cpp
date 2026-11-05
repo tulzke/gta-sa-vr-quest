@@ -1,4 +1,5 @@
 #include "Melee.h"
+#include "CombatPolicy.h"
 
 #include "Log.h"
 #include "PhysicalWeapon.h"
@@ -15,6 +16,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdarg>
+#include <dlfcn.h>
 
 namespace savr::melee {
 namespace {
@@ -124,23 +126,21 @@ struct Segment {
 
 struct Motion {
     bool valid{};
-    bool armed{};
     int slot{-1};
     int weaponType{-1};
     bool modelBound{};
     V3 previousRoot{};
     V3 previousTip{};
     double previousAt{};
-    double calmSince{};
-    double lastStrikeAt{};
-    bool strikeInProgress{};
-    float strikePeakSpeed{};
-    double strikeContinueUntil{};
+    combatpolicy::Swing swing{};
+    V3 hitDirection{};
 };
 
 Motion gMotion[physicalweapon::kHandCount]{};
 bool gMissingSymbolsLogged = false;
 void* gMotionOwner = nullptr;
+std::uint64_t gTrackingEpoch{};
+void (*gPedAudioEvent)(void*,int,float,float,void*,unsigned char,int,unsigned){};
 
 bool CoreReady() {
     return g.FindPlayerPed && g.FindPlayerVehicle &&
@@ -494,6 +494,10 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
         direction = std::clamp(direction, 0, 3);
         accepted = g.CWeapon_GenerateDamageEvent(
             target, player, weaponType, finalDamage, piece, direction);
+        // GenerateDamageEvent handles damage/reactions but never calls the
+        // audio path normally owned by FireMelee. Our physical fists bypass it.
+        if (accepted && weaponType<=1 && gPedAudioEvent)
+            gPedAudioEvent(static_cast<char*>(target)+0x198,65,0.f,1.f,player,0,0,0);
     } else if (type == kEntityVehicle) {
         g.CVehicle_InflictDamage(target, player, weaponType,
                                  static_cast<float>(damage), ToGame(impact));
@@ -574,6 +578,8 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
         return;
     }
 
+    if (accepted) xr::TriggerHaptic(hand,.4f,0,55);
+
     static unsigned hitCount = 0;
     ++hitCount;
     if (hitCount <= 40 || (hitCount % 100) == 0) {
@@ -587,6 +593,23 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
 void ResetMotion(Motion& motion) { motion = Motion{}; }
 
 } // namespace
+
+void Install(void* handle) {
+    gPedAudioEvent=reinterpret_cast<decltype(gPedAudioEvent)>(
+        dlsym(handle,"_ZN17CAEPedAudioEntity13AddAudioEventEiffP9CPhysicalhij"));
+    LOGI("[vr.melee] fist contact audio=%d",gPedAudioEvent!=nullptr);
+}
+
+bool GuardSegment(int hand,float root[3],float tip[3],int* weaponType) {
+    void* player=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    xr::HandPose hands[2]{};Segment segment{};
+    if (!player || !physicalweapon::GetHandPosesSnapshot(hands) ||
+        !BuildSegment(hand,player,hands,segment)) return false;
+    root[0]=segment.root.x;root[1]=segment.root.y;root[2]=segment.root.z;
+    tip[0]=segment.tip.x;tip[1]=segment.tip.y;tip[2]=segment.tip.z;
+    *weaponType=segment.weaponType;
+    return true;
+}
 
 void Reset() {
     for (Motion& motion : gMotion) ResetMotion(motion);
@@ -619,9 +642,14 @@ void Update(bool interactionsBlocked) {
     }
 
     xr::HandPose hands[physicalweapon::kHandCount]{};
-    if (!physicalweapon::GetHandPosesSnapshot(hands)) {
+    float head[3]{},orientation[4]{};std::uint64_t epoch{};
+    if (!physicalweapon::GetInteractionTrackingSnapshot(head,orientation,hands,&epoch)) {
         Reset();
         return;
+    }
+    if (gTrackingEpoch!=epoch) {
+        for (auto& motion:gMotion) ResetMotion(motion);
+        gTrackingEpoch=epoch;
     }
 
     const double now = NowSeconds();
@@ -645,17 +673,12 @@ void Update(bool interactionsBlocked) {
             motion.modelBound != segment.modelBound || dt <= 0.0 || dt > 0.125) {
             ResetMotion(motion);
             motion.valid = true;
-            // Seeding records no contact. The next deliberate movement may be
-            // a first strike; requiring 70 ms of perfect stillness first made
-            // a freshly drawn bat inert while the player kept swinging.
-            motion.armed = segment.enabled;
             motion.slot = segment.slot;
             motion.weaponType = segment.weaponType;
             motion.modelBound = segment.modelBound;
             motion.previousRoot = segment.root;
             motion.previousTip = segment.tip;
             motion.previousAt = now;
-            motion.calmSince = now;
             continue;
         }
 
@@ -664,26 +687,11 @@ void Update(bool interactionsBlocked) {
         const float tipSpeed = Length(tipTravel) / static_cast<float>(dt);
         const float rootSpeed = Length(rootTravel) / static_cast<float>(dt);
         const bool fist = segment.slot == 0;
-        const float threshold = fist ? 1.25f : 0.70f;
-        const bool calm = fist ? tipSpeed <= 0.48f
-                               : tipSpeed <= 0.40f && rootSpeed <= 0.30f;
-        if (calm) {
-            if (motion.calmSince <= 0.0) motion.calmSince = now;
-            if (fist || now - motion.calmSince >= 0.070)
-                motion.armed = true;
-        } else {
-            motion.calmSince = 0.0;
-        }
-        if (!motion.armed && motion.lastStrikeAt > 0.0 &&
-            now - motion.lastStrikeAt >= 0.450) {
-            motion.armed = true;
-        }
+        const float threshold = fist ? 1.25f : 1.10f;
 
         // Recenter/tracking-loss jumps must never become superhuman attacks.
-        if (Length(tipTravel) > 0.65f) {
-            motion.armed = false;
-            motion.strikeInProgress = false;
-            motion.strikePeakSpeed = 0.0f;
+        if (Length(tipTravel) > 0.65f || Length(rootTravel) > .35f) {
+            motion.swing={};
             motion.previousRoot = segment.root;
             motion.previousTip = segment.tip;
             motion.previousAt = now;
@@ -696,30 +704,11 @@ void Update(bool interactionsBlocked) {
                                     static_cast<float>(dt);
         const bool deliberate = fist ? rootSpeed >= 0.75f
                                      : rootSpeed >= 0.25f || relativeSpeed >= 0.50f;
-        if (motion.strikeInProgress && now > motion.strikeContinueUntil) {
-            motion.strikeInProgress = false;
-            motion.strikePeakSpeed = 0.0f;
-        }
-        const bool cooldownReady = motion.lastStrikeAt <= 0.0 ||
-                                   now - motion.lastStrikeAt >= 0.220;
-        const bool fastSample = segment.enabled && motion.armed &&
-                                tipSpeed >= threshold && deliberate &&
-                                cooldownReady;
-        if (fastSample) {
-            static double lastSwingTrace[2]{};
-            if(segment.weaponType>1 && now-lastSwingTrace[hand]>1.0) {
-                lastSwingTrace[hand]=now;
-                Trace("SWING hand=%d type=%d speed=%.2f dt=%.3f",hand,segment.weaponType,tipSpeed,dt);
-            }
-            motion.strikeInProgress = true;
-            motion.strikePeakSpeed = std::max(motion.strikePeakSpeed, tipSpeed);
-            motion.strikeContinueUntil = now + 0.180;
-        }
-        const bool continuation = motion.strikeInProgress &&
-                                  now <= motion.strikeContinueUntil &&
-                                  tipSpeed >= 0.08f;
-
-        if (segment.enabled && motion.armed && (fastSample || continuation)) {
+        const V3 direction=Normalized(tipTravel);
+        const float directionCos=direction.x*motion.hitDirection.x+
+            direction.y*motion.hitDirection.y+direction.z*motion.hitDirection.z;
+        motion.swing.Sample(tipSpeed,threshold,Length(tipTravel),directionCos);
+        if (segment.enabled && !motion.swing.spent && tipSpeed>=threshold && deliberate) {
             V3 rootStart{}, rootEnd{}, tipStart{}, tipEnd{};
             if (ToWorld(motion.previousRoot, rootStart) &&
                 ToWorld(segment.root, rootEnd) &&
@@ -731,17 +720,10 @@ void Update(bool interactionsBlocked) {
                                 rootStart, rootEnd, tipStart, tipEnd,
                                 target, contact)) {
                     ApplyContact(player, hand, segment.weaponType,
-                                 std::max(tipSpeed, motion.strikePeakSpeed),
+                                 tipSpeed,
                                  rootEnd, target, contact);
-                    // A real contact ends this swing. Misses remain live for the
-                    // 180 ms continuation so a stationary player can complete an
-                    // arc across a target without repeat-hitting every frame.
-                    motion.armed = false;
-                    motion.strikeInProgress = false;
-                    motion.strikePeakSpeed = 0.0f;
-                    motion.strikeContinueUntil = 0.0;
-                    motion.lastStrikeAt = now;
-                    motion.calmSince = 0.0;
+                    motion.swing.Hit();
+                    motion.hitDirection=direction;
                 }
             }
         }

@@ -18,6 +18,7 @@
 #include "Locomotion.h"
 #include "Log.h"
 #include "Melee.h"
+#include "Combat.h"
 #include "MissionControls.h"
 #include "Catalyst.h"
 #include "MenuNavigation.h"
@@ -1953,6 +1954,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             menuPage == PG_HOLSTER_CALIB && savr::holster::GripMarkersEnabled(),
             menuPage == PG_CALIB);
         savr::melee::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
+        savr::combat::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::scopeaim::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::vrfire::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::throwable::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
@@ -1968,6 +1970,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         savr::vehicledoors::Reset();
         savr::npcgrab::Reset();
         savr::melee::Reset();
+        savr::combat::Reset();
         savr::scopeaim::Reset();
         savr::vrfire::Update(true);
         savr::throwable::Reset();
@@ -2592,6 +2595,8 @@ void* WaitForGameLibrary(void*) {
     savr::boatentry::Install(handle);
     savr::vehicledoors::Install(handle);
     savr::npcgrab::Install(handle);
+    savr::combat::Install(handle);
+    savr::melee::Install(handle);
     savr::testarea::Install(handle);
     savr::missionweapon::Install(handle);
     savr::braindiag::Install(handle);  // basketball brain-chain diagnostics

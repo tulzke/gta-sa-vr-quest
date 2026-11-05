@@ -60,6 +60,9 @@ void ResetTracking();
 // two-hand pivot/axis, stereo late hands and laser must all use this epoch rather
 // than independently sampling the asynchronously updated XR poses.
 bool GetHandPosesSnapshot(xr::HandPose out[kHandCount]);
+// Exact, unblocked head/hands sample and tracking epoch from Update.
+bool GetInteractionTrackingSnapshot(float head[3], float orientation[4],
+                                   xr::HandPose hands[kHandCount], std::uint64_t* epoch);
 
 // Per-hand ownership. hand: 0=LEFT, 1=RIGHT. Invalid hand returns -1.
 int HeldSlot(int hand);

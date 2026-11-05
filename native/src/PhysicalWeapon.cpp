@@ -103,6 +103,8 @@ radialholster::Menu gRadialMenu{};
 bool gRadialTriggerLatched[kHandCount] = {true, true};
 
 xr::HandPose gHands[kHandCount]{};
+float gInteractionHead[3]{}, gInteractionOrientation[4]{0,0,0,1};
+bool gInteractionHeadValid{};
 V3 gHandVelocity[kHandCount]{};
 V3 gHandAngularVelocity[kHandCount]{};
 V3 gPreviousHandPosition[kHandCount]{};
@@ -788,6 +790,9 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands() | vehicleentry::ClaimedHands();
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));
+    std::copy_n(headPosition,3,gInteractionHead);
+    std::copy_n(headOrientation,4,gInteractionOrientation);
+    gInteractionHeadValid=headValid;
     interactionsBlocked = interactionsBlocked || navigationClaimed || driving::GetVehicleDebugMode()!=0 || !headValid ||
                           !gHolsterTrackingReady || trackingEpoch != gInteractionEpoch;
     if (!headValid || !gHolsterTrackingReady || trackingEpoch != gInteractionEpoch) {
@@ -1371,6 +1376,17 @@ bool GetHandPosesSnapshot(xr::HandPose out[kHandCount]) {
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(out, gHands, sizeof(gHands));
     return gHands[0].valid || gHands[1].valid;
+}
+
+bool GetInteractionTrackingSnapshot(float head[3], float orientation[4],
+                                   xr::HandPose hands[kHandCount], std::uint64_t* epoch) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    if (!gInteractionHeadValid || gInteractionsBlocked) return false;
+    std::copy_n(gInteractionHead,3,head);
+    std::copy_n(gInteractionOrientation,4,orientation);
+    std::copy_n(gHands,kHandCount,hands);
+    *epoch=gInteractionEpoch;
+    return true;
 }
 
 bool IsVehicleSidearmWeaponType(int weaponType) {
