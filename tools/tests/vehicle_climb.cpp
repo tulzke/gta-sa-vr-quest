@@ -57,15 +57,12 @@ int main(){
     assert(tiltA.Valid()&&tiltB.Valid()&&yaw.Valid());
     assert(Length(tiltA.up-tiltB.up)<.0001f&&Length(tiltA.forward-tiltB.forward)<.0001f);
     assert(Length(tiltA.forward-yaw.forward)>.5f);
-    const float identity[]={0,0,0,1},turn90[]={0,0,.70710678f,.70710678f};
-    const float tilt90[]={.70710678f,0,0,.70710678f};
-    assert(std::abs(ControllerTwist(turn90,identity,{0,0,1})-1.5707963f)<.0001f);
-    assert(std::abs(ControllerTwist(tilt90,identity,{0,0,1}))<.0001f);
     const auto left=PipeHandFrame({0,0,1},{0,1,0},-90,0);
     const auto right=PipeHandFrame({0,0,1},{0,1,0},90,0);
     assert(left.forward.z<-.99f&&right.forward.z>.99f);
     for(float a:{0.f,45.f,90.f,180.f}){
-        const auto frame=PipeHandFrame({0,0,1},RotateAround({0,1,0},{0,0,1},a*.01745329252f),0,0);
+        const float radians=a*.01745329252f;
+        const auto frame=PipeHandFrame({0,0,1},{-std::sin(radians),std::cos(radians),0},0,0);
         const Vec centre=GripPivotOffset(frame.forward,frame.up);
         const Vec anchor{};const Vec meshPosition=anchor-centre;
         assert(Length(meshPosition+GripPivotOffset(frame.forward,frame.up)-anchor)<.00001f);
@@ -132,6 +129,32 @@ int main(){
     vrcam::offsetZ=0;
     const float still=Position(ped).z;vrcam::offsetZ=.03f;Tick();assert(std::abs(Position(ped).z-still)<.0001f);vrcam::offsetZ=0;
     hands[1]=hands[0];hands[1].grip=0;Tick();hands[1].grip=1;Tick();assert(ClaimedHands()==3);
+    for(float deg:{0.f,45.f,90.f,180.f,270.f,360.f}){
+        const float a=deg*.01745329252f;
+        xr::HandPose visual[2]={hands[0],hands[1]};
+        for(auto& hand:visual){hand.gripOri[2]=std::sin(a*.5f);hand.gripOri[3]=std::cos(a*.5f);}
+        ApplyHandVisuals(visual);
+        const Vec expected{std::cos(a),std::sin(a),0};
+        const Vec leftUp{visual[0].climbUp[0],visual[0].climbUp[1],visual[0].climbUp[2]};
+        const Vec rightUp{visual[1].climbUp[0],visual[1].climbUp[1],visual[1].climbUp[2]};
+        assert(Length(leftUp+expected)<.0001f&&Length(rightUp-expected)<.0001f);
+    }
+    // Equal controller poses must produce mirrored hand frames, including at
+    // large calibration angles. Repeated calls use the live pose, not the
+    // orientation at which the grip was initially acquired.
+    for(int angle:{0,90,-90}){
+        driving::handAngle[0]=angle;driving::handAngle[1]=angle;
+        xr::HandPose visual[2]={hands[0],hands[1]};ApplyHandVisuals(visual);
+        const Vec lf{visual[0].climbForward[0],visual[0].climbForward[1],visual[0].climbForward[2]};
+        const Vec rf{visual[1].climbForward[0],visual[1].climbForward[1],visual[1].climbForward[2]};
+        const Vec lu{visual[0].climbUp[0],visual[0].climbUp[1],visual[0].climbUp[2]};
+        const Vec ru{visual[1].climbUp[0],visual[1].climbUp[1],visual[1].climbUp[2]};
+        assert(Length(lf+rf)<.0001f&&Length(lu+ru)<.0001f);
+        visual[0].gripOri[2]=.70710678f;visual[0].gripOri[3]=.70710678f;ApplyHandVisuals(visual);
+        visual[0].gripOri[2]=0;visual[0].gripOri[3]=1;ApplyHandVisuals(visual);
+        assert(Length(Vec{visual[0].climbForward[0],visual[0].climbForward[1],visual[0].climbForward[2]}-lf)<.0001f);
+    }
+    driving::handAngle[0]=driving::handAngle[1]=0;
     const float dual=Position(ped).z;hands[0].gripPos[2]-=.005f;hands[1].gripPos[2]-=.005f;Tick();assert(std::abs(Position(ped).z-dual-.005f)<.0001f);
     hands[1].grip=0;Tick();
     wall=true;const Vec blocked=Position(ped);hands[0].gripPos[2]-=.02f;Tick();assert(Position(ped).z==blocked.z&&ignored==nullptr);wall=false;

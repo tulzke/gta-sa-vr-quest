@@ -75,20 +75,6 @@ inline vehicledoors::Basis PipeHandFrame(Vec axis,Vec heading,float pitch,float 
     const Vec oldRight=right;right=right*std::cos(r)+up*std::sin(r);up=up*std::cos(r)-oldRight*std::sin(r);
     return {right,forward,up,{}};
 }
-inline float ControllerTwist(const float current[4],const float reference[4],Vec axis){
-    using namespace vehicledoors;
-    const Vec a{current[0],current[1],current[2]},b{reference[0],reference[1],reference[2]};
-    const Vec v=a*reference[3]-b*current[3]-Cross(a,b);
-    const float w=current[3]*reference[3]+Dot(a,b);
-    if(!Finite(v)||!std::isfinite(w)||Length(axis)<.5f)return 0.f;
-    const float projected=Dot(v,axis*(1.f/Length(axis)));
-    if(std::hypot(projected,w)<.001f)return 0.f;
-    return std::remainder(2.f*std::atan2(projected,w),6.28318530718f);
-}
-inline Vec RotateAround(Vec v,Vec axis,float angle){
-    using namespace vehicledoors;
-    return v*std::cos(angle)+Cross(axis,v)*std::sin(angle)+axis*(Dot(axis,v)*(1.f-std::cos(angle)));
-}
 // Centre of the Grip mesh opening at local Z=0, measured from the inner
 // contour of both BigHand*.uxrh pose-1 meshes (metres). The hand builder
 // maps local X to forward with a -0.055 m wrist adjustment and Y to -up.
