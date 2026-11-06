@@ -1,6 +1,67 @@
 # GTA San Andreas VR for Quest
 
-Version `0.3.1 alpha`. Source code and build tools for the Quest VR mod.
+This is a fork of [GTA San Andreas VR for Quest](https://github.com/dubrovskiy-yevhen-stakelogic/gta-sa-vr-quest)
+by **Yevhen Dubrovskyi**, the original author of the VR mod. This repository
+continues that work with additional immersive interactions, controls, and tools.
+It includes source code and build tools; a legally obtained copy of the game
+and the required external assets must be supplied separately.
+
+**This fork is currently WIP (Work in progress).** Steering-wheel positions,
+seat positions, and other interactive elements have not yet been calibrated
+for most cars.
+
+## Features added in this fork
+
+- **Physical car doors:** grab, pull, and push doors from outside or from your
+  seat. Interior door panels provide larger grab areas, and fully opened doors
+  stay open for boarding.
+- **Immersive vehicle entry and exit:** use directional stick holds toward
+  seat and exit markers to board, leave, or switch seats without the standard
+  entry animation. Four-seat cars, supported doorless vehicles, motorcycles,
+  bicycles, and quad bikes have adapted interactions. High-cab exits use the
+  game's native clearance and placement checks.
+- **Gesture-based vehicle theft:** follow punch, grab, and pull prompts to
+  remove occupants. Selected passenger interactions use a head push toward the
+  dashboard. Motorcycles and bicycles have their own jacking interactions;
+  unfamiliar car drivers can flee or fight back when you enter as a passenger.
+- **Climbing into high vehicles:** grab vertical pipes and pull yourself up
+  toward the cab, including holding on while the vehicle moves. Pipe placement
+  is configurable for supported models; there are no standing platforms.
+- **Hands-on driving:** hybrid hand-lean and handlebar steering for motorcycles
+  and bicycles, handlebar control for quad bikes, motorcycle lifting and
+  stabilization, and per-model steering-wheel position and tilt calibration.
+- **Manual ignition:** grab and turn a physical key to start or stop the
+  engine in supported motor vehicles, with contextual hand poses and hints.
+- **Physical radio control:** turn a modeled radio knob to change stations,
+  with discrete clicks and haptic feedback in cars and on motorcycles.
+- **Rear-view mirror:** an optional rear camera view with LOW and MEDIUM
+  quality, adjustable field of view, and per-car mirror/camera placement.
+  The simplified view omits pedestrians, water, and some scene effects.
+- **Shared interaction targeting and calibration:** nearby cabin controls are
+  selected and highlighted to reduce overlapping grabs. VEHICLE DEBUG lets you
+  adjust supported doors, seats, steering wheels, keys, radio controls, mirrors,
+  and climbing pipes, saving settings per vehicle model.
+- **Two holsters with radial weapon selection:** choose weapons for the two
+  holsters through a radial menu. In BODY mode, the holsters rotate to follow
+  HMD turns through an estimated upright torso frame, while pausing during
+  reaches. Configurable socket markers and return rings help locate holsters
+  and put held weapons away.
+- **Physical melee combat:** motion-based punches distinguish
+  jabs, hooks, and uppercuts, with combo reactions, hit sounds, and haptics.
+  A two-hand inward-facing guard blocks attacks and slows movement; red damage
+  and gray block halos provide peripheral feedback.
+- **Tracked hands and room-scale movement:** authored pointing, fist, pinch,
+  and firearm hand poses, plus improved alignment between head movement and
+  the player body, including movement near collision boundaries.
+- **Flat-screen placement:** game menus and cinema-mode cutscenes open in front
+  of the current view, then remain anchored in space until reopened.
+- **Local development workflow:** incremental Windows build/deploy with save
+  and settings backup, plus host tests for the added interaction systems.
+
+Coverage and calibration vary by vehicle model. Some features are still being
+refined; handling, reach, and comfort need testing in Quest. See
+[BACKLOG/BACKLOG.md](BACKLOG/BACKLOG.md) for remaining work and
+[completed task notes](BACKLOG/ARCHIVE) for implementation details and limits.
 
 ## Requirements
 
@@ -22,6 +83,19 @@ Version `0.3.1 alpha`. Source code and build tools for the Quest VR mod.
 
 The installer leaves the game stopped. Preserve the personal signing key for
 future installations. See [BUILDING.md](BUILDING.md) for command-line options.
+
+For subsequent local Windows deployments from a prepared checkout, run:
+
+```powershell
+./tools/deploy-quest.ps1
+```
+
+This incrementally builds and updates the installed game while preserving its
+game/language splits, and backs up accessible saves and settings before
+installation. Use `-BuildOnly` to build without a headset. For a first install
+or changes to game data, audio, hand assets, manifests, OpenXR, or HLOD, use
+`-Full` or the full builder above. The deploy log is
+`build/quest-deploy/deploy.log`.
 
 ## Proper Fixes
 
@@ -47,6 +121,18 @@ To prepare the pack without installing it:
 Run `INSTALL_HD_WEAPONS.bat` with a compatible mobile weapon pack, then enable
 **HD WEAPONS** in **VR MENU > MODEL SET** and fully restart the game. Weapon
 packs are supplied separately.
+
+## Vehicle setup and debugging
+
+**VEHICLE DEBUG** is the in-world editor for positioning and calibrating vehicle
+interaction elements. **VEHICLE TEST AREA** is a dedicated area for testing
+and adjusting different car models.
+It enables the editor and supplies vehicles in pages, so both modes can be used
+together to configure steering wheels, seating positions, doors, and other
+interactive elements.
+
+See [VEHICLE_DEBUG.md](VEHICLE_DEBUG.md) for controls, editable elements,
+test-area navigation, and how calibration settings are saved.
 
 ## Settings
 
@@ -105,21 +191,6 @@ remain separate display preferences. Moving both hands sideways without tilting
 them does not steer. Wheelie/forward-lean gestures and throttle are unchanged.
 The default speed blend spans 0.04–0.12 in GTA velocity units; it only applies
 while moving forwards. Quest handling and comfort still need a riding check.
-
-## Hand-operated car doors (prototype)
-
-The hand-operated car-door prototype is enabled on foot and from the driver's
-seat of an ordinary car. Approach an
-unlocked, nearly stationary car: translucent yellow arrows appear near its
-door handles. With an empty hand, squeeze grip within about 23 cm of an arrow's
-root, then pull or push while holding grip. Release to let go. Either controller
-works; a grip already held while walking past a car does not grab it.
-
-This version handles ordinary vertical-hinge car doors, one door at a
-time. It does not automatically seat the player. Handle positions are estimated
-from the loaded door frames and need headset checks across models. See
-[VEHICLE_DOORS_IMPLEMENTATION.md](VEHICLE_DOORS_IMPLEMENTATION.md) for limits and
-the Quest verification checklist.
 
 ## Developer tests
 
