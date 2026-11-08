@@ -9553,7 +9553,7 @@ void EnsureArrowProgram() {
 GLuint g_wristProg = 0, g_wristVbo = 0, g_wristSampler = 0;
 GLint  g_wristMvpLoc = -1, g_wristTexLoc = -1, g_wristOpacityLoc = -1;
 GLint g_wristModeLoc = -1, g_watchDataLoc = -1;
-GLint g_pdaHeadingLoc = -1;
+GLint g_pdaHeadingLoc = -1, g_pdaPortraitLoc = -1;
 
 void EnsureWristProgram() {
     if (g_wristProg) return;
@@ -9569,7 +9569,7 @@ void EnsureWristProgram() {
     const char* fs = "#version 300 es\n"
                      "precision mediump float;\n"
                      "in vec2 vUV;\n"
-                     "uniform sampler2D uTex; uniform float uOpacity; uniform int uMode; uniform vec4 uWatch; uniform float uHeading; out vec4 o;\n"
+                     "uniform sampler2D uTex; uniform float uOpacity; uniform int uMode; uniform vec4 uWatch; uniform float uHeading; uniform float uPortrait; out vec4 o;\n"
                      "float seg(vec2 p, vec2 a, vec2 b) { vec2 d=b-a; float t=clamp(dot(p-a,d)/dot(d,d),0.0,1.0); return 1.0-smoothstep(0.025,0.045,length(p-a-t*d)); }\n"
                      "float digit(vec2 p,int n) { int mask[10]=int[10](63,6,91,79,102,109,125,7,127,111); if(n<0 || n>9) return seg(p,vec2(.15,.5),vec2(.55,.5)); int m=mask[n]; float v=0.0;\n"
                      "if((m&1)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.55,.1))); if((m&2)!=0) v=max(v,seg(p,vec2(.55,.1),vec2(.55,.5))); if((m&4)!=0) v=max(v,seg(p,vec2(.55,.5),vec2(.55,.9))); if((m&8)!=0) v=max(v,seg(p,vec2(.15,.9),vec2(.55,.9))); if((m&16)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.15,.9))); if((m&32)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.15,.5))); if((m&64)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.55,.5))); return v; }\n"
@@ -9579,7 +9579,7 @@ void EnsureWristProgram() {
                      "  if(r>.425 && r<.455) { col=vec3(.12); if(uWatch.w>=0.0 && angle<clamp(uWatch.w/100.0,0.0,1.0)) col=vec3(.75); if(uWatch.w>100.0 && angle<clamp((uWatch.w-100.0)/100.0,0.0,1.0)) col=vec3(.32); }\n"
                      "  vec2 q=vec2((vUV.x-.17)*7.5,(vUV.y-.425)*6.0); int i=int(floor(q.x)); int h=int(uWatch.x), m=int(uWatch.y); int n=-1; if(i==0 && h>=0) n=h/10; if(i==1 && h>=0) n=h-10*(h/10); if(i==3 && m>=0) n=m/10; if(i==4 && m>=0) n=m-10*(m/10); float d=0.0; if(i==0||i==1||i==3||i==4) d=digit(vec2(fract(q.x),q.y),n); if(i==2) d=max(1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.35))),1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.65)))); col=mix(col,vec3(.92),d); o=vec4(col,uOpacity); return; }\n"
                      "  if(uMode==2){ o=vec4(.055,.065,.07,uOpacity); return; }\n"
-                     "  if(uMode==3){ vec2 p=vUV-vec2(.5); vec2 q=p*vec2(.8,.5); float c=cos(uHeading), s=sin(uHeading); vec2 uv=vec2(.5)+vec2(c*q.x+s*q.y,-s*q.x+c*q.y); vec3 map=texture(uTex,uv).rgb; p*=vec2(1.6,1.0); float marker=step(abs(p.x),(.012-(p.y+.008)*.55))*step(-.014,p.y)*step(p.y,.018); o=vec4(mix(map,vec3(1.0),marker),uOpacity); return; }\n"
+                     "  if(uMode==3){ vec2 p=vUV-vec2(.5); vec2 dims=mix(vec2(.8,.5),vec2(.5,.8),uPortrait); vec2 q=p*dims; float c=cos(uHeading), s=sin(uHeading); vec2 uv=vec2(.5)+vec2(c*q.x+s*q.y,-s*q.x+c*q.y); vec3 map=texture(uTex,uv).rgb; p*=dims/.5; float marker=step(abs(p.x),(.012-(p.y+.008)*.55))*step(-.014,p.y)*step(p.y,.018); o=vec4(mix(map,vec3(1.0),marker),uOpacity); return; }\n"
                      "  vec4 c = texture(uTex, vUV);\n"
                      "  float coverage = max(c.r, max(c.g, c.b));\n"
                      "  float keyed = smoothstep(0.008, 0.055, coverage);\n"
@@ -9605,6 +9605,7 @@ void EnsureWristProgram() {
     g_wristModeLoc = glGetUniformLocation(g_wristProg, "uMode");
     g_watchDataLoc = glGetUniformLocation(g_wristProg, "uWatch");
     g_pdaHeadingLoc = glGetUniformLocation(g_wristProg, "uHeading");
+    g_pdaPortraitLoc = glGetUniformLocation(g_wristProg, "uPortrait");
     glGenBuffers(1, &g_wristVbo);
     glGenSamplers(1, &g_wristSampler);
     glSamplerParameteri(g_wristSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -9744,17 +9745,17 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
     const XrVector3f br = vsub(vadd(centre, rHalf), uHalf);
     // The capture texture is stored top-down (the in-eye composite samples it
     // the same way), so v0 is the crop's top row and lands at the finger edge.
-    const bool rotatePda=pda && hud::PdaPortrait();
     const float verts[4 * 5] = {
-        tl.x, tl.y, tl.z, rotatePda ? u1 : u0, v0,
-        bl.x, bl.y, bl.z, u0, rotatePda ? v0 : v1,
-        tr.x, tr.y, tr.z, u1, rotatePda ? v1 : v0,
-        br.x, br.y, br.z, rotatePda ? u0 : u1, v1,
+        tl.x, tl.y, tl.z, u0, v0,
+        bl.x, bl.y, bl.z, u0, v1,
+        tr.x, tr.y, tr.z, u1, v0,
+        br.x, br.y, br.z, u1, v1,
     };
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
     glUniform1f(g_wristOpacityLoc, opacity);
     glUniform1i(g_wristModeLoc, watch ? 1 : pda ? 3 : 0);
     if (pda) glUniform1f(g_pdaHeadingLoc,pdaHeading);
+    if (pda) glUniform1f(g_pdaPortraitLoc,hud::PdaPortrait()?1.0f:0.0f);
     if (pda) glBindTexture(GL_TEXTURE_2D, pdaTex);
     const int time = g_watchTime.load(std::memory_order_relaxed);
     glUniform4f(g_watchDataLoc, time < 0 ? -1.0f : float(time / 60),
