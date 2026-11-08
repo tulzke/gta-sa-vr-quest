@@ -1,4 +1,5 @@
 #include "VehicleEntry.h"
+#include "PdaBlipVisibility.h"
 #include "PlayerLife.h"
 #include "MissionHud.h"
 #include "Tbone.h"

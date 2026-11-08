@@ -17,11 +17,15 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
     static auto rect=reinterpret_cast<void (*)(const void*,const void*)>(dlsym(handle,"_ZN9CSprite2d8DrawRectERK5CRectRK5CRGBA"));
     using TraceColor = std::uint32_t (*)(std::uint32_t,unsigned char,unsigned char);
     static auto traceColor=reinterpret_cast<TraceColor>(dlsym(handle,"_ZN6CRadar19GetRadarTraceColourEjhh"));
+    static auto onMission=reinterpret_cast<bool (*)()>(dlsym(handle,"_ZN11CTheScripts18IsPlayerOnAMissionEv"));
+    static auto* radarZoom=static_cast<unsigned char*>(dlsym(handle,"_ZN11CTheScripts14RadarZoomValueE"));
     if (!quad || !sprites || !traces || !rect || !g.CSprite2d_Draw ||
         reinterpret_cast<std::uintptr_t>(traces)!=g.LoadBase+0xa66740u ||
         reinterpret_cast<std::uintptr_t>(quad)!=g.LoadBase+0x5f7ef4u) return;
     constexpr float pixelsPerMetre=400.0f/300.0f;
     const float c=std::cos(heading), s=std::sin(heading);
+    const bool missionActive=onMission && onMission();
+    const bool zoomActive=radarZoom && *radarZoom!=0;
     const float halfX=hud::PdaPortrait()?176.0f:296.0f;
     const float halfY=hud::PdaPortrait()?296.0f:176.0f;
     auto project=[&](float dx,float dy,float& x,float& y,bool pin=true) {
@@ -58,6 +62,7 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
         std::uint16_t flags; std::memcpy(&flags,t+0x29,2);
         if (!(flags&2) || !(flags&0x200) || ((flags>>8)&3)<2) continue;
         const int type=(flags>>10)&15, sprite=t[0x28];
+        if (pdablip::Suppressed(flags,type,sprite!=0,missionActive,zoomActive)) continue;
         if (visible && !visible(sprite,-99)) continue;
         GameSymbols::Vec3 at{};
         std::memcpy(&at,t+8,sizeof(at));
@@ -73,10 +78,9 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
         } else continue;
         if (!std::isfinite(at.x)||!std::isfinite(at.y)||!std::isfinite(at.z)) continue;
         float x,y;
-        // Retail flag bit 2 marks short-range blips; bit 4 requests remaining
-        // visible. Do not infer objective visibility solely from a sprite ID.
-        const bool alwaysVisible=!(flags&4) || (flags&0x10) || type==5 ||
-                                 type<=3 || sprite==0 || sprite==41;
+        // Visibility follows this trace's current game flags. Scripts may
+        // change the same restaurant/gym sprite from local to long-range.
+        const bool alwaysVisible=pdablip::PinToEdge(flags,sprite!=0);
         const float opacity=project(at.x-player.x,at.y-player.y,x,y,alwaysVisible);
         if (opacity<=0.0f) continue;
         if (sprite) icon(sprite,x,y,heading,24.0f,opacity);
