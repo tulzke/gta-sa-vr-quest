@@ -115,6 +115,8 @@ HudTextTexture g_bigTextTexture;
 HudTextTexture g_timerTextTexture;
 HudTextTexture g_breathTextTexture;
 std::atomic<int> g_breathPercent{-1};
+std::atomic<int> g_watchTime{-1};
+std::atomic<float> g_watchHealth{-1}, g_watchArmour{-1};
 HudTextTexture g_signalTextTexture;
 std::atomic<int> g_signalPercent{-1};
 
@@ -4216,7 +4218,7 @@ bool DrawHudComposite(GLuint sourceTexture,int targetWidth,int targetHeight,
         if (!sourceTexture) continue; // signal/text do not need a flat HUD crop
         // Text layers render published strings; their source crop is not
         // sampled at all; only their destination calibration is retained.
-        if (hud::IsDirectTextElement(element)) continue;
+        if (hud::IsDirectTextElement(element) || element == hud::WATCH) continue;
         const bool selectedCalibrationCrop=calibrating&&element==selected;
         // While calibrating, always show the selected real crop in its final
         // rectangle even if the master classic HUD switch/preset is off. This
@@ -5175,6 +5177,13 @@ void PublishBreath(float fraction) {
     const int percent=std::isfinite(fraction)&&fraction>=0.0f
         ? static_cast<int>(std::lround(std::clamp(fraction,0.0f,1.0f)*100.0f)) : -1;
     g_breathPercent.store(percent,std::memory_order_relaxed);
+}
+
+void PublishWatch(int hour, int minute, float health, float armour) {
+    g_watchTime.store(hour >= 0 && hour < 24 && minute >= 0 && minute < 60
+                      ? hour * 60 + minute : -1, std::memory_order_relaxed);
+    g_watchHealth.store(std::isfinite(health) && health >= 0 ? health : -1, std::memory_order_relaxed);
+    g_watchArmour.store(std::isfinite(armour) && armour >= 0 ? armour : -1, std::memory_order_relaxed);
 }
 
 void PublishRadioText(const char* text) {
@@ -8193,7 +8202,7 @@ void BuildHudMenu() {
                           HudSourceScanActive()?"RUNNING":"PRESS A");
         std::snprintf(rows[10],sizeof(rows[10]),"BACK");
         rowCount=11;
-    } else if (page==2||page==3) {
+    } else if (page>=2&&page<=5) {
         const bool dash=page==3;
         PanelText(dash?"HUD DASHBOARD PLACEMENT":"HUD WRIST PLACEMENT",
                   cx, 12, 4, 100, 225, 255);
@@ -8210,7 +8219,8 @@ void BuildHudMenu() {
             std::snprintf(hint,sizeof(hint),
                           "EDITING %s ON THE %s ARM - LIVE PREVIEW",
                           hud::ElementName(element),
-                          element==hud::RADAR?"LEFT":"RIGHT");
+                          (element==hud::RADAR||element==hud::WATCH) ?
+                              (hud::DeviceHand(element)==0?"LEFT":"RIGHT") : "RIGHT");
         }
         PanelText(hint,cx,44,2,255,205,105);
         std::snprintf(rows[0],sizeof(rows[0]),
@@ -8230,8 +8240,14 @@ void BuildHudMenu() {
                       wrist.rollDeg);
         std::snprintf(rows[6],sizeof(rows[6]),"SIZE   < %.1f X >",
                       static_cast<float>(wrist.scaleTenths)/10.0f);
-        std::snprintf(rows[7],sizeof(rows[7]),"BACK");
-        rowCount=8;
+        if (element==hud::RADAR || element==hud::WATCH)
+            std::snprintf(rows[7],sizeof(rows[7]),"HAND   < %s >", hud::DeviceHand(element)==0?"LEFT":"RIGHT");
+        else std::snprintf(rows[7],sizeof(rows[7]),"HAND - FIXED");
+        if (element==hud::RADAR)
+            std::snprintf(rows[8],sizeof(rows[8]),"PDA ORIENTATION   < %s >",hud::PdaPortrait()?"PORTRAIT":"LANDSCAPE");
+        else std::snprintf(rows[8],sizeof(rows[8]),"ORIENTATION - NOT APPLICABLE");
+        std::snprintf(rows[9],sizeof(rows[9]),"BACK");
+        rowCount=10;
     } else {
         PanelText("HUD CALIBRATION", cx, 12, 4, 100, 225, 255);
         char hint[80];
@@ -9529,6 +9545,7 @@ void EnsureArrowProgram() {
 
 GLuint g_wristProg = 0, g_wristVbo = 0, g_wristSampler = 0;
 GLint  g_wristMvpLoc = -1, g_wristTexLoc = -1, g_wristOpacityLoc = -1;
+GLint g_wristModeLoc = -1, g_watchDataLoc = -1;
 
 void EnsureWristProgram() {
     if (g_wristProg) return;
@@ -9544,8 +9561,16 @@ void EnsureWristProgram() {
     const char* fs = "#version 300 es\n"
                      "precision mediump float;\n"
                      "in vec2 vUV;\n"
-                     "uniform sampler2D uTex; uniform float uOpacity; out vec4 o;\n"
+                     "uniform sampler2D uTex; uniform float uOpacity; uniform int uMode; uniform vec4 uWatch; out vec4 o;\n"
+                     "float seg(vec2 p, vec2 a, vec2 b) { vec2 d=b-a; float t=clamp(dot(p-a,d)/dot(d,d),0.0,1.0); return 1.0-smoothstep(0.025,0.045,length(p-a-t*d)); }\n"
+                     "float digit(vec2 p,int n) { int mask[10]=int[10](63,6,91,79,102,109,125,7,127,111); if(n<0 || n>9) return seg(p,vec2(.15,.5),vec2(.55,.5)); int m=mask[n]; float v=0.0;\n"
+                     "if((m&1)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.55,.1))); if((m&2)!=0) v=max(v,seg(p,vec2(.55,.1),vec2(.55,.5))); if((m&4)!=0) v=max(v,seg(p,vec2(.55,.5),vec2(.55,.9))); if((m&8)!=0) v=max(v,seg(p,vec2(.15,.9),vec2(.55,.9))); if((m&16)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.15,.9))); if((m&32)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.15,.5))); if((m&64)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.55,.5))); return v; }\n"
                      "void main(){\n"
+                     "  if(uMode==1){ vec2 p=vUV-vec2(.5); float r=length(p); if(r>.49) discard; vec3 col=vec3(.045,.055,.065); if(r>.455) col=vec3(.28,.30,.32); float angle=mod(atan(p.x,-p.y)+6.2831853,6.2831853)/6.2831853;\n"
+                     "  if(r>.375 && r<.415) { col=vec3(.16,.035,.035); if(uWatch.z>=0.0 && angle<clamp(uWatch.z/100.0,0.0,1.0)) col=vec3(.9,.08,.08); if(uWatch.z>100.0 && angle<clamp((uWatch.z-100.0)/100.0,0.0,1.0)) col=vec3(.40,.01,.01); }\n"
+                     "  if(r>.425 && r<.455) { col=vec3(.12); if(uWatch.w>=0.0 && angle<clamp(uWatch.w/100.0,0.0,1.0)) col=vec3(.75); if(uWatch.w>100.0 && angle<clamp((uWatch.w-100.0)/100.0,0.0,1.0)) col=vec3(.32); }\n"
+                     "  vec2 q=vec2((vUV.x-.17)*7.5,(vUV.y-.425)*6.0); int i=int(floor(q.x)); int h=int(uWatch.x), m=int(uWatch.y); int n=-1; if(i==0 && h>=0) n=h/10; if(i==1 && h>=0) n=h-10*(h/10); if(i==3 && m>=0) n=m/10; if(i==4 && m>=0) n=m-10*(m/10); float d=0.0; if(i==0||i==1||i==3||i==4) d=digit(vec2(fract(q.x),q.y),n); if(i==2) d=max(1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.35))),1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.65)))); col=mix(col,vec3(.92),d); o=vec4(col,uOpacity); return; }\n"
+                     "  if(uMode==2){ o=vec4(.055,.065,.07,uOpacity); return; }\n"
                      "  vec4 c = texture(uTex, vUV);\n"
                      "  float coverage = max(c.r, max(c.g, c.b));\n"
                      "  float keyed = smoothstep(0.008, 0.055, coverage);\n"
@@ -9568,6 +9593,8 @@ void EnsureWristProgram() {
     g_wristMvpLoc = glGetUniformLocation(g_wristProg, "uMVP");
     g_wristTexLoc = glGetUniformLocation(g_wristProg, "uTex");
     g_wristOpacityLoc = glGetUniformLocation(g_wristProg, "uOpacity");
+    g_wristModeLoc = glGetUniformLocation(g_wristProg, "uMode");
+    g_watchDataLoc = glGetUniformLocation(g_wristProg, "uWatch");
     glGenBuffers(1, &g_wristVbo);
     glGenSamplers(1, &g_wristSampler);
     glSamplerParameteri(g_wristSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -9655,18 +9682,35 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
         calibrating ? 1.0f : WristPanelGazeOpacity(rp, centre, gazeRange);
     if (opacity <= 0.0f) return;
 
-    const float w = kWristPanelWidthMetres[panelIndex] *
+    const bool watch = element == hud::WATCH;
+    const bool pda = element == hud::RADAR;
+    const float w = (watch ? 0.085f : kWristPanelWidthMetres[panelIndex]) *
                     static_cast<float>(wrist.scaleTenths) / 10.0f;
-    const float h = w * static_cast<float>(settings.sourceHeight) /
+    const float h = watch ? w : w * static_cast<float>(settings.sourceHeight) /
                     static_cast<float>(settings.sourceWidth);
-    const float u0 = static_cast<float>(settings.sourceX) /
+    const float u0 = watch ? 0.0f : static_cast<float>(settings.sourceX) /
                      kGameplayHudLogicalWidth;
-    const float v0 = static_cast<float>(settings.sourceY) /
+    const float v0 = watch ? 0.0f : static_cast<float>(settings.sourceY) /
                      kGameplayHudLogicalHeight;
-    const float u1 = u0 + static_cast<float>(settings.sourceWidth) /
+    const float u1 = watch ? 1.0f : u0 + static_cast<float>(settings.sourceWidth) /
                      kGameplayHudLogicalWidth;
-    const float v1 = v0 + static_cast<float>(settings.sourceHeight) /
+    const float v1 = watch ? 1.0f : v0 + static_cast<float>(settings.sourceHeight) /
                      kGameplayHudLogicalHeight;
+
+    if (pda) {
+        const float fw = w * (hud::PdaPortrait() ? 1.14f : 1.38f);
+        const float fh = h * (hud::PdaPortrait() ? 1.38f : 1.14f);
+        const XrVector3f c = vsub(centre, vscale(normal, 0.001f));
+        const XrVector3f r = vscale(right, fw * 0.5f), u = vscale(up, fh * 0.5f);
+        const XrVector3f a=vadd(vsub(c,r),u), b=vsub(vsub(c,r),u),
+                         d=vadd(vadd(c,r),u), e=vsub(vadd(c,r),u);
+        const float frame[] = {a.x,a.y,a.z,0,0, b.x,b.y,b.z,0,1,
+                               d.x,d.y,d.z,1,0, e.x,e.y,e.z,1,1};
+        glUniform1f(g_wristOpacityLoc, opacity);
+        glUniform1i(g_wristModeLoc, 2);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(frame), frame, GL_DYNAMIC_DRAW);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
 
     const XrVector3f rHalf = vscale(right, w * 0.5f);
     const XrVector3f uHalf = vscale(up, h * 0.5f);
@@ -9684,6 +9728,12 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
     };
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
     glUniform1f(g_wristOpacityLoc, opacity);
+    glUniform1i(g_wristModeLoc, watch ? 1 : 0);
+    const int time = g_watchTime.load(std::memory_order_relaxed);
+    glUniform4f(g_watchDataLoc, time < 0 ? -1.0f : float(time / 60),
+                time < 0 ? -1.0f : float(time % 60),
+                g_watchHealth.load(std::memory_order_relaxed),
+                g_watchArmour.load(std::memory_order_relaxed));
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
@@ -9796,7 +9846,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
                           reinterpret_cast<void*>(3 * sizeof(float)));
 
-    const int panelElements[2] = {hud::RADAR, hud::HEALTH};
+    const int panelElements[3] = {hud::RADAR, hud::HEALTH, hud::WATCH};
     if (drivingWheel.active || drivingWheel.dashAnchorValid) {
         // Dashboard: one shared anchor at the wheel/handlebar centre, facing
         // the driver, in BOTH driving modes (the geometry frame is published
@@ -9844,17 +9894,17 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
         const bool twoHandHeld = twoHand.active &&
             twoHand.primaryHand >= 0 && twoHand.primaryHand < 2 &&
             (weaponHandMask & (1u << twoHand.primaryHand)) != 0;
-        for (int panel = 0; panel < 2; ++panel) {
+        for (int panel = 0; panel < 3; ++panel) {
             if (panel == 0 && (drivingWheel.active || drivingWheel.dashAnchorValid)) continue;
             int slot = hud::WRIST_SLOT_HAND;
-            int anchorHand = panel;
+            const int anchorHand = panel == 1 ? 1 : hud::DeviceHand(panelElements[panel]);
             if (calibrating && hudMenuPage == 4) {
                 slot = hud::WRIST_SLOT_WEAPON;
             } else if (calibrating && hudMenuPage == 5) {
                 slot = hud::WRIST_SLOT_TWOHAND;
             } else if (twoHandHeld) {
                 slot = hud::WRIST_SLOT_TWOHAND;
-            } else if ((weaponHandMask & (1u << panel)) != 0) {
+            } else if ((weaponHandMask & (1u << anchorHand)) != 0) {
                 slot = hud::WRIST_SLOT_WEAPON;
             }
             XrVector3f base, alongAxis, acrossAxis, liftAxis, right, up,
@@ -9862,7 +9912,8 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
             if (!BuildHandPanelAnchor(hands[anchorHand], anchorHand, twoHand,
                                       base, alongAxis, acrossAxis, liftAxis,
                                       right, up, normal)) continue;
-            DrawWristPanel(panelElements[panel], panel, calibrating,
+            if (panel == 1) base = vadd(base, vscale(alongAxis, 0.15f));
+            DrawWristPanel(panelElements[panel], panel == 0 ? 0 : 1, calibrating,
                            slot, -1, base,
                            alongAxis, acrossAxis, liftAxis,
                            right, up, normal, rp, kWristGazeRange);

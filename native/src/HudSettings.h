@@ -34,6 +34,7 @@ enum Element {
     MESSAGES,
     HELP_TEXT,
     TIMERS,
+    WATCH,
     ELEMENT_COUNT
 };
 
@@ -119,6 +120,10 @@ void ToggleGameplayHud();                  // persists immediately
 bool GazeAutoHideEnabled();
 void SetGazeAutoHideEnabled(bool enabled); // persists immediately
 void ToggleGazeAutoHide();                 // persists immediately
+int DeviceHand(int element);
+void ToggleDeviceHand(int element);
+bool PdaPortrait();
+void TogglePdaPortrait();
 
 // Single predicate for the renderer.  Keeping the master switch separate from
 // the preset matches reference Quest build and allows CLASSIC placement to stay selected while

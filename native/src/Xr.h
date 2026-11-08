@@ -73,6 +73,7 @@ void PublishMissionTimersText(const char* text);
 void PublishTorenoSignal(int percent);
 // Actual native breath fraction [0,1], or negative to hide outside swimming.
 void PublishBreath(float fraction);
+void PublishWatch(int hour, int minute, float health, float armour);
 // Transient radio-station line, shown in the TIMERS text layer while the
 // station changes (empty string clears it).
 void PublishRadioText(const char* text);

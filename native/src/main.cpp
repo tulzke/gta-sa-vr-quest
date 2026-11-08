@@ -946,6 +946,21 @@ void DrawOneFrame(JNIEnv* env, float deltaTime) {
 // are the game's own (from InputHandler in the APK): A=0 B=1 X=2 Y=3 menu=15,
 // and the D-pad synthesised from the left stick uses 8/9/10/11.
 void SendInputToGame(JNIEnv* env, jclass clazz) {
+    static void* gameHandle = dlopen("libGame.so", RTLD_NOLOAD | RTLD_NOW);
+    static std::uint8_t* clockHours = nullptr;
+    static std::uint8_t* clockMinutes = nullptr;
+    if (!gameHandle) gameHandle = dlopen("libGame.so", RTLD_NOLOAD | RTLD_NOW);
+    if (gameHandle && !clockHours) clockHours = static_cast<std::uint8_t*>(dlsym(gameHandle, "_ZN6CClock18ms_nGameClockHoursE"));
+    if (gameHandle && !clockMinutes) clockMinutes = static_cast<std::uint8_t*>(dlsym(gameHandle, "_ZN6CClock20ms_nGameClockMinutesE"));
+    void* watchPed = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
+    float watchHealth = -1, watchArmour = -1;
+    if (watchPed) {
+        std::memcpy(&watchHealth, static_cast<const char*>(watchPed) + 0x6ac, sizeof(float));
+        std::memcpy(&watchArmour, static_cast<const char*>(watchPed) + 0x6b4, sizeof(float));
+    }
+    xr::PublishWatch(clockHours && watchPed ? *clockHours : -1,
+                     clockMinutes && watchPed ? *clockMinutes : -1,
+                     watchHealth, watchArmour);
     if (g.implOnGamepadAxesChanged == nullptr) {
         return;
     }
@@ -1655,7 +1670,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             // of freedom, live-previewed on the arm — or, while sitting in a
             // vehicle, on the wheel-centre dashboard slot. Rows match
             // BuildHudMenu pages 2/3.
-            constexpr int ROWS = 8;
+            constexpr int ROWS = 10;
             if (navUp)   hudWristSel = (hudWristSel - 1 + ROWS) % ROWS;
             if (navDown) hudWristSel = (hudWristSel + 1) % ROWS;
             // Full acceleration magnitude reaches the value adjustments.
@@ -1666,15 +1681,19 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             const int slot =
                 hudWristMode == 4 ? savr::hud::WRIST_SLOT_WEAPON :
                 hudWristMode == 5 ? savr::hud::WRIST_SLOT_TWOHAND :
-                driving ? savr::hud::WRIST_SLOT_VEHICLE
+                (driving && element == savr::hud::RADAR) ? savr::hud::WRIST_SLOT_VEHICLE
                         : savr::hud::WRIST_SLOT_HAND;
             const int dashModel =
-                (hudWristMode == 0 && driving)
+                (hudWristMode == 0 && driving && element == savr::hud::RADAR)
                     ? savr::driving::GetActiveVehicleModelId() : -1;
             if (hudWristSel<=6&&step) {
                 savr::hud::AdjustWristField(element,hudWristSel,step,slot,
                                             dashModel);
-            } else if (hudWristSel==7&&enter) {
+            } else if (hudWristSel==7&&(step||enter) && (element==savr::hud::RADAR || element==savr::hud::WATCH)) {
+                savr::hud::ToggleDeviceHand(element);
+            } else if (hudWristSel==8&&(step||enter) && element==savr::hud::RADAR) {
+                savr::hud::TogglePdaPortrait();
+            } else if (hudWristSel==9&&enter) {
                 menuPage=PG_HUD;
             }
             if (back) menuPage=PG_HUD;
@@ -1868,6 +1887,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             const bool hudOpen = menuPage == PG_HUD ||
                 menuPage == PG_HUD_CROP || menuPage == PG_HUD_WRIST;
             const bool wristDriving = menuPage == PG_HUD_WRIST &&
+                savr::hud::CalibrationElement() == savr::hud::RADAR &&
                 g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false);
             const int hudPage = menuPage == PG_HUD_CROP ? 1 :
                 (menuPage == PG_HUD_WRIST

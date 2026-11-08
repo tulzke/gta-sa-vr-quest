@@ -21,6 +21,8 @@ std::atomic<int>  g_preset{CLASSIC};
 std::atomic<bool> g_enabled{true};
 std::atomic<bool> g_gazeAutoHide{true};
 std::atomic<int>  g_objectiveMarkerMode{OBJECTIVE_ORIGINAL};
+std::atomic<int> g_pdaHand{1}, g_watchHand{0};
+std::atomic<bool> g_pdaPortrait{false};
 std::once_flag    g_initOnce;
 std::mutex        g_saveMutex;
 
@@ -38,6 +40,7 @@ constexpr ElementDefaults kElementDefaults[ELEMENT_COUNT] = {
     {0, 348, 308, 676, 264,  40, 40, 23,  5, 10}, // large mission messages
     {1, 200,   0, 624, 240,  36, 34, 24, 15, 10}, // help/tutorial/brief text
     {1,   0,   0,  64,  64,  62, 26, 24,  8, 10}, // mission timers/counters
+    {1,   0,   0,  64,  64,  50, 50, 10, 10, 10}, // watch
 };
 
 std::atomic<int> g_element[ELEMENT_COUNT][ELEMENT_FIELD_COUNT]{};
@@ -45,7 +48,7 @@ std::atomic<int> g_wrist[WRIST_SLOT_COUNT][ELEMENT_COUNT][WRIST_FIELD_COUNT]{};
 std::atomic<int> g_calibrationElement{RADAR};
 
 const char* const kElementKeys[ELEMENT_COUNT] = {
-    "Radar", "Health", "Messages", "Help", "Timers"
+    "Radar", "Health", "Messages", "Help", "Timers", "Watch"
 };
 const char* const kFieldKeys[ELEMENT_FIELD_COUNT] = {
     "Enabled", "SourceX", "SourceY", "SourceWidth", "SourceHeight",
@@ -135,7 +138,7 @@ void LoadWristDefaults() {
             kDashHealthDefaults[field], std::memory_order_relaxed);
     }
     // One-hand grip places the panel outboard; two-hand grip stacks panels beside the primary hand.
-    for (int element = 0; element < ELEMENT_COUNT; ++element) {
+    for (int element = RADAR; element <= HEALTH; ++element) {
         g_wrist[WRIST_SLOT_WEAPON][element][WRIST_ACROSS_MM].store(
             -120, std::memory_order_relaxed);
         g_wrist[WRIST_SLOT_TWOHAND][element][WRIST_ACROSS_MM].store(
@@ -194,6 +197,12 @@ void Load() {
                 gazeAutoHide = value != 0;
             else if (std::sscanf(line, "ObjectiveMarkers=%d", &value) == 1)
                 objectiveMarkerMode = ClampObjectiveMarkerMode(value);
+            else if (std::sscanf(line, "PdaHand=%d", &value) == 1)
+                g_pdaHand.store(value == 1);
+            else if (std::sscanf(line, "WatchHand=%d", &value) == 1)
+                g_watchHand.store(value == 1);
+            else if (std::sscanf(line, "PdaPortrait=%d", &value) == 1)
+                g_pdaPortrait.store(value != 0);
             else {
                 bool matched = false;
                 for (int element = 0; element < ELEMENT_COUNT && !matched; ++element) {
@@ -290,6 +299,8 @@ void Save() {
                      g_gazeAutoHide.load(std::memory_order_acquire) ? 1 : 0);
         std::fprintf(file, "ObjectiveMarkers=%d\n",
                      g_objectiveMarkerMode.load(std::memory_order_acquire));
+        std::fprintf(file, "PdaHand=%d\nWatchHand=%d\nPdaPortrait=%d\n",
+                     g_pdaHand.load(), g_watchHand.load(), int(g_pdaPortrait.load()));
         for (int element = 0; element < ELEMENT_COUNT; ++element) {
             for (int field = 0; field < ELEMENT_FIELD_COUNT; ++field)
                 std::fprintf(file, "Hud.%s.%s=%d\n",
@@ -364,6 +375,19 @@ void ToggleGazeAutoHide() {
     SetGazeAutoHideEnabled(!GazeAutoHideEnabled());
 }
 
+int DeviceHand(int element) {
+    EnsureLoaded();
+    return (element == WATCH ? g_watchHand : g_pdaHand).load();
+}
+void ToggleDeviceHand(int element) {
+    EnsureLoaded();
+    auto& hand = element == WATCH ? g_watchHand : g_pdaHand;
+    hand.store(1 - hand.load());
+    Save();
+}
+bool PdaPortrait() { EnsureLoaded(); return g_pdaPortrait.load(); }
+void TogglePdaPortrait() { EnsureLoaded(); g_pdaPortrait.store(!g_pdaPortrait.load()); Save(); }
+
 bool ShouldRenderClassicHud() {
     return GameplayHudEnabled() && CurrentPreset() == CLASSIC;
 }
@@ -413,7 +437,7 @@ bool ObjectiveMarkersIncludeHighlight() {
 const char* ElementName(int element) {
     static const char* const names[ELEMENT_COUNT] = {
         "RADAR", "HEALTH / TOP-RIGHT HUD", "BIG MESSAGES", "HELP TEXT",
-        "MISSION TIMERS"
+        "MISSION TIMERS", "WATCH"
     };
     return names[ClampElement(element)];
 }
