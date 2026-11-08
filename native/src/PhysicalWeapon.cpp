@@ -13,6 +13,7 @@
 #include "Xr.h"
 #include "VehicleDoors.h"
 #include "VehicleClimb.h"
+#include "LedgeClimb.h"
 #include "VehicleEntry.h"
 #include "VehicleWeaponPolicy.h"
 #include "NpcGrab.h"
@@ -1454,7 +1455,8 @@ void AutoEquipParachute() {
     static double airborneSince = 0.0;
     void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
     if (ped == nullptr) { airborneSince = 0.0; return; }
-    if (vehicleclimb::Attached()) {
+    if (vehicleclimb::Attached() || ledgeclimb::ClaimedHands() ||
+        ledgeclimb::JumpInProgress()) {
         airborneSince = 0.0;
         // A previously auto-selected chute must not classify a supported ped
         // as parachuting and revoke the grip on the following input tick.

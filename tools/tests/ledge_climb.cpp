@@ -77,5 +77,12 @@ int main(){
  Put(ped,0x68,Vec{});OnLaunch(nullptr,ped);
  assert(std::abs(Read<Vec>(ped,0x68).z-.244948974f)<.00001f);
  assert(jumpUntil>testNow&&!hovered);
+ // A long normal jump with a parachute in the active slot must never hand
+ // the stable VR view to the live ped heading at the apex or on landing.
+ Put(ped,0x8dc,std::int8_t(11));Put(ped,0x730+11*0x20,46);
+ g.CPedGeometryAnalyser_IsInAir=[](const void*){return true;};
+ testNow+=.8;assert(JumpInProgress());assert(!vrcam::ParachuteStateActive());
+ testNow=jumpUntil+.01;assert(!JumpInProgress());assert(vrcam::ParachuteStateActive());
+ g.CPedGeometryAnalyser_IsInAir=[](const void*){return false;};assert(!vrcam::ParachuteStateActive());
  puts("Ledge climbing production checks passed");
 }

@@ -170,6 +170,7 @@ void Install(void* h){
  }
  LOGI("[ledge] hand climbing %s",hooksReady?"ready":"DISABLED: retail hooks unavailable");
 }
+bool JumpInProgress(){return Now()<jumpUntil;}
 unsigned ClaimedHands(){return claimed;}
 void Append(vehicledoors::MarkerFrame& f){if(f.epoch==markers.epoch)for(int i=0;i<markers.count&&f.count<f.kCapacity;++i)f.markers[f.count++]=markers.markers[i];}
 void ApplyHandVisuals(xr::HandPose hands[2]){

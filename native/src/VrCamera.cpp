@@ -4468,7 +4468,8 @@ std::atomic<bool> g_hideWeaponsForChuteDeploy{false};
 // The skydive/parachute state: on foot, parachute is the active weapon, and
 // the ped is genuinely airborne.
 bool ParachuteStateActive() {
-    if (vehicleclimb::Attached() || ledgeclimb::ClaimedHands()) return false;
+    if (vehicleclimb::Attached() || ledgeclimb::ClaimedHands() ||
+        ledgeclimb::JumpInProgress()) return false;
     if (!g.CPedGeometryAnalyser_IsInAir || !g.FindPlayerPed) return false;
     if (g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false)) return false;
     void* ped = g.FindPlayerPed(-1);

@@ -31,6 +31,7 @@ bool WorldPointToTracking(const float* a,float* b){std::copy_n(a,3,b);b[2]-=offs
 bool GetHeadWorldRay(float* o,float* d){o[0]=-1.5f;o[1]=0;o[2]=1.6f;d[1]=1;return true;}
 }
 }
+namespace savr::ledgeclimb {unsigned ClaimedHands(){return 0;}bool JumpInProgress(){return false;}}
 namespace savr::locomotion { bool AutoParachuteEnabled(){return false;} }
 namespace savr::physicalweapon {
 std::atomic<unsigned> gHeldMaskRelaxed{};

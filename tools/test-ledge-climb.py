@@ -8,10 +8,13 @@ source=(ROOT/'native/src/LedgeClimb.cpp').read_text()
 source='\n'.join(x for x in source.splitlines() if not x.startswith('#include'))
 a=source.index('bool Hook(');b=source.index('using ClimbFn',a)
 source=source[:a]+source[b:]
-a=source.index('void Install(');b=source.index('unsigned ClaimedHands()',a)
+a=source.index('void Install(');b=source.index('bool JumpInProgress()',a)
 source=source[:a]+source[b:]
 source=source.replace('dlsym(RTLD_DEFAULT,"_ZN10CPlaceable14SetOrientationEfff")','nullptr')
 source=re.sub(r'double Now\(\)\{[^\n]*\}', 'double Now(){return testNow;}',source)
+camera=(ROOT/'native/src/VrCamera.cpp').read_text()
+a=camera.index('bool ParachuteStateActive() {');b=camera.index('\n}',a)+2
+source+='\nnamespace savr::vehicleclimb {bool Attached(){return false;}}\nnamespace savr::vrcam {\n'+camera[a:b]+'\n}\n'
 generated=OUT/'ledge_climb.cpp'
 generated.write_text((ROOT/'tools/tests/ledge_climb.cpp').read_text().replace('// PRODUCTION',source))
 exe=OUT/('ledge_climb.exe' if os.name=='nt' else 'ledge_climb')
