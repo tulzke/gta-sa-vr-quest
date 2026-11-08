@@ -137,16 +137,25 @@ bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.5
  float best=reach.preview;bool found=false;
  // Fan out from the hand rather than requiring the ledge to face the gaze.
  // Probe higher as well: roof overhangs often sit above the jumping hand.
- for(float angle:{0.f,-.65f,.65f,-1.3f,1.3f})for(float fraction:{.15f,.5f,.9f}){
+ for(float angle:{0.f,-.65f,.65f,-1.3f,1.3f,-2.1f,2.1f,3.14159265f})for(float fraction:{.15f,.5f,.9f}){
   Vec direction=Rotate(forward,angle);
-  Vec probe=hand+direction*(reach.preview*fraction);Hit top,wall;
+  Vec probe=hand+direction*(reach.preview*fraction);Hit top;
   if(!Ray(probe+Vec{0,0,reach.vertical},probe-Vec{0,0,reach.vertical},top)||top.normal.z<.65f)continue;
-  // The stock material flag excludes some physically solid roofs. For VR,
-  // an exposed collision edge and a solid top are the eligibility criteria.
-  Vec start{hand.x-direction.x*reach.preview,hand.y-direction.y*reach.preview,top.point.z-.12f};
-  if(!Ray(start,{probe.x,probe.y,top.point.z-.12f},wall)||std::abs(wall.normal.z)>.45f)continue;
-  Vec edge{wall.point.x,wall.point.y,top.point.z};const float d=Length(edge-hand);
-  Vec axis=Cross({0,0,1},wall.normal);const float n=Length(axis);
+  // Find the boundary of the top itself. A thin roof can have no side
+  // triangles, and the building wall may be recessed behind the overhang.
+  // Requiring that wall would either reject the roof or anchor inside it.
+  const auto onTop=[&](Vec p){
+   p.z=top.point.z-((p.x-top.point.x)*top.normal.x+(p.y-top.point.y)*top.normal.y)/top.normal.z;
+   Hit sample;
+   return Ray(p+Vec{0,0,.06f},p-Vec{0,0,.06f},sample)&&sample.normal.z>=.65f&&
+     std::abs(sample.point.z-p.z)<.045f;
+  };
+  Vec outside=hand-direction*reach.preview,inside=top.point;
+  if(onTop(outside))continue;
+  for(int i=0;i<7;++i){Vec middle=(inside+outside)*.5f;if(onTop(middle))inside=middle;else outside=middle;}
+  Vec edge=inside;edge.z=top.point.z-((edge.x-top.point.x)*top.normal.x+(edge.y-top.point.y)*top.normal.y)/top.normal.z;
+  Vec axis=Cross({0,0,1},direction);
+  const float d=Length(edge-hand);const float n=Length(axis);
   if(d>=best||n<.1f)continue;
   best=d;point=edge;tangent=axis*(1.f/n);found=true;
  }

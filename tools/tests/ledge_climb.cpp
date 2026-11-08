@@ -24,12 +24,12 @@ bool GetHeadWorldRay(float* a,float* b){a[0]=0;a[1]=eyeY;a[2]=2.3f;b[0]=0;b[1]=1
 using namespace savr;
 using namespace savr::ledgeclimb;
 char ped[0xa00]{},matrix[64]{};void* ignored{};
-bool ceiling{},noFloor{},material=true;int moves{};
+bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{};float floorZ=1.f;int moves{};
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 bool Query(const GameSymbols::Vec3* a,const GameSymbols::Vec3* b,void* col,void**,bool,bool,bool,bool,bool,bool,bool,bool){
  Vec p{},normal{};bool hit=false;
- if(!noFloor&&a->z>1.f&&b->z<1.f&&a->y>=0){float t=(a->z-1.f)/(a->z-b->z);p={a->x+(b->x-a->x)*t,a->y+(b->y-a->y)*t,1};normal={0,0,1};hit=true;}
- if(a->y<0&&b->y>=0&&a->z<1.f){float t=-a->y/(b->y-a->y);p={a->x+(b->x-a->x)*t,0,a->z+(b->z-a->z)*t};normal={0,-1,0};hit=true;}
+ if(!noFloor&&a->z>floorZ&&b->z<floorZ&&(a->y>=0||infiniteTop)){float t=(a->z-floorZ)/(a->z-b->z);p={a->x+(b->x-a->x)*t,a->y+(b->y-a->y)*t,floorZ};normal={0,0,1};hit=true;}
+ if(a->y<0&&b->y>=0&&a->z<floorZ&&(!thinRoof||a->z>floorZ-.03f)){float t=-a->y/(b->y-a->y);p={a->x+(b->x-a->x)*t,0,a->z+(b->z-a->z)*t};normal={0,-1,0};hit=true;}
  if(hit){Put(col,0,p);Put(col,0x10,normal);Put(col,0x23,std::uint8_t(1));}return hit;
 }
 int main(){
@@ -45,6 +45,13 @@ int main(){
  assert(fast.grab>idle.grab&&jump.grab>fast.grab&&jump.preview>fast.preview);
  assert(!Find({0,-.08f,.48f},{0,1,0},point,tangent,idle));
  assert(Find({0,-.08f,.48f},{0,1,0},point,tangent,jump));
+ // Thin roofs have no wall at the old hard-coded 12 cm depth.
+ thinRoof=true;
+ assert(Find({0,-.08f,1.05f},{0,1,0},point,tangent));assert(std::abs(point.y)<.025f);
+ floorZ=50;assert(Find({0,-.08f,50.05f},{0,1,0},point,tangent));assert(std::abs(point.z-50)<.001f);
+ floorZ=1;infiniteTop=true;
+ assert(!Find({0,-.08f,1.05f},{0,1,0},point,tangent));
+ infiniteTop=false;thinRoof=false;
  // Crouched landing: CJ's feet are below the top, tracked head is above it.
  Suspend(ped);assert(Stand(ped,{0,-.3f,1.2f},{0,.12f,1.5f},1));
  assert(std::abs(Position(ped).z-2.02f)<.001f);assert(!suspended);
