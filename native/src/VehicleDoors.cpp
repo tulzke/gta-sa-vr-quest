@@ -164,7 +164,7 @@ bool ReadDoor(const Target& t,void* ped,Door& d,bool inside=false) {
     const auto kind=Read<std::uint8_t>(t.vehicle,0x5a);
     if ((kind&7)!=2||(kind>>3)==5) return false; // no wrecks / other classes
     const Vec speed=Read<Vec>(t.vehicle,0x68);
-    if (!Finite(speed)||Length(speed)>.08f) return false; // below 14.4 km/h; opening briefly brakes NPC traffic
+    if (!Finite(speed)) return false;
     const int model=Read<std::uint16_t>(t.vehicle,0x32);
     if (model==431||model==437||model==432||model==539) return false; // special/automatic doors
     void* matrix=Read<void*>(t.vehicle,0x18);

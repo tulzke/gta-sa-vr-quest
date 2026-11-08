@@ -294,6 +294,11 @@ int main() {
     GripEdge edge;CHECK(!edge.Step(1,true));CHECK(!edge.Step(0,true));CHECK(edge.Step(1,true));
     CHECK(!edge.Step(0,false)&&!edge.Step(1,true));
 
+    // Speed changes must neither prevent a new grip nor interrupt an existing one.
+    Setup();Write<Vec>(vehicle,0x68,{.2f,0,0});GrabIt();
+    Write<Vec>(vehicle,0x68,{.01f,0,0});Tick();CHECK(ClaimedHands()==1);
+    Write<Vec>(vehicle,0x68,{.3f,0,0});Tick();CHECK(ClaimedHands()==1);
+    hands[0].grip=0;Tick();CHECK(ClaimedHands()==0);
     Setup();Ready();hands[0].gripPos[1]+=.35f;hands[0].gripPos[2]-=.25f;
     hands[0].grip=1;Tick();CHECK(ClaimedHands()==1); // panel away from the arrow
     Tick();CHECK(ClaimedHands()==1);
