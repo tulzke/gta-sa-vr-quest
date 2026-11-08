@@ -41,6 +41,7 @@ constexpr ElementDefaults kElementDefaults[ELEMENT_COUNT] = {
     {1, 200,   0, 624, 240,  36, 34, 24, 15, 10}, // help/tutorial/brief text
     {1,   0,   0,  64,  64,  62, 26, 24,  8, 10}, // mission timers/counters
     {1,   0,   0,  64,  64,  50, 50, 10, 10, 10}, // watch
+    {1,   0,   0,  64,  64,  50, 50, 10, 10, 10}, // weapon ammo
 };
 
 std::atomic<int> g_element[ELEMENT_COUNT][ELEMENT_FIELD_COUNT]{};
@@ -48,7 +49,7 @@ std::atomic<int> g_wrist[WRIST_SLOT_COUNT][ELEMENT_COUNT][WRIST_FIELD_COUNT]{};
 std::atomic<int> g_calibrationElement{RADAR};
 
 const char* const kElementKeys[ELEMENT_COUNT] = {
-    "Radar", "Health", "Messages", "Help", "Timers", "Watch"
+    "Radar", "Health", "Messages", "Help", "Timers", "Watch", "Ammo"
 };
 const char* const kFieldKeys[ELEMENT_FIELD_COUNT] = {
     "Enabled", "SourceX", "SourceY", "SourceWidth", "SourceHeight",
@@ -437,7 +438,7 @@ bool ObjectiveMarkersIncludeHighlight() {
 const char* ElementName(int element) {
     static const char* const names[ELEMENT_COUNT] = {
         "RADAR", "HEALTH / TOP-RIGHT HUD", "BIG MESSAGES", "HELP TEXT",
-        "MISSION TIMERS", "WATCH"
+        "MISSION TIMERS", "WATCH", "WEAPON AMMO"
     };
     return names[ClampElement(element)];
 }

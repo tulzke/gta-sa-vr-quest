@@ -636,6 +636,7 @@ std::uint64_t         g_holsterEpoch{};
 float                 g_holsterEye[3]{}; // one billboard orientation for both eyes
 holstermarker::Frame   g_stereoHolsterMarkers[kStereoSets]{};
 holstermarker::Frame g_ammoHolsters{}, g_stereoAmmoHolsters[kStereoSets]{};
+WeaponAmmoPose g_weaponAmmoPose[2]{}, g_stereoWeaponAmmoPose[kStereoSets][2]{};
 vehicledoors::MarkerFrame g_npcGrabMarkers{};
 vehicledoors::MarkerFrame g_stereoNpcGrabMarkers[kStereoSets]{};
 vehicledoors::MarkerFrame g_vehicleDoorMarkers{};
@@ -4223,7 +4224,7 @@ bool DrawHudComposite(GLuint sourceTexture,int targetWidth,int targetHeight,
         if (!sourceTexture) continue; // signal/text do not need a flat HUD crop
         // Text layers render published strings; their source crop is not
         // sampled at all; only their destination calibration is retained.
-        if (hud::IsDirectTextElement(element) || element == hud::WATCH) continue;
+        if (hud::IsDirectTextElement(element) || element == hud::WATCH || element == hud::AMMO) continue;
         const bool selectedCalibrationCrop=calibrating&&element==selected;
         // While calibrating, always show the selected real crop in its final
         // rectangle even if the master classic HUD switch/preset is off. This
@@ -5750,6 +5751,11 @@ void SetAmmoHolsters(const holstermarker::Frame& frame) {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
     g_ammoHolsters=frame;
 }
+void SetWeaponAmmoPose(int hand,const WeaponAmmoPose& pose) {
+    if (hand<0 || hand>1) return;
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_weaponAmmoPose[hand]=pose;
+}
 
 void SetParachuteToggles(const float positions[2][3],
                          const float anchors[2][3], const bool grabbed[2],
@@ -6299,6 +6305,8 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         // The compositor reuses this immutable batch for both eyes.
         auto& markerFrame = g_stereoHolsterMarkers[ws];
         g_stereoAmmoHolsters[ws]=g_ammoHolsters;
+        g_stereoWeaponAmmoPose[ws][0]=g_weaponAmmoPose[0];
+        g_stereoWeaponAmmoPose[ws][1]=g_weaponAmmoPose[1];
         markerFrame.count = g_holsterCount;
         markerFrame.epoch = g_holsterEpoch;
         std::memcpy(markerFrame.eye, g_holsterEye, sizeof(markerFrame.eye));
@@ -9577,6 +9585,7 @@ GLint  g_wristMvpLoc = -1, g_wristTexLoc = -1, g_wristOpacityLoc = -1;
 GLint g_wristModeLoc = -1, g_watchDataLoc = -1;
 GLint g_pdaHeadingLoc = -1, g_pdaPortraitLoc = -1;
 GLint g_wantedLoc=-1, g_ammoLoc=-1;
+GLint g_ammoBackdropLoc=-1;
 
 void EnsureWristProgram() {
     if (g_wristProg) return;
@@ -9592,12 +9601,13 @@ void EnsureWristProgram() {
     const char* fs = "#version 300 es\n"
                      "precision mediump float;\n"
                      "in vec2 vUV;\n"
-                     "uniform sampler2D uTex; uniform float uOpacity; uniform int uMode; uniform vec4 uWatch; uniform float uHeading; uniform float uPortrait; uniform int uWanted; uniform ivec2 uAmmo; out vec4 o;\n"
+                     "uniform sampler2D uTex; uniform float uOpacity; uniform int uMode; uniform vec4 uWatch; uniform float uHeading; uniform float uPortrait; uniform int uWanted; uniform ivec2 uAmmo; uniform float uAmmoBackdrop; out vec4 o;\n"
+                     "float ammoDigit(vec2 p,int n){ const int rows[70]=int[70](14,17,19,21,25,17,14, 4,12,4,4,4,4,14, 14,17,1,2,4,8,31, 30,1,1,14,1,1,30, 2,6,10,18,31,2,2, 31,16,16,30,1,1,30, 14,16,16,30,17,17,14, 31,1,2,4,8,8,8, 14,17,17,14,17,17,14, 14,17,17,15,1,1,14); ivec2 cell=ivec2(floor(p*vec2(6.0,9.0))); if(cell.x<0||cell.x>4||cell.y<1||cell.y>7||n<0||n>9)return 0.0;return float((rows[n*7+cell.y-1]>>(4-cell.x))&1);}\n"
                      "float seg(vec2 p, vec2 a, vec2 b) { vec2 d=b-a; float t=clamp(dot(p-a,d)/dot(d,d),0.0,1.0); return 1.0-smoothstep(0.025,0.045,length(p-a-t*d)); }\n"
                      "float digit(vec2 p,int n) { int mask[10]=int[10](63,6,91,79,102,109,125,7,127,111); if(n<0 || n>9) return seg(p,vec2(.15,.5),vec2(.55,.5)); int m=mask[n]; float v=0.0;\n"
                      "if((m&1)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.55,.1))); if((m&2)!=0) v=max(v,seg(p,vec2(.55,.1),vec2(.55,.5))); if((m&4)!=0) v=max(v,seg(p,vec2(.55,.5),vec2(.55,.9))); if((m&8)!=0) v=max(v,seg(p,vec2(.15,.9),vec2(.55,.9))); if((m&16)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.15,.9))); if((m&32)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.15,.5))); if((m&64)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.55,.5))); return v; }\n"
                      "void main(){\n"
-                     "if(uMode==4){ vec2 p=vec2(vUV.x*9.0,vUV.y); int i=int(floor(p.x)); float ink=0.0; if(i==4){ink=seg(vec2(fract(p.x),p.y),vec2(.55,.15),vec2(.15,.85));} else {int v=i<4?uAmmo.x:uAmmo.y; int k=i<4?3-i:8-i; int divisor=k==3?1000:k==2?100:k==1?10:1; if(v>=divisor||k==0) ink=digit(vec2(fract(p.x),p.y),(v/divisor)%10);} o=vec4(mix(vec3(.015),vec3(1.0),ink),uOpacity);return;}\n"
+                     "if(uMode==4){int na=uAmmo.x>=1000?4:3,nb=uAmmo.y>=1000?4:3;float x=vUV.x*(float(na+nb)+.6);bool left=x<float(na);float gx=left?x:x-float(na)-.6;int count=left?na:nb;int i=int(floor(gx));float ink=0.0;if(gx>=0.0&&i<count){int k=count-i-1,v=left?uAmmo.x:uAmmo.y;int div=k==3?1000:k==2?100:k==1?10:1;ink=ammoDigit(vec2(fract(gx),vUV.y),(v/div)%10);}o=vec4((left?vec3(1.0):vec3(.55))*ink,mix(uAmmoBackdrop,1.0,ink)*uOpacity);return;}\n"
                      "  if(uMode==1){ vec2 p=vUV-vec2(.5); float r=length(p); if(r>.49) discard; vec3 col=vec3(.045,.055,.065); if(r>.455) col=vec3(.28,.30,.32); float angle=mod(atan(p.x,-p.y)+6.2831853,6.2831853)/6.2831853;\n"
                      "  if(r>.375 && r<.415) { col=vec3(.16,.035,.035); if(uWatch.z>=0.0 && angle<clamp(uWatch.z/100.0,0.0,1.0)) col=vec3(.9,.08,.08); if(uWatch.z>100.0 && angle<clamp((uWatch.z-100.0)/100.0,0.0,1.0)) col=vec3(.40,.01,.01); }\n"
                      "  if(r>.425 && r<.455) { col=vec3(.12); if(uWatch.w>=0.0 && angle<clamp(uWatch.w/100.0,0.0,1.0)) col=vec3(.75); if(uWatch.w>100.0 && angle<clamp((uWatch.w-100.0)/100.0,0.0,1.0)) col=vec3(.32); }\n"
@@ -9632,6 +9642,7 @@ void EnsureWristProgram() {
     g_pdaPortraitLoc = glGetUniformLocation(g_wristProg, "uPortrait");
     g_wantedLoc=glGetUniformLocation(g_wristProg,"uWanted");
     g_ammoLoc=glGetUniformLocation(g_wristProg,"uAmmo");
+    g_ammoBackdropLoc=glGetUniformLocation(g_wristProg,"uAmmoBackdrop");
     glGenBuffers(1, &g_wristVbo);
     glGenSamplers(1, &g_wristSampler);
     glSamplerParameteri(g_wristSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -9989,21 +10000,39 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
 }
 
 void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
-                   int type, float width) {
-    if (type<0 || type>=64 || !hud::ShouldRenderWristHud()) return;
+                   int type, float width, bool backdrop=true, const WeaponAmmoPose* weaponPose=nullptr) {
+    if (type<0 || type>=64 || (!hud::ShouldRenderWristHud() && !g_hudActive.load(std::memory_order_relaxed))) return;
     const auto ammo=g_ammoHud[type].load(std::memory_order_relaxed);
     if (!(ammo&(1ull<<63))) return;
     const int clip=static_cast<int>((ammo>>32)&0x7fffffffu);
     const int total=static_cast<int>(ammo&0xffffffffu);
     EnsureWristProgram(); if (!g_wristProg) return;
-    const auto right=vscale(QuatRotate(eye.orientation,{1,0,0}),width*.5f);
-    const auto up=vscale(QuatRotate(eye.orientation,{0,1,0}),width*.1f);
+    XrVector3f axisRight=QuatRotate(eye.orientation,{1,0,0});
+    XrVector3f axisUp=QuatRotate(eye.orientation,{0,1,0});
+    if (weaponPose && weaponPose->valid) {
+        const auto settings=hud::GetWristSettings(hud::AMMO,hud::WRIST_SLOT_HAND,-1);
+        if (!hud::GetElementSettings(hud::AMMO).enabled && !g_hudActive.load(std::memory_order_relaxed)) return;
+        axisRight=vnorm({weaponPose->right[0],weaponPose->right[1],weaponPose->right[2]});
+        axisUp=vnorm({weaponPose->forward[0],weaponPose->forward[1],weaponPose->forward[2]});
+        XrVector3f side=vnorm({weaponPose->up[0],weaponPose->up[1],weaponPose->up[2]});
+        centre={weaponPose->position[0],weaponPose->position[1],weaponPose->position[2]};
+        centre=vadd(centre,vadd(vscale(axisRight,.08f+settings.alongMm*.001f),
+                   vadd(vscale(axisUp,.06f+settings.liftMm*.001f),vscale(side,.04f+settings.acrossMm*.001f))));
+        constexpr float radians=.01745329252f;
+        RotateWristAxes(side,axisRight,settings.yawDeg*radians);
+        RotateWristAxes(axisUp,side,settings.pitchDeg*radians);
+        RotateWristAxes(axisRight,axisUp,settings.rollDeg*radians);
+        width*=settings.scaleTenths/10.0f;
+    }
+    const auto right=vscale(axisRight,width*.5f);
+    const auto up=vscale(axisUp,width*.13f);
     const auto tl=vadd(vsub(centre,right),up), tr=vadd(vadd(centre,right),up);
     const auto bl=vsub(vsub(centre,right),up), br=vsub(vadd(centre,right),up);
     const float verts[]={tl.x,tl.y,tl.z,0,0, bl.x,bl.y,bl.z,0,1,
                          tr.x,tr.y,tr.z,1,0, br.x,br.y,br.z,1,1};
     glUseProgram(g_wristProg); glUniformMatrix4fv(g_wristMvpLoc,1,GL_FALSE,mvp);
     glUniform1i(g_wristModeLoc,4); glUniform1f(g_wristOpacityLoc,1);
+    glUniform1f(g_ammoBackdropLoc,backdrop?.1f:0.0f);
     glUniform2i(g_ammoLoc,std::min(clip,9999),std::clamp(total-clip,0,9999));
     glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);glDisable(GL_CULL_FACE);
@@ -12089,7 +12118,8 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const vehicledoors::MarkerFrame& bakedTestArea,
                      const radialholster::Frame& bakedRadial,
                      unsigned int hudSourceTex, unsigned int pdaSourceTex, float pdaHeading,
-                     const int handTypes[2], const holstermarker::Frame& ammoHolsters) {
+                     const int handTypes[2], const holstermarker::Frame& ammoHolsters,
+                     const WeaponAmmoPose ammoPoses[2]) {
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
     {
@@ -12296,12 +12326,10 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,false,true);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,true);
     if (!scope.active) DrawRadialHolsterMenu(mvp,bakedRadial);
-    if (trackedVisuals && hud::ShouldRenderWristHud()) {
+    if (trackedVisuals && (hud::ShouldRenderWristHud() || g_hudActive.load(std::memory_order_relaxed))) {
         const auto lower=QuatRotate(rp.orientation,{0,-.05f,0});
-        for (int h=0;h<2;++h) if ((weaponHandMask&(1u<<h)) && bakedHands[h].valid) {
-            XrVector3f at{bakedHands[h].gripPos[0],bakedHands[h].gripPos[1],bakedHands[h].gripPos[2]};
-            if (TwoHandStateUsable(bakedTwoHand)) at=TwoHandRotatePoint(bakedTwoHand,at);
-            DrawAmmoLabel(mvp,rp,vadd(at,lower),handTypes[h],.11f);
+        for (int h=0;h<2;++h) if ((weaponHandMask&(1u<<h)) && ammoPoses[h].valid) {
+            DrawAmmoLabel(mvp,rp,{},handTypes[h],.11f,true,&ammoPoses[h]);
         }
         if (ammoHolsters.Usable(true,bakedHolsters.epoch)) for (int i=0;i<ammoHolsters.count;++i) {
             const auto& label=ammoHolsters.markers[i];
@@ -12314,7 +12342,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
             const XrVector3f right{bakedRadial.right[0],bakedRadial.right[1],bakedRadial.right[2]};
             const XrVector3f up{bakedRadial.up[0],bakedRadial.up[1],bakedRadial.up[2]};
             at=vadd(at,vadd(vscale(right,.105f*std::sin(a)),vscale(up,.105f*std::cos(a)-.038f)));
-            DrawAmmoLabel(mvp,rp,at,bakedRadial.weaponTypes[i],.065f);
+            DrawAmmoLabel(mvp,rp,at,bakedRadial.weaponTypes[i],.065f,false);
         }
     }
     // Riser controls are their own world-space interaction. They must remain
@@ -12719,7 +12747,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set]);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set]);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

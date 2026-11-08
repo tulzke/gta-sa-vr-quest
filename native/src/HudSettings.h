@@ -35,6 +35,7 @@ enum Element {
     HELP_TEXT,
     TIMERS,
     WATCH,
+    AMMO,
     ELEMENT_COUNT
 };
 

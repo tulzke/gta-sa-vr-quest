@@ -21369,6 +21369,8 @@ void OnRenderScene(bool underwater) {
         xr::GetHandPoses(renderedHandPoses);
     vehicleclimb::ApplyHandVisuals(renderedHandPoses);
     xr::SetRenderedHandPoses(renderedHandPoses);
+    xr::SetWeaponAmmoPose(0,{});
+    xr::SetWeaponAmmoPose(1,{});
     const bool playerInVehicle = g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false);
 
     // Jetpack belt: draw the game's belt clump, but anchored to the VR BODY
@@ -21570,8 +21572,16 @@ void OnRenderScene(bool underwater) {
                     }
                 }
             }
-            if (WeaponMatrixToTracking(heldMatrix, finalPose))
+            if (WeaponMatrixToTracking(heldMatrix, finalPose)) {
                 physicalweapon::PublishHeldVisualPoseTracking(hand, slot, &finalPose);
+                xr::WeaponAmmoPose ammoPose{};
+                ammoPose.valid=true;
+                std::memcpy(ammoPose.position,finalPose.position,sizeof(ammoPose.position));
+                std::memcpy(ammoPose.right,finalPose.right,sizeof(ammoPose.right));
+                std::memcpy(ammoPose.forward,finalPose.forward,sizeof(ammoPose.forward));
+                std::memcpy(ammoPose.up,finalPose.up,sizeof(ammoPose.up));
+                xr::SetWeaponAmmoPose(hand,ammoPose);
+            }
             if (hand == preferredHand) preferredType = weaponType;
         }
 
