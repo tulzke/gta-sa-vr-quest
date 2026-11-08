@@ -99,6 +99,8 @@ constexpr int kFieldOrder[F_COUNT] = {
     F_SUP_STYLE,
 };
 
+#include "DefaultWeaponCalibration.inl"
+
 // Baked HD/modern weapon calibration defaults, captured from the
 // reference device so players get correctly-placed HD models out of the
 // box. Seeded into the HD profile (set 1) at Init; a saved "wm" row or a
@@ -213,6 +215,20 @@ void Init() {
     }
     std::memset(g_supportConfigured, 0, sizeof(g_supportConfigured));
     std::memset(g_opticConfigured, 0, sizeof(g_opticConfigured));
+    for (const auto& captured : kCapturedWeapons) {
+        WeaponCalib& c=g_calibSets[captured.set][kMasterHand][captured.type];
+        for(int i=0;i<F_COUNT;++i) *FieldPtr(c,kFieldOrder[i])=captured.values[i];
+    }
+    for (const auto& captured : kCapturedHolsters) {
+        HolsterCalib& c=g_holsterCalib[captured.type];
+        for(int i=0;i<H_COUNT;++i) *HolsterFieldPtr(c,i)=captured.values[i];
+    }
+    for (int type : kCapturedSupport) g_supportConfigured[type]=true;
+    for (const auto& captured : kCapturedOptics) {
+        auto& p=g_optics[captured.set][captured.type];
+        for(int i=0;i<weaponoptic::FieldCount;++i) p.value[i]=captured.values[i];
+        g_opticConfigured[captured.set][captured.type]=true;
+    }
     g_laserEnabled.store(true, std::memory_order_relaxed);
     g_recoilLevel.store(2, std::memory_order_relaxed);
 
@@ -590,7 +606,13 @@ void ResetOptic(int type) {
     if (!weaponoptic::Supported(type)) return;
     {
         std::lock_guard<std::mutex> guard(g_calibMutex);
-        g_opticConfigured[g_modelSet.load(std::memory_order_relaxed)][type]=false;
+        const int set=g_modelSet.load(std::memory_order_relaxed);
+        g_opticConfigured[set][type]=false;
+        for(const auto& captured:kCapturedOptics) if(captured.set==set && captured.type==type) {
+            for(int i=0;i<weaponoptic::FieldCount;++i) g_optics[set][type].value[i]=captured.values[i];
+            g_opticConfigured[set][type]=true;
+            break;
+        }
     }
     Save();
 }
