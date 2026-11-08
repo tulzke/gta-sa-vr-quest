@@ -111,6 +111,7 @@ struct Hold {
     bool aggression{};
     bool punchFlight{};
     double fallAfter{};
+    double launchedAt{};
     bool Live(const Pool& p) const {
         return ped&&p.flags&&p.size>0&&p.size<=1024&&p.identity==pool&&p.objects==objects&&ref>=0&&(ref>>8)<p.size&&
             p.flags[ref>>8]==(ref&255)&&!(p.flags[ref>>8]&128)&&getPed(ref)==ped;
@@ -879,7 +880,13 @@ void OnCalculateVelocity(void* ped) {
                 h.task=Read<void*>(manager,0)==task?task:nullptr;h.fallAfter=0;
                 if (!h.task) { h={};continue; }
             }
-            Write(ped,0x68,physical);Write(ped,0x6bc,physical.x);Write(ped,0x6c0,physical.y);
+            // Ped locomotion can repeatedly cancel the vertical launch while
+            // standing. Supply the ballistic vertical speed during flight;
+            // horizontal speed and world collision remain native-owned.
+            Vec ballistic=physical;
+            const double elapsed=std::clamp(now-h.launchedAt,0.0,.65);
+            ballistic.z=h.start.z-.24f*static_cast<float>(elapsed);
+            Write(ped,0x68,ballistic);Write(ped,0x6bc,ballistic.x);Write(ped,0x6c0,ballistic.y);
             return;
         }
         if (apply(h,true)) return;
@@ -1057,7 +1064,16 @@ bool KnockdownFromPunch(void* ped,const float velocity[3],const char** reason,bo
         if (!flight) return reject("flight-capacity");
         if (!dead && speed.z>1.f) {
             target.task=current;
-            target.fallAfter=Now()+.25;
+            target.launchedAt=Now();
+            target.start=speed*.02f;
+            target.fallAfter=target.launchedAt+.65;
+            // Give the initial upward velocity room to clear floor contact.
+            // Keep the entity registered in the world's spatial lists.
+            Vec raised=Position(ped);raised.z+=.06f;
+            worldRemove(ped);
+            if (void* matrix=Read<void*>(ped,0x18)) Write(matrix,0x30,raised);
+            else Write(ped,8,raised);
+            worldAdd(ped);
         } else if (!dead) {
             void* task=allocate(0x28);if (!task) return reject("allocation");
             const GameSymbols::Vec2 from{-speed.x,-speed.y};

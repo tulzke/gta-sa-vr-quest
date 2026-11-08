@@ -659,11 +659,14 @@ int main() {
     CHECK(!PunchBikeRider(bikePool,player,h,h,h+Vec{.2f,0,0}));
     CHECK(!bikeTasks);
     // Physical punch knockdown reuses the native fall/flight ownership path.
-    Setup();Tick();const float uppercut[3]{0,4,2};const Vec original=Position(npc);
+    Setup();Tick();worldAdd=[](void* ped) { CHECK(ped==npc);++added; };
+    const float uppercut[3]{0,4,2};const Vec original=Position(npc);
     CHECK(KnockdownFromPunch(npc,uppercut)&&fallCalls==0);
     CHECK(Length(Read<Vec>(npc,0x68)-Vec{0,.08f,.04f})<.0001f);
-    CHECK(Length(Position(npc)-original)<.0001f&&!npcgrab::ClaimedHands());
+    CHECK(Length(Position(npc)-(original+Vec{0,0,.06f}))<.0001f&&!npcgrab::ClaimedHands());
     OnCalculateVelocity(npc);CHECK(Length(Read<Vec>(npc,0x68)-Vec{0,.08f,.04f})<.0001f);
+    for (auto& flight:flights) if (flight.ped==npc) flight.launchedAt=Now()-.2;
+    OnCalculateVelocity(npc);CHECK(Read<Vec>(npc,0x68).z<-.007f&&Read<Vec>(npc,0x68).z>-.009f);
     for (auto& flight:flights) if (flight.ped==npc) flight.fallAfter=Now()-.01;
     OnCalculateVelocity(npc);CHECK(fallCalls==1&&timer==1000);
     const int before=allocations;const float hook[3]{-1.8f,0,.2f};
@@ -672,7 +675,7 @@ int main() {
     // Death/arrest/vehicle/held actors and stale pool slots are never replaced.
     Setup();Tick();Write<void*>(intelligence,8,fall);CHECK(!KnockdownFromPunch(npc,uppercut)&&!fallCalls);
     // Ordinary native hit reactions may be upgraded, unlike unknown tasks.
-    Setup();Tick();punchReactionVtables[0]=npcMatrix;
+    Setup();Tick();worldAdd=[](void* ped) { CHECK(ped==npc);++added; };punchReactionVtables[0]=npcMatrix;
     Write<void*>(fall,0,npcMatrix);Write<void*>(intelligence,8,fall);
     const char* why{};
     CHECK(KnockdownFromPunch(npc,uppercut,&why)&&fallCalls==0&&!std::strcmp(why,"applied"));

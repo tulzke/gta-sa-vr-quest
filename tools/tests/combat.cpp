@@ -134,6 +134,7 @@ void Setup() {
         if (event==121) { CHECK(volume==-5.f&&speed==.9f);++heavySounds; }
     };
     combat::Reset();combat::ready=true;combat::computeDamage=NativeDamage;melee::Reset();
+    melee::gGetTaskFighting=nullptr;melee::gBeHitWhileBlocking=nullptr;
 }
 void Raise() {
     combat::Update(false);testNow+=.1;combat::Update(false);
@@ -243,6 +244,20 @@ int main() {
         xr::poses[0].gripOri[1]=std::sin(i*.1f);xr::poses[0].gripOri[3]=std::cos(i*.1f);
         testNow+=.02;melee::Update(false);
     } CHECK(hits==0); // wrist rotation in place cannot build a fist stroke
+    // Native fight guard absorbs every kind of physical fist strike, including
+    // repeated contacts during the same blocking animation.
+    Setup();
+    static unsigned char brain[32]{},fight[0x50]{},anim[0x60]{};
+    Write(enemy,0x538,static_cast<void*>(brain));Write(fight,0x28,static_cast<void*>(anim));
+    melee::gGetTaskFighting=[](void* p)->void* { CHECK(p==brain);return fight; };
+    melee::gBeHitWhileBlocking=[](void* t,void* victim,void* attacker,signed char combo,signed char move) {
+        CHECK(t==fight&&victim==enemy&&attacker==player&&combo==4&&move==0);
+        CHECK((combat::Read<std::uint16_t>(anim,0x46)&1)==0);
+        Write<std::uint16_t>(anim,0x46,1);return true;
+    };
+    for (auto kind:{punch::Kind::Jab,punch::Kind::Hook,punch::Kind::Uppercut})
+        melee::ApplyContact(player,0,0,6.f,{},enemy,melee::ColPoint{},kind,{0,1,0});
+    CHECK(hits==0&&knockdowns==0&&jabContacts==0&&audioCalls==0&&combat::Read<std::uint16_t>(anim,0x46)==1);
     // A direct upward punch launches backward; a straight jab never knocks down.
     Setup();melee::Update(false);
     for (int i=0;i<8;++i) {

@@ -146,6 +146,8 @@ bool gMissingSymbolsLogged = false;
 void* gMotionOwner = nullptr;
 std::uint64_t gTrackingEpoch{};
 void (*gPedAudioEvent)(void*,int,float,float,void*,unsigned char,int,unsigned){};
+void* (*gGetTaskFighting)(void*){};
+bool (*gBeHitWhileBlocking)(void*,void*,void*,signed char,signed char){};
 
 bool CoreReady() {
     return g.FindPlayerPed && g.FindPlayerVehicle &&
@@ -468,6 +470,29 @@ void ApplyContact(void* player, int hand, int weaponType, float speed,
     int piece = contact.PieceB();
 
     if (type == kEntityPed) {
+        // FightHitPed normally performs this check before GenerateDamageEvent.
+        // Physical VR punches bypass FightHitPed, so ask the same native guard.
+        if (weaponType<=1 && gGetTaskFighting && gBeHitWhileBlocking) {
+            void* intelligence{};std::memcpy(&intelligence,static_cast<char*>(target)+0x538,sizeof(intelligence));
+            void* task=intelligence?gGetTaskFighting(intelligence):nullptr;
+            if (task) {
+                void* anim{};std::memcpy(&anim,static_cast<char*>(task)+0x28,sizeof(anim));
+                // Native marks the animation after one block. Recheck its guard
+                // on later physical strikes without letting that marker bypass it.
+                std::uint16_t flags{};
+                if (anim) { std::memcpy(&flags,static_cast<char*>(anim)+0x46,sizeof(flags));
+                    const std::uint16_t clear=flags&~1u;std::memcpy(static_cast<char*>(anim)+0x46,&clear,sizeof(clear)); }
+                const bool blocked=gBeHitWhileBlocking(task,target,player,4,0);
+                if (anim && (flags&1u)) { std::uint16_t after{};std::memcpy(&after,static_cast<char*>(anim)+0x46,sizeof(after));
+                    after|=1u;std::memcpy(static_cast<char*>(anim)+0x46,&after,sizeof(after)); }
+                if (blocked) {
+                    npcgrab::ResetJabCombo(target);
+                    ReportContactThud(target,root,impact,contact);
+                    xr::TriggerHaptic(hand,.4f,0,55);
+                    return;
+                }
+            }
+        }
         const bool aliveBefore=g.CPed_IsAlive(target)&&!playerlife::Dead(target);
         if (piece < 3 || piece > 9) piece = 3; // torso fallback
         int finalDamage = damage;
@@ -632,6 +657,8 @@ void ResetMotion(Motion& motion) { motion = Motion{}; }
 void Install(void* handle) {
     gPedAudioEvent=reinterpret_cast<decltype(gPedAudioEvent)>(
         dlsym(handle,"_ZN17CAEPedAudioEntity13AddAudioEventEiffP9CPhysicalhij"));
+    gGetTaskFighting=reinterpret_cast<decltype(gGetTaskFighting)>(dlsym(handle,"_ZNK16CPedIntelligence15GetTaskFightingEv"));
+    gBeHitWhileBlocking=reinterpret_cast<decltype(gBeHitWhileBlocking)>(dlsym(handle,"_ZN16CTaskSimpleFight18BeHitWhileBlockingEP4CPedS1_aa"));
     LOGI("[vr.melee] fist contact audio=%d",gPedAudioEvent!=nullptr);
 }
 
