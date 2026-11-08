@@ -20425,7 +20425,7 @@ bool PreparePdaRasterRing() {
     if (!g.RwRasterCreate) return false;
     if (!g_pdaRaster[0]) {
         for (int i=0;i<kEyeSets;++i) {
-            g_pdaRaster[i]=g.RwRasterCreate(640,400,32,5);
+            g_pdaRaster[i]=g.RwRasterCreate(800,800,32,5);
             if (!g_pdaRaster[i]) {
                 for (auto& raster : g_pdaRaster) {
                     if (raster && g.RwRasterDestroy) g.RwRasterDestroy(raster);
@@ -20464,11 +20464,12 @@ void RenderPdaMap() {
         g.RwRenderStateSet(20,reinterpret_cast<void*>(1));
     }
     for (int y=0;y<12;++y) for (int x=0;x<12;++x) {
-        const float left=320.0f+(x*500.0f-3000.0f-player.x)*scale;
-        const float top=200.0f+(player.y-(3000.0f-y*500.0f))*scale;
+        const float left=400.0f+(x*500.0f-3000.0f-player.x)*scale;
+        const float top=400.0f+(player.y-(3000.0f-y*500.0f))*scale;
         const float size=500.0f*scale;
-        if (left>=640 || left+size<=0 || top>=400 || top+size<=0) continue;
-        draw(x,y,{left,top+size,left+size,top},1.0f);
+        if (left>=800 || left+size<=0 || top>=800 || top+size<=0) continue;
+        constexpr float overlap=0.5f;
+        draw(x,y,{left-overlap,top+size+overlap,left+size+overlap,top-overlap},1.0f);
     }
 }
 
@@ -22044,7 +22045,7 @@ void OnRenderScene(bool underwater) {
             }
         }
         if (pdaReady) {
-            screenDimensions.Set(640,400);
+            screenDimensions.Set(800,800);
             *reinterpret_cast<void**>(scc+0x80)=g_pdaRaster[set];
             WriteCam(camU,base);
             if (g.CCamera_CalculateDerivedValues) g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
@@ -22105,7 +22106,9 @@ void OnRenderScene(bool underwater) {
     npcgrab::PublishMarkers();
     testarea::PublishMarkers();
     xr::SetRadialHolsterAtlas(radialReady ? EyeRasterTexId(g_radialIconRaster[set]) : 0);
+    const float pdaHeading = g.FindPlayerHeading ? g.FindPlayerHeading(-1) : 0.0f;
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex,
+                             std::isfinite(pdaHeading) ? pdaHeading : 0.0f,
                              renderedNear, renderedFar,
                              g_recordCounter, g_eyeRasterW, g_eyeRasterH);
     xr::NotifyGameFrame();                                    // for the on-screen FPS readout

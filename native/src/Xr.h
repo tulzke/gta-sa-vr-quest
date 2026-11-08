@@ -243,6 +243,7 @@ inline bool ShouldThrottleStereoProducer(int) { return false; }
 void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           const unsigned int* hudTex,
                           const unsigned int* pdaTex,
+                          float pdaHeading,
                           const float* nearZ, const float* farZ,
                           int seq, int width, int height);
 
