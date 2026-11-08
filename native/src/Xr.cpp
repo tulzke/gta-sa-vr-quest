@@ -9639,7 +9639,8 @@ void EnsureWristProgram() {
                      "  vec4 c = texture(uTex, vUV);\n"
                      "  float coverage = max(c.r, max(c.g, c.b));\n"
                      "  float keyed = smoothstep(0.008, 0.055, coverage);\n"
-                     "  o = vec4(c.rgb, c.a * keyed * uOpacity);\n"
+                     "  float alpha = c.a * keyed * uOpacity; if(alpha <= 0.001) discard;\n"
+                     "  o = vec4(c.rgb, alpha);\n"
                      "}\n";
     const GLuint v = CompileHandShader(GL_VERTEX_SHADER, vs), f = CompileHandShader(GL_FRAGMENT_SHADER, fs);
     g_wristProg = glCreateProgram();
@@ -9908,8 +9909,9 @@ constexpr float kDashPanelUpMetres = 0.12f;
 // Both panels for the current eye. The map moves to the dashboard in a
 // vehicle; the status panel stays on its wrist. Runs inside the hand pass:
 // the depth test against the copied
-// game+hand depth lets the arm and weapon occlude a panel naturally; no
-// depth write, so transparent corners never mask anything.
+// game+hand depth lets the arm and weapon occlude a panel naturally. Panels
+// also write depth so that the nearest panel wins regardless of draw order;
+// the shader discards transparent corners before they can write depth.
 void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            const TwoHandVisualState& twoHand,
                            const driving::WheelVisualState& drivingWheel,
@@ -9928,7 +9930,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
     glEnable(GL_BLEND);
     glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
+    glDepthMask(GL_TRUE);
     glBindBuffer(GL_ARRAY_BUFFER, g_wristVbo);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
