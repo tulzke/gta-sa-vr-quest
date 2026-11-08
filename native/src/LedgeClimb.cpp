@@ -19,6 +19,23 @@ bool (*canClimb)(void*,unsigned){};void* surfaces{};
 GripEdge edges[2];bool held[2]{};Vec anchor[2]{},previous[2]{},inward[2]{};
 void* suspended{};bool collision{},gravity{};unsigned claimed{};
 Vec collisionHeadOffset{0,0,.55f};
+Vec pullVelocity{};double velocityTime{};
+void SampleVelocity(Vec displacement,float dt,double now){
+ if(!Finite(displacement)||dt<=0||dt>.15f){pullVelocity={};velocityTime=0;return;}
+ Vec measured=displacement*(1.f/dt);
+ const float speed=Length(measured);if(speed>10.f)measured=measured*(10.f/speed);
+ const float alpha=1.f-std::exp(-dt/.025f);
+ pullVelocity=pullVelocity*(1.f-alpha)+measured*alpha;velocityTime=now;
+}
+Vec ReleaseVelocity(double now){
+ if(now-velocityTime>.12||!Finite(pullVelocity))return {};
+ Vec velocity=pullVelocity*1.15f;
+ const float horizontal=std::hypot(velocity.x,velocity.y);
+ if(horizontal>6.f){velocity.x*=6.f/horizontal;velocity.y*=6.f/horizontal;}
+ velocity.z=std::clamp(velocity.z,-6.f,8.f);
+ if(Length(velocity)<.15f)return {};
+ return velocity;
+}
 MarkerFrame markers;double last{};std::uint64_t lastEpoch{};
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 Vec Position(void* p){void* m=Read<void*>(p,0x18);return Read<Vec>(m?m:p,m?0x30:8);}
@@ -30,7 +47,7 @@ void Resume(){
  }
  suspended=nullptr;
 }
-void Reset(){Resume();held[0]=held[1]=false;claimed=0;}
+void Reset(){Resume();held[0]=held[1]=false;claimed=0;pullVelocity={};velocityTime=0;}
 void Suspend(void* ped){
  if(suspended!=ped){Resume();suspended=ped;collision=(Read<std::uint64_t>(ped,0x28)&1)!=0;gravity=(Read<std::uint32_t>(ped,0x64)&2)!=0;}
  Write(ped,0x28,Read<std::uint64_t>(ped,0x28)&~std::uint64_t(1));
@@ -206,23 +223,47 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
  const Reach reach=ReachFor(speed,airborne);
  const bool wasHeld=held[0]||held[1];
  const float releaseZ=held[0]?anchor[0].z:anchor[1].z;
+ Vec releaseMotion{};int released=0;bool cancelled=false;
  for(int h=0;h<2;++h){
   Vec raw{hands[h].gripPos[0],hands[h].gripPos[1],hands[h].gripPos[2]},world{};
   const bool valid=hands[h].valid&&World(raw,world)&&!(occupied&(1u<<h));
-  if(!valid||hands[h].grip<=.35f)held[h]=false;
+  if(held[h]&&(!valid||hands[h].grip<=.35f)){
+   if(valid&&hands[h].grip<=.35f&&dt<=.15f){
+    Vec prevWorld{};if(World(previous[h],prevWorld)&&Length(raw-previous[h])<=.65f){releaseMotion=releaseMotion+prevWorld-world;++released;}else cancelled=true;
+   }else cancelled=true;
+   held[h]=false;
+  }
   Vec point{},tangent{};
   if(valid&&!held[h]&&Find(world,forward,point,tangent,reach)){
    Marker m{point,tangent,{0,0,1},false};m.bikeGrip=true;m.climbPipe=true;m.ledge=true;m.pipeLength=.24f;m.opacity=.45f;markers.markers[markers.count++]=m;
-   if(fresh[h]&&Length(point-world)<reach.grab){held[h]=true;anchor[h]=point;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
+   if(fresh[h]&&Length(point-world)<reach.grab){if(!wasHeld){pullVelocity={};velocityTime=0;}held[h]=true;anchor[h]=point;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
   }
   if(!held[h])continue;
-  if(dt>.15f)previous[h]=raw;
+  if(dt>.15f){previous[h]=raw;pullVelocity={};velocityTime=0;}
   Vec prevWorld{};if(!World(previous[h],prevWorld)){previous[h]=raw;claimed|=1u<<h;++count;continue;}
-  if(Length(raw-previous[h])>.65f){previous[h]=raw;claimed|=1u<<h;++count;continue;}
+  if(Length(raw-previous[h])>.65f){pullVelocity={};velocityTime=0;previous[h]=raw;claimed|=1u<<h;++count;continue;}
   previous[h]=raw;motion=motion+prevWorld-world;++count;claimed|=1u<<h;
  }
- if(count){Suspend(ped);Move(ped,root,root+motion*(1.f/count));Write(ped,0x68,Vec{});}
- else {if(wasHeld){Stand(ped,root,eye,releaseZ);}Resume();}
+ if(count){
+  Suspend(ped);const bool clear=Move(ped,root,root+motion*(1.f/count));
+  SampleVelocity(Position(ped)-root,dt,now);if(!clear)pullVelocity={};
+  Write(ped,0x68,Vec{});
+ }else{
+  Vec impulse{};
+  if(wasHeld&&released&&!cancelled){
+   const bool clear=Move(ped,root,root+releaseMotion*(1.f/released));
+   SampleVelocity(Position(ped)-root,dt,now);if(!clear)pullVelocity={};
+   impulse=ReleaseVelocity(now);
+  }
+  if(wasHeld)Stand(ped,Position(ped),eye,releaseZ);
+  Resume();
+  if(Length(impulse)>.0f){
+   Write(ped,0x68,impulse*(1.f/50.f));
+   Write(ped,0x584,std::uint8_t(Read<std::uint8_t>(ped,0x584)&~1u));
+   jumpUntil=now+3.;hovered=true;hoverUntil=0;
+  }
+  pullVelocity={};velocityTime=0;
+ }
  *g.CWorld_pIgnoreEntity=saved;
 }
 }

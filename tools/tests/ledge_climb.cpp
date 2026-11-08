@@ -76,6 +76,26 @@ int main(){
  hands[0].grip=0;testNow+=.01;Update(true,hands,1,0);assert(!ClaimedHands()&&!suspended);
  assert(std::abs(Position(ped).z-2.02f)<.001f);vrcam::eyeY=-.2f;
  assert((Read<std::uint64_t>(ped,0x28)&1)&&(Read<std::uint32_t>(ped,0x64)&2));
+ // Pull down quickly and release: actual accepted body velocity becomes
+ // an upward native impulse. A held second hand must prevent this launch.
+ Reset();Put(matrix,0x30,Vec{0,-.3f,.8f});noFloor=true;
+ hands[0].grip=1;hands[0].gripPos[2]=1.05f;previous[0]={0,-.08f,1.05f};held[0]=true;anchor[0]={0,0,1};
+ for(int i=0;i<4;++i){hands[0].gripPos[2]-=.03f;testNow+=.01;Update(true,hands,1,0);}
+ assert(ClaimedHands()==1&&Read<Vec>(ped,0x68).z==0);
+ hands[0].grip=0;hands[0].gripPos[2]-=.03f;testNow+=.01;Update(true,hands,1,0);
+ assert(!ClaimedHands()&&!suspended);assert(Read<Vec>(ped,0x68).z>.04f&&Read<Vec>(ped,0x68).z<=.16f);
+ assert(!(Read<std::uint8_t>(ped,0x584)&1));
+ // Losing tracking cancels the gesture without launching the player.
+ held[0]=true;Suspend(ped);pullVelocity={0,0,4};velocityTime=testNow;
+ testNow+=.01;Update(false,hands,1,0);assert(Length(Read<Vec>(ped,0x68))==0);
+ // A stationary release has no minimum/artificial boost; stale samples and
+ // discontinuous frames cannot carry old momentum into a later release.
+ SampleVelocity({},.2f,testNow);assert(Length(ReleaseVelocity(testNow))==0);
+ pullVelocity={0,0,4};velocityTime=testNow-.2;assert(Length(ReleaseVelocity(testNow))==0);
+ Reset();hands[1].valid=true;hands[1].grip=1;hands[1].gripPos[2]=1;
+ held[0]=held[1]=true;previous[0]={hands[0].gripPos[0],hands[0].gripPos[1],hands[0].gripPos[2]};previous[1]={0,0,1};
+ hands[0].grip=0;testNow+=.01;Update(true,hands,1,0);assert(ClaimedHands()==2&&Length(Read<Vec>(ped,0x68))==0);
+ Reset();noFloor=false;hands[1].valid=false;
  // Retail callbacks preserve NPCs and add height only on an actual launch.
  originalClimb=[](void*,Vec&,float&,unsigned char&,bool)->void*{return matrix;};
  float angle{};unsigned char surface{};assert(!OnClimb(ped,point,angle,surface,true));
