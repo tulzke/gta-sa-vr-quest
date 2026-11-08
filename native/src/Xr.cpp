@@ -4306,14 +4306,14 @@ bool DrawHudComposite(GLuint sourceTexture,int targetWidth,int targetHeight,
         glBindTexture(GL_TEXTURE_2D,g_breathTextTexture.texture);
         glUniform4f(s.hudCompositeSourceRectUniform,0.0f,0.0f,1.0f,1.0f);
         glUniform4f(s.hudCompositeDestinationRectUniform,
-                    0.36f+hudDepthShiftUv,0.67f,0.28f,0.08f);
+                    0.36f+hudDepthShiftUv,0.70f,0.28f,0.08f);
         glUniform1f(s.hudCompositeHighlightUniform,0.0f);
         glDrawArrays(GL_TRIANGLES,0,3);
     }
     if (breath>=0) {
         glUniform4f(s.hudCompositeSourceRectUniform,breath/100.0f,0.0f,1.0f,1.0f);
         glUniform4f(s.hudCompositeDestinationRectUniform,
-                    0.40f+hudDepthShiftUv,0.745f,0.20f,0.012f);
+                    0.40f+hudDepthShiftUv,0.775f,0.20f,0.012f);
         glUniform1f(s.hudCompositeHighlightUniform,4.0f);
         glDrawArrays(GL_TRIANGLES,0,3);
     }
