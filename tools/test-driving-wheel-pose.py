@@ -22,6 +22,8 @@ def function(signature):
 
 PRELUDE = r'''
 #include "Driving.h"
+#include "IgnitionState.h"
+#include "RadioKnobState.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -34,6 +36,7 @@ PRELUDE = r'''
 #include <mutex>
 #include <string>
 
+namespace savr::xr { void SetHandPinchAmount(int,float) {} }
 namespace savr::driving {
 int activeModel=411, activeMode=MODE_IMMERSIVE;
 int saveCount=0, resetCount=0;
@@ -61,6 +64,7 @@ std::atomic<int> g_value[F_COUNT]{};
 std::atomic<int> g_bikeVisualLeanPercent{50};
 std::atomic<bool> g_bikeLeanSteering{true};
 std::atomic<int> g_bikeLeanSensitivity{100};
+std::atomic<int> g_rearMirrorQuality{1},g_rearMirrorFov{80};
 int kDefaults[F_COUNT]{};
 '''
 

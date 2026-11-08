@@ -6,6 +6,7 @@
 #include "VehicleDoors.h"
 #include "VehicleEntry.h"
 #include "BikeSteering.h"
+#include "WheelReturn.h"
 #include "QuadHandlebar.h"
 #include "MissionComfort.h"
 #include "IgnitionState.h"
@@ -4397,6 +4398,9 @@ bool CabinVisualContext() {
 }
 
 void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
+    static wheelreturn::Clock returnClock;
+    const float wheelReturnDt=g.CTimer_m_snTimeInMilliseconds?
+        returnClock.Step(*g.CTimer_m_snTimeInMilliseconds):0.0f;
     // Controller-yaw MOTION steering is intentionally unavailable in this
     // release. Stick and physical cockpit modes remain the only driving paths.
     g_motionEngaged.store(false,std::memory_order_relaxed);
@@ -4830,7 +4834,21 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
                 g_continuousAngle[hand]=angle;
                 sum+=UnwrapAngle(WrapAngle(angle),previousAngle); ++count;
             }
-            steeringAngle=count?sum/count:previousAngle;
+            if (mask==0) {
+                float forwardSpeed=0.0f;
+                V3 er,ef,eu,ep;
+                if (activeType==VEHICLE_CAR&&activeVehicle&&
+                    ReadEntityMatrix(activeVehicle,&er,&ef,&eu,&ep)) {
+                    // Same verified CPhysical velocity field used for bikes.
+                    const V3 velocity=*reinterpret_cast<const V3*>(
+                        static_cast<const char*>(activeVehicle)+0x68);
+                    forwardSpeed=Dot(velocity,ef);
+                }
+                steeringAngle=wheelreturn::ReleasedAngle(previousAngle,forwardSpeed,wheelReturnDt);
+            } else {
+                // A held wheel with hands near its axis must not self-centre.
+                steeringAngle=count?sum/count:previousAngle;
+            }
             g_twoHandAngleValid=false;
         } else if (left&&rightGrabbed) {
             const float chordAngle=PlanarAngle(positions[1]-positions[0],right,up);
