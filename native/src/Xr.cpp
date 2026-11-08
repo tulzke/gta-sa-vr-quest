@@ -9760,14 +9760,13 @@ bool BuildHandPanelAnchor(const HandPose& hp, int hand,
     return true;
 }
 
-// Dashboard side offset of each panel from the steering-wheel centre, before
-// the saved calibration: the map left of the wheel, the readout right of it.
-constexpr float kDashPanelAcrossMetres[2] = {-0.32f, 0.32f};
+// Dashboard map offset from the steering-wheel centre before calibration.
+constexpr float kDashPanelAcrossMetres = -0.32f;
+constexpr float kDashPanelUpMetres = 0.12f;
 
-// Both panels for the current eye. On foot they ride the visible wrists; in
-// a vehicle with the immersive wheel they anchor to the wheel centre like the
-// Vice City dashboard instrumentation, with their own saved calibration
-// slot. Runs inside the hand pass: the depth test against the copied
+// Both panels for the current eye. The map moves to the dashboard in a
+// vehicle; the status panel stays on its wrist. Runs inside the hand pass:
+// the depth test against the copied
 // game+hand depth lets the arm and weapon occlude a panel naturally; no
 // depth write, so transparent corners never mask anything.
 void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
@@ -9823,9 +9822,11 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
         const XrVector3f panelUp = drivingWheel.bike ? fieldNormal : fieldUp;
         const XrVector3f panelNormal = vscale(
             drivingWheel.bike ? fieldUp : fieldNormal, -1.0f);
-        for (int panel = 0; panel < 2; ++panel) {
+        {
+            const int panel = 0;
             const XrVector3f base = vadd(wheelCentre,
-                vscale(panelRight, kDashPanelAcrossMetres[panel]));
+                vadd(vscale(panelRight, kDashPanelAcrossMetres),
+                     vscale(panelUp, kDashPanelUpMetres)));
             DrawWristPanel(panelElements[panel], panel, calibrating,
                            hud::WRIST_SLOT_VEHICLE, drivingWheel.modelId,
                            base,
@@ -9833,26 +9834,26 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            panelRight, panelUp, panelNormal, rp,
                            kDashGazeRange);
         }
-    } else {
-        // Per-panel slot selection: normal wrist, one-hand weapon grip
-        // (panel slides beside the gripping hand), or two-hand grip (both
-        // panels re-anchor to the primary hand). Calibration pages 4/5 force
+    }
+    {
+        // Per-panel slot selection: normal wrist, one-hand weapon grip,
+        // or two-hand grip (each panel follows its own visible hand).
+        // Calibration pages 4/5 force
         // the respective slot so it can be tuned without holding a gun.
         const int hudMenuPage = g_hudPage.load(std::memory_order_relaxed);
         const bool twoHandHeld = twoHand.active &&
             twoHand.primaryHand >= 0 && twoHand.primaryHand < 2 &&
             (weaponHandMask & (1u << twoHand.primaryHand)) != 0;
         for (int panel = 0; panel < 2; ++panel) {
+            if (panel == 0 && (drivingWheel.active || drivingWheel.dashAnchorValid)) continue;
             int slot = hud::WRIST_SLOT_HAND;
             int anchorHand = panel;
             if (calibrating && hudMenuPage == 4) {
                 slot = hud::WRIST_SLOT_WEAPON;
             } else if (calibrating && hudMenuPage == 5) {
                 slot = hud::WRIST_SLOT_TWOHAND;
-                if (twoHandHeld) anchorHand = twoHand.primaryHand;
             } else if (twoHandHeld) {
                 slot = hud::WRIST_SLOT_TWOHAND;
-                anchorHand = twoHand.primaryHand;
             } else if ((weaponHandMask & (1u << panel)) != 0) {
                 slot = hud::WRIST_SLOT_WEAPON;
             }
@@ -9861,7 +9862,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
             if (!BuildHandPanelAnchor(hands[anchorHand], anchorHand, twoHand,
                                       base, alongAxis, acrossAxis, liftAxis,
                                       right, up, normal)) continue;
-            DrawWristPanel(panelElements[panel], anchorHand, calibrating,
+            DrawWristPanel(panelElements[panel], panel, calibrating,
                            slot, -1, base,
                            alongAxis, acrossAxis, liftAxis,
                            right, up, normal, rp, kWristGazeRange);
@@ -9875,7 +9876,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
     static bool logged = false;
     if (!logged) {
         logged = true;
-        LOGI("[wrist] panels active (radar=LEFT/dash-left, status=RIGHT/dash-right)");
+        LOGI("[wrist] panels active (radar=LEFT/dash-left, status=RIGHT)");
     }
 }
 

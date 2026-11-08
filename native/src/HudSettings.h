@@ -52,8 +52,8 @@ enum WristSlot {
     // Placement while that element's hand holds a weapon one-handed (the
     // panel slides beside the gripping hand)...
     WRIST_SLOT_WEAPON,
-    // ...and while a weapon is held with BOTH hands: both panels anchor to
-    // the primary hand with these per-element offsets.
+    // ...and while a weapon is held with BOTH hands: each panel follows
+    // its own visible hand with these per-element offsets.
     WRIST_SLOT_TWOHAND,
     WRIST_SLOT_COUNT
 };
