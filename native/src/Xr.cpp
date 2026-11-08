@@ -271,6 +271,7 @@ std::atomic<unsigned int> g_stereoEyeDepth[kStereoSets][2] = {};
 // reuse the same numeric GL name.
 std::atomic<unsigned int> g_eyeFoveationAttemptedTex[kStereoSets][2] = {};
 std::atomic<unsigned int> g_stereoHudTex[kStereoSets] = {};
+std::atomic<unsigned int> g_stereoPdaTex[kStereoSets] = {};
 std::atomic<float>        g_stereoEyeNear[kStereoSets][2] = {};
 std::atomic<float>        g_stereoEyeFar[kStereoSets][2] = {};
 std::atomic<float>        g_stereoUnderWaterness[kStereoSets] = {};
@@ -5569,6 +5570,7 @@ void ResetStereoEyeTextures() {
         g_eyeFoveationAttemptedTex[set][1].store(
             0, std::memory_order_relaxed);
         g_stereoHudTex[set].store(0, std::memory_order_relaxed);
+        g_stereoPdaTex[set].store(0, std::memory_order_relaxed);
         g_stereoUnderWaterness[set].store(0.0f, std::memory_order_relaxed);
         g_stereoWaterDepth[set].store(0.0f, std::memory_order_relaxed);
         clearMobileColor[set] = true;
@@ -6177,6 +6179,7 @@ bool WaitStereoProducerFenceForCandidate(int set, int generation) {
 
 void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           const unsigned int* hudTex,
+                          const unsigned int* pdaTex,
                           const float* nearZ, const float* farZ,
                           int seq, int width, int height) {
     // `tex` points at a [kStereoSets][2] row-major table of GL texture ids. The
@@ -6209,6 +6212,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         depth ? depth[ws * 2 + 1] : 0, std::memory_order_relaxed);
     g_stereoHudTex[ws].store(hudTex ? hudTex[ws] : 0,
                               std::memory_order_relaxed);
+    g_stereoPdaTex[ws].store(pdaTex ? pdaTex[ws] : 0, std::memory_order_relaxed);
     g_stereoEyeNear[ws][0].store(nearZ ? nearZ[0] : 0.05f, std::memory_order_relaxed);
     g_stereoEyeNear[ws][1].store(nearZ ? nearZ[1] : 0.05f, std::memory_order_relaxed);
     g_stereoEyeFar[ws][0].store(farZ ? farZ[0] : 1000.0f, std::memory_order_relaxed);
@@ -9571,6 +9575,7 @@ void EnsureWristProgram() {
                      "  if(r>.425 && r<.455) { col=vec3(.12); if(uWatch.w>=0.0 && angle<clamp(uWatch.w/100.0,0.0,1.0)) col=vec3(.75); if(uWatch.w>100.0 && angle<clamp((uWatch.w-100.0)/100.0,0.0,1.0)) col=vec3(.32); }\n"
                      "  vec2 q=vec2((vUV.x-.17)*7.5,(vUV.y-.425)*6.0); int i=int(floor(q.x)); int h=int(uWatch.x), m=int(uWatch.y); int n=-1; if(i==0 && h>=0) n=h/10; if(i==1 && h>=0) n=h-10*(h/10); if(i==3 && m>=0) n=m/10; if(i==4 && m>=0) n=m-10*(m/10); float d=0.0; if(i==0||i==1||i==3||i==4) d=digit(vec2(fract(q.x),q.y),n); if(i==2) d=max(1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.35))),1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.65)))); col=mix(col,vec3(.92),d); o=vec4(col,uOpacity); return; }\n"
                      "  if(uMode==2){ o=vec4(.055,.065,.07,uOpacity); return; }\n"
+                     "  if(uMode==3){ vec3 map=texture(uTex,vUV).rgb; vec2 p=(vUV-vec2(.5))*vec2(1.6,1.0); float marker=step(abs(p.x),(.012-(p.y+.008)*.55))*step(-.014,p.y)*step(p.y,.018); o=vec4(mix(map,vec3(1.0),marker),uOpacity); return; }\n"
                      "  vec4 c = texture(uTex, vUV);\n"
                      "  float coverage = max(c.r, max(c.g, c.b));\n"
                      "  float keyed = smoothstep(0.008, 0.055, coverage);\n"
@@ -9658,7 +9663,7 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
                     const XrVector3f& alongAxis, const XrVector3f& acrossAxis,
                     const XrVector3f& liftAxis,
                     XrVector3f right, XrVector3f up, XrVector3f normal,
-                    const XrPosef& rp, float gazeRange) {
+                    const XrPosef& rp, float gazeRange, unsigned int pdaTex) {
     const hud::ElementSettings settings = hud::GetElementSettings(element);
     if ((!settings.enabled && !calibrating) || settings.sourceWidth <= 0 ||
         settings.sourceHeight <= 0) return;
@@ -9684,23 +9689,24 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
 
     const bool watch = element == hud::WATCH;
     const bool pda = element == hud::RADAR;
-    const float w = (watch ? 0.085f : kWristPanelWidthMetres[panelIndex]) *
+    if (pda && !pdaTex) return;
+    const float w = (watch ? 0.085f : pda ? (hud::PdaPortrait() ? 0.075f : 0.12f) : kWristPanelWidthMetres[panelIndex]) *
                     static_cast<float>(wrist.scaleTenths) / 10.0f;
-    const float h = watch ? w : w * static_cast<float>(settings.sourceHeight) /
+    const float h = watch ? w : pda ? (hud::PdaPortrait() ? w * 1.6f : w / 1.6f) : w * static_cast<float>(settings.sourceHeight) /
                     static_cast<float>(settings.sourceWidth);
-    const float u0 = watch ? 0.0f : static_cast<float>(settings.sourceX) /
+    const float u0 = (watch || pda) ? 0.0f : static_cast<float>(settings.sourceX) /
                      kGameplayHudLogicalWidth;
-    const float v0 = watch ? 0.0f : static_cast<float>(settings.sourceY) /
+    const float v0 = (watch || pda) ? 0.0f : static_cast<float>(settings.sourceY) /
                      kGameplayHudLogicalHeight;
-    const float u1 = watch ? 1.0f : u0 + static_cast<float>(settings.sourceWidth) /
+    const float u1 = (watch || pda) ? 1.0f : u0 + static_cast<float>(settings.sourceWidth) /
                      kGameplayHudLogicalWidth;
-    const float v1 = watch ? 1.0f : v0 + static_cast<float>(settings.sourceHeight) /
+    const float v1 = (watch || pda) ? 1.0f : v0 + static_cast<float>(settings.sourceHeight) /
                      kGameplayHudLogicalHeight;
 
     if (pda) {
-        const float fw = w * (hud::PdaPortrait() ? 1.14f : 1.38f);
-        const float fh = h * (hud::PdaPortrait() ? 1.38f : 1.14f);
-        const XrVector3f c = vsub(centre, vscale(normal, 0.001f));
+        const float fw = w * 1.08f;
+        const float fh = h * 1.08f;
+        const XrVector3f c = vsub(centre, vscale(normal, 0.002f));
         const XrVector3f r = vscale(right, fw * 0.5f), u = vscale(up, fh * 0.5f);
         const XrVector3f a=vadd(vsub(c,r),u), b=vsub(vsub(c,r),u),
                          d=vadd(vadd(c,r),u), e=vsub(vadd(c,r),u);
@@ -9710,6 +9716,19 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
         glUniform1i(g_wristModeLoc, 2);
         glBufferData(GL_ARRAY_BUFFER, sizeof(frame), frame, GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        const XrVector3f depth = vscale(normal, -0.008f * wrist.scaleTenths / 10.0f);
+        const XrVector3f aa=vadd(a,depth), bb=vadd(b,depth), dd=vadd(d,depth), ee=vadd(e,depth);
+        const XrVector3f faces[] = {a,b,aa,bb, d,dd,e,ee, a,aa,d,dd, b,e,bb,ee, aa,bb,dd,ee};
+        for (int face=0;face<5;++face) {
+            float side[20];
+            for (int i=0;i<4;++i) {
+                const XrVector3f& v=faces[face*4+i];
+                side[i*5]=v.x; side[i*5+1]=v.y; side[i*5+2]=v.z;
+                side[i*5+3]=0; side[i*5+4]=0;
+            }
+            glBufferData(GL_ARRAY_BUFFER,sizeof(side),side,GL_DYNAMIC_DRAW);
+            glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+        }
     }
 
     const XrVector3f rHalf = vscale(right, w * 0.5f);
@@ -9720,21 +9739,24 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
     const XrVector3f br = vsub(vadd(centre, rHalf), uHalf);
     // The capture texture is stored top-down (the in-eye composite samples it
     // the same way), so v0 is the crop's top row and lands at the finger edge.
+    const bool rotatePda=pda && hud::PdaPortrait();
     const float verts[4 * 5] = {
-        tl.x, tl.y, tl.z, u0, v0,
-        bl.x, bl.y, bl.z, u0, v1,
-        tr.x, tr.y, tr.z, u1, v0,
-        br.x, br.y, br.z, u1, v1,
+        tl.x, tl.y, tl.z, rotatePda ? u1 : u0, v0,
+        bl.x, bl.y, bl.z, u0, rotatePda ? v0 : v1,
+        tr.x, tr.y, tr.z, u1, rotatePda ? v1 : v0,
+        br.x, br.y, br.z, rotatePda ? u0 : u1, v1,
     };
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
     glUniform1f(g_wristOpacityLoc, opacity);
-    glUniform1i(g_wristModeLoc, watch ? 1 : 0);
+    glUniform1i(g_wristModeLoc, watch ? 1 : pda ? 3 : 0);
+    if (pda) glBindTexture(GL_TEXTURE_2D, pdaTex);
     const int time = g_watchTime.load(std::memory_order_relaxed);
     glUniform4f(g_watchDataLoc, time < 0 ? -1.0f : float(time / 60),
                 time < 0 ? -1.0f : float(time % 60),
                 g_watchHealth.load(std::memory_order_relaxed),
                 g_watchArmour.load(std::memory_order_relaxed));
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    if (pda) glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 // Anchor for a panel worn on one arm. Starts from the raw baked grip pose,
@@ -9822,7 +9844,7 @@ constexpr float kDashPanelUpMetres = 0.12f;
 void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            const TwoHandVisualState& twoHand,
                            const driving::WheelVisualState& drivingWheel,
-                           unsigned int hudTex, const XrPosef& rp,
+                           unsigned int hudTex, unsigned int pdaTex, const XrPosef& rp,
                            unsigned int weaponHandMask) {
     const bool calibrating = g_hudActive.load(std::memory_order_relaxed);
     if (!hudTex || (!hud::ShouldRenderWristHud() && !calibrating)) return;
@@ -9882,7 +9904,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            base,
                            panelNormal, panelRight, panelUp,
                            panelRight, panelUp, panelNormal, rp,
-                           kDashGazeRange);
+                           kDashGazeRange, pdaTex);
         }
     }
     {
@@ -9895,6 +9917,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
             twoHand.primaryHand >= 0 && twoHand.primaryHand < 2 &&
             (weaponHandMask & (1u << twoHand.primaryHand)) != 0;
         for (int panel = 0; panel < 3; ++panel) {
+            glBindTexture(GL_TEXTURE_2D, hudTex);
             if (panel == 0 && (drivingWheel.active || drivingWheel.dashAnchorValid)) continue;
             int slot = hud::WRIST_SLOT_HAND;
             const int anchorHand = panel == 1 ? 1 : hud::DeviceHand(panelElements[panel]);
@@ -9916,7 +9939,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
             DrawWristPanel(panelElements[panel], panel == 0 ? 0 : 1, calibrating,
                            slot, -1, base,
                            alongAxis, acrossAxis, liftAxis,
-                           right, up, normal, rp, kWristGazeRange);
+                           right, up, normal, rp, kWristGazeRange, pdaTex);
         }
     }
     glDisableVertexAttribArray(0);
@@ -12002,7 +12025,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const vehicledoors::MarkerFrame& bakedNpcGrabs,
                      const vehicledoors::MarkerFrame& bakedTestArea,
                      const radialholster::Frame& bakedRadial,
-                     unsigned int hudSourceTex) {
+                     unsigned int hudSourceTex, unsigned int pdaSourceTex) {
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
     {
@@ -12226,7 +12249,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // depth pass (arm/weapon occlude the panel).
     if (wristWanted)
         DrawWristPanelsForEye(mvp, bakedHands, bakedTwoHand, drivingWheel,
-                              hudSourceTex, rp, weaponHandMask);
+                              hudSourceTex, pdaSourceTex, rp, weaponHandMask);
 
     glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
     glDisable(GL_DEPTH_TEST);
@@ -12611,7 +12634,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed));
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

@@ -242,6 +242,7 @@ inline bool ShouldThrottleStereoProducer(int) { return false; }
 // Published by the GameThread each stereo frame.
 void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           const unsigned int* hudTex,
+                          const unsigned int* pdaTex,
                           const float* nearZ, const float* farZ,
                           int seq, int width, int height);
 

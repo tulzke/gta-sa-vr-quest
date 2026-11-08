@@ -18150,6 +18150,7 @@ void* g_eyeRaster[kEyeSets][2] = {};
 void* g_pendingEyeRaster[kEyeSets][2] = {};
 void* g_retiredEyeRaster[kEyeSets][2] = {};
 void* g_hudRaster[kEyeSets] = {};
+void* g_pdaRaster[kEyeSets] = {};
 void* g_radialIconRaster[kEyeSets] = {};
 void* g_radialWeaponIcons[64] = {};
 int   g_recordCounter = 0;                    // monotonic; set = counter % kEyeSets
@@ -20420,6 +20421,57 @@ bool PrepareHudRasterRing() {
     return true;
 }
 
+bool PreparePdaRasterRing() {
+    if (!g.RwRasterCreate) return false;
+    if (!g_pdaRaster[0]) {
+        for (int i=0;i<kEyeSets;++i) {
+            g_pdaRaster[i]=g.RwRasterCreate(640,400,32,5);
+            if (!g_pdaRaster[i]) {
+                for (auto& raster : g_pdaRaster) {
+                    if (raster && g.RwRasterDestroy) g.RwRasterDestroy(raster);
+                    raster=nullptr;
+                }
+                return false;
+            }
+        }
+        return false;
+    }
+    for (void* raster : g_pdaRaster) if (!EyeRasterTexId(raster)) return false;
+    return true;
+}
+
+// CRadar's menu-map path draws the same texture database tiles as the HUD.
+// Coordinates follow the retail CRect HFA ABI: left, bottom, right, top.
+void RenderPdaMap() {
+    struct Rect { float left, bottom, right, top; };
+    using DrawTile = void (*)(int,int,Rect,float);
+    if (!g.LoadBase || !g.FindPlayerPed || !g.FindPlayerPed(-1) || !g.FindPlayerCoors) return;
+    static void* handle = dlopen("libGame.so", RTLD_NOLOAD | RTLD_NOW);
+    if (!handle) return;
+    static auto draw = reinterpret_cast<DrawTile>(dlsym(handle, "_ZN6CRadar19DrawRadarSectionMapEii5CRectf"));
+    if (!draw || reinterpret_cast<std::uintptr_t>(draw) != g.LoadBase + 0x51e360u) return;
+    const auto player = g.FindPlayerCoors(-1);
+    if (!std::isfinite(player.x) || !std::isfinite(player.y)) return;
+    // Height covers 300 world units, width 480: equal metres per pixel.
+    constexpr float scale = 400.0f / 300.0f;
+    if (g.RwRenderStateSet) {
+        g.RwRenderStateSet(6,reinterpret_cast<void*>(0));
+        g.RwRenderStateSet(8,reinterpret_cast<void*>(0));
+        g.RwRenderStateSet(10,reinterpret_cast<void*>(5));
+        g.RwRenderStateSet(11,reinterpret_cast<void*>(6));
+        g.RwRenderStateSet(12,reinterpret_cast<void*>(1));
+        g.RwRenderStateSet(14,reinterpret_cast<void*>(0));
+        g.RwRenderStateSet(20,reinterpret_cast<void*>(1));
+    }
+    for (int y=0;y<12;++y) for (int x=0;x<12;++x) {
+        const float left=320.0f+(x*500.0f-3000.0f-player.x)*scale;
+        const float top=200.0f+(player.y-(3000.0f-y*500.0f))*scale;
+        const float size=500.0f*scale;
+        if (left>=640 || left+size<=0 || top>=400 || top+size<=0) continue;
+        draw(x,y,{left,top+size,left+size,top},1.0f);
+    }
+}
+
 bool PrepareRadialIconRasters() {
     if (!g.RwRasterCreate) return false;
     if (!g_radialIconRaster[0]) {
@@ -21201,6 +21253,7 @@ void OnRenderScene(bool underwater) {
     unsigned int tex[kEyeSets][2];
     unsigned int depth[kEyeSets][2];
     unsigned int hudTex[kEyeSets]{};
+    unsigned int pdaTex[kEyeSets]{};
     for (int s = 0; s < kEyeSets; ++s)
         for (int e = 0; e < 2; ++e) {
             tex[s][e] = EyeRasterTexId(g_eyeRaster[s][e]);
@@ -21234,6 +21287,10 @@ void OnRenderScene(bool underwater) {
     // the steady already-materialised HUD ring remains overlap-safe.
     if (hudNeeded && !g_hudRaster[0]) closeEnginePreFinish();
     const bool hudReady=hudNeeded&&PrepareHudRasterRing();
+    const bool pdaNeeded=hudNeeded && (hud::ShouldRenderWristHud() || xr::HudCalibrationActive());
+    if (pdaNeeded && !g_pdaRaster[0]) closeEnginePreFinish();
+    const bool pdaReady=pdaNeeded && PreparePdaRasterRing();
+    if (pdaReady) for (int i=0;i<kEyeSets;++i) pdaTex[i]=EyeRasterTexId(g_pdaRaster[i]);
     const auto radialMenu = xr::GetRadialHolsterMenu();
     if (radialMenu.visible && !g_radialIconRaster[0]) closeEnginePreFinish();
     const bool radialReady = radialMenu.visible && PrepareRadialIconRasters();
@@ -21986,6 +22043,18 @@ void OnRenderScene(bool underwater) {
                 LOGI("[hud] stock HUD recorded for in-eye alpha composite");
             }
         }
+        if (pdaReady) {
+            screenDimensions.Set(640,400);
+            *reinterpret_cast<void**>(scc+0x80)=g_pdaRaster[set];
+            WriteCam(camU,base);
+            if (g.CCamera_CalculateDerivedValues) g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
+            g_origCopy(g.TheCamera,false);
+            unsigned char background[4]={12,26,38,255};
+            if (g.RwCameraClear) g.RwCameraClear(sc,background,1|2|4);
+            g.RwCameraBeginUpdate(sc);
+            RenderPdaMap();
+            g.RwCameraEndUpdate(sc);
+        }
         if (radialReady) {
             screenDimensions.Set(512,512);
             *reinterpret_cast<void**>(scc+0x80)=g_radialIconRaster[set];
@@ -22036,7 +22105,7 @@ void OnRenderScene(bool underwater) {
     npcgrab::PublishMarkers();
     testarea::PublishMarkers();
     xr::SetRadialHolsterAtlas(radialReady ? EyeRasterTexId(g_radialIconRaster[set]) : 0);
-    xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex,
+    xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex,
                              renderedNear, renderedFar,
                              g_recordCounter, g_eyeRasterW, g_eyeRasterH);
     xr::NotifyGameFrame();                                    // for the on-screen FPS readout
