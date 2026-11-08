@@ -10037,11 +10037,11 @@ void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
         centre=vadd(centre,vadd(vscale(axisRight,.08f+settings.alongMm*.001f),
                    vadd(vscale(axisUp,.06f+settings.liftMm*.001f),vscale(side,.04f+settings.acrossMm*.001f))));
         constexpr float radians=.01745329252f;
-        // Weapon calibration is authored on the right; mirror its yaw for the
-        // left-hand weapon basis while keeping the saved value unchanged.
-        RotateWristAxes(side,axisRight,settings.yawDeg*radians*(weaponHand==0?-1.0f:1.0f));
+        // The shared right-hand calibration mirrors yaw and roll on the left.
+        const float mirror=weaponHand==0?-1.0f:1.0f;
+        RotateWristAxes(side,axisRight,settings.yawDeg*radians*mirror);
         RotateWristAxes(axisUp,side,settings.pitchDeg*radians);
-        RotateWristAxes(axisRight,axisUp,settings.rollDeg*radians);
+        RotateWristAxes(axisRight,axisUp,settings.rollDeg*radians*mirror);
         width*=settings.scaleTenths/10.0f;
     }
     const auto right=vscale(axisRight,width*.5f);
