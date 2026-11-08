@@ -1,5 +1,6 @@
 #include "VehicleEntry.h"
 #include "VehicleClimb.h"
+#include "LedgeClimb.h"
 #include "VehicleExit.h"
 #include "PassengerReaction.h"
 #include "BoatEntry.h"
@@ -57,7 +58,7 @@ void Install(void* h){
  canOpen=reinterpret_cast<decltype(canOpen)>(dlsym(h,"_ZNK8CVehicle15CanPedOpenLocksEPK4CPed"));
  healthy=reinterpret_cast<decltype(healthy)>(dlsym(h,"_ZN13CCarEnterExit12IsPedHealthyERK4CPed"));
 }
-bool ConsumesMove(){return vehicleclimb::ClaimedHands()!=0||started>0||Now()<flashUntil;}
+bool ConsumesMove(){return ledgeclimb::ClaimedHands()!=0||vehicleclimb::ClaimedHands()!=0||started>0||Now()<flashUntil;}
 void Update(bool usable,std::uint64_t epoch){
  passengerreaction::Update(usable);
  const double now=Now();visible=false;icons={};icons.epoch=epoch;claimed=0;

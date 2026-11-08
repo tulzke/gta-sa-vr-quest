@@ -108,7 +108,7 @@ struct Marker {
     bool doorGrab{};
     bool bikeGrip{};
     float pipeLength{.11f};
-    bool climbPipe{},clipPipe{};
+    bool climbPipe{},clipPipe{},ledge{};
     unsigned pipeHandMask{};
     Vec pipeHands[2]{};
     bool hideArrow{};
@@ -142,8 +142,9 @@ inline std::array<Vec,144> GripCylinder(const Marker& m) {
     const Vec left=m.position-axis*(m.pipeLength*.5f),right=m.position+axis*(m.pipeLength*.5f);
     for(int i=0;i<12;++i){
         const float a=6.2831853f*i/12,b=6.2831853f*(i+1)/12;
-        const Vec r=(up*std::cos(a)+across*std::sin(a))*.022f;
-        const Vec s=(up*std::cos(b)+across*std::sin(b))*.022f;
+        const float radius=m.ledge?.004f:.022f;
+        const Vec r=(up*std::cos(a)+across*std::sin(a))*radius;
+        const Vec s=(up*std::cos(b)+across*std::sin(b))*radius;
         mesh[n++]=left+r;mesh[n++]=right+r;mesh[n++]=left+s;
         mesh[n++]=left+s;mesh[n++]=right+r;mesh[n++]=right+s;
         mesh[n++]=left;mesh[n++]=left+s;mesh[n++]=left+r;

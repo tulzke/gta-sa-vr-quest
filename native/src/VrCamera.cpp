@@ -36,6 +36,7 @@
 #include "BoatEntry.h"
 #include "VehicleDoors.h"
 #include "VehicleClimb.h"
+#include "LedgeClimb.h"
 #include "NpcGrab.h"
 #include "VehicleTestArea.h"
 #include "StereoSurfacePolicy.h"
@@ -4467,7 +4468,7 @@ std::atomic<bool> g_hideWeaponsForChuteDeploy{false};
 // The skydive/parachute state: on foot, parachute is the active weapon, and
 // the ped is genuinely airborne.
 bool ParachuteStateActive() {
-    if (vehicleclimb::Attached()) return false;
+    if (vehicleclimb::Attached() || ledgeclimb::ClaimedHands()) return false;
     if (!g.CPedGeometryAnalyser_IsInAir || !g.FindPlayerPed) return false;
     if (g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false)) return false;
     void* ped = g.FindPlayerPed(-1);
@@ -21367,7 +21368,7 @@ void OnRenderScene(bool underwater) {
     xr::HandPose renderedHandPoses[2]{};
     if (!physicalweapon::GetHandPosesSnapshot(renderedHandPoses))
         xr::GetHandPoses(renderedHandPoses);
-    vehicleclimb::ApplyHandVisuals(renderedHandPoses);
+    vehicleclimb::ApplyHandVisuals(renderedHandPoses); ledgeclimb::ApplyHandVisuals(renderedHandPoses);
     xr::SetRenderedHandPoses(renderedHandPoses);
     xr::SetWeaponAmmoPose(0,{});
     xr::SetWeaponAmmoPose(1,{});
@@ -30352,7 +30353,7 @@ struct RoomPending {
 } g_roomPending;
 
 void FinishRoomMovement() {
-    if (vehicleclimb::ClaimedHands()) { g_roomPending.valid=false; return; }
+    if (vehicleclimb::ClaimedHands() || ledgeclimb::ClaimedHands()) { g_roomPending.valid=false; return; }
     const auto pending = g_roomPending;
     g_roomPending.valid = false;
     if (!pending.valid || pending.serial != g_cameraResetSerial ||
@@ -30402,7 +30403,7 @@ void OnRoomPlayerControl(void* ped) {
 
     float hp[3]{}, hq[4]{}; std::uint64_t epoch{};
     const bool active = ShouldRunStereo() && !g_inputBlocked.load(std::memory_order_relaxed) &&
-        !vehicleclimb::ClaimedHands() && GroundWalkControlsActive() && !(g.PlayerIsEnteringCar && g.PlayerIsEnteringCar()) &&
+        !vehicleclimb::ClaimedHands() && !ledgeclimb::ClaimedHands() && GroundWalkControlsActive() && !(g.PlayerIsEnteringCar && g.PlayerIsEnteringCar()) &&
         !ScriptedCutsceneRunning() && !jetpack::IsActive() && !ParachuteStateActive() &&
         !g_duckLatched && g_origin.valid && g_vrBaseValid &&
         xr::GetHeadPose(hp,hq,&epoch);

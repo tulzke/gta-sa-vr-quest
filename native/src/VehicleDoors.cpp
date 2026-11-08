@@ -1,5 +1,6 @@
 #include "VehicleDoors.h"
 #include "VehicleClimb.h"
+#include "LedgeClimb.h"
 #include "VehicleEntry.h"
 #include "NpcGrab.h"
 #include "VehicleDoorMotion.h"
@@ -404,7 +405,7 @@ bool QuadBarPosition(void* vehicle,float out[3]) {
 }
 
 void Install(void* handle) {
-    vehicleclimb::Install(handle);
+    vehicleclimb::Install(handle); ledgeclimb::Install(handle);
     vehicleentry::Install(handle);
     if (!handle||g_ready) return;
     g_open=reinterpret_cast<OpenFn>(dlsym(handle,"_ZN11CAutomobile8OpenDoorEP4CPedi6eDoorsfb"));
@@ -423,7 +424,7 @@ void Install(void* handle) {
     if (g_ready) LOGI("[doors] hand interaction installed");
     else LOGE("[doors] required symbols or verified hook unavailable; hand interaction disabled");
 }
-unsigned ClaimedHands() { return g_claimed.load(std::memory_order_relaxed)|vehicleclimb::ClaimedHands(); }
+unsigned ClaimedHands() { return g_claimed.load(std::memory_order_relaxed)|vehicleclimb::ClaimedHands()|ledgeclimb::ClaimedHands(); }
 unsigned DebugPinchHands() { return g_debugPinchHands.load(std::memory_order_relaxed); }
 void InteriorDistances(void* vehicle,const xr::HandPose hands[2],float distances[2]) {
     distances[0]=distances[1]=1e6f;
@@ -450,7 +451,7 @@ void InteriorDistances(void* vehicle,const xr::HandPose hands[2],float distances
 bool DebugEditActive() { return g_edit.hand>=0||g_bikeEdit.hand>=0||vehicleclimb::Editing(); }
 void PublishMarkers() {
     MarkerFrame worldFrame=g_worldMarkers;
-    vehicleclimb::Append(worldFrame);
+    vehicleclimb::Append(worldFrame); ledgeclimb::Append(worldFrame);
     vehicleentry::Append(worldFrame);
     MarkerFrame frame;frame.epoch=worldFrame.epoch;
     for (int i=0;i<worldFrame.count;++i) {
@@ -515,13 +516,14 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         fresh[h]=g_edges[h].Step(hands[h].grip,usable&&hands[h].valid);
         editFresh[h]=g_editEdges[h].Step(hands[h].trigger,editMode&&usable&&hands[h].valid);
     }
-    vehicleclimb::Update(usable,hands,epoch,physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands()|g_claimed.load());
+    vehicleclimb::Update(usable,hands,epoch,ledgeclimb::ClaimedHands()|physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands()|g_claimed.load());
+    ledgeclimb::Update(usable,hands,epoch,vehicleclimb::ClaimedHands()|physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands()|g_claimed.load());
     vehicleentry::Update(usable,epoch);
     Pool pool;
     Vec eye{};float origin[3]{},forward[3]{};
     if (!usable||!pool.ReadCurrent()||!vrcam::GetHeadWorldRay(origin,forward)) { Reset();return; }
     eye={origin[0],origin[1],origin[2]};
-    unsigned occupied=vehicleclimb::ClaimedHands()|physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands()|vehicleentry::ClaimedHands();
+    unsigned occupied=ledgeclimb::ClaimedHands()|vehicleclimb::ClaimedHands()|physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands()|vehicleentry::ClaimedHands();
     void* seated=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
     if (g_release.active) {
         Door d;

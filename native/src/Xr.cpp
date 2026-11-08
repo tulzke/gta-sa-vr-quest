@@ -10326,7 +10326,7 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
         if(marker.bikeGrip){
             if(marker.clipPipe&&!marker.pipeHandMask)continue;
             const auto mesh=vehicledoors::GripCylinder(marker);
-            if(marker.climbPipe)glUniform4f(g_markerColLoc,1.f,1.f,1.f,marker.held?.95f:.8f);
+            if(marker.climbPipe)glUniform4f(g_markerColLoc,1.f,1.f,1.f,marker.ledge?.45f:(marker.held?.95f:.8f));
             else glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.held?.95f:.8f);
             glUniform1i(g_markerClipLoc,marker.clipPipe?1:0);
             if(marker.clipPipe){

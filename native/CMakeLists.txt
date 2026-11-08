@@ -85,6 +85,7 @@ add_library(savr SHARED
     src/VehicleExit.cpp
     src/VehicleEntry.cpp
     src/VehicleClimb.cpp
+    src/LedgeClimb.cpp
     src/VehicleDoors.cpp
     src/VehicleTestArea.cpp
     src/MissionWeaponGrant.cpp
