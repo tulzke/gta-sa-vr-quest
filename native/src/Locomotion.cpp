@@ -60,8 +60,11 @@ std::map<std::string, int> g_cutsceneCameras;
 constexpr int kBindingVehicle[BIND_SRC_COUNT]={
     BIND_ACT_SPRINT, BIND_ACT_ATTACK, BIND_ACT_JUMP, BIND_ACT_ENTER,
     BIND_ACT_CROUCH, BIND_ACT_NONE};
-constexpr int kBindingDefault[BIND_SRC_COUNT]={
+constexpr int kBindingPreviousDefault[BIND_SRC_COUNT]={
     BIND_ACT_NONE, BIND_ACT_ATTACK, BIND_ACT_JUMP, BIND_ACT_ENTER,
+    BIND_ACT_SPRINT, BIND_ACT_CROUCH};
+constexpr int kBindingDefault[BIND_SRC_COUNT]={
+    BIND_ACT_JUMP, BIND_ACT_ATTACK, BIND_ACT_NONE, BIND_ACT_ENTER,
     BIND_ACT_SPRINT, BIND_ACT_CROUCH};
 constexpr int kBindingLegacySwapped[BIND_SRC_COUNT]={
     BIND_ACT_JUMP, BIND_ACT_ENTER, BIND_ACT_SPRINT, BIND_ACT_ATTACK,
@@ -172,7 +175,8 @@ void Load() {
         std::fclose(file);
     }
     // Migrate recognized presets while preserving custom mappings.
-    if(std::equal(bind,bind+BIND_SRC_COUNT,kBindingVehicle))
+    if(std::equal(bind,bind+BIND_SRC_COUNT,kBindingVehicle)||
+       std::equal(bind,bind+BIND_SRC_COUNT,kBindingPreviousDefault))
         std::copy(kBindingDefault,kBindingDefault+BIND_SRC_COUNT,bind);
     else if(std::equal(bind,bind+BIND_SRC_COUNT,kBindingLegacySwapped))
         std::copy(kBindingSwapped,kBindingSwapped+BIND_SRC_COUNT,bind);

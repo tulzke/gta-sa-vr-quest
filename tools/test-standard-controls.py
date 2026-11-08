@@ -73,8 +73,12 @@ int main(){
  CHECK(driving::fallbackCalls==1);vrcam::stereo=true;driving::fallbackCalls=0;
  Write("BindA=1\nBindB=3\nBindX=2\nBindY=4\nBindL3=5\nBindR3=0\nMovementMode=2\nGestureSwim=0\n");
  CHECK(GetButtonBinding(BIND_SRC_L3)==BIND_ACT_SPRINT && GetButtonBinding(BIND_SRC_R3)==BIND_ACT_CROUCH);
- CHECK(GetButtonBinding(BIND_SRC_A)==BIND_ACT_NONE && GetButtonBinding(BIND_SRC_X)==BIND_ACT_JUMP);
+ CHECK(GetButtonBinding(BIND_SRC_A)==BIND_ACT_JUMP && GetButtonBinding(BIND_SRC_X)==BIND_ACT_NONE);
  CHECK(GetMovementMode()==2 && !GestureSwimEnabled());
+ CHECK(ActionHeld(BIND_ACT_JUMP,true,false,false,false,false,false,true));
+ CHECK(!ActionHeld(BIND_ACT_JUMP,false,false,true,false,false,false,true));
+ Write("BindA=0\nBindB=3\nBindX=2\nBindY=4\nBindL3=1\nBindR3=5\n");
+ CHECK(GetButtonBinding(BIND_SRC_A)==BIND_ACT_JUMP && GetButtonBinding(BIND_SRC_X)==BIND_ACT_NONE);
  CHECK(ActionHeld(BIND_ACT_SPRINT,true,false,false,false,false,false,false)); // vehicle A unchanged
  CHECK(!ActionHeld(BIND_ACT_SPRINT,false,false,false,false,true,false,false));
  CHECK(ControlsLayout()==CONTROLS_LAYOUT_DEFAULT);

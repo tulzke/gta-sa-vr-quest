@@ -24,11 +24,16 @@ bool GetHeadWorldRay(float* a,float* b){a[0]=0;a[1]=eyeY;a[2]=2.3f;b[0]=0;b[1]=1
 using namespace savr;
 using namespace savr::ledgeclimb;
 char ped[0xa00]{},matrix[64]{};void* ignored{};
-bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{};float floorZ=1.f;int moves{};
+bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{};float floorZ=1.f,slopeX{},slopeY{},edgeSlope{};int moves{};
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 bool Query(const GameSymbols::Vec3* a,const GameSymbols::Vec3* b,void* col,void**,bool,bool,bool,bool,bool,bool,bool,bool){
  Vec p{},normal{};bool hit=false;
- if(!noFloor&&a->z>floorZ&&b->z<floorZ&&(a->y>=0||infiniteTop)){float t=(a->z-floorZ)/(a->z-b->z);p={a->x+(b->x-a->x)*t,a->y+(b->y-a->y)*t,floorZ};normal={0,0,1};hit=true;}
+ const float da=a->z-floorZ-slopeX*a->x-slopeY*a->y;
+ const float db=b->z-floorZ-slopeX*b->x-slopeY*b->y;
+ if(!noFloor&&da>0&&db<0){
+  const float t=da/(da-db);Vec candidate{a->x+(b->x-a->x)*t,a->y+(b->y-a->y)*t,a->z+(b->z-a->z)*t};
+  if(candidate.y>=edgeSlope*candidate.x||infiniteTop){p=candidate;normal={-slopeX,-slopeY,1};normal=normal*(1.f/Length(normal));hit=true;}
+ }
  if(a->y<0&&b->y>=0&&a->z<floorZ&&(!thinRoof||a->z>floorZ-.03f)){float t=-a->y/(b->y-a->y);p={a->x+(b->x-a->x)*t,0,a->z+(b->z-a->z)*t};normal={0,-1,0};hit=true;}
  if(hit){Put(col,0,p);Put(col,0x10,normal);Put(col,0x23,std::uint8_t(1));}return hit;
 }
@@ -51,7 +56,15 @@ int main(){
  floorZ=50;assert(Find({0,-.08f,50.05f},{0,1,0},point,tangent));assert(std::abs(point.z-50)<.001f);
  floorZ=1;infiniteTop=true;
  assert(!Find({0,-.08f,1.05f},{0,1,0},point,tangent));
- infiniteTop=false;thinRoof=false;
+ infiniteTop=false;
+ // The displayed segment follows both an oblique boundary and the slope,
+ // using collision samples rather than the gaze direction or a level bar.
+ slopeX=.45f;slopeY=.2f;edgeSlope=.35f;Vec lineA{},lineB{},lineNormal{};
+ assert(Find({0,-.08f,1.05f},{0,1,0},point,tangent,idle,&lineA,&lineB,&lineNormal));
+ assert(Length(lineB-lineA)>.1f&&std::abs(tangent.z)>.1f);
+ for(Vec end:{lineA,lineB}){assert(std::abs(end.y-edgeSlope*end.x)<.02f);assert(std::abs(end.z-(floorZ+slopeX*end.x+slopeY*end.y))<.005f);}
+ assert(std::abs(Dot(tangent,lineNormal))<.005f);
+ slopeX=slopeY=edgeSlope=0;thinRoof=false;
  // Crouched landing: CJ's feet are below the top, tracked head is above it.
  Suspend(ped);assert(Stand(ped,{0,-.3f,1.2f},{0,.12f,1.5f},1));
  assert(std::abs(Position(ped).z-2.02f)<.001f);assert(!suspended);

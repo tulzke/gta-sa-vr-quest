@@ -5288,7 +5288,7 @@ void OnUpdatePads() {
     if(vehicle==nullptr && GroundWalkControlsActive())
         ns[16]=locomotion::RunEnabled() && !g_duckLatched && !combat::IsBlocking() ? 255 : 0;
 
-    // On-foot jump through the remappable bindings (VC default: X).
+    // On-foot jump through the remappable bindings (default: A).
     // ButtonSquare (ns[14]) is SA's jump.
     if (vehicle == nullptr &&
         locomotion::ActionHeld(locomotion::BIND_ACT_JUMP,

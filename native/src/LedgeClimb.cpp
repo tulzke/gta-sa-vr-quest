@@ -150,8 +150,8 @@ Reach ReachFor(Vec velocity,bool airborne){
  const float extra=std::min(speed*.04f,.26f)+(airborne?.16f:0.f);
  return {.18f+extra,.48f+extra,.55f+extra};
 }
-bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.55f}){
- float best=reach.preview;bool found=false;
+bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.55f},Vec* lineA=nullptr,Vec* lineB=nullptr,Vec* lineNormal=nullptr){
+ float best=reach.preview;bool found=false;Hit bestTop{};Vec bestInside{},bestOutside{};
  // Fan out from the hand rather than requiring the ledge to face the gaze.
  // Probe higher as well: roof overhangs often sit above the jumping hand.
  for(float angle:{0.f,-.65f,.65f,-1.3f,1.3f,-2.1f,2.1f,3.14159265f})for(float fraction:{.15f,.5f,.9f}){
@@ -174,7 +174,21 @@ bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.5
   Vec axis=Cross({0,0,1},direction);
   const float d=Length(edge-hand);const float n=Length(axis);
   if(d>=best||n<.1f)continue;
-  best=d;point=edge;tangent=axis*(1.f/n);found=true;
+  best=d;point=edge;tangent=axis*(1.f/n);found=true;bestTop=top;bestInside=top.point;bestOutside=hand-direction*reach.preview;
+ }
+ if(found){
+  const auto planeZ=[&](Vec p){return bestTop.point.z-((p.x-bestTop.point.x)*bestTop.normal.x+(p.y-bestTop.point.y)*bestTop.normal.y)/bestTop.normal.z;};
+  const auto sample=[&](Vec p){p.z=planeZ(p);Hit h;return Ray(p+Vec{0,0,.06f},p-Vec{0,0,.06f},h)&&h.normal.z>=.65f&&std::abs(h.point.z-p.z)<.045f;};
+  const auto trace=[&](Vec offset,Vec& out){
+   Vec inside=bestInside+offset,outside=bestOutside+offset;
+   if(!sample(inside)||sample(outside))return false;
+   for(int i=0;i<8;++i){Vec mid=(inside+outside)*.5f;if(sample(mid))inside=mid;else outside=mid;}
+   out=inside;out.z=planeZ(out);return true;
+  };
+  Vec a=point,b=point;
+  for(float half:{.12f,.06f,.03f}){Vec start{},end{};if(trace(tangent*(-half),start)&&trace(tangent*half,end)){a=start;b=end;break;}}
+  if(Length(b-a)>.01f)tangent=(b-a)*(1.f/Length(b-a));else a=b=point;
+  if(lineA)*lineA=a;if(lineB)*lineB=b;if(lineNormal)*lineNormal=bestTop.normal;
  }
  return found;
 }
@@ -233,9 +247,9 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
    }else cancelled=true;
    held[h]=false;
   }
-  Vec point{},tangent{};
-  if(valid&&!held[h]&&Find(world,forward,point,tangent,reach)){
-   Marker m{point,tangent,{0,0,1},false};m.bikeGrip=true;m.climbPipe=true;m.ledge=true;m.pipeLength=.24f;m.opacity=.45f;markers.markers[markers.count++]=m;
+  Vec point{},tangent{},lineA{},lineB{},normal{};
+  if(valid&&!held[h]&&Find(world,forward,point,tangent,reach,&lineA,&lineB,&normal)){
+   Marker m{(lineA+lineB)*.5f+normal*.006f,tangent,normal,false};m.bikeGrip=true;m.climbPipe=true;m.ledge=true;m.pipeLength=Length(lineB-lineA);m.opacity=.45f;if(m.pipeLength>.01f)markers.markers[markers.count++]=m;
    if(fresh[h]&&Length(point-world)<reach.grab){if(!wasHeld){pullVelocity={};velocityTime=0;}held[h]=true;anchor[h]=point;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
   }
   if(!held[h])continue;
