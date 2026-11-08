@@ -4,10 +4,10 @@
 
 namespace savr::weaponoptic {
 constexpr bool Supported(int type) { return type == 34 || type == 36; }
-constexpr int FieldCount = 8;
-// Half centimetres, half degrees, outer diameter/width and body length.
+constexpr int FieldCount = 10;
+// Half centimetres, half degrees, diameter/width, length, horizontal/vertical flips.
 struct Profile {
-    int value[FieldCount]{0, 0, 0, 0, 0, 0, 12, 30};
+    int value[FieldCount]{0, 0, 0, 0, 0, 0, 12, 30, 1, 0};
 };
 inline Profile Defaults(int type) {
     Profile p;
@@ -19,6 +19,7 @@ inline Profile Defaults(int type) {
 }
 inline int ClampField(int field, int value) {
     if (field < 0 || field >= FieldCount) return 0;
+    if (field >= 8) return std::clamp(value, 0, 1);
     if (field == 6) return std::clamp(value, 4, 60);
     if (field == 7) return std::clamp(value, 2, 100);
     return std::clamp(value, field < 3 ? -200 : -720, field < 3 ? 200 : 720);

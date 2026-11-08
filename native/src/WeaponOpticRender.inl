@@ -7,6 +7,7 @@ constexpr int Resolution=768;
 constexpr float Far=450.f;
 struct Optic {
     bool visible{}, imageReady{};
+    bool flipHorizontal{true},flipVertical{};
     int type{};
     void* raster{};
     WeaponOpticFrame frame{};
@@ -22,6 +23,9 @@ void Prepare(int hand,int type,const RwMat& weapon) {
     auto& optic=optics[hand];
     if(!BuildWeaponOpticFrame(type,weapon,optic.frame)) return;
     optic.type=type;
+    const auto profile=calib::SnapshotOptic(type);
+    optic.flipHorizontal=profile.value[8]!=0;
+    optic.flipVertical=profile.value[9]!=0;
     optic.tanFov=weaponoptic::TanHalfFov(optic.frame.halfSize,scopeaim::WeaponZoom(type));
     optic.lock=type==36 ? scopeaim::HeatLockSnapshot() : scopeaim::HeatLockState{};
     optic.visible=true;
@@ -201,7 +205,8 @@ void DrawSurfaces() {
         const float size=optic.frame.halfSize,length=optic.frame.length;
         const auto vertex=[&](float x,float y,float z,std::uint32_t color) {
             return SkyBackdropVertex{surface.pos-surface.right*x+surface.up*y+surface.forward*z,{},color,
-                .5f-x/(2.f*size),.5f-y/(2.f*size)};
+                .5f+(optic.flipHorizontal ? -x : x)/(2.f*size),
+                .5f+(optic.flipVertical ? y : -y)/(2.f*size)};
         };
         const auto draw=[&](SkyBackdropVertex* vertices,int count,unsigned short* indices,int indexCount,void* texture) {
             g.RwRenderStateSet(1,texture);

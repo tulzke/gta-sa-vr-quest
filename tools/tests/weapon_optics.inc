@@ -59,6 +59,21 @@
         CHECK(Finite(vertex.position)&&std::isfinite(vertex.u)&&std::isfinite(vertex.v));
         CHECK((vertex.position.x>=0 && vertex.u<=.501f)||(vertex.position.x<=0 && vertex.u>=.499f));
     }
+    const auto defaultVertices=opticVertices;
+    for(bool flipH : {false,true}) for(bool flipV : {false,true}) {
+        opt::optics[0].flipHorizontal=flipH;opt::optics[0].flipVertical=flipV;
+        opticVertices.clear();opt::DrawSurfaces();
+        CHECK(opticVertices.size()==defaultVertices.size());
+        for(std::size_t i=0;i<opticVertices.size();++i) {
+            const auto& v=opticVertices[i];
+            CHECK(std::memcmp(&v.position,&defaultVertices[i].position,sizeof(V3))==0);
+            CHECK(v.position.x==0.f || (v.u-.5f)*v.position.x*(flipH ? -1.f : 1.f)>=-.00001f);
+            CHECK(v.position.z==0.f || (v.v-.5f)*v.position.z*(flipV ? 1.f : -1.f)>=-.00001f);
+        }
+        CHECK(states==beforeOpticStates);
+    }
+    CHECK(ClampField(8,-1)==0&&ClampField(8,2)==1&&ClampField(9,2)==1);
+    CHECK(Defaults(34).value[8]==1&&Defaults(34).value[9]==0);
     opt::ResetFrame();CHECK(!opt::optics[0].visible);
     std::puts("weapon optics: supported types, zoom/clamps, mirrored mount, camera basis, ped/vehicle frustum, camera/fog/state restore, unreflected world-space lens PASS");
     namespace heat=savr::heat_test;

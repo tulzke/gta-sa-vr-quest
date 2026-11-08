@@ -1256,8 +1256,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         case PG_CALIB: {
             // 26 rows: 0..18 fields, 19 WEAPON LASER (global), 20 LASER BEAM
             // mode, 21 LOCK LASER, 22 WEAPON RECOIL, 23 TRACER COLOR,
-            // 24 TRACER SMOKE SPREAD; optics add 25..32 pose/size, 33 reset.
-            const int ROWS = savr::weaponoptic::Supported(calibWeaponType) ? 35 : 26;
+            // Optics add 25..32 pose/size, 33..34 image flips, 35 reset.
+            const int ROWS = savr::weaponoptic::Supported(calibWeaponType) ? 37 : 26;
             if (navUp)   calibSel = (calibSel - 1 + ROWS) % ROWS;
             if (navDown) calibSel = (calibSel + 1) % ROWS;
             const int type = calibWeaponType;
@@ -1277,9 +1277,14 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
 
             if (calibSel == ROWS-1) {                              // BACK
                 if (enter || firstTick || back) { savr::calib::Save(); menuPage = PG_MAIN; }
-            } else if (ROWS==35 && calibSel==33) {
+            } else if (ROWS==37 && calibSel==35) {
                 if(enter) savr::calib::ResetOptic(type);
-            } else if (ROWS==35 && calibSel>=25) {
+            } else if (ROWS==37 && (calibSel==33 || calibSel==34)) {
+                const int field=calibSel-25;
+                const int current=savr::calib::SnapshotOptic(type).value[field];
+                if(enter) savr::calib::AdjustOptic(type,field,current ? -1 : 1);
+                else if(firstTick) savr::calib::AdjustOptic(type,field,dir);
+            } else if (ROWS==37 && calibSel>=25) {
                 if(fire) savr::calib::AdjustOptic(type,calibSel-25,dir*mult);
             } else if (calibSel == 24) {                           // TRACER SMOKE SPREAD
                 if (enter) vrcam::AdjustTracerSmokeSpread(+1);

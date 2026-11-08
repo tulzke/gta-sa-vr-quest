@@ -8343,7 +8343,7 @@ void BuildCalibMenu() {
     // A scrolling window keeps selection centred, including optional optic rows, so the
     // fixed panel stays readable at arm's length instead of shrinking the font.
     const bool hasOptic=weaponoptic::Supported(type);
-    const int kRows = hasOptic ? 35 : 26;
+    const int kRows = hasOptic ? 37 : 26;
     constexpr int kWin = 9;
     int start = sel - kWin / 2;
     if (start < 0)              start = 0;
@@ -8359,8 +8359,13 @@ void BuildCalibMenu() {
         char row[64];
         if (r == kRows-1) {
             std::snprintf(row, sizeof(row), "BACK");
-        } else if (hasOptic && r == 33) {
+        } else if (hasOptic && r == 35) {
             std::snprintf(row,sizeof(row),"RESET SCOPE   < PRESS A >");
+        } else if (hasOptic && (r == 33 || r == 34)) {
+            const int field=r-25;
+            const auto profile=calib::SnapshotOptic(type);
+            std::snprintf(row,sizeof(row),"%s   < %s >",calib::OpticFieldLabel(field),
+                profile.value[field] ? "ON" : "OFF");
         } else if (hasOptic && r >= 25) {
             const int field=r-25;
             const auto profile=calib::SnapshotOptic(type);
