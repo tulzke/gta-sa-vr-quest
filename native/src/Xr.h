@@ -73,7 +73,7 @@ void PublishMissionTimersText(const char* text);
 void PublishTorenoSignal(int percent);
 // Actual native breath fraction [0,1], or negative to hide outside swimming.
 void PublishBreath(float fraction);
-void PublishWatch(int hour, int minute, float health, float armour);
+void PublishWatch(int hour, int minute, float health, float armour, int money);
 void PublishWeaponHud(int wanted, const int types[13], const int clips[13], const int totals[13]);
 void SetAmmoHolsters(const holstermarker::Frame& frame);
 struct WeaponAmmoPose {

@@ -117,6 +117,7 @@ HudTextTexture g_timerTextTexture;
 HudTextTexture g_breathTextTexture;
 std::atomic<int> g_breathPercent{-1};
 std::atomic<int> g_watchTime{-1};
+std::atomic<int> g_watchMoney{-1};
 std::atomic<float> g_watchHealth{-1}, g_watchArmour{-1};
 std::atomic<int> g_watchWanted{0};
 std::atomic<std::uint64_t> g_ammoHud[64]{};
@@ -5187,11 +5188,12 @@ void PublishBreath(float fraction) {
     g_breathPercent.store(percent,std::memory_order_relaxed);
 }
 
-void PublishWatch(int hour, int minute, float health, float armour) {
+void PublishWatch(int hour, int minute, float health, float armour, int money) {
     g_watchTime.store(hour >= 0 && hour < 24 && minute >= 0 && minute < 60
                       ? hour * 60 + minute : -1, std::memory_order_relaxed);
     g_watchHealth.store(std::isfinite(health) && health >= 0 ? health : -1, std::memory_order_relaxed);
     g_watchArmour.store(std::isfinite(armour) && armour >= 0 ? armour : -1, std::memory_order_relaxed);
+    g_watchMoney.store(money<0?-1:std::min(money,99999999),std::memory_order_relaxed);
 }
 
 void PublishWeaponHud(int wanted, const int types[13], const int clips[13], const int totals[13]) {
@@ -9602,6 +9604,7 @@ GLint  g_wristMvpLoc = -1, g_wristTexLoc = -1, g_wristOpacityLoc = -1;
 GLint g_wristModeLoc = -1, g_watchDataLoc = -1;
 GLint g_pdaHeadingLoc = -1, g_pdaPortraitLoc = -1;
 GLint g_wantedLoc=-1, g_ammoLoc=-1;
+GLint g_moneyLoc=-1;
 GLint g_ammoBackdropLoc=-1;
 
 void EnsureWristProgram() {
@@ -9616,10 +9619,12 @@ void EnsureWristProgram() {
     // channel is not trustworthy after RenderWare HUD blending, so dark pixels
     // turn transparent and the radar keeps its shape on the arm.
     const char* fs = "#version 300 es\n"
-                     "precision mediump float;\n"
+                     "precision mediump float; precision highp int;\n"
                      "in vec2 vUV;\n"
                      "uniform sampler2D uTex; uniform float uOpacity; uniform int uMode; uniform vec4 uWatch; uniform float uHeading; uniform float uPortrait; uniform int uWanted; uniform ivec2 uAmmo; uniform float uAmmoBackdrop; out vec4 o;\n"
                      "float ammoDigit(vec2 p,int n){ const int rows[70]=int[70](14,17,19,21,25,17,14, 4,12,4,4,4,4,14, 14,17,1,2,4,8,31, 30,1,1,14,1,1,30, 2,6,10,18,31,2,2, 31,16,16,30,1,1,30, 14,16,16,30,17,17,14, 31,1,2,4,8,8,8, 14,17,17,14,17,17,14, 14,17,17,15,1,1,14); ivec2 cell=ivec2(floor(p*vec2(6.0,9.0))); if(cell.x<0||cell.x>4||cell.y<1||cell.y>7||n<0||n>9)return 0.0;return float((rows[n*7+cell.y-1]>>(4-cell.x))&1);}\n"
+                     "float hudGlyph(vec2 p,int glyph){if(glyph<0||glyph>11||p.x<0.0||p.x>=1.0||p.y<0.0||p.y>=1.0)return 0.0;vec2 uv=vec2((640.0+(float(glyph)+p.x)*64.0)/2048.0,(880.0+p.y*96.0)/1152.0);vec3 rgb=texture(uTex,uv).rgb;return smoothstep(.04,.35,max(rgb.r,max(rgb.g,rgb.b)));}\n"
+                     "uniform int uMoney;\n"
                      "float seg(vec2 p, vec2 a, vec2 b) { vec2 d=b-a; float t=clamp(dot(p-a,d)/dot(d,d),0.0,1.0); return 1.0-smoothstep(0.025,0.045,length(p-a-t*d)); }\n"
                      "float digit(vec2 p,int n) { int mask[10]=int[10](63,6,91,79,102,109,125,7,127,111); if(n<0 || n>9) return seg(p,vec2(.15,.5),vec2(.55,.5)); int m=mask[n]; float v=0.0;\n"
                      "if((m&1)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.55,.1))); if((m&2)!=0) v=max(v,seg(p,vec2(.55,.1),vec2(.55,.5))); if((m&4)!=0) v=max(v,seg(p,vec2(.55,.5),vec2(.55,.9))); if((m&8)!=0) v=max(v,seg(p,vec2(.15,.9),vec2(.55,.9))); if((m&16)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.15,.9))); if((m&32)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.15,.5))); if((m&64)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.55,.5))); return v; }\n"
@@ -9628,7 +9633,7 @@ void EnsureWristProgram() {
                      "  if(uMode==1){ vec2 p=vUV-vec2(.5); float r=length(p); if(r>.49) discard; vec3 col=vec3(.045,.055,.065); if(r>.455) col=vec3(.28,.30,.32); float angle=mod(atan(p.x,-p.y)+6.2831853,6.2831853)/6.2831853;\n"
                      "  if(r>.375 && r<.415) { col=vec3(.16,.035,.035); if(uWatch.z>=0.0 && angle<clamp(uWatch.z/100.0,0.0,1.0)) col=vec3(.9,.08,.08); if(uWatch.z>100.0 && angle<clamp((uWatch.z-100.0)/100.0,0.0,1.0)) col=vec3(.40,.01,.01); }\n"
                      "  if(r>.425 && r<.455) { col=vec3(.12); if(uWatch.w>=0.0 && angle<clamp(uWatch.w/100.0,0.0,1.0)) col=vec3(.75); if(uWatch.w>100.0 && angle<clamp((uWatch.w-100.0)/100.0,0.0,1.0)) col=vec3(.32); }\n"
-                     "  vec2 q=vec2((vUV.x-.17)*7.5,(vUV.y-.425)*6.0); int i=int(floor(q.x)); int h=int(uWatch.x), m=int(uWatch.y); int n=-1; if(i==0 && h>=0) n=h/10; if(i==1 && h>=0) n=h-10*(h/10); if(i==3 && m>=0) n=m/10; if(i==4 && m>=0) n=m-10*(m/10); float d=0.0; if(i==0||i==1||i==3||i==4) d=digit(vec2(fract(q.x),q.y),n); if(i==2) d=max(1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.35))),1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.65)))); col=mix(col,vec3(.92),d); if(uWanted>0){for(int j=0;j<6;++j){vec2 z=vUV-vec2(.26+.096*float(j),.70); float a=atan(z.x,-z.y); float t=abs(fract((a+3.14159265)/6.2831853*5.0)*2.0-1.0); float bound=mix(.016,.036,t); float star=1.0-smoothstep(bound-.001,bound+.001,length(z)); col=mix(col,j<uWanted?vec3(1.0,.8,.25):vec3(.18),star);}} o=vec4(col,uOpacity); return; }\n"
+                     "  vec2 tq=vec2((vUV.x-.22)*(5.0/.56),(vUV.y-.405)/.18); int ti=int(floor(tq.x)); int h=int(uWatch.x), m=int(uWatch.y), tg=-1; if(ti==0&&h>=0)tg=1+h/10; if(ti==1&&h>=0)tg=1+h%10; if(ti==2&&h>=0)tg=11; if(ti==3&&m>=0)tg=1+m/10; if(ti==4&&m>=0)tg=1+m%10; float ink=hudGlyph(vec2(fract(tq.x),tq.y),tg); vec2 mq=vec2((vUV.x-.21)*(9.0/.58),(vUV.y-.285)/.115); int mi=int(floor(mq.x)),mg=-1; if(uMoney>=0&&mi==0)mg=0; if(uMoney>=0&&mi>=1&&mi<=8){int k=8-mi; int divisor=k==7?10000000:k==6?1000000:k==5?100000:k==4?10000:k==3?1000:k==2?100:k==1?10:1; mg=1+(uMoney/divisor)%10;} float cash=hudGlyph(vec2(fract(mq.x),mq.y),mg); col=mix(col,vec3(.95),ink); col=mix(col,vec3(.33,1.0,.35),cash); if(uWanted>0){for(int j=0;j<6;++j){vec2 z=vUV-vec2(.26+.096*float(j),.70); float a=atan(z.x,-z.y); float t=abs(fract((a+3.14159265)/6.2831853*5.0)*2.0-1.0); float bound=mix(.016,.036,t); float star=1.0-smoothstep(bound-.001,bound+.001,length(z)); col=mix(col,j<uWanted?vec3(1.0,.8,.25):vec3(.18),star);}} o=vec4(col,uOpacity); return; }\n"
                      "  if(uMode==2){ o=vec4(.055,.065,.07,uOpacity); return; }\n"
                      "  if(uMode==3){ vec2 p=vUV-vec2(.5); vec2 dims=mix(vec2(.8,.5),vec2(.5,.8),uPortrait); vec2 q=p*dims; float c=cos(uHeading), s=sin(uHeading); vec2 uv=vec2(.5)+vec2(c*q.x+s*q.y,-s*q.x+c*q.y); o=vec4(texture(uTex,uv).rgb,uOpacity); return; }\n"
                      "  vec4 c = texture(uTex, vUV);\n"
@@ -9658,6 +9663,7 @@ void EnsureWristProgram() {
     g_pdaHeadingLoc = glGetUniformLocation(g_wristProg, "uHeading");
     g_pdaPortraitLoc = glGetUniformLocation(g_wristProg, "uPortrait");
     g_wantedLoc=glGetUniformLocation(g_wristProg,"uWanted");
+    g_moneyLoc=glGetUniformLocation(g_wristProg,"uMoney");
     g_ammoLoc=glGetUniformLocation(g_wristProg,"uAmmo");
     g_ammoBackdropLoc=glGetUniformLocation(g_wristProg,"uAmmoBackdrop");
     glGenBuffers(1, &g_wristVbo);
@@ -9809,6 +9815,7 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
     glUniform1f(g_wristOpacityLoc, opacity);
     glUniform1i(g_wristModeLoc, watch ? 1 : pda ? 3 : 0);
     if (watch) glUniform1i(g_wantedLoc,g_watchWanted.load(std::memory_order_relaxed));
+    if (watch) glUniform1i(g_moneyLoc,g_watchMoney.load(std::memory_order_relaxed));
     if (pda) glUniform1f(g_pdaHeadingLoc,pdaHeading);
     if (pda) glUniform1f(g_pdaPortraitLoc,hud::PdaPortrait()?1.0f:0.0f);
     if (pda) glBindTexture(GL_TEXTURE_2D, pdaTex);
@@ -9975,9 +9982,6 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
         // Calibration pages 4/5 force
         // the respective slot so it can be tuned without holding a gun.
         const int hudMenuPage = g_hudPage.load(std::memory_order_relaxed);
-        const bool twoHandHeld = twoHand.active &&
-            twoHand.primaryHand >= 0 && twoHand.primaryHand < 2 &&
-            (weaponHandMask & (1u << twoHand.primaryHand)) != 0;
         for (int panel = 0; panel < 3; ++panel) {
             glBindTexture(GL_TEXTURE_2D, hudTex);
             if (panel == 0 && (drivingWheel.active || drivingWheel.dashAnchorValid)) continue;
@@ -9987,14 +9991,12 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                 slot = hud::WRIST_SLOT_WEAPON;
             } else if (calibrating && hudMenuPage == 5) {
                 slot = hud::WRIST_SLOT_TWOHAND;
-            } else if (twoHandHeld) {
-                slot = hud::WRIST_SLOT_TWOHAND;
             } else if ((weaponHandMask & (1u << anchorHand)) != 0) {
                 slot = hud::WRIST_SLOT_WEAPON;
             }
             XrVector3f base, alongAxis, acrossAxis, liftAxis, right, up,
                 normal;
-            if (!BuildHandPanelAnchor(hands[anchorHand], anchorHand, twoHand,
+            if (!BuildHandPanelAnchor(hands[anchorHand], anchorHand, TwoHandVisualState{},
                                       base, alongAxis, acrossAxis, liftAxis,
                                       right, up, normal)) continue;
             if (panel == 1) base = vadd(base, vscale(alongAxis, 0.15f));

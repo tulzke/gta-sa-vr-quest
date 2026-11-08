@@ -20638,6 +20638,37 @@ private:
     bool alphaActive_{};
 };
 
+// Draw a digit atlas with the exact game HUD font into an unused portion of the
+// HUD capture. The watch samples these cells rather than synthesising glyphs.
+void RenderWatchHudFontAtlas() {
+    using ByteFn=void (*)(unsigned char);
+    using SetColorFn=void (*)(const void*);
+    using PrintFn=void (*)(float,float,const std::int16_t*);
+    static void* handle=dlopen("libGame.so",RTLD_NOLOAD|RTLD_NOW);
+    if (!handle || !g.CFont_RenderFontBuffer || !g.CFont_InitPerFrame) return;
+    static auto style=reinterpret_cast<ByteFn>(dlsym(handle,"_ZN5CFont12SetFontStyleEh"));
+    static auto orientation=reinterpret_cast<ByteFn>(dlsym(handle,"_ZN5CFont14SetOrientationEh"));
+    static auto proportional=reinterpret_cast<ByteFn>(dlsym(handle,"_ZN5CFont15SetProportionalEh"));
+    static auto edge=reinterpret_cast<ByteFn>(dlsym(handle,"_ZN5CFont7SetEdgeEa"));
+    static auto scale=reinterpret_cast<void (*)(float)>(dlsym(handle,"_ZN5CFont8SetScaleEf"));
+    static auto color=reinterpret_cast<SetColorFn>(dlsym(handle,"_ZN5CFont8SetColorE5CRGBA"));
+    static auto background=reinterpret_cast<void (*)(unsigned char,unsigned char)>(dlsym(handle,"_ZN5CFont13SetBackgroundEhh"));
+    static auto print=reinterpret_cast<PrintFn>(dlsym(handle,"_ZN5CFont11PrintStringEffPs"));
+    static auto* efigs=static_cast<unsigned char*>(dlsym(handle,"_ZN5CFont18UsingEFIGSLanguageE"));
+    if (!style || !orientation || !proportional || !edge || !scale || !color || !background || !print || !efigs) return;
+    g.CFont_InitPerFrame();
+    background(0,0); proportional(0); style(*efigs?3:5); orientation(0);
+    edge(1); scale(1.5f);
+    const unsigned char white[4]={255,255,255,255}; color(white);
+    static constexpr char glyphs[]="$0123456789:";
+    for (int i=0;i<12;++i) {
+        const std::int16_t glyph[]={static_cast<std::int16_t>(glyphs[i]),0};
+        print(640.0f+64.0f*i,880.0f,glyph);
+    }
+    g.CFont_RenderFontBuffer();
+    g.CFont_InitPerFrame();
+}
+
 void RenderGameplayHudPass() {
     if (g.RwRenderStateSet) {
         g.RwRenderStateSet(6,  reinterpret_cast<void*>(0)); // ZTEST OFF
@@ -22052,6 +22083,7 @@ void OnRenderScene(bool underwater) {
                 g.RwCameraClear(sc,transparent,1|2|4);
             g.RwCameraBeginUpdate(sc);
             RenderGameplayHudPass();
+            RenderWatchHudFontAtlas();
             g.RwCameraEndUpdate(sc);
             static bool logged=false;
             if (!logged) {

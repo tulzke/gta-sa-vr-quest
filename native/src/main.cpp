@@ -959,9 +959,13 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         std::memcpy(&watchHealth, static_cast<const char*>(watchPed) + 0x6ac, sizeof(float));
         std::memcpy(&watchArmour, static_cast<const char*>(watchPed) + 0x6b4, sizeof(float));
     }
+    int watchMoney=-1;
+    if (watchPed && g.CWorld_Players && g.CWorld_PlayerInFocus && *g.CWorld_PlayerInFocus<2)
+        std::memcpy(&watchMoney,static_cast<const char*>(g.CWorld_Players)+
+                    *g.CWorld_PlayerInFocus*0x1d8+0xf0,sizeof(watchMoney));
     xr::PublishWatch(clockHours && watchPed ? *clockHours : -1,
                      clockMinutes && watchPed ? *clockMinutes : -1,
-                     watchHealth, watchArmour);
+                     watchHealth, watchArmour, watchMoney);
     int wantedLevel=0, ammoTypes[13]{}, ammoClips[13]{}, ammoTotals[13]{};
     if (watchPed) {
         void* wanted=g.FindPlayerWanted?g.FindPlayerWanted(0):nullptr;
