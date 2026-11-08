@@ -1285,7 +1285,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 if(enter) savr::calib::AdjustOptic(type,field,current ? -1 : 1);
                 else if(firstTick) savr::calib::AdjustOptic(type,field,dir);
             } else if (ROWS==37 && calibSel>=25) {
-                if(fire) savr::calib::AdjustOptic(type,calibSel-25,dir*mult);
+                if(fire) savr::calib::AdjustOptic(type,calibSel-25,dir*(in.l3 ? 1 : 5*mult));
             } else if (calibSel == 24) {                           // TRACER SMOKE SPREAD
                 if (enter) vrcam::AdjustTracerSmokeSpread(+1);
                 else if (firstTick) vrcam::AdjustTracerSmokeSpread(dir);

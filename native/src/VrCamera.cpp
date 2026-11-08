@@ -21442,7 +21442,7 @@ void OnRenderScene(bool underwater) {
             queueWeapon(heldClump, heldMatrix);
             if(heldClump) {
                 if(weaponoptic::Supported(weaponType) && !weapon_optic_render::HasRaster(hand)) closeEnginePreFinish();
-                weapon_optic_render::Prepare(hand,weaponType,heldMatrix);
+                weapon_optic_render::Prepare(hand,weaponType,heldMatrix,base);
             }
             if (heldClump) {
                 renderedHeldMask |= 1u << hand;

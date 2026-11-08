@@ -1,29 +1,50 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 
 namespace savr::weaponoptic {
 constexpr bool Supported(int type) { return type == 34 || type == 36; }
 constexpr int FieldCount = 10;
-// Half centimetres, half degrees, diameter/width, length, horizontal/vertical flips.
+// Tenths of centimetres/degrees, diameter/width, length, image flips.
 struct Profile {
-    int value[FieldCount]{0, 0, 0, 0, 0, 0, 12, 30, 1, 0};
+    int value[FieldCount]{0, 0, 0, 0, 0, 0, 60, 150, 1, 0};
 };
 inline Profile Defaults(int type) {
     Profile p;
-    p.value[1] = type == 34 ? 12 : 16; // above barrel
-    p.value[0] = type == 34 ? -12 : -24; // behind model pivot
-    p.value[6] = type == 34 ? 12 : 24;
-    p.value[7] = type == 34 ? 30 : 12;
+    p.value[1] = type == 34 ? 60 : 80; // above barrel
+    p.value[0] = type == 34 ? -60 : -120; // behind model pivot
+    p.value[6] = type == 34 ? 60 : 120;
+    p.value[7] = type == 34 ? 150 : 60;
     return p;
 }
 inline int ClampField(int field, int value) {
     if (field < 0 || field >= FieldCount) return 0;
     if (field >= 8) return std::clamp(value, 0, 1);
-    if (field == 6) return std::clamp(value, 4, 60);
-    if (field == 7) return std::clamp(value, 2, 100);
-    return std::clamp(value, field < 3 ? -200 : -720, field < 3 ? 200 : 720);
+    if (field == 6) return std::clamp(value, 20, 300);
+    if (field == 7) return std::clamp(value, 10, 500);
+    return std::clamp(value, field < 3 ? -1000 : -3600, field < 3 ? 1000 : 3600);
 }
+inline bool ParseProfile(const char* line,int& set,int& type,Profile& p) {
+    const bool fine=std::strncmp(line,"optic2 ",7)==0;
+    if(!fine && std::strncmp(line,"optic ",6)!=0) return false;
+    p=Profile{};
+    const int fields=std::sscanf(line+(fine?6:5)," %d %d %d %d %d %d %d %d %d %d %d %d",
+        &set,&type,&p.value[0],&p.value[1],&p.value[2],&p.value[3],&p.value[4],
+        &p.value[5],&p.value[6],&p.value[7],&p.value[8],&p.value[9]);
+    if((fields!=10 && fields!=12) || set<0 || set>1 || !Supported(type)) return false;
+    for(int i=0;i<FieldCount;++i) {
+        if(!fine && i<8) p.value[i]=std::clamp(p.value[i],-10000,10000)*5;
+        p.value[i]=ClampField(i,p.value[i]);
+    }
+    return true;
+}
+inline bool NearEye(float distance,float axial,float lateral,float halfSize,bool previous) {
+    return std::isfinite(distance)&&std::isfinite(axial)&&std::isfinite(lateral)&&
+        distance<(previous?.45f:.35f) && axial<.03f && lateral<halfSize+.12f;
+}
+constexpr float NormalFar=450.f, DetailedFar=1200.f;
 inline float StepZoom(int type, float zoom, float axis, float seconds) {
     const float minimum = type == 34 ? 2.f : 1.f;
     const float maximum = type == 34 ? 8.f : 4.f;

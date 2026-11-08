@@ -228,18 +228,9 @@ void Init() {
     while (std::fgets(line, sizeof(line), f)) {
         int opticSet{}, opticType{};
         weaponoptic::Profile optic;
-        const int opticFields=std::sscanf(line, "optic %d %d %d %d %d %d %d %d %d %d %d %d",
-                &opticSet, &opticType, &optic.value[0], &optic.value[1],
-                &optic.value[2], &optic.value[3], &optic.value[4],
-                &optic.value[5], &optic.value[6], &optic.value[7],&optic.value[8],&optic.value[9]);
-        // Legacy eight-value optic rows retain the previous texture orientation.
-        if (opticFields == 10 || opticFields == 12) {
-            if (opticSet >= 0 && opticSet < 2 && weaponoptic::Supported(opticType)) {
-                for (int i=0; i<weaponoptic::FieldCount; ++i)
-                    optic.value[i] = weaponoptic::ClampField(i, optic.value[i]);
-                g_optics[opticSet][opticType] = optic;
-                g_opticConfigured[opticSet][opticType] = true;
-            }
+        if (weaponoptic::ParseProfile(line,opticSet,opticType,optic)) {
+            g_optics[opticSet][opticType] = optic;
+            g_opticConfigured[opticSet][opticType] = true;
             continue;
         }
         int state = 0;
@@ -367,7 +358,7 @@ void Save() {
     int saved = 0;
     for (int set=0; set<2; ++set) for (int type : {34,36}) {
         if (!g_opticConfigured[set][type]) continue;
-        std::fprintf(f, "optic %d %d", set, type);
+        std::fprintf(f, "optic2 %d %d", set, type);
         for (int value : g_optics[set][type].value) std::fprintf(f, " %d", value);
         std::fputc('\n', f);
     }

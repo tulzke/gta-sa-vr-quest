@@ -324,7 +324,7 @@ void UpdateHeat(void* ped, int hand, std::uint64_t now) {
     if(!pool || !flags || !objects || count<=0 || count>20000) { ClearHeat(); return; }
     const V3 origin{o[0],o[1],o[2]}, direction{d[0],d[1],d[2]};
     const float cone=std::min(.10f, weaponoptic::TanHalfFov(
-        calib::SnapshotOptic(kHeatSeekerType).value[6]*.0025f,WeaponZoom(kHeatSeekerType))*.65f);
+        calib::SnapshotOptic(kHeatSeekerType).value[6]*.0005f,WeaponZoom(kHeatSeekerType))*.65f);
     int best=-1; float bestScore=1e9f; V3 bestPosition{};
     for(int i=0;i<count;++i) {
         if(flags[i]&0x80) continue;

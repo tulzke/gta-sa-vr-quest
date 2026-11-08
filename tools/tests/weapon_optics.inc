@@ -9,7 +9,7 @@
     CHECK(StepZoom(34,2.5f,1.f,100.f)==StepZoom(34,2.5f,1.f,.1f));
     CHECK(StepZoom(34,2.5f,std::numeric_limits<float>::quiet_NaN(),.1f)==2.5f);
     CHECK(TanHalfFov(.03f,8.f)<TanHalfFov(.03f,2.f));
-    CHECK(ClampField(6,-100)==4&&ClampField(6,999)==60&&ClampField(7,0)==2);
+    CHECK(ClampField(6,-100)==20&&ClampField(6,999)==300&&ClampField(7,0)==10);
     RwMat gun{{0,1,0},0,{0,0,1},0,{1,0,0},0,{10,20,30},0};
     WeaponOpticFrame opticFrame{};
     calib::opticProfile=Defaults(34);
@@ -18,12 +18,12 @@
     CHECK(std::fabs(opticFrame.surface.pos.z-30.06f)<.0001f);
     CHECK(std::fabs(opticFrame.camera.pos.y-20.09f)<.0001f);
     CHECK(opticFrame.camera.forward.y>.999f&&opticFrame.camera.right.x<-.999f);
-    calib::opticProfile.value[2]=10; // lateral position mirrors with the model
+    calib::opticProfile.value[2]=50; // lateral position mirrors with the model
     CHECK(BuildWeaponOpticFrame(34,gun,opticFrame));CHECK(opticFrame.surface.pos.x>10.049f);
     gun.a[0]=-1;
     CHECK(BuildWeaponOpticFrame(34,gun,opticFrame));CHECK(opticFrame.surface.pos.x<9.951f);
     CHECK(opticFrame.camera.right.x<-.999f); // never mirror the scene texture
-    calib::opticProfile.value[3]=90;calib::opticProfile.value[4]=65;calib::opticProfile.value[5]=-30;
+    calib::opticProfile.value[3]=450;calib::opticProfile.value[4]=325;calib::opticProfile.value[5]=-150;
     CHECK(BuildWeaponOpticFrame(34,gun,opticFrame));
     CHECK(std::fabs(Dot(opticFrame.camera.forward,opticFrame.camera.up))<.0001f);
     CHECK(std::fabs(Dot(opticFrame.camera.forward,opticFrame.camera.forward)-1)<.0001f);
@@ -113,3 +113,42 @@
     CHECK(locomotion::FilterTurnStickX(std::numeric_limits<float>::quiet_NaN(),0.f)==0.f);
     CHECK(locomotion::FilterTurnStickX(1.f,std::numeric_limits<float>::infinity())==0.f);
     std::puts("turn stick: vertical zoom sectors, centre drift, diagonals suppressed; deliberate left/right and smooth scaling PASS");
+    int parsedSet=-1,parsedType=-1;Profile parsed;
+    CHECK(ParseProfile("optic 1 34 -12 12 3 4 5 6 12 30 0 1",parsedSet,parsedType,parsed));
+    CHECK(parsedSet==1&&parsedType==34&&parsed.value[0]==-60&&parsed.value[2]==15);
+    CHECK(parsed.value[6]==60&&parsed.value[7]==150&&parsed.value[8]==0&&parsed.value[9]==1);
+    CHECK(ParseProfile("optic 0 36 -24 16 0 0 0 0 24 12",parsedSet,parsedType,parsed));
+    CHECK(parsed.value[0]==-120&&parsed.value[8]==1&&parsed.value[9]==0);
+    CHECK(ParseProfile("optic2 0 34 -61 61 1 1 0 0 60 150 1 1",parsedSet,parsedType,parsed));
+    CHECK(parsed.value[0]==-61&&parsed.value[1]==61&&parsed.value[2]==1&&parsed.value[3]==1);
+    CHECK(!ParseProfile("optic2 2 34 0 0 0 0 0 0 60 150 1 0",parsedSet,parsedType,parsed));
+    CHECK(!ParseProfile("optic2 0 35 0 0 0 0 0 0 60 150 1 0",parsedSet,parsedType,parsed));
+    CHECK(!ParseProfile("optic2 0 34 0 0 0",parsedSet,parsedType,parsed));
+    CHECK(NearEye(.2f,-.2f,.03f,.03f,false));
+    CHECK(!NearEye(.4f,-.4f,0.f,.03f,false));
+    CHECK(NearEye(.4f,-.4f,0.f,.03f,true));
+    CHECK(!NearEye(.46f,-.46f,0.f,.03f,true));
+    CHECK(!NearEye(.2f,.2f,0.f,.03f,false)); // front of objective
+    CHECK(!NearEye(.2f,-.1f,.18f,.03f,false)); // eye beside tube
+    opt::Optic farOptic=optic;Entity farTarget(13,{0,-900,0},1,3);
+    opt::candidateCount=0;opt::seen.fill(nullptr);
+    opt::Consider(farTarget.e.data(),farOptic);CHECK(opt::candidateCount==0);
+    farOptic.detailed=true;farOptic.farClip=DetailedFar;opt::seen.fill(nullptr);
+    opt::Consider(farTarget.e.data(),farOptic);CHECK(opt::candidateCount==1);
+    calib::opticProfile=Defaults(34);
+    WeaponOpticFrame nearFrame;CHECK(BuildWeaponOpticFrame(34,gun,nearFrame));
+    CamBasis nearHead=nearFrame.surface;nearHead.pos=nearFrame.surface.pos-nearFrame.surface.forward*.2f;
+    opt::Prepare(0,34,gun,nearHead);CHECK(opt::optics[0].detailed&&opt::optics[0].farClip==DetailedFar);
+    const auto savedHeadForDetail=head;
+    head=nearHead;
+    static float detailedClip=0.f,detailedFog=0.f;
+    g.RwCameraEndUpdate=[](void* c){detailedClip=r::Read<float>(c,0xac);detailedFog=fogState.end;};
+    opt::Render(camera.data(),reinterpret_cast<std::uintptr_t>(&head));
+    CHECK(detailedClip==DetailedFar&&detailedFog==DetailedFar);
+    CHECK(camera==originalCamera&&fogState.start==originalFog.start&&fogState.end==originalFog.end);
+    head=savedHeadForDetail;g.RwCameraEndUpdate=[](void*){};
+    nearHead.pos=nearFrame.surface.pos-nearFrame.surface.forward*.4f;
+    opt::Prepare(0,34,gun,nearHead);CHECK(opt::optics[0].detailed); // hysteresis
+    nearHead.pos=nearFrame.surface.pos-nearFrame.surface.forward*.5f;
+    opt::Prepare(0,34,gun,nearHead);CHECK(!opt::optics[0].detailed&&opt::optics[0].farClip==NormalFar);
+    std::puts("optic range: eye-close 1200m, lowered 450m, hysteresis/front/side; legacy profile migration and 0.1-unit precision PASS");

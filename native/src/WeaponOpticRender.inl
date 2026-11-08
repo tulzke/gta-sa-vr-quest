@@ -4,10 +4,11 @@
 namespace weapon_optic_render {
 using rear_mirror_render::Read;
 constexpr int Resolution=768;
-constexpr float Far=450.f;
 struct Optic {
     bool visible{}, imageReady{};
     bool flipHorizontal{true},flipVertical{};
+    bool detailed{};
+    float farClip=weaponoptic::NormalFar;
     int type{};
     void* raster{};
     WeaponOpticFrame frame{};
@@ -17,11 +18,18 @@ struct Optic {
 Optic optics[2];
 void ResetFrame() { for(auto& optic:optics) optic.visible=false; }
 bool HasRaster(int hand) { return optics[hand].raster!=nullptr; }
-void Prepare(int hand,int type,const RwMat& weapon) {
+void Prepare(int hand,int type,const RwMat& weapon,const CamBasis& head) {
     if(!weaponoptic::Supported(type) || PhotoViewActive() ||
         FormalCutsceneRunning() || ScriptedCutsceneRunning() || !rear_mirror_render::Resolve()) return;
     auto& optic=optics[hand];
     if(!BuildWeaponOpticFrame(type,weapon,optic.frame)) return;
+    const auto& surface=optic.frame.surface;
+    const V3 eye=head.pos-surface.pos;
+    const float axial=Dot(eye,surface.forward);
+    const float lateral=std::hypot(Dot(eye,surface.right),Dot(eye,surface.up));
+    optic.detailed=weaponoptic::NearEye(std::sqrt(Dot(eye,eye)),axial,lateral,
+        optic.frame.halfSize,optic.detailed);
+    optic.farClip=optic.detailed ? weaponoptic::DetailedFar : weaponoptic::NormalFar;
     optic.type=type;
     const auto profile=calib::SnapshotOptic(type);
     optic.flipHorizontal=profile.value[8]!=0;
@@ -35,6 +43,7 @@ struct Candidate { void* entity{}; float distance{}; int type{}; };
 std::array<Candidate,2048> candidates{};
 std::array<void*,8192> seen{};
 int candidateCount{};
+int requests{},creates{};
 bool First(void* entity) {
     auto hash=(reinterpret_cast<std::uintptr_t>(entity)>>4)%seen.size();
     for(std::size_t n=0;n<seen.size();++n) {
@@ -64,20 +73,32 @@ void Consider(void* entity,const Optic& optic) {
     const float radius=std::max(Read<float>(collision,0x24),1.f);
     const float depth=Dot(delta,camera.forward);
     const float sideLimit=depth*optic.tanFov+radius*std::sqrt(1.f+optic.tanFov*optic.tanFov);
-    if(!Finite(position) || !std::isfinite(radius) || depth+radius<.1f || depth-radius>Far ||
+    if(!Finite(position) || !std::isfinite(radius) || depth+radius<.1f || depth-radius>optic.farClip ||
         std::abs(Dot(delta,camera.right))>sideLimit || std::abs(Dot(delta,camera.up))>sideLimit) return;
-    if(!Read<void*>(entity,0x20)) return; // stream ownership stays with the game
+    if(!Read<void*>(entity,0x20)) {
+        // Asynchronous, bounded supplementation only in the eye-close frustum.
+        // The engine owns loading/unloading; never run LoadAllRequestedModels,
+        // simulation or PreRender again for the optic.
+        if(!optic.detailed || type==2 || type==3) return;
+        if(Read<void*>(model,0x40) && creates<4) {
+            ++creates;rear_mirror_render::api.createObject(entity);
+        } else if(requests<4 && g.CStreaming_RequestModel) {
+            ++requests;g.CStreaming_RequestModel(Read<std::int16_t>(entity,0x32),0);
+        }
+        if(!Read<void*>(entity,0x20)) return;
+    }
     const float distance=std::max(0.f,std::sqrt(Dot(delta,delta))-radius);
     // Prefer authored detail when both its detail and linked LOD are resident.
     // A parent is skipped below only when a selected child really replaces it.
     if(candidateCount<static_cast<int>(candidates.size())) candidates[candidateCount++]={entity,distance,type};
 }
 void Collect(const Optic& optic) {
-    candidateCount=0;seen.fill(nullptr);
+    candidateCount=requests=creates=0;seen.fill(nullptr);
     const auto index=[](float p){return std::clamp(static_cast<int>(std::floor((p+3000.f)/50.f)),0,119);};
     const V3 pos=optic.frame.camera.pos;
     int visited=0;
-    for(int y=index(pos.y-Far);y<=index(pos.y+Far);++y) for(int x=index(pos.x-Far);x<=index(pos.x+Far);++x) {
+    for(int y=index(pos.y-optic.farClip);y<=index(pos.y+optic.farClip);++y)
+    for(int x=index(pos.x-optic.farClip);x<=index(pos.x+optic.farClip);++x) {
         const V3 forward=optic.frame.camera.forward;
         const float planar=std::hypot(forward.x,forward.y);
         if(planar>.85f && optic.tanFov<.35f) {
@@ -161,8 +182,14 @@ void Render(void* sc,std::uintptr_t cam) {
         *reinterpret_cast<float*>(camera+0x9c)=1.f/optic.tanFov;
         *reinterpret_cast<float*>(camera+0xa0)=0.f;
         *reinterpret_cast<float*>(camera+0xa4)=0.f;
-        g.RwCameraSetNearClipPlane(sc,.1f);g.RwCameraSetFarClipPlane(sc,Far);
-        *reinterpret_cast<float*>(camera+0xb0)=fog.valid ? fog.start : Far*.65f;
+        g.RwCameraSetNearClipPlane(sc,.1f);g.RwCameraSetFarClipPlane(sc,optic.farClip);
+        // Keep the weather's relative fog ramp, extending its range with the
+        // detailed camera so the old fog end does not hide the additional world.
+        const float fogScale=optic.detailed && fog.valid && fog.end>1.f
+            ? std::max(1.f,optic.farClip/fog.end) : 1.f;
+        const float fogStart=fog.valid ? fog.start*fogScale : optic.farClip*.65f;
+        const float fogEnd=fog.valid ? std::min(fog.end*fogScale,optic.farClip) : optic.farClip;
+        *reinterpret_cast<float*>(camera+0xb0)=fogStart;
         unsigned char background[4]={110,125,140,255};
         g.RwCameraClear(sc,background,1|2|4);
         g.RwCameraBeginUpdate(sc);
@@ -170,7 +197,7 @@ void Render(void* sc,std::uintptr_t cam) {
             if(g.DefinedState)g.DefinedState();
             RenderWorldStableSkyPolys(cam,fog);
             if(g.DefinedState)g.DefinedState();
-            ApplyMobileDistanceFog(fog,fog.start,std::min(fog.end,Far));
+            ApplyMobileDistanceFog(fog,fogStart,fogEnd);
             rear_mirror_render::api.directionalOff();rear_mirror_render::api.ambient();
             DrawEntities();
             g.RwCameraEndUpdate(sc);

@@ -8370,7 +8370,7 @@ void BuildCalibMenu() {
             const int field=r-25;
             const auto profile=calib::SnapshotOptic(type);
             std::snprintf(row,sizeof(row),"%s   < %+.1f %s >",
-                calib::OpticFieldLabel(field),profile.value[field]*.5f,
+                calib::OpticFieldLabel(field),profile.value[field]*.1f,
                 field>=3 && field<=5 ? "DEG" : "CM");
         } else if (r == 24) {
             std::snprintf(row, sizeof(row), "TRACER SMOKE   < %d%% >",
@@ -8406,7 +8406,8 @@ void BuildCalibMenu() {
     }
     if (start < kRows - kWin) PanelText("- MORE -", cx, top + kWin * rowH, 2, 120, 150, 120);
 
-    PanelText("STICK SEL   L2/R2 ADJUST   A ACTION", cx, kPanelH - 18, 2, 150, 185, 150);
+    PanelText(hasOptic ? "L2/R2 ADJUST   HOLD L3: 0.1   A ACTION" :
+              "STICK SEL   L2/R2 ADJUST   A ACTION", cx, kPanelH - 18, 2, 150, 185, 150);
 }
 
 // Upload the current panel into the debug swapchain and describe it as a
