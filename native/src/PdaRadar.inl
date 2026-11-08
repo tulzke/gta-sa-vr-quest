@@ -22,16 +22,18 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
         reinterpret_cast<std::uintptr_t>(quad)!=g.LoadBase+0x5f7ef4u) return;
     constexpr float pixelsPerMetre=400.0f/300.0f;
     const float c=std::cos(heading), s=std::sin(heading);
-    const float halfX=hud::PdaPortrait()?188.0f:308.0f;
-    const float halfY=hud::PdaPortrait()?308.0f:188.0f;
+    const float halfX=hud::PdaPortrait()?176.0f:296.0f;
+    const float halfY=hud::PdaPortrait()?296.0f:176.0f;
     auto project=[&](float dx,float dy,float& x,float& y) {
         // Same world-to-source texture mapping as the tiles, then clamp in the
         // FINAL rotated viewport, and transform back into source coordinates.
         const float sx=dx*pixelsPerMetre, sy=-dy*pixelsPerMetre;
         float vx=c*sx-s*sy, vy=s*sx+c*sy;
+        const bool inside=std::abs(vx)<=halfX && std::abs(vy)<=halfY;
         const float edge=std::max(1.0f,std::max(std::abs(vx)/halfX,std::abs(vy)/halfY));
         vx/=edge; vy/=edge;
         x=400.0f+c*vx+s*vy; y=400.0f-s*vx+c*vy;
+        return inside;
     };
     const unsigned char white[4]={255,255,255,255};
     auto icon=[&](int id,float x,float y,float angle,float radius) {
@@ -63,8 +65,12 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
             if (entry && entryPosition) entryPosition(entry,at);
         } else continue;
         if (!std::isfinite(at.x)||!std::isfinite(at.y)||!std::isfinite(at.z)) continue;
-        float x,y; project(at.x-player.x,at.y-player.y,x,y);
-        if (sprite) icon(sprite,x,y,heading,12.0f);
+        float x,y;
+        const bool inside=project(at.x-player.x,at.y-player.y,x,y);
+        // Nearby map locations belong to the visible map, not a ring of every
+        // known POI. Keep edge indicators for objectives/entities and waypoint.
+        if (!inside && ((flags&4) || (sprite && sprite!=41 && (type==4 || type==5)))) continue;
+        if (sprite) icon(sprite,x,y,heading,24.0f);
         else {
             // Stock radar primitives have a black border and a coloured core.
             std::uint32_t color; std::memcpy(&color,t,4);
@@ -72,13 +78,13 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
             unsigned char rgba[4];
             rgba[0]=color>>24;rgba[1]=color>>16;rgba[2]=color>>8;rgba[3]=255;
             const unsigned char black[4]={0,0,0,255};
-            const Rect border{x-8,y+8,x+8,y-8}, core{x-5,y+5,x+5,y-5};
+            const Rect border{x-16,y+16,x+16,y-16}, core{x-10,y+10,x+10,y-10};
             rect(&border,black); rect(&core,rgba);
         }
     }
     float nx,ny; project(0,100000.0f,nx,ny);
-    icon(4,nx,ny,heading,12.0f); // stock north sprite
+    icon(4,nx,ny,heading,24.0f); // stock north sprite
     float playerHeading=g.FindPlayerHeading?g.FindPlayerHeading(0):heading;
     if (!std::isfinite(playerHeading)) playerHeading=heading;
-    icon(2,400,400,playerHeading,14.0f); // stock player arrow
+    icon(2,400,400,playerHeading,28.0f); // stock player arrow
 }
