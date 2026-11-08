@@ -9998,7 +9998,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
             }
             XrVector3f base, alongAxis, acrossAxis, liftAxis, right, up,
                 normal;
-            if (!BuildHandPanelAnchor(hands[anchorHand], anchorHand, TwoHandVisualState{},
+            if (!BuildHandPanelAnchor(hands[anchorHand], anchorHand, twoHand,
                                       base, alongAxis, acrossAxis, liftAxis,
                                       right, up, normal)) continue;
             if (panel == 1) base = vadd(base, vscale(alongAxis, 0.15f));
