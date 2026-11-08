@@ -1244,6 +1244,18 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     }
 
     holstermarker::Marker markers[holster::POINT_COUNT + 1]{};
+    holstermarker::Frame ammoHolsters{};
+    ammoHolsters.epoch=trackingEpoch;
+    if (!interactionsBlocked) for (int point=0;point<holster::PointCount();++point) {
+        const int slot=holster::PointSlot(point);
+        if (!anchorValid[point] || !holster::PointVisible(point) || !OwnedConfiguredSlot(ped,slot) ||
+            HeldHandForSlotLocked(slot)>=0 || (OccupiedSlotMaskLocked()&(1u<<slot)) ||
+            ammoHolsters.count>=holstermarker::kCapacity) continue;
+        auto& label=ammoHolsters.markers[ammoHolsters.count++];
+        std::memcpy(label.position,anchors[point],sizeof(label.position));
+        label.weaponType=WeaponTypeInSlot(ped,slot);
+    }
+    xr::SetAmmoHolsters(ammoHolsters);
     int markerCount = 0;
     const bool gameplayMarkers = !interactionsBlocked &&
                                  holster::GripMarkersEnabled();

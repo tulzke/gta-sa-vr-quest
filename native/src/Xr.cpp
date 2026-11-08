@@ -117,6 +117,8 @@ HudTextTexture g_breathTextTexture;
 std::atomic<int> g_breathPercent{-1};
 std::atomic<int> g_watchTime{-1};
 std::atomic<float> g_watchHealth{-1}, g_watchArmour{-1};
+std::atomic<int> g_watchWanted{0};
+std::atomic<std::uint64_t> g_ammoHud[64]{};
 HudTextTexture g_signalTextTexture;
 std::atomic<int> g_signalPercent{-1};
 
@@ -633,6 +635,7 @@ bool g_holsterUnavailable[8]{};
 std::uint64_t         g_holsterEpoch{};
 float                 g_holsterEye[3]{}; // one billboard orientation for both eyes
 holstermarker::Frame   g_stereoHolsterMarkers[kStereoSets]{};
+holstermarker::Frame g_ammoHolsters{}, g_stereoAmmoHolsters[kStereoSets]{};
 vehicledoors::MarkerFrame g_npcGrabMarkers{};
 vehicledoors::MarkerFrame g_stereoNpcGrabMarkers[kStereoSets]{};
 vehicledoors::MarkerFrame g_vehicleDoorMarkers{};
@@ -5188,6 +5191,19 @@ void PublishWatch(int hour, int minute, float health, float armour) {
     g_watchArmour.store(std::isfinite(armour) && armour >= 0 ? armour : -1, std::memory_order_relaxed);
 }
 
+void PublishWeaponHud(int wanted, const int types[13], const int clips[13], const int totals[13]) {
+    g_watchWanted.store(std::clamp(wanted,0,6),std::memory_order_relaxed);
+    std::uint64_t next[64]{};
+    for (int i=0;i<13;++i) {
+        const int type=types[i];
+        if (type<16 || type>43 || type==40) continue;
+        const auto clip=static_cast<std::uint64_t>(std::clamp(clips[i],0,9999));
+        const auto total=static_cast<std::uint64_t>(std::clamp(totals[i],0,99999));
+        next[type]=(1ull<<63)|(clip<<32)|total;
+    }
+    for (int i=0;i<64;++i) g_ammoHud[i].store(next[i],std::memory_order_relaxed);
+}
+
 void PublishRadioText(const char* text) {
     std::u16string next;
     if (text) {
@@ -5728,6 +5744,11 @@ void SetHolsterMarkerStates(const holstermarker::Marker* markers, int count,
         g_holsterKind[i] = markers[i].kind;
         g_holsterUnavailable[i]=markers[i].unavailable;
     }
+}
+
+void SetAmmoHolsters(const holstermarker::Frame& frame) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_ammoHolsters=frame;
 }
 
 void SetParachuteToggles(const float positions[2][3],
@@ -6277,6 +6298,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         // Capture markers with the eye textures containing their socket models.
         // The compositor reuses this immutable batch for both eyes.
         auto& markerFrame = g_stereoHolsterMarkers[ws];
+        g_stereoAmmoHolsters[ws]=g_ammoHolsters;
         markerFrame.count = g_holsterCount;
         markerFrame.epoch = g_holsterEpoch;
         std::memcpy(markerFrame.eye, g_holsterEye, sizeof(markerFrame.eye));
@@ -9554,6 +9576,7 @@ GLuint g_wristProg = 0, g_wristVbo = 0, g_wristSampler = 0;
 GLint  g_wristMvpLoc = -1, g_wristTexLoc = -1, g_wristOpacityLoc = -1;
 GLint g_wristModeLoc = -1, g_watchDataLoc = -1;
 GLint g_pdaHeadingLoc = -1, g_pdaPortraitLoc = -1;
+GLint g_wantedLoc=-1, g_ammoLoc=-1;
 
 void EnsureWristProgram() {
     if (g_wristProg) return;
@@ -9569,15 +9592,16 @@ void EnsureWristProgram() {
     const char* fs = "#version 300 es\n"
                      "precision mediump float;\n"
                      "in vec2 vUV;\n"
-                     "uniform sampler2D uTex; uniform float uOpacity; uniform int uMode; uniform vec4 uWatch; uniform float uHeading; uniform float uPortrait; out vec4 o;\n"
+                     "uniform sampler2D uTex; uniform float uOpacity; uniform int uMode; uniform vec4 uWatch; uniform float uHeading; uniform float uPortrait; uniform int uWanted; uniform ivec2 uAmmo; out vec4 o;\n"
                      "float seg(vec2 p, vec2 a, vec2 b) { vec2 d=b-a; float t=clamp(dot(p-a,d)/dot(d,d),0.0,1.0); return 1.0-smoothstep(0.025,0.045,length(p-a-t*d)); }\n"
                      "float digit(vec2 p,int n) { int mask[10]=int[10](63,6,91,79,102,109,125,7,127,111); if(n<0 || n>9) return seg(p,vec2(.15,.5),vec2(.55,.5)); int m=mask[n]; float v=0.0;\n"
                      "if((m&1)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.55,.1))); if((m&2)!=0) v=max(v,seg(p,vec2(.55,.1),vec2(.55,.5))); if((m&4)!=0) v=max(v,seg(p,vec2(.55,.5),vec2(.55,.9))); if((m&8)!=0) v=max(v,seg(p,vec2(.15,.9),vec2(.55,.9))); if((m&16)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.15,.9))); if((m&32)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.15,.5))); if((m&64)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.55,.5))); return v; }\n"
                      "void main(){\n"
+                     "if(uMode==4){ vec2 p=vec2(vUV.x*9.0,vUV.y); int i=int(floor(p.x)); float ink=0.0; if(i==4){ink=seg(vec2(fract(p.x),p.y),vec2(.55,.15),vec2(.15,.85));} else {int v=i<4?uAmmo.x:uAmmo.y; int k=i<4?3-i:8-i; int divisor=k==3?1000:k==2?100:k==1?10:1; if(v>=divisor||k==0) ink=digit(vec2(fract(p.x),p.y),(v/divisor)%10);} o=vec4(mix(vec3(.015),vec3(1.0),ink),uOpacity);return;}\n"
                      "  if(uMode==1){ vec2 p=vUV-vec2(.5); float r=length(p); if(r>.49) discard; vec3 col=vec3(.045,.055,.065); if(r>.455) col=vec3(.28,.30,.32); float angle=mod(atan(p.x,-p.y)+6.2831853,6.2831853)/6.2831853;\n"
                      "  if(r>.375 && r<.415) { col=vec3(.16,.035,.035); if(uWatch.z>=0.0 && angle<clamp(uWatch.z/100.0,0.0,1.0)) col=vec3(.9,.08,.08); if(uWatch.z>100.0 && angle<clamp((uWatch.z-100.0)/100.0,0.0,1.0)) col=vec3(.40,.01,.01); }\n"
                      "  if(r>.425 && r<.455) { col=vec3(.12); if(uWatch.w>=0.0 && angle<clamp(uWatch.w/100.0,0.0,1.0)) col=vec3(.75); if(uWatch.w>100.0 && angle<clamp((uWatch.w-100.0)/100.0,0.0,1.0)) col=vec3(.32); }\n"
-                     "  vec2 q=vec2((vUV.x-.17)*7.5,(vUV.y-.425)*6.0); int i=int(floor(q.x)); int h=int(uWatch.x), m=int(uWatch.y); int n=-1; if(i==0 && h>=0) n=h/10; if(i==1 && h>=0) n=h-10*(h/10); if(i==3 && m>=0) n=m/10; if(i==4 && m>=0) n=m-10*(m/10); float d=0.0; if(i==0||i==1||i==3||i==4) d=digit(vec2(fract(q.x),q.y),n); if(i==2) d=max(1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.35))),1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.65)))); col=mix(col,vec3(.92),d); o=vec4(col,uOpacity); return; }\n"
+                     "  vec2 q=vec2((vUV.x-.17)*7.5,(vUV.y-.425)*6.0); int i=int(floor(q.x)); int h=int(uWatch.x), m=int(uWatch.y); int n=-1; if(i==0 && h>=0) n=h/10; if(i==1 && h>=0) n=h-10*(h/10); if(i==3 && m>=0) n=m/10; if(i==4 && m>=0) n=m-10*(m/10); float d=0.0; if(i==0||i==1||i==3||i==4) d=digit(vec2(fract(q.x),q.y),n); if(i==2) d=max(1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.35))),1.0-smoothstep(.025,.05,length(vec2(fract(q.x)-.3,q.y-.65)))); col=mix(col,vec3(.92),d); if(uWanted>0){for(int j=0;j<6;++j){vec2 z=vUV-vec2(.26+.096*float(j),.70); float a=atan(z.x,-z.y); float t=abs(fract((a+3.14159265)/6.2831853*5.0)*2.0-1.0); float bound=mix(.016,.036,t); float star=1.0-smoothstep(bound-.001,bound+.001,length(z)); col=mix(col,j<uWanted?vec3(1.0,.8,.25):vec3(.18),star);}} o=vec4(col,uOpacity); return; }\n"
                      "  if(uMode==2){ o=vec4(.055,.065,.07,uOpacity); return; }\n"
                      "  if(uMode==3){ vec2 p=vUV-vec2(.5); vec2 dims=mix(vec2(.8,.5),vec2(.5,.8),uPortrait); vec2 q=p*dims; float c=cos(uHeading), s=sin(uHeading); vec2 uv=vec2(.5)+vec2(c*q.x+s*q.y,-s*q.x+c*q.y); o=vec4(texture(uTex,uv).rgb,uOpacity); return; }\n"
                      "  vec4 c = texture(uTex, vUV);\n"
@@ -9606,6 +9630,8 @@ void EnsureWristProgram() {
     g_watchDataLoc = glGetUniformLocation(g_wristProg, "uWatch");
     g_pdaHeadingLoc = glGetUniformLocation(g_wristProg, "uHeading");
     g_pdaPortraitLoc = glGetUniformLocation(g_wristProg, "uPortrait");
+    g_wantedLoc=glGetUniformLocation(g_wristProg,"uWanted");
+    g_ammoLoc=glGetUniformLocation(g_wristProg,"uAmmo");
     glGenBuffers(1, &g_wristVbo);
     glGenSamplers(1, &g_wristSampler);
     glSamplerParameteri(g_wristSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -9754,6 +9780,7 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
     glUniform1f(g_wristOpacityLoc, opacity);
     glUniform1i(g_wristModeLoc, watch ? 1 : pda ? 3 : 0);
+    if (watch) glUniform1i(g_wantedLoc,g_watchWanted.load(std::memory_order_relaxed));
     if (pda) glUniform1f(g_pdaHeadingLoc,pdaHeading);
     if (pda) glUniform1f(g_pdaPortraitLoc,hud::PdaPortrait()?1.0f:0.0f);
     if (pda) glBindTexture(GL_TEXTURE_2D, pdaTex);
@@ -9959,6 +9986,35 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
         logged = true;
         LOGI("[wrist] panels active (radar=LEFT/dash-left, status=RIGHT)");
     }
+}
+
+void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
+                   int type, float width) {
+    if (type<0 || type>=64 || !hud::ShouldRenderWristHud()) return;
+    const auto ammo=g_ammoHud[type].load(std::memory_order_relaxed);
+    if (!(ammo&(1ull<<63))) return;
+    const int clip=static_cast<int>((ammo>>32)&0x7fffffffu);
+    const int total=static_cast<int>(ammo&0xffffffffu);
+    EnsureWristProgram(); if (!g_wristProg) return;
+    const auto right=vscale(QuatRotate(eye.orientation,{1,0,0}),width*.5f);
+    const auto up=vscale(QuatRotate(eye.orientation,{0,1,0}),width*.1f);
+    const auto tl=vadd(vsub(centre,right),up), tr=vadd(vadd(centre,right),up);
+    const auto bl=vsub(vsub(centre,right),up), br=vsub(vadd(centre,right),up);
+    const float verts[]={tl.x,tl.y,tl.z,0,0, bl.x,bl.y,bl.z,0,1,
+                         tr.x,tr.y,tr.z,1,0, br.x,br.y,br.z,1,1};
+    glUseProgram(g_wristProg); glUniformMatrix4fv(g_wristMvpLoc,1,GL_FALSE,mvp);
+    glUniform1i(g_wristModeLoc,4); glUniform1f(g_wristOpacityLoc,1);
+    glUniform2i(g_ammoLoc,std::min(clip,9999),std::clamp(total-clip,0,9999));
+    glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);glDisable(GL_CULL_FACE);
+    glBindBuffer(GL_ARRAY_BUFFER,g_wristVbo);
+    glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,5*sizeof(float),nullptr);
+    glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,5*sizeof(float),reinterpret_cast<void*>(3*sizeof(float)));
+    glBufferData(GL_ARRAY_BUFFER,sizeof(verts),verts,GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+    glDisableVertexAttribArray(0);glDisableVertexAttribArray(1);
+    glDepthMask(GL_TRUE);glDisable(GL_BLEND);
 }
 
 // Procedural per-eye sniper mask. The target port does not yet expose a safe
@@ -12032,7 +12088,8 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const vehicledoors::MarkerFrame& bakedNpcGrabs,
                      const vehicledoors::MarkerFrame& bakedTestArea,
                      const radialholster::Frame& bakedRadial,
-                     unsigned int hudSourceTex, unsigned int pdaSourceTex, float pdaHeading) {
+                     unsigned int hudSourceTex, unsigned int pdaSourceTex, float pdaHeading,
+                     const int handTypes[2], const holstermarker::Frame& ammoHolsters) {
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
     {
@@ -12239,6 +12296,27 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,false,true);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,true);
     if (!scope.active) DrawRadialHolsterMenu(mvp,bakedRadial);
+    if (trackedVisuals && hud::ShouldRenderWristHud()) {
+        const auto lower=QuatRotate(rp.orientation,{0,-.05f,0});
+        for (int h=0;h<2;++h) if ((weaponHandMask&(1u<<h)) && bakedHands[h].valid) {
+            XrVector3f at{bakedHands[h].gripPos[0],bakedHands[h].gripPos[1],bakedHands[h].gripPos[2]};
+            if (TwoHandStateUsable(bakedTwoHand)) at=TwoHandRotatePoint(bakedTwoHand,at);
+            DrawAmmoLabel(mvp,rp,vadd(at,lower),handTypes[h],.11f);
+        }
+        if (ammoHolsters.Usable(true,bakedHolsters.epoch)) for (int i=0;i<ammoHolsters.count;++i) {
+            const auto& label=ammoHolsters.markers[i];
+            XrVector3f at{label.position[0],label.position[1],label.position[2]};
+            DrawAmmoLabel(mvp,rp,vadd(at,lower),label.weaponType,.10f);
+        }
+        if (bakedRadial.visible) for (int i=0;i<bakedRadial.count;++i) {
+            const float a=6.28318530718f*i/bakedRadial.count;
+            XrVector3f at{bakedRadial.origin[0],bakedRadial.origin[1],bakedRadial.origin[2]};
+            const XrVector3f right{bakedRadial.right[0],bakedRadial.right[1],bakedRadial.right[2]};
+            const XrVector3f up{bakedRadial.up[0],bakedRadial.up[1],bakedRadial.up[2]};
+            at=vadd(at,vadd(vscale(right,.105f*std::sin(a)),vscale(up,.105f*std::cos(a)-.038f)));
+            DrawAmmoLabel(mvp,rp,at,bakedRadial.weaponTypes[i],.065f);
+        }
+    }
     // Riser controls are their own world-space interaction. They must remain
     // visible even when the selected hand preset hides general tracked-hand
     // overlays; otherwise the player has no handle to grab under the canopy.
@@ -12641,7 +12719,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed));
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set]);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease
