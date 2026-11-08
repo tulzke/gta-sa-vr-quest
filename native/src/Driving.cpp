@@ -235,6 +235,8 @@ bool g_wheelSeatLocalValid{};
 double g_wheelSeatStableSince{0.0};
 bool g_grabbed[2]{};
 bool g_gripDown[2]{};
+float g_rimGripAngle[2]{};
+int g_rimOwnershipMask{};
 float g_grabReferenceAngle[2]{};
 float g_continuousAngle[2]{};
 bool g_angleValid[2]{};
@@ -924,6 +926,7 @@ void EnsureInit() { std::call_once(g_initOnce, Load); }
 
 void ClearGrabStateLocked() {
     g_hornPressed.store(false,std::memory_order_release);
+    g_rimOwnershipMask=0;
     for (int hand=0; hand<2; ++hand) {
         g_grabbed[hand]=false; g_gripDown[hand]=false;
         g_grabReferenceAngle[hand]=0.0f; g_continuousAngle[hand]=0.0f;
@@ -1723,8 +1726,15 @@ void FillHandleVisuals(WheelVisualState* visual) {
         if (found!=g_modelCalibration.end()) calibration=found->second;
     }
     for (int hand=0; hand<2; ++hand) {
-        V3 pos=center+wheelRight*((hand==0?-1.0f:1.0f)*visual->radius);
+        const float a=visual->rimGrip[hand]?visual->rimAngle[hand]:
+            (hand==0?3.14159265358979323846f:0.0f);
+        const V3 radial=wheelRight*std::cos(a)+wheelUp*std::sin(a);
+        V3 pos=center+radial*visual->radius;
         V3 handleRight=wheelRight,handleUp=wheelUp,handleForward=normal;
+        if (visual->rimGrip[hand]&&!visual->bike) {
+            handleRight=radial*(hand==0?-1.0f:1.0f);
+            handleUp=Normalized(Cross(handleRight,normal));
+        }
         if (visual->bike) {
             // Match the Quest VC handlebar grip frame: palms face inward and
             // both hands point along the turned bike heading.
@@ -4658,6 +4668,24 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
     const unsigned int weaponHands = physicalweapon::HeldHandMaskRelaxed() | vehicledoors::ClaimedHands();
     unsigned ignitionOccupied=weaponHands;
     for (int h=0;h<2;++h) if (g_grabbed[h]) ignitionOccupied|=1u<<h;
+    const bool circular=!visual.bike&&!visual.yoke;
+    const float previousWheelAngle=(g_visual.active&&g_visual.bike==visual.bike)?g_visual.physicalAngle:0.0f;
+    visual.physicalAngle=previousWheelAngle;
+    if (circular) for (int hand=0;hand<2;++hand) {
+        const V3 p{poses[hand].gripPos[0],poses[hand].gripPos[1],poses[hand].gripPos[2]};
+        const V3 d=p-center;
+        const float x=Dot(d,right), y=Dot(d,up);
+        const float planar=std::sqrt(x*x+y*y);
+        if (!poses[hand].valid||!std::isfinite(planar)||planar<0.01f) continue;
+        float a=WrapAngle(std::atan2(y,x)-previousWheelAngle);
+        constexpr float sticky=3.14159265358979323846f/6.0f;
+        if (std::abs(WrapAngle(a))<=sticky) a=0.0f;
+        else if (std::abs(WrapAngle(a-3.14159265358979323846f))<=sticky)
+            a=3.14159265358979323846f;
+        visual.rimGrip[hand]=true;
+        visual.rimAngle[hand]=g_grabbed[hand]?g_rimGripAngle[hand]:a;
+    }
+    FillHandleVisuals(&visual);
     UpdateCockpitControls(visual,activeVehicle,input,poses,ignitionOccupied,true);
     for (int hand=0;hand<2;++hand) {
         positions[hand]={poses[hand].gripPos[0],poses[hand].gripPos[1],poses[hand].gripPos[2]};
@@ -4677,6 +4705,7 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
             input.grip[hand]>=0.65f&&
             !g_gripDown[hand]&&distance<=grabDistance) {
             g_grabbed[hand]=true; justGrabbed[hand]=true;
+            if (circular) g_rimGripAngle[hand]=visual.rimAngle[hand];
         }
         if (input.grip[hand]<=0.30f) g_gripDown[hand]=false;
         else if (input.grip[hand]>=0.65f) g_gripDown[hand]=true;
@@ -4781,7 +4810,29 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
             g_grabReferenceAngle[hand]=WrapAngle(angle-previousAngle);
             g_continuousAngle[hand]=previousAngle; g_angleValid[hand]=true;
         }
-        if (left&&rightGrabbed) {
+        if (circular) {
+            float sum=0.0f; int count=0;
+            const int mask=(left?1:0)|(rightGrabbed?2:0);
+            if (mask!=g_rimOwnershipMask) {
+                for (int hand=0;hand<2;++hand) g_angleValid[hand]=false;
+                g_rimOwnershipMask=mask;
+            }
+            for (int hand=0;hand<2;++hand) if (g_grabbed[hand]&&poseValid[hand]) {
+                const V3 d=positions[hand]-center;
+                const float x=Dot(d,right), y=Dot(d,up);
+                if (x*x+y*y<0.0025f) { g_angleValid[hand]=false; continue; }
+                const float raw=std::atan2(y,x);
+                if (!g_angleValid[hand]) {
+                    g_grabReferenceAngle[hand]=WrapAngle(raw-previousAngle);
+                    g_continuousAngle[hand]=previousAngle; g_angleValid[hand]=true;
+                }
+                const float angle=UnwrapAngle(WrapAngle(raw-g_grabReferenceAngle[hand]),g_continuousAngle[hand]);
+                g_continuousAngle[hand]=angle;
+                sum+=UnwrapAngle(WrapAngle(angle),previousAngle); ++count;
+            }
+            steeringAngle=count?sum/count:previousAngle;
+            g_twoHandAngleValid=false;
+        } else if (left&&rightGrabbed) {
             const float chordAngle=PlanarAngle(positions[1]-positions[0],right,up);
             if (!g_twoHandAngleValid||justGrabbed[0]||justGrabbed[1]) {
                 g_twoHandReferenceAngle=WrapAngle(chordAngle-previousAngle);
@@ -4927,7 +4978,8 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
         // In IMMERSIVE the player must be able to see where to reach before the
         // controller is already close. Keep both cyan sockets visible whenever
         // handle highlights are enabled; engaged sockets turn green in Xr.
-        visual.markerVisible[hand]=g_highlights.load();
+        visual.markerVisible[hand]=g_highlights.load()&&(!circular ||
+            (visual.rimGrip[hand]&&!g_grabbed[hand]&&visual.interactionTarget[hand]==3));
     }
     FillHandleVisuals(&visual); g_visual=visual;
 

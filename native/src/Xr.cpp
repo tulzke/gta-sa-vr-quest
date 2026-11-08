@@ -11212,14 +11212,14 @@ void DrawImmersiveDrivingWheel(const float* mvp,
     const XrVector3f rightHandle{wheel.handlePosition[1][0],
                                  wheel.handlePosition[1][1],
                                  wheel.handlePosition[1][2]};
-    const XrVector3f wheelRight = vnorm(vsub(rightHandle,leftHandle));
+    const XrVector3f normal = vnorm({wheel.normal[0],wheel.normal[1],
+                                     wheel.normal[2]});
+    const XrVector3f wheelRight = wheel.bike ? vnorm(vsub(rightHandle,leftHandle)) :
+        vnorm(RotateAroundAxis({wheel.right[0],wheel.right[1],wheel.right[2]},normal,-wheel.physicalAngle));
     const XrVector3f wheelUp = wheel.bike
         ? vnorm({wheel.handleForward[1][0],wheel.handleForward[1][1],
                  wheel.handleForward[1][2]})
-        : vnorm({wheel.handleUp[1][0],wheel.handleUp[1][1],
-                 wheel.handleUp[1][2]});
-    const XrVector3f normal = vnorm({wheel.normal[0],wheel.normal[1],
-                                     wheel.normal[2]});
+        : vnorm(RotateAroundAxis({wheel.up[0],wheel.up[1],wheel.up[2]},normal,-wheel.physicalAngle));
     // Vice City renders a solid virtual rim only for cars. Bike controls are
     // represented by the real model and optional grip sockets; drawing our own
     // bar/stem produced the floating "stick" reported in SA.
@@ -11291,6 +11291,23 @@ void DrawImmersiveDrivingWheel(const float* mvp,
     // sockets are green; reachable but free sockets use the VC cyan highlight.
     for (int hand=0; hand<2; ++hand) {
         if (!wheel.markerVisible[hand]) continue;
+        if (!wheel.bike && !wheel.yoke && wheel.rimGrip[hand]) {
+            const float a=wheel.rimAngle[hand];
+            const float half=0.09f;
+            const XrVector3f start=vadd(center,vadd(vscale(wheelRight,std::cos(a-half)*wheel.radius),vscale(wheelUp,std::sin(a-half)*wheel.radius)));
+            const XrVector3f end=vadd(center,vadd(vscale(wheelRight,std::cos(a+half)*wheel.radius),vscale(wheelUp,std::sin(a+half)*wheel.radius)));
+            const XrVector3f delta=vsub(end,start);
+            const float length=std::sqrt(vdot(delta,delta));
+            if (length>0.001f) {
+                float vertices[24]{}; unsigned short indices[36]{};
+                int vc=0,ic=0;
+                AppendDrivingBox(vertices,vc,indices,ic,vscale(vadd(start,end),0.5f),
+                    vscale(delta,1.f/length),vnorm(vsub(vscale(vadd(start,end),0.5f),center)),normal,
+                    length*0.52f,0.0145f,0.0125f);
+                DrawDrivingBoxes(mvp,vertices,vc,indices,ic,1.f,1.f,1.f);
+            }
+            continue;
+        }
         if(wheel.bike){
             vehicledoors::Marker marker;
             marker.position={wheel.handlePosition[hand][0],wheel.handlePosition[hand][1],wheel.handlePosition[hand][2]};
