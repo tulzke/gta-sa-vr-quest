@@ -20471,6 +20471,43 @@ void RenderPdaMap() {
         constexpr float overlap=0.5f;
         draw(x,y,{left-overlap,top+size+overlap,left+size+overlap,top-overlap},1.0f);
     }
+
+    // Retail blip code inlines its transforms, so run its frontend projection
+    // with a scoped square map aligned to the north-up PDA texture. Restore
+    // every shared field before the normal game HUD can run again.
+    using DrawBlips = void (*)(float);
+    static auto blips = reinterpret_cast<DrawBlips>(dlsym(handle,"_ZN6CRadar9DrawBlipsEf"));
+    static auto* menu = static_cast<std::uint8_t*>(dlsym(handle,"gMobileMenu"));
+    static auto* origin = static_cast<float*>(dlsym(handle,"_ZN6CRadar16vec2DRadarOriginE"));
+    static auto* range = static_cast<float*>(dlsym(handle,"_ZN6CRadar12m_radarRangeE"));
+    if (!blips || !menu || !origin || !range || !g.FindPlayerPed(0) ||
+        reinterpret_cast<std::uintptr_t>(blips) != g.LoadBase+0x518e44u ||
+        reinterpret_cast<std::uintptr_t>(menu) != g.LoadBase+0xd0db20u ||
+        reinterpret_cast<std::uintptr_t>(origin) != g.LoadBase+0xa69620u ||
+        reinterpret_cast<std::uintptr_t>(range) != g.LoadBase+0xa69628u) return;
+    auto* cachedCos = reinterpret_cast<float*>(g.LoadBase+0xa6987cu);
+    auto* cachedSin = reinterpret_cast<float*>(g.LoadBase+0xa69880u);
+    auto* legend = reinterpret_cast<std::uint8_t*>(g.LoadBase+0xa66530u);
+    auto* legendCount = reinterpret_cast<std::uint8_t*>(g.LoadBase+0xa66724u);
+    std::uint8_t savedMenu[0x18], savedLegend[0x1f4], savedCount[2];
+    std::memcpy(savedMenu,menu+0x78,sizeof(savedMenu));
+    std::memcpy(savedLegend,legend,sizeof(savedLegend));
+    std::memcpy(savedCount,legendCount,sizeof(savedCount));
+    const float savedOrigin[2]={origin[0],origin[1]};
+    const float savedRange=*range, savedCos=*cachedCos, savedSin=*cachedSin;
+    const float projection=400.0f;
+    std::memcpy(menu+0x78,&projection,sizeof(float));
+    std::memcpy(menu+0x7c,&projection,sizeof(float));
+    std::memcpy(menu+0x80,&projection,sizeof(float));
+    menu[0x8c]=1;
+    origin[0]=player.x; origin[1]=player.y; *range=300.0f;
+    *cachedCos=1.0f; *cachedSin=0.0f;
+    blips(-1.0f);
+    origin[0]=savedOrigin[0]; origin[1]=savedOrigin[1]; *range=savedRange;
+    *cachedCos=savedCos; *cachedSin=savedSin;
+    std::memcpy(menu+0x78,savedMenu,sizeof(savedMenu));
+    std::memcpy(legend,savedLegend,sizeof(savedLegend));
+    std::memcpy(legendCount,savedCount,sizeof(savedCount));
 }
 
 bool PrepareRadialIconRasters() {
