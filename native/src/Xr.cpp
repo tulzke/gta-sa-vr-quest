@@ -10017,7 +10017,8 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
 }
 
 void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
-                   int type, float width, bool backdrop=true, const WeaponAmmoPose* weaponPose=nullptr) {
+                   int type, float width, bool backdrop=true, const WeaponAmmoPose* weaponPose=nullptr,
+                   int weaponHand=1) {
     if (type<0 || type>=64 || (!hud::ShouldRenderWristHud() && !g_calibActive.load(std::memory_order_relaxed))) return;
     const auto ammo=g_ammoHud[type].load(std::memory_order_relaxed);
     if (!(ammo&(1ull<<63))) return;
@@ -10036,7 +10037,9 @@ void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
         centre=vadd(centre,vadd(vscale(axisRight,.08f+settings.alongMm*.001f),
                    vadd(vscale(axisUp,.06f+settings.liftMm*.001f),vscale(side,.04f+settings.acrossMm*.001f))));
         constexpr float radians=.01745329252f;
-        RotateWristAxes(side,axisRight,settings.yawDeg*radians);
+        // Weapon calibration is authored on the right; mirror its yaw for the
+        // left-hand weapon basis while keeping the saved value unchanged.
+        RotateWristAxes(side,axisRight,settings.yawDeg*radians*(weaponHand==0?-1.0f:1.0f));
         RotateWristAxes(axisUp,side,settings.pitchDeg*radians);
         RotateWristAxes(axisRight,axisUp,settings.rollDeg*radians);
         width*=settings.scaleTenths/10.0f;
@@ -12346,7 +12349,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     if (trackedVisuals && (hud::ShouldRenderWristHud() || (g_calibActive.load(std::memory_order_relaxed) && g_calibGroup.load()==weaponmenu::AMMO))) {
         const auto lower=QuatRotate(rp.orientation,{0,-.05f,0});
         for (int h=0;h<2;++h) if ((weaponHandMask&(1u<<h)) && ammoPoses[h].valid) {
-            DrawAmmoLabel(mvp,rp,{},handTypes[h],.11f,true,&ammoPoses[h]);
+            DrawAmmoLabel(mvp,rp,{},handTypes[h],.11f,true,&ammoPoses[h],h);
         }
         if (ammoHolsters.Usable(true,bakedHolsters.epoch)) for (int i=0;i<ammoHolsters.count;++i) {
             const auto& label=ammoHolsters.markers[i];
