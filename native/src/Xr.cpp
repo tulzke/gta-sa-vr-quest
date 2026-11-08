@@ -8340,9 +8340,11 @@ void BuildCalibMenu() {
     PanelText(hdr, cx, 44, 2, 255, 200, 120);
     PanelText("LEFT USES THE SAME MIRRORED PROFILE", cx, 64, 2, 145, 185, 205);
 
-    // 26 rows (0..25) in a scrolling window that keeps the selection centred, so the
+    // A scrolling window keeps selection centred, including optional optic rows, so the
     // fixed panel stays readable at arm's length instead of shrinking the font.
-    constexpr int kRows = 26, kWin = 9;
+    const bool hasOptic=weaponoptic::Supported(type);
+    const int kRows = hasOptic ? 35 : 26;
+    constexpr int kWin = 9;
     int start = sel - kWin / 2;
     if (start < 0)              start = 0;
     if (start > kRows - kWin)   start = kRows - kWin;
@@ -8355,8 +8357,16 @@ void BuildCalibMenu() {
         if (r == sel) PanelFillRect(18, y - 3, kPanelW - 18, y + 18, 120, 40, 110, 235);
         const int c = (r == sel) ? 255 : 200;
         char row[64];
-        if (r == 25) {
+        if (r == kRows-1) {
             std::snprintf(row, sizeof(row), "BACK");
+        } else if (hasOptic && r == 33) {
+            std::snprintf(row,sizeof(row),"RESET SCOPE   < PRESS A >");
+        } else if (hasOptic && r >= 25) {
+            const int field=r-25;
+            const auto profile=calib::SnapshotOptic(type);
+            std::snprintf(row,sizeof(row),"%s   < %+.1f %s >",
+                calib::OpticFieldLabel(field),profile.value[field]*.5f,
+                field>=3 && field<=5 ? "DEG" : "CM");
         } else if (r == 24) {
             std::snprintf(row, sizeof(row), "TRACER SMOKE   < %d%% >",
                           vrcam::GetTracerSmokeSpreadPercent());
@@ -8707,7 +8717,7 @@ LaserRay BuildCalibratedLaserRay(const HandPose& pose, int hand,
                                  const TwoHandVisualState& twoHand) {
     LaserRay ray{};
     const int weaponType = calib::ActiveWeapon();
-    const bool firearm = (weaponType >= 22 && weaponType <= 34) || weaponType == 38;
+    const bool firearm = (weaponType >= 22 && weaponType <= 35) || weaponType == 38;
     if (!pose.valid || !pose.aimValid || !firearm ||
         !calib::LaserVisibleForWeapon(weaponType) ||
         hand < 0 || hand > 1 ||

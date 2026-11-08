@@ -2942,6 +2942,8 @@ bool CapturedTwoHandUsable(const xr::TwoHandVisualState& state, int hand) {
     return Finite(axis) && Finite(pivot) && Dot(axis, axis) >= 1.0e-6f;
 }
 
+#include "WeaponOpticFrame.inl"
+
 // Build the laser/shot from the weapon model frame, not directly from the raw
 // OpenXR AIM space.  With the authored base adjustment the CMatrix +X axis is
 // the barrel, +Y is the top of the gun, and +Z is its lateral axis.  Preserve
@@ -4939,7 +4941,7 @@ void OnUpdatePads() {
     float mappedMoveX=0.0f,mappedMoveY=0.0f;
     float mappedTurnX=0.0f,mappedTurnY=0.0f;
     locomotion::MapGameplaySticks(
-        in.leftStick[0],in.leftStick[1],in.rightStick[0],in.rightStick[1],
+        in.leftStick[0],in.leftStick[1],in.rightStick[0],scopeaim::ConsumesZoomInput() ? 0.f : in.rightStick[1],
         &mappedMoveX,&mappedMoveY,&mappedTurnX,&mappedTurnY);
 
     // Always advance the physical Y latch, including theater/menu/blocked frames.
@@ -5110,7 +5112,7 @@ void OnUpdatePads() {
     // only: vehicles keep their whole stick vocabulary (Hydra nozzles!).
     const bool dpadModeNow =
         (in.thumbrest[0] || in.thumbrest[1]) && vehicle == nullptr &&
-        !(scopeaim::Snapshot().active && scopeaim::Snapshot().weaponType == 43);
+        !scopeaim::ConsumesZoomInput();
     static bool dpadModeWas = false;
     if (dpadModeNow != dpadModeWas) {
         dpadModeWas = dpadModeNow;
@@ -18081,6 +18083,7 @@ void DrawNpcWeaponSnapshots() {
 }
 
 namespace rear_mirror_render { void DrawSurface(); }
+namespace weapon_optic_render { void DrawSurfaces(); }
 void OnCloudsRender() {
     if (!g_renderingStereoEye && g_origCloudsRender) {
         g_origCloudsRender();                              // retain vanilla non-VR/reflection passes
@@ -18109,6 +18112,7 @@ void OnCloudsRender() {
         // Retail RenderScene has now restarted this eye camera with its final
         // near plane. Share that exact depth projection with the cabin mesh.
         rear_mirror_render::DrawSurface();
+        weapon_optic_render::DrawSurfaces();
     }
     for (int i = 0; i < g_pendingWeaponCount; ++i)
         if (g_pendingWeapons[i].clump)
@@ -21000,6 +21004,7 @@ private:
 };
 
 #include "RearMirrorRender.inl"
+#include "WeaponOpticRender.inl"
 
 void OnRenderScene(bool underwater) {
     perf::NotifyRenderSceneEntry();
@@ -21275,6 +21280,7 @@ void OnRenderScene(bool underwater) {
         driving::GetActiveVehicleType()==driving::VEHICLE_CAR && !driving::ThirdPersonViewActive())
         closeEnginePreFinish();
     rear_mirror_render::Prepare(base);
+    weapon_optic_render::ResetFrame();
     unsigned char black[4] = {0, 0, 0, 255};
 
     // Build one eye-independent draw list from the physical ownership state. A
@@ -21434,6 +21440,10 @@ void OnRenderScene(bool underwater) {
             }
             void* heldClump = WeaponModelClumpForSlot(slot, weaponType);
             queueWeapon(heldClump, heldMatrix);
+            if(heldClump) {
+                if(weaponoptic::Supported(weaponType) && !weapon_optic_render::HasRaster(hand)) closeEnginePreFinish();
+                weapon_optic_render::Prepare(hand,weaponType,heldMatrix);
+            }
             if (heldClump) {
                 renderedHeldMask |= 1u << hand;
                 renderedWeaponTypes[hand] = weaponType;
@@ -21597,6 +21607,7 @@ void OnRenderScene(bool underwater) {
     }
     tA = NowMs(); g.RwCameraEndUpdate(sc); tEnd += NowMs() - tA;   // end the caller's surface pass
     rear_mirror_render::Render(sc,camU);
+    weapon_optic_render::Render(sc,camU);
 
     // Pull the near clip in for the eye pass so the close weapon grip isn't clipped
     // (the game default clips it -> a hole that shows the sky through). Restore after.
@@ -21818,6 +21829,7 @@ void OnRenderScene(bool underwater) {
         RenderWorldStableSkyPolys(camU, mobileFog);
         graphicsfx::RenderSkyEye(sc, e);
         if (!g_cloudsHooked) rear_mirror_render::DrawSurface();
+        if (!g_cloudsHooked) weapon_optic_render::DrawSurfaces();
         tSky[e] += NowMs() - tA;
         // Opaque path: the CClouds::Render hook (OnCloudsRender) suppresses the
         // flat eye backdrop and draws the weapon BEFORE world geometry. Fallback
@@ -29991,6 +30003,26 @@ bool GetWeaponFireSegment(int hand, int weaponType,
 bool GetWeaponFireRay(int hand, int weaponType,
                       float originOut[3], float directionOut[3]) {
     return GetWeaponFireSegment(hand, weaponType, originOut, directionOut, nullptr);
+}
+
+bool GetWeaponOpticRay(int hand,int type,float origin[3],float direction[3]) {
+    if(hand<0 || hand>1 || !origin || !direction || !g_stereoActive.load(std::memory_order_relaxed)) return false;
+    xr::HandPose hands[2]{};
+    if(!physicalweapon::GetHandPosesSnapshot(hands)) return false;
+    RwMat matrix{};
+    if(!HandWeaponMatrixForPoseCalibrated(hand,type,hands[hand],calib::Snapshot(1,type),matrix)) return false;
+    physicalweapon::TrackingPose pose{};
+    float pivot[3]{},axis[3]{},angle{};
+    if(physicalweapon::GetTwoHandTransformTracking(hand,pivot,axis,&angle)) {
+        if(!WeaponMatrixToTracking(matrix,pose)) return false;
+        ApplyTwoHandRotation(pose,pivot,axis,angle);
+        if(!TrackingWeaponMatrix(pose,matrix)) return false;
+    }
+    WeaponOpticFrame frame{};
+    if(!BuildWeaponOpticFrame(type,matrix,frame)) return false;
+    origin[0]=frame.camera.pos.x;origin[1]=frame.camera.pos.y;origin[2]=frame.camera.pos.z;
+    direction[0]=frame.camera.forward.x;direction[1]=frame.camera.forward.y;direction[2]=frame.camera.forward.z;
+    return true;
 }
 
 bool GetWeaponRayTracking(const xr::HandPose& renderedPose, int hand,

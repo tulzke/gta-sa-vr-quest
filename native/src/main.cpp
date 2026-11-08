@@ -1256,8 +1256,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         case PG_CALIB: {
             // 26 rows: 0..18 fields, 19 WEAPON LASER (global), 20 LASER BEAM
             // mode, 21 LOCK LASER, 22 WEAPON RECOIL, 23 TRACER COLOR,
-            // 24 TRACER SMOKE SPREAD, 25 BACK.
-            constexpr int ROWS = 26;
+            // 24 TRACER SMOKE SPREAD; optics add 25..32 pose/size, 33 reset.
+            const int ROWS = savr::weaponoptic::Supported(calibWeaponType) ? 35 : 26;
             if (navUp)   calibSel = (calibSel - 1 + ROWS) % ROWS;
             if (navDown) calibSel = (calibSel + 1) % ROWS;
             const int type = calibWeaponType;
@@ -1275,8 +1275,12 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             const int  mult      = (calAdjHeld < 45) ? 1 : (calAdjHeld < 105) ? 3 : 10;  // x1/x3/x10
             const bool firstTick = fire && calAdjHeld == 1;
 
-            if (calibSel == 25) {                                  // BACK
+            if (calibSel == ROWS-1) {                              // BACK
                 if (enter || firstTick || back) { savr::calib::Save(); menuPage = PG_MAIN; }
+            } else if (ROWS==35 && calibSel==33) {
+                if(enter) savr::calib::ResetOptic(type);
+            } else if (ROWS==35 && calibSel>=25) {
+                if(fire) savr::calib::AdjustOptic(type,calibSel-25,dir*mult);
             } else if (calibSel == 24) {                           // TRACER SMOKE SPREAD
                 if (enter) vrcam::AdjustTracerSmokeSpread(+1);
                 else if (firstTick) vrcam::AdjustTracerSmokeSpread(dir);
@@ -2037,7 +2041,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         float gameTurnX=0.0f, gameTurnY=0.0f;
         savr::locomotion::MapGameplaySticks(
             in.leftStick[0], in.leftStick[1],
-            in.rightStick[0], in.rightStick[1],
+            in.rightStick[0], savr::scopeaim::ConsumesZoomInput() ? 0.f : in.rightStick[1],
             &gameMoveX, &gameMoveY, &gameTurnX, &gameTurnY);
         // The mobile Java provider writes the pad after CPad::UpdatePads. Feed
         // it the same head-relative vector as the native hook, otherwise these
@@ -2052,15 +2056,14 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         if (savr::vehicleentry::ConsumesMove()) gameMoveX=gameMoveY=0;
         // Thumbrest D-pad mode: the provider must not see the raw right
         // stick while it acts as the D-pad.
-        const auto scope = savr::scopeaim::Snapshot();
-        const bool cameraZoom = scope.active && scope.weaponType == 43;
+        const bool cameraZoom = savr::scopeaim::ConsumesZoomInput();
         const bool dpadMode = (in.thumbrest[0] || in.thumbrest[1]) &&
                               !driving && !cameraZoom;
         g.implOnGamepadAxesChanged(env, clazz, 0,
                                    scriptedWeapon ? 0.0f : gameMoveX,
                                    scriptedWeapon ? 0.0f : -gameMoveY,
                                    dpadMode || scriptedWeapon ? 0.0f : gameTurnX,
-                                   dpadMode || cameraZoom || scriptedWeapon ? 0.0f : -gameTurnY,
+                                   dpadMode || scriptedWeapon ? 0.0f : -gameTurnY,
                                    scriptedWeapon ? 0.0f : gameLT,
                                    scriptedWeapon ? 0.0f : gameRT);
 

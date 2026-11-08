@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "WeaponOptic.h"
 
 // VR weapon calibration, based on the Vice City VR mod's weapon-calibration
 // page.  There is one canonical RIGHT/master profile per weapon; LEFT consumes
@@ -68,6 +69,11 @@ void Init();
 // Persist edited profiles and laser state. Only canonical RIGHT/master rows are
 // written; old readers still understand their unchanged `w ...` row format.
 void Save();
+
+weaponoptic::Profile SnapshotOptic(int weaponType);
+void AdjustOptic(int weaponType, int field, int steps);
+void ResetOptic(int weaponType);
+const char* OpticFieldLabel(int field);
 
 // The weapon type currently held / rendered. The GameThread sets it each frame so
 // the menu edits — and the renderer applies — the right profile.

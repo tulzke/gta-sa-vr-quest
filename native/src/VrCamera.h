@@ -78,6 +78,9 @@ void UpdateHolsterBodyTracking(const float headPosition[3], const float headOrie
 // hidden sight must not make bullets fall back to camera aim.
 bool GetWeaponFireRay(int hand, int weaponType,
                       float originOut[3], float directionOut[3]);
+// Same calibrated, two-hand-steered optic frame as the world-space lens.
+bool GetWeaponOpticRay(int hand, int weaponType,
+                       float originOut[3], float directionOut[3]);
 // Returns the existing calibrated ray and the weapon-model anchor for a
 // collision check along the held weapon.
 bool GetWeaponFireSegment(int hand, int weaponType, float originOut[3],

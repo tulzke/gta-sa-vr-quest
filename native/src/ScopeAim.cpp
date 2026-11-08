@@ -6,6 +6,8 @@
 #include "Symbols.h"
 #include "VrCamera.h"
 #include "Xr.h"
+#include "WeaponOptic.h"
+#include "Calib.h"
 
 #include <algorithm>
 #include <atomic>
@@ -27,8 +29,6 @@ constexpr int kWeaponSlots = 13;
 constexpr int kOffWeapons = 0x730;
 constexpr int kWeaponStride = 0x20;
 constexpr int kColPointSize = 0x2c;
-constexpr float kSniperZoom = 2.5f;
-constexpr float kLauncherZoom = 1.8f;
 constexpr float kCameraZoom = 1.8f;
 constexpr float kCameraMinZoom = 1.0f;
 constexpr float kCameraMaxZoom = 8.0f;
@@ -90,6 +90,14 @@ std::atomic<int> gActivePacked{0};
 std::atomic<bool> gSniperFireAvailable{false};
 std::atomic<bool> gProjectileFireAvailable{false};
 std::atomic<float> gCameraZoom{kCameraZoom};
+std::atomic<float> gSniperZoom{2.5f}, gHeatZoom{1.8f};
+std::atomic<bool> gWeaponZoomInput{false};
+std::uint64_t gWeaponZoomTime{};
+HeatLockState gHeatLock{}; // GameThread, like the scene producer/launcher hook
+void* gHeatPool{};
+int gHeatIndex{-1}, gHeatHand{-1};
+unsigned char gHeatGeneration{};
+std::uint64_t gHeatSince{};
 std::uint64_t gCameraZoomTime = 0;
 int gCandidateHand = -1;
 int gCandidateType = -1;
@@ -106,21 +114,12 @@ int PackedHand(int packed) { return packed == 0 ? -1 : (packed & 0xff) - 1; }
 int PackedType(int packed) { return packed == 0 ? -1 : packed >> 8; }
 
 bool IsScopeWeapon(int type) {
-    // Weapon 33 (the country rifle/Mosin replacement in WEAPONS SET ONE) has no
-    // optic. It always follows the calibrated barrel/laser. The real sniper,
-    // the two launchers and the photo camera (its viewfinder is the Vice City
-    // bring-to-face optic) may enter the HMD-centred scope view.
-    return type == kSniperType ||
-           type == kRpgType || type == kHeatSeekerType ||
-           type == kCameraType;
+    // Only the photographic camera retains the full-view viewfinder.
+    return type == kCameraType;
 }
 
 float ZoomForWeapon(int type) {
-    return type == kSniperType ? kSniperZoom
-         : type == kRpgType || type == kHeatSeekerType
-                              ? kLauncherZoom
-         : type == kCameraType ? gCameraZoom.load(std::memory_order_relaxed)
-                               : 1.0f;
+    return type == kCameraType ? gCameraZoom.load(std::memory_order_relaxed) : 1.0f;
 }
 
 void UpdateCameraZoom(std::uint64_t now) {
@@ -299,6 +298,92 @@ bool BuildCentreTarget(V3& target) {
     return Finite(target);
 }
 
+template<class T> T Read(const void* p, std::size_t offset) {
+    T value{};
+    if(p) std::memcpy(&value, static_cast<const char*>(p)+offset, sizeof(value));
+    return value;
+}
+void ClearHeat() {
+    gHeatLock={}; gHeatPool=nullptr; gHeatIndex=-1; gHeatHand=-1; gHeatSince=0;
+}
+void* ValidHeatEntity() {
+    void* pool=g.CPools_ms_pVehiclePool ? *g.CPools_ms_pVehiclePool : nullptr;
+    if(!pool || pool!=gHeatPool || gHeatIndex<0 || gHeatIndex>=Read<int>(pool,0x10)) return nullptr;
+    const auto* flags=Read<const unsigned char*>(pool,8);
+    auto* objects=Read<char*>(pool,0);
+    if(!flags || !objects || (flags[gHeatIndex]&0x80) || flags[gHeatIndex]!=gHeatGeneration) return nullptr;
+    return objects+gHeatIndex*0xc68;
+}
+void UpdateHeat(void* ped, int hand, std::uint64_t now) {
+    float o[3]{}, d[3]{};
+    if(!vrcam::GetWeaponOpticRay(hand,kHeatSeekerType,o,d)) { ClearHeat(); return; }
+    void* pool=g.CPools_ms_pVehiclePool ? *g.CPools_ms_pVehiclePool : nullptr;
+    const int count=Read<int>(pool,0x10);
+    const auto* flags=Read<const unsigned char*>(pool,8);
+    auto* objects=Read<char*>(pool,0);
+    if(!pool || !flags || !objects || count<=0 || count>20000) { ClearHeat(); return; }
+    const V3 origin{o[0],o[1],o[2]}, direction{d[0],d[1],d[2]};
+    const float cone=std::min(.10f, weaponoptic::TanHalfFov(
+        calib::SnapshotOptic(kHeatSeekerType).value[6]*.0025f,WeaponZoom(kHeatSeekerType))*.65f);
+    int best=-1; float bestScore=1e9f; V3 bestPosition{};
+    for(int i=0;i<count;++i) {
+        if(flags[i]&0x80) continue;
+        void* entity=objects+i*0xc68;
+        if(!(Read<std::uint32_t>(entity,0x28)&(1u<<7))) continue;
+        V3 pos{};
+        if(g.CEntity_GetBoundCentre) {
+            GameVec3 centre{}; g.CEntity_GetBoundCentre(entity,&centre);
+            pos={centre.x,centre.y,centre.z};
+        } else {
+            const void* matrix=Read<void*>(entity,0x18);
+            pos=matrix ? Read<V3>(matrix,0x30) : Read<V3>(entity,8);
+        }
+        const V3 delta=pos-origin;
+        const float depth=Dot(delta,direction), lengthSq=LengthSquared(delta);
+        if(!Finite(pos) || depth<3.f || lengthSq>400.f*400.f) continue;
+        const float offAxis=std::sqrt(std::max(0.f,lengthSq-depth*depth))/depth;
+        if(offAxis>cone) continue;
+        ColPoint col{}; void* hitEntity=nullptr;
+        void* savedIgnore=*g.CWorld_pIgnoreEntity; *g.CWorld_pIgnoreEntity=ped;
+        const GameVec3 from{origin.x,origin.y,origin.z}, to{pos.x,pos.y,pos.z};
+        const bool hit=g.CWorld_ProcessLineOfSight(&from,&to,&col,&hitEntity,
+            true,true,false,true,true,false,false,false);
+        *g.CWorld_pIgnoreEntity=savedIgnore;
+        if(hit && hitEntity!=entity) continue;
+        const float score=offAxis+(i==gHeatIndex && pool==gHeatPool ? -.025f : 0.f);
+        if(score<bestScore) { best=i;bestScore=score;bestPosition=pos; }
+    }
+    if(best<0) { ClearHeat(); return; }
+    if(pool!=gHeatPool || best!=gHeatIndex || flags[best]!=gHeatGeneration || hand!=gHeatHand) {
+        gHeatSince=now;gHeatPool=pool;gHeatIndex=best;gHeatGeneration=flags[best];gHeatHand=hand;
+    }
+    gHeatLock.candidate=true;
+    gHeatLock.progress=std::clamp(static_cast<float>(now-gHeatSince)/.8e3f,0.f,1.f);
+    gHeatLock.locked=gHeatLock.progress>=1.f;
+    gHeatLock.target[0]=bestPosition.x;gHeatLock.target[1]=bestPosition.y;gHeatLock.target[2]=bestPosition.z;
+}
+void UpdateWeaponOptics(void* ped, std::uint64_t now) {
+    int selected=-1, heat=-1;
+    for(int h=0;h<2;++h) {
+        const int type=WeaponTypeInSlot(ped,physicalweapon::HeldSlot(h));
+        if(!weaponoptic::Supported(type) || !FireRouteAvailable(type)) continue;
+        xr::HandPose hands[2]{};
+        if(!physicalweapon::GetHandPosesSnapshot(hands) || !hands[h].valid || !hands[h].aimValid) continue;
+        if(selected<0 || h==physicalweapon::PreferredHeldHand()) selected=h;
+        if(type==kHeatSeekerType) heat=h;
+    }
+    gWeaponZoomInput.store(selected>=0,std::memory_order_relaxed);
+    const float seconds=gWeaponZoomTime && now>=gWeaponZoomTime ? (now-gWeaponZoomTime)*.001f : 0.f;
+    gWeaponZoomTime=now;
+    if(selected>=0) {
+        xr::InputState input{};xr::GetInput(input);
+        const int type=WeaponTypeInSlot(ped,physicalweapon::HeldSlot(selected));
+        auto& zoom=type==kSniperType ? gSniperZoom : gHeatZoom;
+        zoom.store(weaponoptic::StepZoom(type,zoom.load(),input.rightStick[1],seconds));
+    }
+    if(heat>=0) UpdateHeat(ped,heat,now); else ClearHeat();
+}
+
 } // namespace
 
 void Reset() {
@@ -307,6 +392,7 @@ void Reset() {
     gReleaseSince = 0;
     gOwner = nullptr;
     gCameraZoomTime = 0;
+    gWeaponZoomTime=0;gWeaponZoomInput.store(false,std::memory_order_relaxed);ClearHeat();
 }
 
 void SetSniperFireAvailable(bool available) {
@@ -354,6 +440,7 @@ void Update(bool interactionsBlocked) {
         Reset();
         gOwner = ped;
     }
+    UpdateWeaponOptics(ped,NowMs());
 
     V3 head{}, headRight{}, headUp{}, headForward{};
     if (!HeadFrame(head, headRight, headUp, headForward)) {
@@ -426,6 +513,14 @@ VisualState Snapshot() {
 
 bool IsActive() { return Snapshot().active; }
 
+float WeaponZoom(int type) {
+    return type==kSniperType ? gSniperZoom.load(std::memory_order_relaxed)
+        : type==kHeatSeekerType ? gHeatZoom.load(std::memory_order_relaxed) : 1.f;
+}
+bool ConsumesZoomInput() { return gWeaponZoomInput.load(std::memory_order_relaxed) || IsActive(); }
+HeatLockState HeatLockSnapshot() { return gHeatLock; }
+void* HeatTarget(int hand) { return gHeatLock.locked && hand==gHeatHand ? ValidHeatEntity() : nullptr; }
+
 bool IsActiveFor(int hand, int weaponType) {
     const VisualState state = Snapshot();
     return state.active && state.hand == hand && state.weaponType == weaponType;
@@ -445,6 +540,15 @@ float RenderFovX(float baseFovXDegrees) {
 
 bool ApplyReticleAim(int hand, int weaponType,
                      const float muzzleOrigin[3], float direction[3]) {
+    if(weaponoptic::Supported(weaponType)) {
+        float o[3]{}, d[3]{};
+        if(!muzzleOrigin || !direction || !vrcam::GetWeaponOpticRay(hand,weaponType,o,d)) return false;
+        const V3 target=V3{o[0],o[1],o[2]}+V3{d[0],d[1],d[2]}*weaponoptic::ZeroDistance;
+        const V3 aim=Normalized(target-V3{muzzleOrigin[0],muzzleOrigin[1],muzzleOrigin[2]});
+        if(!Finite(aim) || LengthSquared(aim)<.9f) return false;
+        direction[0]=aim.x;direction[1]=aim.y;direction[2]=aim.z;
+        return true;
+    }
     if (!IsActiveFor(hand, weaponType)) return true;
     if (!muzzleOrigin || !direction) return false;
 

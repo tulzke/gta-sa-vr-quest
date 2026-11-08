@@ -2,10 +2,9 @@
 
 namespace savr::scopeaim {
 
-// Scope state is advanced on the GameThread after physical weapon ownership.
-// The bounded SA port covers the real sniper and both launchers. The unscoped
-// country rifle/Mosin always uses its physical laser ray. Launcher
-// activation is published only after its physical projectile route is ready.
+// GameThread state after physical ownership: photo-camera full-view viewfinder,
+// world-space weapon-optic zoom, and the heat-seeker's real acquisition state.
+// RPG and the country rifle/Mosin have no optic.
 void Update(bool interactionsBlocked);
 void Reset();
 
@@ -26,15 +25,25 @@ VisualState Snapshot();
 bool IsActive();
 bool IsActiveFor(int hand, int weaponType);
 
-// Render the world through the narrowed optic frustum while the OpenXR
-// projection layer remains at the normal headset FOV. This is the same
-// full-view zoom scheme used by the current Quest Vice City implementation.
+// Weapon optics are surfaces in the world; they never activate the full-view
+// photo-camera mode reported by Snapshot/IsActive.
+float WeaponZoom(int weaponType);
+bool ConsumesZoomInput();
+struct HeatLockState {
+    bool candidate{}, locked{};
+    float progress{};
+    float target[3]{};
+};
+HeatLockState HeatLockSnapshot();
+// GameThread only. Validates pool slot + generation again before use.
+void* HeatTarget(int hand);
+
+// Full-view FOV adjustment for the photo camera only.
 float RenderFovX(float baseFovXDegrees);
 
-// When this hand/type owns the active optic, converge the calibrated muzzle ray
-// on the HMD-centre world hit. An invalid centre ray returns false so callers can
-// suppress the shot instead of silently firing outside the visible reticle.
-// For a non-active scope this is a no-op and returns true.
+// Physical optics converge the muzzle to the optical axis at fixed 100 m zero.
+// The photo camera retains its independent HMD-centre ray. All other weapons
+// keep their physical barrel direction; no face/proximity gate changes firing.
 bool ApplyReticleAim(int hand, int weaponType,
                      const float muzzleOrigin[3], float direction[3]);
 

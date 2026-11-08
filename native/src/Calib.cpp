@@ -25,6 +25,8 @@ WeaponCalib      g_calibSets[2][kHands][kMaxWeapons];
 WeaponCalib      (*g_calib)[kMaxWeapons] = g_calibSets[0];
 std::atomic<int> g_modelSet{0};
 HolsterCalib     g_holsterCalib[kMaxWeapons];
+weaponoptic::Profile g_optics[2][kMaxWeapons];
+bool g_opticConfigured[2][kMaxWeapons]{};
 bool             g_supportConfigured[kMaxWeapons]{};
 std::atomic<int> g_active{0};
 std::mutex       g_calibMutex;
@@ -210,6 +212,7 @@ void Init() {
         g_laserLocked[t].store(false, std::memory_order_relaxed);
     }
     std::memset(g_supportConfigured, 0, sizeof(g_supportConfigured));
+    std::memset(g_opticConfigured, 0, sizeof(g_opticConfigured));
     g_laserEnabled.store(true, std::memory_order_relaxed);
     g_recoilLevel.store(2, std::memory_order_relaxed);
 
@@ -223,6 +226,20 @@ void Init() {
     bool anyTypedLockSeen = false;
     bool legacyLaserLocked = false;
     while (std::fgets(line, sizeof(line), f)) {
+        int opticSet{}, opticType{};
+        weaponoptic::Profile optic;
+        if (std::sscanf(line, "optic %d %d %d %d %d %d %d %d %d %d",
+                &opticSet, &opticType, &optic.value[0], &optic.value[1],
+                &optic.value[2], &optic.value[3], &optic.value[4],
+                &optic.value[5], &optic.value[6], &optic.value[7]) == 10) {
+            if (opticSet >= 0 && opticSet < 2 && weaponoptic::Supported(opticType)) {
+                for (int i=0; i<weaponoptic::FieldCount; ++i)
+                    optic.value[i] = weaponoptic::ClampField(i, optic.value[i]);
+                g_optics[opticSet][opticType] = optic;
+                g_opticConfigured[opticSet][opticType] = true;
+            }
+            continue;
+        }
         int state = 0;
         if (std::sscanf(line, "laser_enabled %d", &state) == 1) {
             g_laserEnabled.store(state != 0, std::memory_order_relaxed);
@@ -346,6 +363,12 @@ void Save() {
     // Retain the compatibility row for readers that do not support per-weapon state.
     std::fprintf(f, "laser_locked %d\n", LaserLocked() ? 1 : 0);
     int saved = 0;
+    for (int set=0; set<2; ++set) for (int type : {34,36}) {
+        if (!g_opticConfigured[set][type]) continue;
+        std::fprintf(f, "optic %d %d", set, type);
+        for (int value : g_optics[set][type].value) std::fprintf(f, " %d", value);
+        std::fputc('\n', f);
+    }
     for (int t = 0; t < kMaxWeapons; ++t) {
         const int laserMode = g_laserMode[t].load(std::memory_order_relaxed);
         if (laserMode != 0)
@@ -544,13 +567,45 @@ bool LaserVisibleForWeapon(int weaponType) {
     switch (LaserModeForWeapon(weaponType)) {
         case 1: return true;
         case 2: return false;
-        default: return LaserEnabled();
+        default: return weaponType == 35 || LaserEnabled();
     }
 }
 
 void LockLaser() { LockLaser(ActiveWeapon()); }
 
 int FieldCount() { return F_COUNT; }
+
+weaponoptic::Profile SnapshotOptic(int type) {
+    std::lock_guard<std::mutex> guard(g_calibMutex);
+    const int set=g_modelSet.load(std::memory_order_relaxed);
+    return weaponoptic::Supported(type) && g_opticConfigured[set][type]
+        ? g_optics[set][type] : weaponoptic::Defaults(type);
+}
+void AdjustOptic(int type, int field, int steps) {
+    if (!weaponoptic::Supported(type) || field<0 || field>=weaponoptic::FieldCount) return;
+    {
+        std::lock_guard<std::mutex> guard(g_calibMutex);
+        const int set=g_modelSet.load(std::memory_order_relaxed);
+        if (!g_opticConfigured[set][type]) g_optics[set][type]=weaponoptic::Defaults(type);
+        g_opticConfigured[set][type]=true;
+        int& value=g_optics[set][type].value[field];
+        value=weaponoptic::ClampField(field,value+steps);
+    }
+    Save();
+}
+void ResetOptic(int type) {
+    if (!weaponoptic::Supported(type)) return;
+    {
+        std::lock_guard<std::mutex> guard(g_calibMutex);
+        g_opticConfigured[g_modelSet.load(std::memory_order_relaxed)][type]=false;
+    }
+    Save();
+}
+const char* OpticFieldLabel(int field) {
+    constexpr const char* labels[]={"SCOPE POS BARREL", "SCOPE POS UP", "SCOPE POS SIDE",
+        "SCOPE ROT X", "SCOPE ROT Y", "SCOPE ROT Z", "SCOPE SIZE", "SCOPE LENGTH"};
+    return field>=0 && field<weaponoptic::FieldCount ? labels[field] : "";
+}
 
 void FieldRange(int field, int& lo, int& hi) {
     if (field == F_SUP_STYLE)            { lo = 0;    hi = 1;   return; }

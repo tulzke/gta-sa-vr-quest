@@ -447,6 +447,9 @@ bool OnFireProjectile(void* weapon, void* shooter, Vec3* origin,
         Vec3 velocity{launchDirection.x * kRocketSpeed,
                       launchDirection.y * kRocketSpeed,
                       launchDirection.z * kRocketSpeed};
+        // Local lock comes from the physical screen's optical axis. Never use
+        // a stock HMD/desktop-camera target for a physically held launcher.
+        targetEntity=type==kHeatSeekerType ? scopeaim::HeatTarget(hand) : nullptr;
         const bool hasHeatTarget = type == kHeatSeekerType && targetEntity;
         const int projectileType = hasHeatTarget
             ? kHeatSeekerProjectileType : kRocketProjectileType;
