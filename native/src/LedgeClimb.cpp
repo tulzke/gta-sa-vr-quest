@@ -18,6 +18,7 @@ void (*removeEntity)(void*){};void (*addEntity)(void*){};
 bool (*canClimb)(void*,unsigned){};void* surfaces{};
 GripEdge edges[2];bool held[2]{};Vec anchor[2]{},previous[2]{},inward[2]{};
 void* suspended{};bool collision{},gravity{};unsigned claimed{};
+Vec collisionHeadOffset{0,0,.55f};
 MarkerFrame markers;double last{};std::uint64_t lastEpoch{};
 double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 Vec Position(void* p){void* m=Read<void*>(p,0x18);return Read<Vec>(m?m:p,m?0x30:8);}
@@ -96,13 +97,16 @@ bool Clear(void* ped,Vec root){
  return true;
 }
 void Place(void* ped,Vec p){removeEntity(ped);void* m=Read<void*>(ped,0x18);Write(m?m:ped,m?0x30:8,p);addEntity(ped);Write(ped,0x68,Vec{});}
+// Native body collision is suspended while gripping. Only the tracked head
+// keeps a small swept collision volume; animation legs cannot snag a fence.
 bool Move(void* ped,Vec from,Vec to){
- if(!Finite(to)||Length(to-from)>.35f)return false;
+ if(!Finite(to)||Length(to-from)>.65f)return false;
  const int count=std::max(1,int(std::ceil(Length(to-from)/.035f)));Vec accepted=from;
  for(int i=1;i<=count;++i){Vec p=from+(to-from)*(float(i)/count);Hit hit;
-  bool blocked=!Clear(ped,p);
-  for(float z:{-.55f,.55f})blocked=blocked||Ray(accepted+Vec{0,0,z},p+Vec{0,0,z},hit,true);
-  if(blocked)break;accepted=p;
+  Vec head=p+collisionHeadOffset;
+  if(g.CWorld_TestSphereAgainstWorld({head.x,head.y,head.z},.12f,ped,true,true,true,true,true,false)||
+     Ray(accepted+collisionHeadOffset,head,hit,true))break;
+  accepted=p;
  }
  Place(ped,accepted);return Length(accepted-to)<.005f;
 }
@@ -123,15 +127,28 @@ bool Stand(void* ped,Vec root,Vec eye,float edgeZ){
  Place(ped,target);Resume();Write(ped,0x584,std::uint8_t(Read<std::uint8_t>(ped,0x584)|1u));
  held[0]=held[1]=false;claimed=0;return true;
 }
-bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent){
- float best=.46f;bool found=false;
- for(float distance:{.05f,.20f,.35f}){
-  Vec probe=hand+forward*distance;Hit top,wall;
-  if(!Ray(probe+Vec{0,0,.4f},probe-Vec{0,0,.4f},top)||top.normal.z<.7f||!canClimb(surfaces,top.surface))continue;
-  Vec start{hand.x-forward.x*.25f,hand.y-forward.y*.25f,top.point.z-.10f};
-  if(!Ray(start,{probe.x,probe.y,top.point.z-.10f},wall)||std::abs(wall.normal.z)>.35f)continue;
+struct Reach {float grab{},preview{},vertical{};};
+Reach ReachFor(Vec velocity,bool airborne){
+ const float speed=Finite(velocity)?std::min(Length(velocity)*50.f,8.f):0.f;
+ const float extra=std::min(speed*.04f,.26f)+(airborne?.16f:0.f);
+ return {.18f+extra,.48f+extra,.55f+extra};
+}
+bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.55f}){
+ float best=reach.preview;bool found=false;
+ // Fan out from the hand rather than requiring the ledge to face the gaze.
+ // Probe higher as well: roof overhangs often sit above the jumping hand.
+ for(float angle:{0.f,-.65f,.65f,-1.3f,1.3f})for(float fraction:{.15f,.5f,.9f}){
+  Vec direction=Rotate(forward,angle);
+  Vec probe=hand+direction*(reach.preview*fraction);Hit top,wall;
+  if(!Ray(probe+Vec{0,0,reach.vertical},probe-Vec{0,0,reach.vertical},top)||top.normal.z<.65f)continue;
+  // The stock material flag excludes some physically solid roofs. For VR,
+  // an exposed collision edge and a solid top are the eligibility criteria.
+  Vec start{hand.x-direction.x*reach.preview,hand.y-direction.y*reach.preview,top.point.z-.12f};
+  if(!Ray(start,{probe.x,probe.y,top.point.z-.12f},wall)||std::abs(wall.normal.z)>.45f)continue;
   Vec edge{wall.point.x,wall.point.y,top.point.z};const float d=Length(edge-hand);
-  if(d>=best)continue;best=d;point=edge;tangent=Cross({0,0,1},wall.normal);const float n=Length(tangent);if(n<.1f)continue;tangent=tangent*(1.f/n);found=true;
+  Vec axis=Cross({0,0,1},wall.normal);const float n=Length(axis);
+  if(d>=best||n<.1f)continue;
+  best=d;point=edge;tangent=axis*(1.f/n);found=true;
  }
  return found;
 }
@@ -161,7 +178,7 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
 void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned occupied){
  const double now=Now();const float dt=float(now-last);last=now;markers={};markers.epoch=epoch;
  void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
- usable=usable&&hooksReady&&epoch==lastEpoch&&dt>0&&dt<.15f&&ped&&removeEntity&&addEntity&&canClimb&&surfaces&&g.CWorld_ProcessLineOfSight&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&vrcam::GroundWalkControlsActive()&&(!g.CPed_IsAlive||g.CPed_IsAlive(ped));lastEpoch=epoch;
+ usable=usable&&hooksReady&&epoch==lastEpoch&&dt>0&&ped&&removeEntity&&addEntity&&canClimb&&surfaces&&g.CWorld_ProcessLineOfSight&&g.CWorld_TestSphereAgainstWorld&&g.CWorld_pIgnoreEntity&&vrcam::GroundWalkControlsActive()&&(!g.CPed_IsAlive||g.CPed_IsAlive(ped));lastEpoch=epoch;
  bool fresh[2]{};for(int h=0;h<2;++h)fresh[h]=edges[h].Step(hands[h].grip,usable&&hands[h].valid);
  if(!usable){Reset();jumpUntil=hoverUntil=0;return;}
  if(now<jumpUntil&&!held[0]&&!held[1]){
@@ -172,7 +189,11 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
  void* saved=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=ped;
  float a[3]{},f[3]{};if(!vrcam::GetHeadWorldRay(a,f)){*g.CWorld_pIgnoreEntity=saved;Reset();return;}
  Vec eye{a[0],a[1],a[2]},forward{f[0],f[1],0};float n=Length(forward);if(n>.1f)forward=forward*(1.f/n);else forward={0,1,0};
- Vec root=Position(ped),motion{};int count=0;claimed=0;float edgeZ=0;
+ Vec root=Position(ped),motion{};int count=0;claimed=0;
+ collisionHeadOffset=eye-root;
+ const Vec speed=Read<Vec>(ped,0x68);
+ const bool airborne=(Read<std::uint8_t>(ped,0x584)&1)==0||std::abs(speed.z)>.015f;
+ const Reach reach=ReachFor(speed,airborne);
  const bool wasHeld=held[0]||held[1];
  const float releaseZ=held[0]?anchor[0].z:anchor[1].z;
  for(int h=0;h<2;++h){
@@ -180,16 +201,17 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
   const bool valid=hands[h].valid&&World(raw,world)&&!(occupied&(1u<<h));
   if(!valid||hands[h].grip<=.35f)held[h]=false;
   Vec point{},tangent{};
-  if(valid&&!held[h]&&Find(world,forward,point,tangent)){
+  if(valid&&!held[h]&&Find(world,forward,point,tangent,reach)){
    Marker m{point,tangent,{0,0,1},false};m.bikeGrip=true;m.climbPipe=true;m.ledge=true;m.pipeLength=.24f;m.opacity=.45f;markers.markers[markers.count++]=m;
-   if(fresh[h]&&Length(point-world)<.16f){held[h]=true;anchor[h]=point;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
+   if(fresh[h]&&Length(point-world)<reach.grab){held[h]=true;anchor[h]=point;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
   }
   if(!held[h])continue;
-  Hit support;if(!Ray(anchor[h]+inward[h]*.07f+Vec{0,0,.1f},anchor[h]+inward[h]*.07f-Vec{0,0,.12f},support)||std::abs(support.point.z-anchor[h].z)>.08f){held[h]=false;continue;}
-  Vec prevWorld{};if(!World(previous[h],prevWorld)||Length(raw-previous[h])>.35f){held[h]=false;continue;}
-  previous[h]=raw;motion=motion+prevWorld-world;edgeZ=anchor[h].z;++count;claimed|=1u<<h;
+  if(dt>.15f)previous[h]=raw;
+  Vec prevWorld{};if(!World(previous[h],prevWorld)){previous[h]=raw;claimed|=1u<<h;++count;continue;}
+  if(Length(raw-previous[h])>.65f){previous[h]=raw;claimed|=1u<<h;++count;continue;}
+  previous[h]=raw;motion=motion+prevWorld-world;++count;claimed|=1u<<h;
  }
- if(count){Suspend(ped);if(!Stand(ped,root,eye,edgeZ)){Move(ped,root,root+motion*(1.f/count));Write(ped,0x68,Vec{});}}
+ if(count){Suspend(ped);Move(ped,root,root+motion*(1.f/count));Write(ped,0x68,Vec{});}
  else {if(wasHeld){Stand(ped,root,eye,releaseZ);}Resume();}
  *g.CWorld_pIgnoreEntity=saved;
 }

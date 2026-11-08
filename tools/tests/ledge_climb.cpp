@@ -13,10 +13,11 @@ bool IsSessionFocused(){return true;}
 void TriggerHaptic(int,float,float,float){}
 }
 namespace vrcam {
+float eyeY=-.2f;
 bool GroundWalkControlsActive(){return true;}
 bool TrackingPointToWorld(const float* a,float* b){std::copy_n(a,3,b);return true;}
 bool WorldPointToTracking(const float* a,float* b){std::copy_n(a,3,b);return true;}
-bool GetHeadWorldRay(float* a,float* b){a[0]=0;a[1]=-.2f;a[2]=2.3f;b[0]=0;b[1]=1;b[2]=0;return true;}
+bool GetHeadWorldRay(float* a,float* b){a[0]=0;a[1]=eyeY;a[2]=2.3f;b[0]=0;b[1]=1;b[2]=0;return true;}
 }
 }
 // PRODUCTION
@@ -39,7 +40,11 @@ int main(){
  removeEntity=[](void*){++moves;};addEntity=[](void*){};
  canClimb=[](void*,unsigned){return material;};surfaces=ped;hooksReady=true;
  Vec point{},tangent{};assert(Find({0,-.08f,1.05f},{0,1,0},point,tangent));assert(std::abs(point.z-1)<.001f);
- material=false;assert(!Find({0,-.08f,1.05f},{0,1,0},point,tangent));material=true;
+ material=false;assert(Find({0,-.08f,1.05f},{0,1,0},point,tangent));material=true;
+ const Reach idle=ReachFor({},false),fast=ReachFor({0,.12f,0},false),jump=ReachFor({0,.12f,.1f},true);
+ assert(fast.grab>idle.grab&&jump.grab>fast.grab&&jump.preview>fast.preview);
+ assert(!Find({0,-.08f,.48f},{0,1,0},point,tangent,idle));
+ assert(Find({0,-.08f,.48f},{0,1,0},point,tangent,jump));
  // Crouched landing: CJ's feet are below the top, tracked head is above it.
  Suspend(ped);assert(Stand(ped,{0,-.3f,1.2f},{0,.12f,1.5f},1));
  assert(std::abs(Position(ped).z-2.02f)<.001f);assert(!suspended);
@@ -47,15 +52,22 @@ int main(){
  ceiling=true;assert(!Stand(ped,{0,-.3f,1.2f},{0,.12f,1.5f},1));ceiling=false;
  noFloor=true;assert(!Stand(ped,{0,-.3f,1.2f},{0,.12f,1.5f},1));noFloor=false;
  assert(!Stand(ped,{0,-.3f,1.2f},{0,.12f,.9f},1));
- // Sweeps stop before walls and reject tracking teleports.
- Put(matrix,0x30,Vec{0,-.3f,.8f});assert(!Move(ped,Position(ped),{0,.03f,.8f}));assert(Position(ped).y<0);
+ // Animation legs pass the fence while the tracked head remains protected.
+ Put(matrix,0x30,Vec{0,-.3f,.8f});assert(Move(ped,Position(ped),{0,.03f,.8f}));assert(Position(ped).y>0);
+ ceiling=true;assert(!Move(ped,Position(ped),{0,.1f,.8f}));ceiling=false;
  const int old=moves;assert(!Move(ped,Position(ped),{10,0,0}));assert(moves==old);
  // A closed grip on entry cannot latch; a release and fresh squeeze can.
  xr::HandPose hands[2];hands[1].valid=false;hands[0].gripPos[1]=-.08f;hands[0].gripPos[2]=1.05f;hands[0].grip=1;
  for(int i=0;i<3;++i){testNow+=.01;Update(true,hands,1,0);}assert(!ClaimedHands());
  hands[0].grip=0;testNow+=.01;Update(true,hands,1,0);
  hands[0].grip=1;testNow+=.01;Update(true,hands,1,0);assert(ClaimedHands()==1);
- testNow+=.01;Update(false,hands,1,0);assert(!ClaimedHands()&&!suspended);
+ // Crossing the top must not auto-release, even if the original support
+ // probe temporarily misses. Physics resumes only after the last grip opens.
+ vrcam::eyeY=.12f;noFloor=true;
+ testNow+=.01;Update(true,hands,1,0);assert(ClaimedHands()==1&&suspended);
+ noFloor=false;testNow+=.3;Update(true,hands,1,0);assert(ClaimedHands()==1&&suspended);
+ hands[0].grip=0;testNow+=.01;Update(true,hands,1,0);assert(!ClaimedHands()&&!suspended);
+ assert(std::abs(Position(ped).z-2.02f)<.001f);vrcam::eyeY=-.2f;
  assert((Read<std::uint64_t>(ped,0x28)&1)&&(Read<std::uint32_t>(ped,0x64)&2));
  // Retail callbacks preserve NPCs and add height only on an actual launch.
  originalClimb=[](void*,Vec&,float&,unsigned char&,bool)->void*{return matrix;};
