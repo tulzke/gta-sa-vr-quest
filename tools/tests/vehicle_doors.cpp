@@ -397,7 +397,16 @@ int main() {
     CHECK(g_release.active&&g_release.inside);
     Write<float>(vehicle,0x770+2*0x18+0xc,0);OnSwing(vehicle,10,2);
     CHECK(Read<float>(vehicle,0x770+2*0x18+0xc)<-.3f);
-    seated=nullptr;Tick();CHECK(!g_release.active);
+    Write<Vec>(vehicle,0x68,{.1f,0,0});Tick();CHECK(!g_release.active);
+    { const int before=nativeSwings;OnSwing(vehicle,10,2);CHECK(nativeSwings==before+1); }
+    // Releasing while already moving hands the partly open door to the engine.
+    Setup();seated=vehicle;vrcam::eye={-.35f,-.3f,1.3f};hands[0]={};hands[1]={};
+    Write<Vec>(vehicle,0x68,{.1f,0,0});
+    std::memcpy(hands[0].gripPos,&inner,12);Tick();hands[0].grip=1;Tick();
+    { const Vec opened=innerHinge+Rotate(inner-innerHinge,-.2f);
+      std::memcpy(hands[0].gripPos,&opened,12);Tick(); }
+    hands[0].grip=0;Tick();CHECK(!g_release.active);
+    { const int before=nativeSwings;OnSwing(vehicle,10,2);CHECK(nativeSwings==before+1); }
     // If an open seated grab loses tracking or visibility, preserve its last
     // angle without imparting a throw, rather than letting native physics close it.
     for(int failure=0;failure<2;++failure) {

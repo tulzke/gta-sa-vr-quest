@@ -527,6 +527,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         Door d;
         if (!g_release.target.Live(pool)||(g_release.inside&&seated!=g_release.target.vehicle)||
             (!g_release.inside&&seated)||!ReadDoor(g_release.target,ped,d,g_release.inside)) g_release={};
+        else if (g_release.inside&&!g_release.motion.slam&&
+                 Length(Read<Vec>(g_release.target.vehicle,0x68))>.02f) g_release={};
         else {
             auto& m=g_release.motion;m.Step(dt);
             ApplyDoor(g_release.target,std::clamp((m.angle-m.closed)/(m.open-m.closed),0.f,1.f));
@@ -757,6 +759,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             // must not hand a door opened from the seat to swinging physics.
             const auto grab=g_grab;
             const bool keep=grab.inside&&seated==grab.target.vehicle&&grab.target.Live(pool)&&
+                Length(Read<Vec>(grab.target.vehicle,0x68))<=.02f&&
                 ReadDoor(grab.target,ped,d,true)&&grab.motion.Ratio()>0;
             Reset();
             if(grab.motion.Ratio()>=.985f&&grab.target.Live(pool))LatchOpen(grab.target);
@@ -774,7 +777,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const bool slam=motion.velocity*(motion.open-motion.closed)<0&&std::abs(motion.velocity)>=.6f&&motion.Ratio()>0;
             Reset();
             if(motion.Ratio()>=.985f&&!slam){LatchOpen(target);ApplyDoor(target,1.f);return;}
-            if ((inside&&motion.Ratio()>0)||slam) {
+            if ((inside&&motion.Ratio()>0&&Length(Read<Vec>(target.vehicle,0x68))<=.02f)||slam) {
                 g_release.target=target;g_release.inside=inside;g_release.active=true;
                 // A slow closing movement stops where it is released; only a
                 // deliberate throw should continue toward the latch.
