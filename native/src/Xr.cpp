@@ -11270,11 +11270,9 @@ void DrawImmersiveDrivingWheel(const float* mvp,
                 wheelRight,wheelUp,normal,wheel.radius*0.55f,0.030f,0.016f);
         } else {
             for (int spoke=0; spoke<3; ++spoke) {
-                const float angle=6.2831853071795864769f*spoke/3.0f;
-                const XrVector3f direction=vnorm(vadd(
-                    vscale(wheelRight,std::cos(angle)),
-                    vscale(wheelUp,std::sin(angle))));
-                const float length=wheel.radius*0.72f;
+                const XrVector3f direction=spoke==0 ? wheelRight :
+                    (spoke==1 ? vscale(wheelRight,-1.0f) : vscale(wheelUp,-1.0f));
+                const float length=wheel.radius;
                 AppendDrivingBox(vertices,vertexCount,indices,indexCount,
                     vadd(center,vscale(direction,length*0.5f)),direction,
                     vnorm(vcross(normal,direction)),normal,
