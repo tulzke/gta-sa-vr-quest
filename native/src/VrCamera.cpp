@@ -4072,7 +4072,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                                 ((in.thumbrest[0] || in.thumbrest[1]) &&
                                  !jetpack::IsActive());
                             const float rx =
-                                thumbrestOwnsTurn ? 0.0f : mappedTurnX;
+                                thumbrestOwnsTurn ? 0.0f : locomotion::FilterTurnStickX(mappedTurnX,mappedTurnY);
                             const double now=NowMs();
                             static double previousTurnMs=now;
                             const float dt=static_cast<float>(

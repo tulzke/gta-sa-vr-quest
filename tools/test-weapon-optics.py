@@ -68,7 +68,7 @@ for name in ('ClearHeat', 'ValidHeatEntity', 'UpdateHeat', 'ApplyReticleAim'):
     production += function(scope, name)
 production += '\n}\n'
 harness = (ROOT / 'tools/tests/rear_mirror.cpp').read_text(encoding='utf8')
-harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n' + harness
+harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n' + harness
 harness = harness.replace('// PRODUCTION_ADAPTER', production)
 tests = (ROOT / 'tools/tests/weapon_optics.inc').read_text(encoding='utf8')
 harness = harness[:harness.rfind('}')] + tests + '\n}\n'

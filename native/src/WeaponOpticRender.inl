@@ -185,8 +185,9 @@ void Render(void* sc,std::uintptr_t cam) {
     }
 }
 // All geometry is in world space with normal depth testing: walls, the other
-// eye and the weapon can occlude the lens. Camera-left is negated for true U;
-// unlike the rear mirror the optic image must never be reflected.
+// eye and the weapon can occlude the lens. Quest's camera raster has reversed
+// horizontal U relative to the world-space surface; compensate in sampling,
+// keeping the physical camera and target-marker axes unchanged.
 void DrawSurfaces() {
     constexpr int states[]={1,6,8,9,10,11,12,14,20};
     std::uintptr_t saved[std::size(states)]{};
@@ -200,7 +201,7 @@ void DrawSurfaces() {
         const float size=optic.frame.halfSize,length=optic.frame.length;
         const auto vertex=[&](float x,float y,float z,std::uint32_t color) {
             return SkyBackdropVertex{surface.pos-surface.right*x+surface.up*y+surface.forward*z,{},color,
-                .5f+x/(2.f*size),.5f-y/(2.f*size)};
+                .5f-x/(2.f*size),.5f-y/(2.f*size)};
         };
         const auto draw=[&](SkyBackdropVertex* vertices,int count,unsigned short* indices,int indexCount,void* texture) {
             g.RwRenderStateSet(1,texture);

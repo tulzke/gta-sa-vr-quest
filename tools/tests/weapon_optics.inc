@@ -45,7 +45,8 @@
     CHECK(skipBlend&&skipOpaque&&screen[2]==1920&&screen[3]==1080);
     CHECK(fogState.start==originalFog.start&&fogState.end==originalFog.end);
     CHECK(opt::optics[0].imageReady);
-    // Geometry uses true horizontal U, not mirror U, and restores all states.
+    // Native Quest raster needs reversed U on the world-space lens. Keep the
+    // surface/target axes intact and compensate only the texture coordinates.
     static std::vector<SkyBackdropVertex> opticVertices;
     g.RwIm3DTransform=[](void* vertices,unsigned n,void*,unsigned)->void* {
         auto* first=static_cast<SkyBackdropVertex*>(vertices);
@@ -56,7 +57,7 @@
     opt::DrawSurfaces();CHECK(states==beforeOpticStates&&!opticVertices.empty());
     for(const auto& vertex:opticVertices) {
         CHECK(Finite(vertex.position)&&std::isfinite(vertex.u)&&std::isfinite(vertex.v));
-        CHECK((vertex.position.x>=0 && vertex.u>=.499f)||(vertex.position.x<=0 && vertex.u<=.501f));
+        CHECK((vertex.position.x>=0 && vertex.u<=.501f)||(vertex.position.x<=0 && vertex.u>=.499f));
     }
     opt::ResetFrame();CHECK(!opt::optics[0].visible);
     std::puts("weapon optics: supported types, zoom/clamps, mirrored mount, camera basis, ped/vehicle frustum, camera/fog/state restore, unreflected world-space lens PASS");
@@ -87,3 +88,13 @@
     CHECK(direction[1]<-.999f&&direction[0]<0); // points to weapon optic, not HMD centre
     float untouched[]={1,0,0};CHECK(heat::ApplyReticleAim(1,35,muzzle,untouched)&&untouched[0]==1);
     std::puts("heat lock: dwell, occlusion loss, pool generation/reuse, ignore restore; optic zero and RPG physical ray PASS");
+    for(float y : {-1.f,-.8f,.8f,1.f}) for(float x : {-.6f,-.2f,0.f,.2f,.6f})
+        CHECK(locomotion::FilterTurnStickX(x,y)==0.f);
+    CHECK(locomotion::FilterTurnStickX(.19f,0.f)==0.f);
+    CHECK(locomotion::FilterTurnStickX(.7f,.7f)==0.f);
+    CHECK(locomotion::FilterTurnStickX(1.f,.3f)==1.f);
+    CHECK(locomotion::FilterTurnStickX(-1.f,-.3f)==-1.f);
+    CHECK(std::abs(locomotion::FilterTurnStickX(.6f,0.f)-.5f)<.0001f);
+    CHECK(locomotion::FilterTurnStickX(std::numeric_limits<float>::quiet_NaN(),0.f)==0.f);
+    CHECK(locomotion::FilterTurnStickX(1.f,std::numeric_limits<float>::infinity())==0.f);
+    std::puts("turn stick: vertical zoom sectors, centre drift, diagonals suppressed; deliberate left/right and smooth scaling PASS");
