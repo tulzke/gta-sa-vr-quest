@@ -4844,7 +4844,8 @@ void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
                         static_cast<const char*>(activeVehicle)+0x68);
                     forwardSpeed=Dot(velocity,ef);
                 }
-                steeringAngle=wheelreturn::ReleasedAngle(previousAngle,forwardSpeed,wheelReturnDt);
+                steeringAngle=wheelreturn::ReleasedAngle(previousAngle,forwardSpeed,wheelReturnDt,
+                    activeType==VEHICLE_CAR);
             } else {
                 // A held wheel with hands near its axis must not self-centre.
                 steeringAngle=count?sum/count:previousAngle;

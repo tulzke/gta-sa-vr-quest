@@ -47,10 +47,21 @@ WheelVisualState Solve(float previousAngle,int mask,float dt,V3 p0,V3 p1,int typ
 }
 int main(){
     using namespace wheelreturn;
-    CHECK(Near(TimeConstant(0),.75f));CHECK(Near(TimeConstant(20.f/180),.4f));
-    CHECK(Near(TimeConstant(60.f/180),.175f));CHECK(Near(TimeConstant(100),.175f));
-    CHECK(Near(TimeConstant(-20.f/180),.4f));
-    CHECK(Near(TimeConstant(std::numeric_limits<float>::quiet_NaN()),.75f));
+    CHECK(ReturnRate(0)==0);CHECK(Near(ReturnRate(20.f/180),1.f/.4f));
+    CHECK(Near(ReturnRate(60.f/180),1.f/.175f));CHECK(Near(ReturnRate(100),1.f/.175f));
+    CHECK(Near(ReturnRate(-20.f/180),1.f/.4f));
+    CHECK(ReturnRate(std::numeric_limits<float>::quiet_NaN())==0);
+    CHECK(ReturnRate(std::numeric_limits<float>::infinity())==0);
+    for(float kmh:{.001f,1.f,5.f,10.f,15.f,19.999f,20.f}){
+        CHECK(Near(ReturnRate(kmh/180),kmh/20*ReturnRate(20.f/180)));
+        CHECK(Near(ReturnRate(-kmh/180),ReturnRate(kmh/180)));
+    }
+    CHECK(Near(ReturnRate(20.001f/180),ReturnRate(20.f/180)));
+    for(float angle:{-1.f,1.f,-.0001f,.0001f}){
+        float parked=angle;
+        for(int i=0;i<10000;++i)parked=ReleasedAngle(parked,0,.01f);
+        CHECK(parked==angle);
+    }
     CHECK(Near(ReleasedAngle(1,0,0),1));CHECK(Near(ReleasedAngle(1,0,1),1));
     CHECK(Near(ReleasedAngle(1,0,-1),1));
     Clock clock;
@@ -59,11 +70,11 @@ int main(){
     CHECK(clock.Step(2000)==0);CHECK(Near(clock.Step(2010),.01f));
     for(int hz:{72,90,120}){
         float a=1;
-        for(int i=0;i<hz;++i)a=ReleasedAngle(a,0,1.f/hz);
-        CHECK(Near(a,std::exp(-1.f/.75f)));
+        for(int i=0;i<hz;++i)a=ReleasedAngle(a,10.f/180,1.f/hz);
+        CHECK(Near(a,std::exp(-1.f*1.25f)));
     }
     for(int mask:{1,2,3})for(float sign:{-1.f,1.f}){
-        g_rimOwnershipMask=0;velocity={};
+        g_rimOwnershipMask=0;velocity={0,20.f/180,0};
         const V3 p0{-.2f,0,0},p1{.2f,0,0};
         auto v=Solve(sign,mask,.01f,p0,p1);
         CHECK(Near(v.physicalAngle,sign)); // first grab keeps current angle
@@ -75,6 +86,11 @@ int main(){
         CHECK(Near(v.physicalAngle,mid)); // regrab stops return in this frame
         v=Solve(mid,mask,.01f,{0,0,0},{0,0,0});
         CHECK(Near(v.physicalAngle,mid)); // hands at axis still own wheel
+        velocity={};
+        const auto parked=Solve(mid,0,.01f,p0,p1);
+        CHECK(parked.physicalAngle==mid);
+        CHECK(Near(parked.steering,v.steering));
+        velocity={0,20.f/180,0};
         for(int i=0;i<1000;++i)v=Solve(v.physicalAngle,0,.01f,p0,p1);
         CHECK(v.physicalAngle==0&&v.steering==0);
     }
@@ -82,7 +98,11 @@ int main(){
     velocity={0,-.4f,0};CHECK(Near(Solve(1,0,.01f,{},{}).physicalAngle,fast));
     velocity={.4f,0,.4f};const float slow=Solve(1,0,.01f,{},{}).physicalAngle;
     CHECK(fast<slow);
-    velocity={0,.4f,0};CHECK(Near(Solve(1,0,.01f,{},{},VEHICLE_BOAT).physicalAngle,slow));
+    CHECK(slow==1); // lateral/vertical motion cannot self-centre a parked car
+    velocity={0,.4f,0};CHECK(Near(Solve(1,0,.01f,{},{},VEHICLE_BOAT).physicalAngle,std::exp(-.01f/.75f)));
+    velocity={0,10.f/180,0};const auto halfSpeed=Solve(1,0,.1f,{},{});
+    velocity={0,20.f/180,0};const auto fullSpeed=Solve(1,0,.1f,{},{});
+    CHECK(Near(-std::log(halfSpeed.physicalAngle),-.5f*std::log(fullSpeed.physicalAngle)));
     // 1 -> 2 -> 1 and restored valid angles keep current wheel orientation.
     g_rimOwnershipMask=0;
     for(int mask:{1,3,2,3,1})CHECK(Near(Solve(.7f,mask,.01f,{-.2f,0,0},{.2f,0,0}).physicalAngle,.7f));
