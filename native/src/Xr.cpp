@@ -1,3 +1,4 @@
+#include "WeaponCalibrationMenu.h"
 #include "Xr.h"
 #include "Combat.h"
 #include "NpcGrabVisual.h"
@@ -575,6 +576,7 @@ std::atomic<int>      g_menuSelection{0}, g_menuCount{0};
 std::atomic<int>      g_menuCategory{-1};
 std::atomic<bool>     g_calibActive{false};      // calibration page shown
 std::atomic<int>      g_calibSel{0};             // highlighted row 0..20
+std::atomic<int> g_calibGroup{0};
 std::atomic<int>      g_calibHand{1};            // EDIT HAND: 0=LEFT, 1=RIGHT
 std::atomic<int>      g_calibWeaponType{0};       // latched on page entry
 std::atomic<bool>     g_mainMenuActive{false};   // main VR menu (root list) shown
@@ -5408,7 +5410,8 @@ void ReportStereoPacerAdvanceApplied(std::uint64_t appliedNs) {
     g_stereoPhaseKickAppliedNs.fetch_add(appliedNs, std::memory_order_relaxed);
 }
 
-void SetCalibPage(bool active, int selection, int hand, int weaponType) {
+void SetCalibPage(bool active, int selection, int hand, int weaponType, int group) {
+    g_calibGroup.store(group,std::memory_order_relaxed);
     g_calibActive.store(active, std::memory_order_relaxed);
     g_calibSel.store(selection, std::memory_order_relaxed);
     g_calibHand.store(hand, std::memory_order_relaxed);
@@ -8385,8 +8388,9 @@ void BuildCalibMenu() {
     const int cx   = kPanelW / 2;
     const int type = g_calibWeaponType.load(std::memory_order_relaxed);
     const int sel  = g_calibSel.load(std::memory_order_relaxed);
+    const int group=g_calibGroup.load(std::memory_order_relaxed);
 
-    PanelText("WEAPON CALIBRATION", cx, 10, 3, 100, 225, 255);
+    PanelText(weaponmenu::Name(group), cx, 10, 3, 100, 225, 255);
     char hdr[64];
     std::snprintf(hdr, sizeof(hdr), "%s   RIGHT MASTER",
                   savr::calib::WeaponName(type));
@@ -8396,30 +8400,43 @@ void BuildCalibMenu() {
     // A scrolling window keeps selection centred, including optional optic rows, so the
     // fixed panel stays readable at arm's length instead of shrinking the font.
     const bool hasOptic=weaponoptic::Supported(type);
-    const int kRows = hasOptic ? 37 : 26;
+    const int kRows=weaponmenu::Rows(group);
     constexpr int kWin = 9;
     int start = sel - kWin / 2;
     if (start < 0)              start = 0;
-    if (start > kRows - kWin)   start = kRows - kWin;
+    if (start > std::max(0,kRows-kWin)) start=std::max(0,kRows-kWin);
 
     if (start > 0) PanelText("- MORE -", cx, 80, 2, 120, 150, 120);
     const int top = 96, rowH = 38;
-    for (int w = 0; w < kWin; ++w) {
-        const int r = start + w;
+    for (int w = 0; w < kWin && start+w<kRows; ++w) {
+        const int index=start+w;
+        const int r=weaponmenu::Field(group,index);
         const int y = top + w * rowH;
-        if (r == sel) PanelFillRect(18, y - 3, kPanelW - 18, y + 18, 120, 40, 110, 235);
-        const int c = (r == sel) ? 255 : 200;
+        if (index == sel) PanelFillRect(18, y - 3, kPanelW - 18, y + 18, 120, 40, 110, 235);
+        const int c = (index == sel) ? 255 : 200;
         char row[64];
-        if (r == kRows-1) {
+        if (index == kRows-1) {
             std::snprintf(row, sizeof(row), "BACK");
-        } else if (hasOptic && r == 35) {
+        } else if (group==weaponmenu::ROOT) {
+            std::snprintf(row,sizeof(row),"%s%s",weaponmenu::Name(index+1),
+                          index==4 && !hasOptic?" (NOT AVAILABLE)":" ...");
+        } else if (group==weaponmenu::AMMO) {
+            const auto ammo=hud::GetWristSettings(hud::AMMO,hud::WRIST_SLOT_HAND,-1);
+            const int values[]={ammo.alongMm,ammo.acrossMm,ammo.liftMm,
+                                ammo.pitchDeg,ammo.yawDeg,ammo.rollDeg,ammo.scaleTenths};
+            static const char* names[]={"ALONG BARREL","SIDE","UP","PITCH","YAW","ROLL","SIZE"};
+            if (index==0) std::snprintf(row,sizeof(row),"VISIBLE   < %s >",hud::GetElementSettings(hud::AMMO).enabled?"ON":"OFF");
+            else if(index<=3) std::snprintf(row,sizeof(row),"%s   < %+.1f CM >",names[index-1],values[index-1]/10.0f);
+            else if(index<=6) std::snprintf(row,sizeof(row),"%s   < %+d DEG >",names[index-1],values[index-1]);
+            else std::snprintf(row,sizeof(row),"SIZE   < %.1f X >",ammo.scaleTenths/10.0f);
+        } else if (group==weaponmenu::OPTIC && r == 35) {
             std::snprintf(row,sizeof(row),"RESET SCOPE   < PRESS A >");
-        } else if (hasOptic && (r == 33 || r == 34)) {
+        } else if (group==weaponmenu::OPTIC && (r == 33 || r == 34)) {
             const int field=r-25;
             const auto profile=calib::SnapshotOptic(type);
             std::snprintf(row,sizeof(row),"%s   < %s >",calib::OpticFieldLabel(field),
                 profile.value[field] ? "ON" : "OFF");
-        } else if (hasOptic && r >= 25) {
+        } else if (group==weaponmenu::OPTIC && r >= 25) {
             const int field=r-25;
             const auto profile=calib::SnapshotOptic(type);
             std::snprintf(row,sizeof(row),"%s   < %+.1f %s >",
@@ -8455,7 +8472,7 @@ void BuildCalibMenu() {
                               savr::calib::FieldUnit(field));
             }
         }
-        PanelText(row, cx, y, 2, c, c, (r == sel) ? 120 : c);
+        PanelText(row, cx, y, 2, c, c, (index == sel) ? 120 : c);
     }
     if (start < kRows - kWin) PanelText("- MORE -", cx, top + kWin * rowH, 2, 120, 150, 120);
 
@@ -10001,7 +10018,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
 
 void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
                    int type, float width, bool backdrop=true, const WeaponAmmoPose* weaponPose=nullptr) {
-    if (type<0 || type>=64 || (!hud::ShouldRenderWristHud() && !g_hudActive.load(std::memory_order_relaxed))) return;
+    if (type<0 || type>=64 || (!hud::ShouldRenderWristHud() && !g_calibActive.load(std::memory_order_relaxed))) return;
     const auto ammo=g_ammoHud[type].load(std::memory_order_relaxed);
     if (!(ammo&(1ull<<63))) return;
     const int clip=static_cast<int>((ammo>>32)&0x7fffffffu);
@@ -10011,7 +10028,7 @@ void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
     XrVector3f axisUp=QuatRotate(eye.orientation,{0,1,0});
     if (weaponPose && weaponPose->valid) {
         const auto settings=hud::GetWristSettings(hud::AMMO,hud::WRIST_SLOT_HAND,-1);
-        if (!hud::GetElementSettings(hud::AMMO).enabled && !g_hudActive.load(std::memory_order_relaxed)) return;
+        if (!hud::GetElementSettings(hud::AMMO).enabled && !(g_calibActive.load(std::memory_order_relaxed) && g_calibGroup.load()==weaponmenu::AMMO)) return;
         axisRight=vnorm({weaponPose->right[0],weaponPose->right[1],weaponPose->right[2]});
         axisUp=vnorm({weaponPose->forward[0],weaponPose->forward[1],weaponPose->forward[2]});
         XrVector3f side=vnorm({weaponPose->up[0],weaponPose->up[1],weaponPose->up[2]});
@@ -12326,7 +12343,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,false,true);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,true);
     if (!scope.active) DrawRadialHolsterMenu(mvp,bakedRadial);
-    if (trackedVisuals && (hud::ShouldRenderWristHud() || g_hudActive.load(std::memory_order_relaxed))) {
+    if (trackedVisuals && (hud::ShouldRenderWristHud() || (g_calibActive.load(std::memory_order_relaxed) && g_calibGroup.load()==weaponmenu::AMMO))) {
         const auto lower=QuatRotate(rp.orientation,{0,-.05f,0});
         for (int h=0;h<2;++h) if ((weaponHandMask&(1u<<h)) && ammoPoses[h].valid) {
             DrawAmmoLabel(mvp,rp,{},handTypes[h],.11f,true,&ammoPoses[h]);

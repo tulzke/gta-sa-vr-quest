@@ -538,8 +538,10 @@ void CycleCalibrationElement(int direction) {
     EnsureLoaded();
     if (!direction) return;
     const int current = CalibrationElement();
+    int next=(current+ELEMENT_COUNT+(direction<0?-1:1))%ELEMENT_COUNT;
+    if (next==AMMO) next=(next+ELEMENT_COUNT+(direction<0?-1:1))%ELEMENT_COUNT;
     g_calibrationElement.store(
-        (current + ELEMENT_COUNT + (direction < 0 ? -1 : 1)) % ELEMENT_COUNT,
+        next,
         std::memory_order_release);
 }
 

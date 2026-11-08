@@ -1,3 +1,4 @@
+#include "WeaponCalibrationMenu.h"
 #include "VehicleEntry.h"
 #include "Tbone.h"
 #include "BeachDance.h"
@@ -1044,6 +1045,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     static int  menuPage = PG_NONE;
     static int  mainSel = 0, cheatSel = 0, cheatCategory = -1, calibSel = 0;
     static int  calibWeaponType = 0;
+    static int calibGroup=savr::weaponmenu::ROOT;
     static int  holsterCalibSel = 0, holsterSel = 0, drivingSel = 0;
     static int  drivingVehicleType = savr::driving::VEHICLE_BIKE;
     static int  drivingCalibSel = 0, drivingCalibHand = 0;
@@ -1203,6 +1205,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 if      (mainSel == 0) {
                     calibWeaponType = savr::calib::ActiveWeapon();
                     menuPage = PG_CALIB;
+                    calibGroup=savr::weaponmenu::ROOT;
                     calibSel = 0;
                 }
                 else if (mainSel == 1) {
@@ -1281,14 +1284,27 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             break;
         }
         case PG_CALIB: {
-            // 26 rows: 0..18 fields, 19 WEAPON LASER (global), 20 LASER BEAM
-            // mode, 21 LOCK LASER, 22 WEAPON RECOIL, 23 TRACER COLOR,
-            // Optics add 25..32 pose/size, 33..34 image flips, 35 reset.
-            const int ROWS = savr::weaponoptic::Supported(calibWeaponType) ? 37 : 26;
+            const int ROWS=savr::weaponmenu::Rows(calibGroup);
             if (navUp)   calibSel = (calibSel - 1 + ROWS) % ROWS;
             if (navDown) calibSel = (calibSel + 1) % ROWS;
             const int type = calibWeaponType;
 
+            if (calibGroup==savr::weaponmenu::ROOT) {
+                calAdjDir=calAdjHeld=calAdjSince=0;
+                if (back || (enter && calibSel==ROWS-1)) menuPage=PG_MAIN;
+                else if (enter && (calibSel!=4 || savr::weaponoptic::Supported(type))) {
+                    calibGroup=calibSel+1; calibSel=0;
+                }
+                break;
+            }
+            if (back || calibSel==ROWS-1) {
+                if (back || enter) {
+                    savr::calib::Save(); calibSel=calibGroup-1; calibGroup=savr::weaponmenu::ROOT;
+                    calAdjDir=calAdjHeld=calAdjSince=0;
+                }
+                break;
+            }
+            const int fieldRow=savr::weaponmenu::Field(calibGroup,calibSel);
             // Value adjust (accelerated): L2 / stick-left = -1, R2 / stick-right = +1.
             const int dir = !grips && in.triggers[1] >= 0.55f ? +1
                           : !grips && in.triggers[0] >= 0.55f ? -1 : 0;
@@ -1302,44 +1318,48 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             const int  mult      = (calAdjHeld < 45) ? 1 : (calAdjHeld < 105) ? 3 : 10;  // x1/x3/x10
             const bool firstTick = fire && calAdjHeld == 1;
 
-            if (calibSel == ROWS-1) {                              // BACK
-                if (enter || firstTick || back) { savr::calib::Save(); menuPage = PG_MAIN; }
-            } else if (ROWS==37 && calibSel==35) {
+            if (calibGroup==savr::weaponmenu::AMMO) {
+                if (calibSel==0 && (enter || firstTick)) {
+                    const bool enabled=savr::hud::GetElementSettings(savr::hud::AMMO).enabled;
+                    savr::hud::SetElementEnabled(savr::hud::AMMO, enter?!enabled:dir>0);
+                } else if (calibSel>=1 && calibSel<=7 && fire) {
+                    savr::hud::AdjustWristField(savr::hud::AMMO,calibSel-1,dir*mult,savr::hud::WRIST_SLOT_HAND,-1);
+                }
+            } else if (calibGroup==savr::weaponmenu::OPTIC && fieldRow==35) {
                 if(enter) savr::calib::ResetOptic(type);
-            } else if (ROWS==37 && (calibSel==33 || calibSel==34)) {
-                const int field=calibSel-25;
+            } else if (calibGroup==savr::weaponmenu::OPTIC && (fieldRow==33 || fieldRow==34)) {
+                const int field=fieldRow-25;
                 const int current=savr::calib::SnapshotOptic(type).value[field];
                 if(enter) savr::calib::AdjustOptic(type,field,current ? -1 : 1);
                 else if(firstTick) savr::calib::AdjustOptic(type,field,dir);
-            } else if (ROWS==37 && calibSel>=25) {
-                if(fire) savr::calib::AdjustOptic(type,calibSel-25,dir*(in.l3 ? 1 : 5*mult));
-            } else if (calibSel == 24) {                           // TRACER SMOKE SPREAD
+            } else if (calibGroup==savr::weaponmenu::OPTIC && fieldRow>=25) {
+                if(fire) savr::calib::AdjustOptic(type,fieldRow-25,dir*(in.l3 ? 1 : 5*mult));
+            } else if (fieldRow == 24) {                           // TRACER SMOKE SPREAD
                 if (enter) vrcam::AdjustTracerSmokeSpread(+1);
                 else if (firstTick) vrcam::AdjustTracerSmokeSpread(dir);
-            } else if (calibSel == 23) {                           // TRACER COLOR
+            } else if (fieldRow == 23) {                           // TRACER COLOR
                 if (enter) vrcam::AdjustTracerColorMode(+1);
                 else if (firstTick) vrcam::AdjustTracerColorMode(dir);
-            } else if (calibSel == 22) {                           // WEAPON RECOIL
+            } else if (fieldRow == 22) {                           // WEAPON RECOIL
                 if (enter) savr::calib::CycleRecoil(+1);
                 else if (firstTick) savr::calib::CycleRecoil(dir);
-            } else if (calibSel == 21) {                           // explicit persistent lock
+            } else if (fieldRow == 21) {                           // explicit persistent lock
                 if (enter || firstTick) savr::calib::LockLaser(type);
-            } else if (calibSel == 20) {                           // per-weapon beam override
+            } else if (fieldRow == 20) {                           // per-weapon beam override
                 if (enter) savr::calib::CycleLaserModeForWeapon(type, +1);
                 else if (firstTick) savr::calib::CycleLaserModeForWeapon(type, dir);
-            } else if (calibSel == 19) {                           // global laser toggle
+            } else if (fieldRow == 19) {                           // global laser toggle
                 if (enter) savr::calib::ToggleLaser();
                 else if (firstTick) savr::calib::SetLaserEnabled(dir > 0);
-            } else if (calibSel == savr::calib::F_SUP_STYLE) {     // SUPPORT STYLE toggle
+            } else if (fieldRow == savr::calib::F_SUP_STYLE) {     // SUPPORT STYLE toggle
                 if (enter || firstTick) {
                     const int cur = savr::calib::GetField(1, type, savr::calib::F_SUP_STYLE);
                     savr::calib::SetField(1, type, savr::calib::F_SUP_STYLE, cur ? 0 : 1);
                     savr::calib::Save();
                 }
             } else if (fire) {                                     // numeric fields 0..17
-                savr::calib::AdjustField(1, type, calibSel, dir * mult);
+                savr::calib::AdjustField(1, type, fieldRow, dir * mult);
             }
-            if (back) { savr::calib::Save(); menuPage = PG_MAIN; }
             break;
         }
         case PG_HOLSTER_CALIB: {
@@ -1878,7 +1898,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             savr::basketball::EndHandCalibration();
 
         xr::SetMainMenu    (menuPage == PG_MAIN,     mainSel);
-        xr::SetCalibPage   (menuPage == PG_CALIB, calibSel, 1, calibWeaponType);
+        xr::SetCalibPage   (menuPage == PG_CALIB, calibSel, 1, calibWeaponType, calibGroup);
         xr::SetHolsterCalibMenu(menuPage == PG_HOLSTER_CALIB, holsterCalibSel);
         xr::SetHolsterMenu (menuPage == PG_HOLSTERS, holsterSel);
         savr::driving::SetMenuPreview(
@@ -1991,7 +2011,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         savr::physicalweapon::Update(
             weaponInteractionsBlocked,
             menuPage == PG_HOLSTER_CALIB && savr::holster::GripMarkersEnabled(),
-            menuPage == PG_CALIB);
+            menuPage == PG_CALIB && calibGroup==savr::weaponmenu::SUPPORT);
         savr::melee::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::combat::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::scopeaim::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);

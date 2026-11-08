@@ -422,7 +422,7 @@ void ReportStereoPacerAdvanceApplied(std::uint64_t appliedNs);
 
 // VR menu calibration page. RIGHT is the single master profile; LEFT consumes the
 // same values through its mirrored hand basis, so only one hand is calibrated.
-void SetCalibPage(bool active, int selection, int hand, int weaponType);
+void SetCalibPage(bool active, int selection, int hand, int weaponType, int group=0);
 
 // Root VR menu, holster loadout and Graphics submenu. Only one menu page is active
 // at a time; the GameThread publishes whichever is current each frame.
