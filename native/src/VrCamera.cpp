@@ -20495,7 +20495,9 @@ void RenderPdaMap() {
     std::memcpy(savedCount,legendCount,sizeof(savedCount));
     const float savedOrigin[2]={origin[0],origin[1]};
     const float savedRange=*range, savedCos=*cachedCos, savedSin=*cachedSin;
-    const float projection=400.0f;
+    // Frontend coordinates are in the game's 448-unit logical space; sprite
+    // drawing scales them by framebuffer height / 448. 224 maps to pixel 400.
+    const float projection=224.0f;
     std::memcpy(menu+0x78,&projection,sizeof(float));
     std::memcpy(menu+0x7c,&projection,sizeof(float));
     std::memcpy(menu+0x80,&projection,sizeof(float));
@@ -22143,10 +22145,9 @@ void OnRenderScene(bool underwater) {
     npcgrab::PublishMarkers();
     testarea::PublishMarkers();
     xr::SetRadialHolsterAtlas(radialReady ? EyeRasterTexId(g_radialIconRaster[set]) : 0);
-    // Unlike FindPlayerPed, FindPlayerHeading indexes the player array before
-    // resolving negative IDs. Never call it with -1 or before a player exists.
-    const float pdaHeading = pdaReady && g.FindPlayerPed && g.FindPlayerPed(0) &&
-                             g.FindPlayerHeading ? g.FindPlayerHeading(0) : 0.0f;
+    // `base` is the actual head-tracked game camera used for this stereo pair.
+    // Its horizontal forward vector includes both body and physical head yaw.
+    const float pdaHeading = std::atan2(-base.forward.x, base.forward.y);
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex,
                              std::isfinite(pdaHeading) ? pdaHeading : 0.0f,
                              renderedNear, renderedFar,
