@@ -24,27 +24,34 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
     const float c=std::cos(heading), s=std::sin(heading);
     const float halfX=hud::PdaPortrait()?176.0f:296.0f;
     const float halfY=hud::PdaPortrait()?296.0f:176.0f;
-    auto project=[&](float dx,float dy,float& x,float& y) {
-        // Same world-to-source texture mapping as the tiles, then clamp in the
-        // FINAL rotated viewport, and transform back into source coordinates.
+    auto project=[&](float dx,float dy,float& x,float& y,bool pin=true) {
+        // Objectives stay inset at the edge. Local POIs keep their real map
+        // position, pass through the screen boundary and fade outside it.
         const float sx=dx*pixelsPerMetre, sy=-dy*pixelsPerMetre;
         float vx=c*sx-s*sy, vy=s*sx+c*sy;
-        const bool inside=std::abs(vx)<=halfX && std::abs(vy)<=halfY;
-        const float edge=std::max(1.0f,std::max(std::abs(vx)/halfX,std::abs(vy)/halfY));
-        vx/=edge; vy/=edge;
+        float opacity=1.0f;
+        if (pin) {
+            const float edge=std::max(1.0f,std::max(std::abs(vx)/halfX,std::abs(vy)/halfY));
+            vx/=edge; vy/=edge;
+        } else {
+            constexpr float radius=24.0f;
+            const float outside=std::max(0.0f,std::max(std::abs(vx)-(halfX+radius),std::abs(vy)-(halfY+radius)));
+            const float t=std::clamp(outside/radius,0.0f,1.0f);
+            opacity=1.0f-t*t*(3.0f-2.0f*t);
+        }
         x=400.0f+c*vx+s*vy; y=400.0f-s*vx+c*vy;
-        return inside;
+        return opacity;
     };
-    const unsigned char white[4]={255,255,255,255};
-    auto icon=[&](int id,float x,float y,float angle,float radius) {
+    auto icon=[&](int id,float x,float y,float angle,float radius,float opacity=1.0f) {
         if (id<0 || id>=64 || !*reinterpret_cast<void**>(sprites+id*8)) return;
         const float ca=std::cos(angle), sa=std::sin(angle);
         auto corner=[&](float a,float b) { return std::pair<float,float>{x+ca*a+sa*b,y-sa*a+ca*b}; };
         const auto tl=corner(-radius,-radius), tr=corner(radius,-radius),
                    bl=corner(-radius,radius), br=corner(radius,radius);
         // Native overload takes bottom-left, bottom-right, top-left, top-right.
+        const unsigned char color[4]={255,255,255,static_cast<unsigned char>(255.0f*opacity)};
         quad(sprites+id*8,bl.first,bl.second,br.first,br.second,
-             tl.first,tl.second,tr.first,tr.second,white);
+             tl.first,tl.second,tr.first,tr.second,color);
     };
     for (int i=0;i<250;++i) {
         const auto* t=traces+i*48;
@@ -66,11 +73,13 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
         } else continue;
         if (!std::isfinite(at.x)||!std::isfinite(at.y)||!std::isfinite(at.z)) continue;
         float x,y;
-        const bool inside=project(at.x-player.x,at.y-player.y,x,y);
-        // Nearby map locations belong to the visible map, not a ring of every
-        // known POI. Keep edge indicators for objectives/entities and waypoint.
-        if (!inside && ((flags&4) || (sprite && sprite!=41 && (type==4 || type==5)))) continue;
-        if (sprite) icon(sprite,x,y,heading,24.0f);
+        // Retail flag bit 2 marks short-range blips; bit 4 requests remaining
+        // visible. Do not infer objective visibility solely from a sprite ID.
+        const bool alwaysVisible=!(flags&4) || (flags&0x10) || type==5 ||
+                                 type<=3 || sprite==0 || sprite==41;
+        const float opacity=project(at.x-player.x,at.y-player.y,x,y,alwaysVisible);
+        if (opacity<=0.0f) continue;
+        if (sprite) icon(sprite,x,y,heading,24.0f,opacity);
         else {
             // Stock radar primitives have a black border and a coloured core.
             std::uint32_t color; std::memcpy(&color,t,4);
