@@ -8198,7 +8198,6 @@ void BuildHudMenu() {
     const hud::ElementSettings settings=hud::GetElementSettings(element);
     const int wristSlot=(page==3)?hud::WRIST_SLOT_VEHICLE:
                         (page==4)?hud::WRIST_SLOT_WEAPON:
-                        (page==5)?hud::WRIST_SLOT_TWOHAND:
                                   hud::WRIST_SLOT_HAND;
     const int dashModel=(page==3)
         ?g_lastDashModelId.load(std::memory_order_relaxed):-1;
@@ -8313,12 +8312,9 @@ void BuildHudMenu() {
         std::snprintf(rows[7],sizeof(rows[7]),directText?
                       "WEAPON GRIP - NO PANEL":
                       "WEAPON GRIP PLACEMENT ...");
-        std::snprintf(rows[8],sizeof(rows[8]),directText?
-                      "TWO-HAND GRIP - NO PANEL":
-                      "TWO-HAND GRIP PLACEMENT ...");
-        std::snprintf(rows[9],sizeof(rows[9]),"RESET THIS ELEMENT");
-        std::snprintf(rows[10],sizeof(rows[10]),"BACK");
-        rowCount=11;
+        std::snprintf(rows[8],sizeof(rows[8]),"RESET THIS ELEMENT");
+        std::snprintf(rows[9],sizeof(rows[9]),"BACK");
+        rowCount=10;
     }
 
     constexpr int kWin=9;
@@ -9872,17 +9868,39 @@ bool BuildHandPanelAnchor(const HandPose& hp, int hand,
                      twoHand.supportAnchor[2]});
             }
             if (twoHand.supportBasisValid) {
-                // The published support basis is a conventional wrist frame:
-                // forward to the fingers, up away from the palm. Both are
-                // already anatomical (no OpenXR hand mirroring), so the grip
-                // vocabulary follows directly and side closes the frame.
-                palmUp = vnorm(TwoHandRotateVector(twoHand,
-                    {twoHand.supportUp[0], twoHand.supportUp[1],
-                     twoHand.supportUp[2]}));
-                backward = vnorm(vscale(TwoHandRotateVector(twoHand,
-                    {twoHand.supportForward[0], twoHand.supportForward[1],
-                     twoHand.supportForward[2]}), -1.0f));
-                side = vnorm(vcross(palmUp, backward));
+                // Transform the original grip axes through the same visual
+                // hand frames as BuildHandMeshes. Substituting anatomical
+                // axes directly changes the panel's calibrated wrist frame.
+                const XrQuaternionf aq{hp.aimOri[0], hp.aimOri[1],
+                                       hp.aimOri[2], hp.aimOri[3]};
+                const XrVector3f gripRight = vnorm(QuatRotate(q, {1, 0, 0}));
+                const XrVector3f gripUp = vnorm(QuatRotate(q, {0, 1, 0}));
+                const XrVector3f gripForward = vnorm(QuatRotate(q, {0, 0, -1}));
+                const XrVector3f aimForward = vnorm(QuatRotate(aq, {0, 0, -1}));
+                const XrVector3f fromForward = vnorm(
+                    vdot(aimForward, aimForward) > 0.1f ? aimForward : gripUp);
+                XrVector3f fromUp = vscale(gripRight, hand == 1 ? 1.0f : -1.0f);
+                fromUp = vsub(fromUp, vscale(fromForward, vdot(fromUp, fromForward)));
+                if (vdot(fromUp, fromUp) < 0.0001f)
+                    fromUp = vscale(gripRight, hand == 1 ? 1.0f : -1.0f);
+                fromUp = vnorm(fromUp);
+                XrVector3f fromRight = vnorm(vcross(fromUp, fromForward));
+                if (vdot(fromRight, gripForward) < 0.0f) fromRight = vscale(fromRight, -1.0f);
+                XrVector3f toRight = vnorm(TwoHandRotateVector(twoHand,
+                    {twoHand.supportRight[0], twoHand.supportRight[1], twoHand.supportRight[2]}));
+                if (hand == 0) toRight = vscale(toRight, -1.0f);
+                const XrVector3f toUp = vnorm(TwoHandRotateVector(twoHand,
+                    {twoHand.supportUp[0], twoHand.supportUp[1], twoHand.supportUp[2]}));
+                const XrVector3f toForward = vnorm(TwoHandRotateVector(twoHand,
+                    {twoHand.supportForward[0], twoHand.supportForward[1], twoHand.supportForward[2]}));
+                const auto mapAxis = [&](XrVector3f axis) {
+                    return vadd(vadd(vscale(toRight, vdot(axis, fromRight)),
+                                     vscale(toUp, vdot(axis, fromUp))),
+                                vscale(toForward, vdot(axis, fromForward)));
+                };
+                side = mapAxis(side);
+                palmUp = mapAxis(palmUp);
+                backward = mapAxis(backward);
             }
         }
     }
@@ -9980,9 +9998,8 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
     }
     {
         // Per-panel slot selection: normal wrist, one-hand weapon grip,
-        // or two-hand grip (each panel follows its own visible hand).
-        // Calibration pages 4/5 force
-        // the respective slot so it can be tuned without holding a gun.
+        // Each panel follows its own visible hand. Calibration page 4 forces
+        // the weapon slot so it can be tuned without holding a gun.
         const int hudMenuPage = g_hudPage.load(std::memory_order_relaxed);
         for (int panel = 0; panel < 3; ++panel) {
             glBindTexture(GL_TEXTURE_2D, hudTex);
@@ -9991,9 +10008,8 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
             const int anchorHand = panel == 1 ? 1 : hud::DeviceHand(panelElements[panel]);
             if (calibrating && hudMenuPage == 4) {
                 slot = hud::WRIST_SLOT_WEAPON;
-            } else if (calibrating && hudMenuPage == 5) {
-                slot = hud::WRIST_SLOT_TWOHAND;
-            } else if ((weaponHandMask & (1u << anchorHand)) != 0) {
+            } else if ((weaponHandMask & (1u << anchorHand)) != 0 &&
+                       !(TwoHandStateUsable(twoHand) && anchorHand == twoHand.supportHand)) {
                 slot = hud::WRIST_SLOT_WEAPON;
             }
             XrVector3f base, alongAxis, acrossAxis, liftAxis, right, up,

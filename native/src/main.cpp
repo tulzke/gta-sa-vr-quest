@@ -1629,7 +1629,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         case PG_HUD: {
             // Root: presets, element pick, and the two calibration submenus.
             // Row indices must match BuildHudMenu page 0.
-            constexpr int ROWS = 11;
+            constexpr int ROWS = 10;
             if (navUp)   hudSel = (hudSel - 1 + ROWS) % ROWS;
             if (navDown) hudSel = (hudSel + 1) % ROWS;
             const int step=minus?-1:(plus?1:0);
@@ -1668,12 +1668,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                     menuPage=PG_HUD_WRIST; hudWristSel=0; hudWristMode=4;
                 }
             } else if (hudSel==8&&enter) {
-                if (!directText) {
-                    menuPage=PG_HUD_WRIST; hudWristSel=0; hudWristMode=5;
-                }
-            } else if (hudSel==9&&enter) {
                 savr::hud::ResetElement(element);
-            } else if (hudSel==10&&enter) {
+            } else if (hudSel==9&&enter) {
                 menuPage = PG_MAIN;
             }
             if (back) menuPage = PG_MAIN;
@@ -1716,7 +1712,6 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 g.FindPlayerVehicle(-1, false) != nullptr;
             const int slot =
                 hudWristMode == 4 ? savr::hud::WRIST_SLOT_WEAPON :
-                hudWristMode == 5 ? savr::hud::WRIST_SLOT_TWOHAND :
                 (driving && element == savr::hud::RADAR) ? savr::hud::WRIST_SLOT_VEHICLE
                         : savr::hud::WRIST_SLOT_HAND;
             const int dashModel =
