@@ -22106,7 +22106,10 @@ void OnRenderScene(bool underwater) {
     npcgrab::PublishMarkers();
     testarea::PublishMarkers();
     xr::SetRadialHolsterAtlas(radialReady ? EyeRasterTexId(g_radialIconRaster[set]) : 0);
-    const float pdaHeading = g.FindPlayerHeading ? g.FindPlayerHeading(-1) : 0.0f;
+    // Unlike FindPlayerPed, FindPlayerHeading indexes the player array before
+    // resolving negative IDs. Never call it with -1 or before a player exists.
+    const float pdaHeading = pdaReady && g.FindPlayerPed && g.FindPlayerPed(0) &&
+                             g.FindPlayerHeading ? g.FindPlayerHeading(0) : 0.0f;
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex,
                              std::isfinite(pdaHeading) ? pdaHeading : 0.0f,
                              renderedNear, renderedFar,
