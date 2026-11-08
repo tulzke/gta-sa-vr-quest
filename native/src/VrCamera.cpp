@@ -2952,7 +2952,7 @@ bool CapturedTwoHandUsable(const xr::TwoHandVisualState& state, int hand) {
 bool BuildModelBoundWeaponRayTracking(
         const xr::HandPose& renderedPose, int hand, int weaponType,
         const xr::TwoHandVisualState* capturedTwoHand,
-        float originOut[3], float directionOut[3]) {
+        float originOut[3], float directionOut[3], float* anchorOut = nullptr) {
     if (!originOut || !directionOut || hand < 0 || hand > 1 ||
         weaponType == 0 || !renderedPose.valid || !renderedPose.aimValid ||
         !g_vrBaseValid || !g_origin.valid) {
@@ -3027,6 +3027,11 @@ bool BuildModelBoundWeaponRayTracking(
     constexpr float kUnitToMetres = 0.005f;
     const V3 weaponPosition{weaponPose.position[0], weaponPose.position[1],
                             weaponPose.position[2]};
+    if (anchorOut) {
+        anchorOut[0] = weaponPosition.x;
+        anchorOut[1] = weaponPosition.y;
+        anchorOut[2] = weaponPosition.z;
+    }
     const V3 origin = weaponPosition +
         baseLateral * (c.aimOffX * kUnitToMetres) +
         baseTop * (c.aimOffY * kUnitToMetres) +
@@ -29939,8 +29944,9 @@ bool GetLocalHeadYaw(float* yawOut) {
     return std::isfinite(*yawOut);
 }
 
-bool GetWeaponFireRay(int hand, int weaponType,
-                      float originOut[3], float directionOut[3]) {
+bool GetWeaponFireSegment(int hand, int weaponType,
+                          float originOut[3], float directionOut[3],
+                          float anchorOut[3]) {
     if (!originOut || !directionOut || hand < 0 || hand > 1 || weaponType == 0 ||
         !g_stereoActive.load(std::memory_order_relaxed) ||
         !g_vrBaseValid || !g_origin.valid) {
@@ -29952,9 +29958,10 @@ bool GetWeaponFireRay(int hand, int weaponType,
         xr::GetHandPoses(hands);
     float trackingOriginValues[3]{};
     float trackingDirectionValues[3]{};
+    float trackingAnchor[3]{};
     if (!BuildModelBoundWeaponRayTracking(
             hands[hand], hand, weaponType, nullptr,
-            trackingOriginValues, trackingDirectionValues)) {
+            trackingOriginValues, trackingDirectionValues, trackingAnchor)) {
         return false;
     }
     const V3 trackingOrigin{trackingOriginValues[0], trackingOriginValues[1],
@@ -29963,8 +29970,10 @@ bool GetWeaponFireRay(int hand, int weaponType,
                                trackingDirectionValues[1],
                                trackingDirectionValues[2]};
     const V3 origin = TrackingPointToGame(trackingOrigin);
+    const V3 anchor = TrackingPointToGame(
+        {trackingAnchor[0], trackingAnchor[1], trackingAnchor[2]});
     const V3 forward = Normalized(TrackingVectorToGame(trackingDirection));
-    if (!Finite(origin) || !Finite(forward) || Dot(forward, forward) < 0.5f)
+    if (!Finite(origin) || !Finite(anchor) || !Finite(forward) || Dot(forward, forward) < 0.5f)
         return false;
 
     originOut[0] = origin.x;
@@ -29973,7 +29982,15 @@ bool GetWeaponFireRay(int hand, int weaponType,
     directionOut[0] = forward.x;
     directionOut[1] = forward.y;
     directionOut[2] = forward.z;
+    if (anchorOut) {
+        anchorOut[0] = anchor.x; anchorOut[1] = anchor.y; anchorOut[2] = anchor.z;
+    }
     return true;
+}
+
+bool GetWeaponFireRay(int hand, int weaponType,
+                      float originOut[3], float directionOut[3]) {
+    return GetWeaponFireSegment(hand, weaponType, originOut, directionOut, nullptr);
 }
 
 bool GetWeaponRayTracking(const xr::HandPose& renderedPose, int hand,

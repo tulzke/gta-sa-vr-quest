@@ -183,7 +183,7 @@ Vec3 Normalize(Vec3 v) {
 }
 
 bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction,
-                    bool* suppressShot = nullptr) {
+                    bool* suppressShot = nullptr, Vec3* anchor = nullptr) {
     if (suppressShot) *suppressShot = false;
     // Every direct-fire family aims with the tracked hand: hitscan guns,
     // the AREA sprayers (flamethrower/spraycan/extinguisher) and the camera.
@@ -207,14 +207,16 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
     int hand = -1;
     if (!query || !query(weaponType, &hand) || hand < 0 || hand > 1)
         return false;
+    if (suppressShot && SupportedHitscan(weaponType)) *suppressShot = true;
     const bool scoped = scopedType && scope.hand == hand;
     if (scopedType && !scoped) return false;
-    if (suppressShot) *suppressShot = scoped;
+    if (suppressShot) *suppressShot = scoped || SupportedHitscan(weaponType);
 
     float o[3]{};
     float d[3]{};
-    if (!vrcam::GetWeaponFireRay(hand, weaponType, o, d)) {
-        if (suppressShot) *suppressShot = scoped;
+    float a[3]{};
+    if (!(anchor ? vrcam::GetWeaponFireSegment(hand, weaponType, o, d, a)
+                 : vrcam::GetWeaponFireRay(hand, weaponType, o, d))) {
         return false;
     }
     if (!scopeaim::ApplyReticleAim(hand, weaponType, o, d)) {
@@ -225,6 +227,7 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
         return false;
     }
     origin = {o[0], o[1], o[2]};
+    if (anchor) *anchor = {a[0], a[1], a[2]};
     direction = Normalize({d[0], d[1], d[2]});
     const bool valid = Finite(origin) && Finite(direction) &&
                        LengthSquared(direction) > 0.9f;
@@ -415,7 +418,7 @@ float PelletSpreadForWeapon(int weaponType) {
 }
 
 bool FireControllerRay(void* weapon, void* shooter, int weaponType,
-                       Vec3 origin, Vec3 direction) {
+                       Vec3 origin, Vec3 direction, Vec3 anchor) {
     int skill = g.CPed_GetWeaponSkill(shooter, weaponType);
     if (skill < 0 || skill > 3) skill = 1;
     void* wi = g.CWeaponInfo_GetWeaponInfo(weaponType,
@@ -495,6 +498,9 @@ bool FireControllerRay(void* weapon, void* shooter, int weaponType,
             ? g.FindPlayerVehicle(-1, false) : nullptr;
         ScopedLineOptions options(ownVehicle ? ownVehicle : shooter);
         hit = g.CWorld_ProcessLineOfSight(
+            &anchor, &origin, colPoint, &victim,
+            true, true, true, true, true, false, false, true);
+        if (!hit) hit = g.CWorld_ProcessLineOfSight(
             &origin, &pelletEnd, colPoint, &victim,
             true, true, true, true, true, false, false, true);
         if (hit && victim &&
@@ -569,9 +575,10 @@ bool OnFireInstantHit(void* weapon, void* firingEntity,
     const int weaponType = *reinterpret_cast<const std::int32_t*>(weapon);
     Vec3 vrOrigin{};
     Vec3 vrDirection{};
+    Vec3 vrAnchor{};
     bool suppressShot = false;
     if (!GetPhysicalRay(firingEntity, weaponType, vrOrigin, vrDirection,
-                        &suppressShot)) {
+                        &suppressShot, &vrAnchor)) {
         if (suppressShot) return false;
         if (origin && target)
             basketball::OnBulletShot(&origin->x, &target->x, true);
@@ -585,7 +592,7 @@ bool OnFireInstantHit(void* weapon, void* firingEntity,
 
     g_insideHook = true;
     const bool fired = FireControllerRay(
-        weapon, firingEntity, weaponType, vrOrigin, vrDirection);
+        weapon, firingEntity, weaponType, vrOrigin, vrDirection, vrAnchor);
     g_insideHook = false;
     if (fired) return true;
     if (suppressShot) return false;
@@ -605,17 +612,18 @@ bool OnFireSniper(void* weapon, void* shooter, void* targetEntity, Vec3* target)
     const int weaponType = *reinterpret_cast<const std::int32_t*>(weapon);
     Vec3 vrOrigin{};
     Vec3 vrDirection{};
+    Vec3 vrAnchor{};
     bool suppressShot = false;
     if (weaponType != 34 ||
         !GetPhysicalRay(shooter, weaponType, vrOrigin, vrDirection,
-                        &suppressShot)) {
+                        &suppressShot, &vrAnchor)) {
         if (suppressShot) return false;
         return g_origFireSniper(weapon, shooter, targetEntity, target);
     }
 
     g_insideHook = true;
     const bool fired = FireControllerRay(
-        weapon, shooter, weaponType, vrOrigin, vrDirection);
+        weapon, shooter, weaponType, vrOrigin, vrDirection, vrAnchor);
     g_insideHook = false;
     if (fired) return true;
     if (suppressShot) return false;

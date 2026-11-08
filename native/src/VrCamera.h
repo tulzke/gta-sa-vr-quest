@@ -78,6 +78,10 @@ void UpdateHolsterBodyTracking(const float headPosition[3], const float headOrie
 // hidden sight must not make bullets fall back to camera aim.
 bool GetWeaponFireRay(int hand, int weaponType,
                       float originOut[3], float directionOut[3]);
+// Returns the existing calibrated ray and the weapon-model anchor for a
+// collision check along the held weapon.
+bool GetWeaponFireSegment(int hand, int weaponType, float originOut[3],
+                          float directionOut[3], float anchorOut[3]);
 
 // The same model-bound ray in OpenXR LOCAL space, evaluated from the exact hand
 // and two-hand snapshots baked into a stereo-ring slot.  The visible laser uses
