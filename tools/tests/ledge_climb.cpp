@@ -141,18 +141,25 @@ int main(){
  };
  originalLandingAudio=[](void*,int event){assert(event==123);};
  Put(matrix,0x30,Vec{0,0,16});assert(QuietFall(ped));assert(FallDamage(100,4)==0);
- Put(assoc,0x44,std::uint16_t(121));Put(assoc,0x30,1.f);assert(OnAir(airTask,ped));assert(Read<float>(assoc,0x30)==0&&Read<unsigned char>(airTask,0x44)==1);
+ Put(assoc,0x44,std::uint16_t(121));Put(assoc,0x30,1.f);assert(OnAir(airTask,ped));assert(Read<float>(assoc,0x30)==1&&Read<unsigned char>(airTask,0x44)==1);
  Put(ped,0x584,std::uint64_t(0x401));
- assert(OnLand(landTask,ped));assert(abortCalls==1&&landCalls==0);
+ assert(OnLand(landTask,ped));assert(abortCalls==1&&landCalls==1);
  assert(Read<void*>(landTask,0x10)==nullptr&&(Read<unsigned char>(landTask,0x1c)&1));
  assert(Read<std::uint64_t>(ped,0x584)==1); // landing lock cleared, standing preserved
  OnLandingAudio(audio,999); // suppressed callback
  Put(matrix,0x30,Vec{0,0,15.99f});assert(!QuietFall(ped));assert(FallDamage(100,4.01f)==100);
  originalAir=[](void* task,void*){assert(Read<unsigned char>(task,0x44)==1);return true;};
  OnAir(airTask,ped);assert(Read<float>(assoc,0x30)==1);OnLandingAudio(audio,123);
- assert(!OnLand(landTask,ped));assert(abortCalls==1&&landCalls==1); // high falls keep native task
+ assert(!OnLand(landTask,ped));assert(abortCalls==1&&landCalls==2); // high falls keep native task
  Put(matrix,0x30,Vec{0,0,20});BeginFall(ped);Put(assoc,0x44,std::uint16_t(118));
- SetFallAnimation(assoc,true,hiddenAir);assert(Read<float>(assoc,0x30)==1); // jump launch preserved
+ originalAir=[](void* task,void* p){
+  void* animation=Read<void*>(task,0x28);assert(Read<float>(animation,0x30)==1.f);
+  return (Read<std::uint8_t>(p,0x584)&1)!=0;
+ };
+ Put(ped,0x584,std::uint8_t(0));assert(!OnAir(airTask,ped));
+ Put(ped,0x584,std::uint8_t(1));assert(OnAir(airTask,ped)); // airborne -> landed parent transition remains native
+ originalLand=[](void*,void*){++landCalls;return true;};
+ assert(OnLand(landTask,ped));assert(abortCalls==1); // no abort after native completion
 
  // A fixed palm frame is published separately; controller rotation remains
  // available to the renderer for the wrist bone.

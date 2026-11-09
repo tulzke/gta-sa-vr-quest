@@ -102,31 +102,24 @@ using FallTaskFn=bool (*)(void*,void*);
 FallTaskFn originalAir{},originalLand{};
 bool (*abortLand)(void*,void*,int,const void*){};
 void (*originalLandingAudio)(void*,int){};
-void* hiddenAir{};
-void SetFallAnimation(void* association,bool quiet,void*& hidden){
- if(!association)return;
- const auto id=Read<std::uint16_t>(association,0x44);
- if(id<120||id>128)return;
- if(quiet){Write(association,0x30,0.f);Write(association,0x34,0.f);hidden=association;}
- else if(association==hidden){Write(association,0x30,1.f);Write(association,0x34,0.f);hidden=nullptr;}
-}
 bool OnAir(void* task,void* ped){
  const bool quiet=QuietFall(ped);const auto speech=Read<unsigned char>(task,0x44);
  if(quiet)Write(task,0x44,std::uint8_t(0));
  const bool result=originalAir(task,ped);
  if(quiet)Write(task,0x44,speech);
- if(ped==fallPed)SetFallAnimation(Read<void*>(task,0x28),quiet,hiddenAir);
  return result;
 }
 bool OnLand(void* task,void* ped){
- if(QuietFall(ped)&&abortLand&&abortLand(task,ped,2,nullptr)){
-  // Retail MakeAbortable priority 2 detaches callbacks, fades the landing
-  // association and clears ped.bIsLanding. Finish the task in this tick,
-  // rather than retaining an invisible animation that owns player control.
+ const bool quiet=QuietFall(ped);
+ // Let retail initialise its landing state and animation callbacks first.
+ // Air associations retain their native blend/time so the parent jump task
+ // can finish normally. A hidden association with zero blend can stall it.
+ const bool result=originalLand(task,ped);
+ if(!result&&quiet&&abortLand&&abortLand(task,ped,2,nullptr)){
   Write(task,0x1c,std::uint8_t(Read<std::uint8_t>(task,0x1c)|1u));
   return true;
  }
- return originalLand(task,ped);
+ return result;
 }
 void OnLandingAudio(void* audio,int event){if(!QuietFall(Read<void*>(audio,0xa8)))originalLandingAudio(audio,event);}
 ClimbFn originalClimb{};LaunchFn originalLaunch{};
