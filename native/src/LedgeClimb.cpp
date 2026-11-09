@@ -210,6 +210,37 @@ bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.5
   if(Length(b-a)>.01f)tangent=(b-a)*(1.f/Length(b-a));else a=b=point;
   if(lineA)*lineA=a;if(lineB)*lineB=b;if(lineNormal)*lineNormal=bestTop.normal;
  }
+ if(!found){
+  // Chain-link fences can have only a vertical collision sheet: no upward
+  // face exists for a downward ray. Find its upper termination horizontally.
+  for(float angle:{0.f,-.65f,.65f,-1.3f,1.3f,3.14159265f}){
+   const Vec direction=Rotate(forward,angle);
+   const auto wallAt=[&](Vec centre,Hit& hit){
+    Vec from=centre-direction*reach.preview,to=centre+direction*reach.preview;
+    return (Ray(from,to,hit)||Ray(to,from,hit))&&std::abs(hit.normal.z)<.4f;
+   };
+   bool previousHit=false;float low=hand.z-reach.vertical;Hit below{};
+   for(int step=0;step<=20;++step){
+    const float z=hand.z-reach.vertical+(2.f*reach.vertical*step/20.f);Hit hit;
+    const bool hitWall=wallAt({hand.x,hand.y,z},hit);
+    if(previousHit&&!hitWall){
+     float high=z;
+     for(int i=0;i<9;++i){float mid=(low+high)*.5f;Hit sample;if(wallAt({hand.x,hand.y,mid},sample)){low=mid;below=sample;}else high=mid;}
+     Vec edge{below.point.x,below.point.y,(low+high)*.5f};
+     const auto covered=[&](float side){Hit top;Vec p=edge+direction*side;return Ray(p+Vec{0,0,.08f},p-Vec{0,0,.08f},top)&&top.normal.z>=.65f;};
+     if(covered(-.04f)&&covered(.04f))break;
+     const float d=Length(edge-hand);
+     if(d<best){
+      Vec axis=Cross({0,0,1},below.normal);const float n=Length(axis);
+      if(n>.1f){best=d;point=edge;tangent=axis*(1.f/n);found=true;
+       if(lineA)*lineA=edge-tangent*.06f;if(lineB)*lineB=edge+tangent*.06f;if(lineNormal)*lineNormal={0,0,1};}
+     }
+     break;
+    }
+    previousHit=hitWall;if(hitWall){low=z;below=hit;}
+   }
+  }
+ }
  return found;
 }
 }
@@ -240,7 +271,8 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
  for(int h=0;h<2;++h)if(held[h]){
   float a[]{anchor[h].x,anchor[h].y,anchor[h].z},out[3]{};
   if(!vrcam::WorldPointToTracking(a,out))continue;
-  const Vec right=gripAxis[h],up=gripNormal[h],forward=Cross(up,right);
+  const Vec up=gripNormal[h];
+  const Vec right=gripAxis[h]*(h==0?-1.f:1.f),forward=Cross(up,right);
   const Vec axes[]{right,forward,up};float* outputs[]{hands[h].climbRight,hands[h].climbForward,hands[h].climbUp};
   bool valid=true;
   for(int i=0;i<3;++i){Vec end=anchor[h]+axes[i];float w[]{end.x,end.y,end.z},t[3]{};if(!vrcam::WorldPointToTracking(w,t)){valid=false;break;}for(int j=0;j<3;++j)outputs[i][j]=t[j]-out[j];}

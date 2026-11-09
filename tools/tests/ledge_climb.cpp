@@ -1,6 +1,7 @@
 #include "LedgeClimb.h"
 #include "Symbols.h"
 #include "HandAnimation.h"
+#include "VehicleClimbGeometry.h"
 #include <cstring>
 #include <chrono>
 #include <cassert>
@@ -25,13 +26,13 @@ bool GetHeadWorldRay(float* a,float* b){a[0]=0;a[1]=eyeY;a[2]=2.3f;b[0]=0;b[1]=1
 using namespace savr;
 using namespace savr::ledgeclimb;
 char ped[0xa00]{},matrix[64]{};void* ignored{};
-bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{};float fenceWidth=1000.f;float floorZ=1.f,slopeX{},slopeY{},edgeSlope{};int moves{};
+bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{},sheetFence{};float fenceWidth=1000.f;float floorZ=1.f,slopeX{},slopeY{},edgeSlope{};int moves{};
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 bool Query(const GameSymbols::Vec3* a,const GameSymbols::Vec3* b,void* col,void**,bool,bool,bool,bool,bool,bool,bool,bool){
  Vec p{},normal{};bool hit=false;
  const float da=a->z-floorZ-slopeX*a->x-slopeY*a->y;
  const float db=b->z-floorZ-slopeX*b->x-slopeY*b->y;
- if(!noFloor&&da>0&&db<0){
+ if(!sheetFence&&!noFloor&&da>0&&db<0){
   const float t=da/(da-db);Vec candidate{a->x+(b->x-a->x)*t,a->y+(b->y-a->y)*t,a->z+(b->z-a->z)*t};
   if((candidate.y>=edgeSlope*candidate.x&&candidate.y<=edgeSlope*candidate.x+fenceWidth)||infiniteTop){p=candidate;normal={-slopeX,-slopeY,1};normal=normal*(1.f/Length(normal));hit=true;}
  }
@@ -67,6 +68,11 @@ int main(){
  for(Vec end:{lineA,lineB}){assert(std::abs(end.y-edgeSlope*end.x)<.02f);assert(std::abs(end.z-(floorZ+slopeX*end.x+slopeY*end.y))<.005f);}
  assert(std::abs(Dot(tangent,lineNormal))<.005f);
  slopeX=slopeY=edgeSlope=0;thinRoof=false;
+ // A chain-link collision sheet has no top face at all.
+ sheetFence=true;
+ assert(Find({0,-.08f,1.05f},{0,1,0},point,tangent,idle,&lineA,&lineB,&lineNormal));
+ assert(std::abs(point.z-1.f)<.01f&&std::abs(point.y)<.01f);
+ assert(Length(lineB-lineA)>.1f);floorZ=5;assert(!Find({0,-.08f,1.05f},{0,1,0},point,tangent));floorZ=1;sheetFence=false;
  // Crouched landing: CJ's feet are below the top, tracked head is above it.
  Suspend(ped);assert(Stand(ped,{0,-.3f,1.2f},{0,.12f,1.5f},1));
  assert(std::abs(Position(ped).z-2.02f)<.001f);assert(!suspended);
@@ -126,7 +132,11 @@ int main(){
  // available to the renderer for the wrist bone.
  held[0]=true;anchor[0]={0,0,1};gripAxis[0]={1,0,0};gripNormal[0]={0,0,1};
  xr::HandPose visual[2];ApplyHandVisuals(visual);assert(visual[0].ledgeGrip&&visual[0].climbGrip);
- assert(visual[0].climbRight[0]>.99f&&visual[0].climbUp[2]>.99f);Reset();
+ assert(visual[0].climbRight[0]<-.99f&&visual[0].climbUp[2]>.99f);
+ held[1]=true;anchor[1]=anchor[0];gripAxis[1]=gripAxis[0];gripNormal[1]=gripNormal[0];ApplyHandVisuals(visual);
+ const auto frame=[&](int h){const auto& v=visual[h];return vehicleclimb::PipeGripMeshFrame({{v.climbRight[0],v.climbRight[1],v.climbRight[2]},{v.climbForward[0],v.climbForward[1],v.climbForward[2]},{v.climbUp[0],v.climbUp[1],v.climbUp[2]},{}},h);};
+ const auto left=frame(0),right=frame(1);
+ assert(Dot(left.right,right.right)<-.99f&&Dot(left.forward,right.forward)>.99f&&Dot(left.up,right.up)>.99f);Reset();
  // Retail callbacks preserve NPCs and add height only on an actual launch.
  originalClimb=[](void*,Vec&,float&,unsigned char&,bool)->void*{return matrix;};
  float angle{};unsigned char surface{};assert(!OnClimb(ped,point,angle,surface,true));
