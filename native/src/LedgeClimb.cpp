@@ -100,8 +100,9 @@ bool QuietFall(void* ped){
 }
 using FallTaskFn=bool (*)(void*,void*);
 FallTaskFn originalAir{},originalLand{};
+bool (*abortLand)(void*,void*,int,const void*){};
 void (*originalLandingAudio)(void*,int){};
-void* hiddenAir{};void* hiddenLand{};
+void* hiddenAir{};
 void SetFallAnimation(void* association,bool quiet,void*& hidden){
  if(!association)return;
  const auto id=Read<std::uint16_t>(association,0x44);
@@ -118,9 +119,14 @@ bool OnAir(void* task,void* ped){
  return result;
 }
 bool OnLand(void* task,void* ped){
- const bool quiet=QuietFall(ped);const bool result=originalLand(task,ped);
- if(ped==fallPed)SetFallAnimation(Read<void*>(task,0x10),quiet,hiddenLand);
- return result;
+ if(QuietFall(ped)&&abortLand&&abortLand(task,ped,2,nullptr)){
+  // Retail MakeAbortable priority 2 detaches callbacks, fades the landing
+  // association and clears ped.bIsLanding. Finish the task in this tick,
+  // rather than retaining an invisible animation that owns player control.
+  Write(task,0x1c,std::uint8_t(Read<std::uint8_t>(task,0x1c)|1u));
+  return true;
+ }
+ return originalLand(task,ped);
 }
 void OnLandingAudio(void* audio,int event){if(!QuietFall(Read<void*>(audio,0xa8)))originalLandingAudio(audio,event);}
 ClimbFn originalClimb{};LaunchFn originalLaunch{};
@@ -292,6 +298,7 @@ void Install(void* h){
  const std::uint32_t damageCode[]{0xd10283ff,0xa9067bfd,0xf9003bf7,0xa90857f6};void* damageOriginal{};
  if(Hook(dlsym(h,"_ZN28CPedDamageResponseCalculator21ComputeDamageResponseEP4CPedR18CPedDamageResponseb"),damageCode,reinterpret_cast<void*>(&OnDamage),damageOriginal))originalDamage=reinterpret_cast<DamageFn>(damageOriginal);
  const std::uint32_t airCode[]{0xd102c3ff,0xfd0033e8,0xa9077bfd,0xa9085ff8};
+ abortLand=reinterpret_cast<decltype(abortLand)>(dlsym(h,"_ZN15CTaskSimpleLand13MakeAbortableEP4CPediPK6CEvent"));
  const std::uint32_t landCode[]{0xfc1d0fe8,0xa900fbfd,0xf9000ff5,0xa9024ff4};
  const std::uint32_t audioCode[]{0xfc1d0fe8,0xa9017bfd,0xa9024ff4,0x910043fd};
  void* airOriginal{};void* landOriginal{};void* audioOriginal{};

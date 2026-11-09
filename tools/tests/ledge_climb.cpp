@@ -26,7 +26,7 @@ bool GetHeadWorldRay(float* a,float* b){a[0]=0;a[1]=eyeY;a[2]=2.3f;b[0]=0;b[1]=1
 using namespace savr;
 using namespace savr::ledgeclimb;
 char ped[0xa00]{},matrix[64]{};void* ignored{};
-bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{},sheetFence{};float fenceWidth=1000.f;float floorZ=1.f,slopeX{},slopeY{},edgeSlope{};int moves{};
+bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{},sheetFence{};float fenceWidth=1000.f;float floorZ=1.f,slopeX{},slopeY{},edgeSlope{};int moves{},landCalls{},abortCalls{};
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 bool Query(const GameSymbols::Vec3* a,const GameSymbols::Vec3* b,void* col,void**,bool,bool,bool,bool,bool,bool,bool,bool){
  Vec p{},normal{};bool hit=false;
@@ -134,14 +134,23 @@ int main(){
  char airTask[0x80]{},landTask[0x40]{},assoc[0x60]{},audio[0xc0]{};
  Put(airTask,0x28,static_cast<void*>(assoc));Put(airTask,0x44,std::uint8_t(1));Put(landTask,0x10,static_cast<void*>(assoc));Put(audio,0xa8,static_cast<void*>(ped));
  originalAir=[](void* task,void*){assert(Read<unsigned char>(task,0x44)==0);return true;};
- originalLand=[](void*,void*){return true;};
+ originalLand=[](void*,void*){++landCalls;return false;};
+ abortLand=[](void* task,void* p,int priority,const void* event){
+  assert(priority==2&&!event);++abortCalls;
+  Put(task,0x10,static_cast<void*>(nullptr));Put(p,0x584,Read<std::uint64_t>(p,0x584)&~std::uint64_t(0x400));return true;
+ };
  originalLandingAudio=[](void*,int event){assert(event==123);};
  Put(matrix,0x30,Vec{0,0,16});assert(QuietFall(ped));assert(FallDamage(100,4)==0);
  Put(assoc,0x44,std::uint16_t(121));Put(assoc,0x30,1.f);assert(OnAir(airTask,ped));assert(Read<float>(assoc,0x30)==0&&Read<unsigned char>(airTask,0x44)==1);
- assert(OnLand(landTask,ped));OnLandingAudio(audio,999); // suppressed callback
+ Put(ped,0x584,std::uint64_t(0x401));
+ assert(OnLand(landTask,ped));assert(abortCalls==1&&landCalls==0);
+ assert(Read<void*>(landTask,0x10)==nullptr&&(Read<unsigned char>(landTask,0x1c)&1));
+ assert(Read<std::uint64_t>(ped,0x584)==1); // landing lock cleared, standing preserved
+ OnLandingAudio(audio,999); // suppressed callback
  Put(matrix,0x30,Vec{0,0,15.99f});assert(!QuietFall(ped));assert(FallDamage(100,4.01f)==100);
  originalAir=[](void* task,void*){assert(Read<unsigned char>(task,0x44)==1);return true;};
  OnAir(airTask,ped);assert(Read<float>(assoc,0x30)==1);OnLandingAudio(audio,123);
+ assert(!OnLand(landTask,ped));assert(abortCalls==1&&landCalls==1); // high falls keep native task
  Put(matrix,0x30,Vec{0,0,20});BeginFall(ped);Put(assoc,0x44,std::uint16_t(118));
  SetFallAnimation(assoc,true,hiddenAir);assert(Read<float>(assoc,0x30)==1); // jump launch preserved
 
