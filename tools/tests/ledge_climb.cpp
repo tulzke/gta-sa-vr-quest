@@ -1,5 +1,6 @@
 #include "LedgeClimb.h"
 #include "Symbols.h"
+#include "HandAnimation.h"
 #include <cstring>
 #include <chrono>
 #include <cassert>
@@ -8,7 +9,7 @@ double testNow=1;
 namespace savr {
 GameSymbols g;
 namespace xr {
-struct HandPose {bool valid=true;float gripPos[3]{};float grip{};};
+struct HandPose {bool valid=true;float gripPos[3]{};float grip{},trigger{};bool climbGrip{},ledgeGrip{};float climbRight[3]{},climbForward[3]{},climbUp[3]{};};
 bool IsSessionFocused(){return true;}
 void TriggerHaptic(int,float,float,float){}
 }
@@ -24,7 +25,7 @@ bool GetHeadWorldRay(float* a,float* b){a[0]=0;a[1]=eyeY;a[2]=2.3f;b[0]=0;b[1]=1
 using namespace savr;
 using namespace savr::ledgeclimb;
 char ped[0xa00]{},matrix[64]{};void* ignored{};
-bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{};float floorZ=1.f,slopeX{},slopeY{},edgeSlope{};int moves{};
+bool ceiling{},noFloor{},material=true,thinRoof{},infiniteTop{};float fenceWidth=1000.f;float floorZ=1.f,slopeX{},slopeY{},edgeSlope{};int moves{};
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 bool Query(const GameSymbols::Vec3* a,const GameSymbols::Vec3* b,void* col,void**,bool,bool,bool,bool,bool,bool,bool,bool){
  Vec p{},normal{};bool hit=false;
@@ -32,7 +33,7 @@ bool Query(const GameSymbols::Vec3* a,const GameSymbols::Vec3* b,void* col,void*
  const float db=b->z-floorZ-slopeX*b->x-slopeY*b->y;
  if(!noFloor&&da>0&&db<0){
   const float t=da/(da-db);Vec candidate{a->x+(b->x-a->x)*t,a->y+(b->y-a->y)*t,a->z+(b->z-a->z)*t};
-  if(candidate.y>=edgeSlope*candidate.x||infiniteTop){p=candidate;normal={-slopeX,-slopeY,1};normal=normal*(1.f/Length(normal));hit=true;}
+  if((candidate.y>=edgeSlope*candidate.x&&candidate.y<=edgeSlope*candidate.x+fenceWidth)||infiniteTop){p=candidate;normal={-slopeX,-slopeY,1};normal=normal*(1.f/Length(normal));hit=true;}
  }
  if(a->y<0&&b->y>=0&&a->z<floorZ&&(!thinRoof||a->z>floorZ-.03f)){float t=-a->y/(b->y-a->y);p={a->x+(b->x-a->x)*t,0,a->z+(b->z-a->z)*t};normal={0,-1,0};hit=true;}
  if(hit){Put(col,0,p);Put(col,0x10,normal);Put(col,0x23,std::uint8_t(1));}return hit;
@@ -51,7 +52,8 @@ int main(){
  assert(!Find({0,-.08f,.48f},{0,1,0},point,tangent,idle));
  assert(Find({0,-.08f,.48f},{0,1,0},point,tangent,jump));
  // Thin roofs have no wall at the old hard-coded 12 cm depth.
- thinRoof=true;
+ thinRoof=true;fenceWidth=.02f;
+ assert(Find({0,-.01f,1.05f},{0,1,0},point,tangent));fenceWidth=1000.f;
  assert(Find({0,-.08f,1.05f},{0,1,0},point,tangent));assert(std::abs(point.y)<.025f);
  floorZ=50;assert(Find({0,-.08f,50.05f},{0,1,0},point,tangent));assert(std::abs(point.z-50)<.001f);
  floorZ=1;infiniteTop=true;
@@ -109,6 +111,22 @@ int main(){
  held[0]=held[1]=true;previous[0]={hands[0].gripPos[0],hands[0].gripPos[1],hands[0].gripPos[2]};previous[1]={0,0,1};
  hands[0].grip=0;testNow+=.01;Update(true,hands,1,0);assert(ClaimedHands()==2&&Length(Read<Vec>(ped,0x68))==0);
  Reset();noFloor=false;hands[1].valid=false;
+ // Fall damage is based on the last support/release, not the old jump.
+ char calculator[32]{};float computed{};
+ originalDamage=[](void* c,void*,void* out,bool){*static_cast<float*>(out)=Read<float>(c,8);};
+ Put(calculator,8,100.f);Put(calculator,0x10,54);
+ Put(matrix,0x30,Vec{0,0,20});BeginFall(ped);
+ Put(matrix,0x30,Vec{0,0,15});OnDamage(calculator,ped,&computed,false);assert(computed==0&&Read<float>(calculator,8)==100.f);
+ BeginFall(ped);Put(matrix,0x30,Vec{0,0,8});OnDamage(calculator,ped,&computed,false);assert(computed==10.f);
+ Put(calculator,0x10,22);OnDamage(calculator,ped,&computed,false);assert(computed==100.f);
+ Put(calculator,0x10,54);OnDamage(calculator,matrix,&computed,false);assert(computed==100.f);
+ assert(handanimation::PalmLockWeight(0)==0&&handanimation::PalmLockWeight(.1f)==1);
+ assert(handanimation::PalmLockWeight(.04f)>.4f&&handanimation::PalmLockWeight(.04f)<.6f);
+ // A fixed palm frame is published separately; controller rotation remains
+ // available to the renderer for the wrist bone.
+ held[0]=true;anchor[0]={0,0,1};gripAxis[0]={1,0,0};gripNormal[0]={0,0,1};
+ xr::HandPose visual[2];ApplyHandVisuals(visual);assert(visual[0].ledgeGrip&&visual[0].climbGrip);
+ assert(visual[0].climbRight[0]>.99f&&visual[0].climbUp[2]>.99f);Reset();
  // Retail callbacks preserve NPCs and add height only on an actual launch.
  originalClimb=[](void*,Vec&,float&,unsigned char&,bool)->void*{return matrix;};
  float angle{};unsigned char surface{};assert(!OnClimb(ped,point,angle,surface,true));

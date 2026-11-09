@@ -168,6 +168,11 @@ inline Selection FreeHand(float grip, float trigger) {
         return {Gesture::Grip,Gesture::Fist,grip,grip>0.f?trigger/grip:0.f};
     return {Gesture::Point,Gesture::Fist,trigger,grip/trigger};
 }
+// Two procedural bones for flattened hand assets: wrist rotation is live,
+// palm and finger vertices use the frame captured on the collision edge.
+inline float PalmLockWeight(float localX){
+ float t=std::clamp((localX-.015f)/.05f,0.f,1.f);return t*t*(3.f-2.f*t);
+}
 inline bool Firearm(int weaponType) {
     return (weaponType>=22 && weaponType<=34) || weaponType==38;
 }

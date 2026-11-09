@@ -9133,6 +9133,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             }
         }
 
+        const auto wristForward=forward,wristRight=right,wristUp=up;
         if(hp[hand].climbGrip){
             forward={hp[hand].climbForward[0],hp[hand].climbForward[1],hp[hand].climbForward[2]};
             right={hp[hand].climbRight[0],hp[hand].climbRight[1],hp[hand].climbRight[2]};
@@ -9230,8 +9231,21 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                 nx=value.normal[0]; ny=value.normal[1]; nz=value.normal[2];
             }
             // UXR local axes: X->forward (wrist pulled 5.5cm back), Z->right, Y->-up.
-            const XrVector3f wp = vadd(vadd(vadd(pos, vscale(forward, lx - 0.055f)), vscale(right, lz)), vscale(up, -ly));
-            const XrVector3f wn = vnorm(vadd(vadd(vscale(forward, nx), vscale(right, nz)), vscale(up, -ny)));
+            XrVector3f wp = vadd(vadd(vadd(pos, vscale(forward, lx - 0.055f)), vscale(right, lz)), vscale(up, -ly));
+            XrVector3f wn = vnorm(vadd(vadd(vscale(forward, nx), vscale(right, nz)), vscale(up, -ny)));
+            if(hp[hand].ledgeGrip){
+                // The shipped hand mesh is baked, with no bone indices. Two
+                // procedural bone transforms pin palm/fingers while allowing
+                // the wrist region to follow controller rotation.
+                const float palm=handanimation::PalmLockWeight(lx);
+                const auto pivot=vehicleclimb::GripPivotOffset({wristForward.x,wristForward.y,wristForward.z},{wristUp.x,wristUp.y,wristUp.z});
+                const XrVector3f anchor{hp[hand].gripPos[0],hp[hand].gripPos[1],hp[hand].gripPos[2]};
+                const auto wristPos=vsub(anchor,{pivot.x,pivot.y,pivot.z});
+                const auto wristVertex=vadd(vadd(vadd(wristPos,vscale(wristForward,lx-.055f)),vscale(wristRight,lz)),vscale(wristUp,-ly));
+                const auto wristNormal=vnorm(vadd(vadd(vscale(wristForward,nx),vscale(wristRight,nz)),vscale(wristUp,-ny)));
+                wp=vadd(vscale(wp,palm),vscale(wristVertex,1.f-palm));
+                wn=vnorm(vadd(vscale(wn,palm),vscale(wristNormal,1.f-palm)));
+            }
             float* o = &g_hVerts[g_hVc * 8];
             o[0] = wp.x; o[1] = wp.y; o[2] = wp.z; o[3] = wn.x; o[4] = wn.y; o[5] = wn.z; o[6] = v.u; o[7] = v.v;
             ++g_hVc;

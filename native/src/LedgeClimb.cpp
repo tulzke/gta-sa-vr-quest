@@ -16,7 +16,7 @@ template<class T>T Read(const void* p,int off){T v{};std::memcpy(&v,static_cast<
 template<class T>void Write(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 void (*removeEntity)(void*){};void (*addEntity)(void*){};
 bool (*canClimb)(void*,unsigned){};void* surfaces{};
-GripEdge edges[2];bool held[2]{};Vec anchor[2]{},previous[2]{},inward[2]{};
+GripEdge edges[2];bool held[2]{};Vec anchor[2]{},previous[2]{},inward[2]{},gripAxis[2]{{1,0,0},{1,0,0}},gripNormal[2]{{0,0,1},{0,0,1}};
 void* suspended{};bool collision{},gravity{};unsigned claimed{};
 Vec collisionHeadOffset{0,0,.55f};
 Vec pullVelocity{};double velocityTime{};
@@ -81,6 +81,18 @@ bool Hook(void* target,const std::uint32_t (&expected)[4],void* hook,void*& orig
 
 using ClimbFn=void* (*)(void*,Vec&,float&,unsigned char&,bool);
 using LaunchFn=void (*)(void*,void*);
+using DamageFn=void (*)(void*,void*,void*,bool);
+DamageFn originalDamage{};void* fallPed{};float fallOrigin{};bool fallValid{};
+void BeginFall(void* ped){fallPed=ped;fallOrigin=Position(ped).z;fallValid=std::isfinite(fallOrigin);}
+float FallDamage(float original,float drop){return std::min(original,std::max(0.f,drop-6.f)*10.f);}
+void OnDamage(void* calculator,void* ped,void* response,bool speak){
+ const float saved=Read<float>(calculator,8);
+ if(g.FindPlayerPed&&ped==g.FindPlayerPed(-1)&&ped==fallPed&&fallValid&&Read<int>(calculator,0x10)==54){
+  const float drop=fallOrigin-Position(ped).z;
+  if(std::isfinite(drop))Write(calculator,8,FallDamage(saved,drop));
+ }
+ originalDamage(calculator,ped,response,speak);Write(calculator,8,saved);
+}
 ClimbFn originalClimb{};LaunchFn originalLaunch{};
 bool hooksReady{};bool installed{};double jumpUntil{},hoverUntil{};bool hovered{};
 void* OnClimb(void* ped,Vec& point,float& angle,unsigned char& surface,bool launch){
@@ -98,7 +110,7 @@ void OnLaunch(void* task,void* ped){
  }}
  originalLaunch(task,ped);
  Vec speed=Read<Vec>(ped,0x68);
- if(local&&speed.z>before.z+.001f&&speed.z>0){speed.z*=1.224744871f;Write(ped,0x68,speed);jumpUntil=Now()+3.;hovered=false;hoverUntil=0;}
+ if(local&&speed.z>before.z+.001f&&speed.z>0){BeginFall(ped);speed.z*=1.224744871f;Write(ped,0x68,speed);jumpUntil=Now()+3.;hovered=false;hoverUntil=0;}
 }
 
 struct Hit {Vec point{},normal{};unsigned surface{};};
@@ -154,9 +166,10 @@ bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.5
  float best=reach.preview;bool found=false;Hit bestTop{};Vec bestInside{},bestOutside{};
  // Fan out from the hand rather than requiring the ledge to face the gaze.
  // Probe higher as well: roof overhangs often sit above the jumping hand.
- for(float angle:{0.f,-.65f,.65f,-1.3f,1.3f,-2.1f,2.1f,3.14159265f})for(float fraction:{.15f,.5f,.9f}){
+ for(float angle:{0.f,-.65f,.65f,-1.3f,1.3f,-2.1f,2.1f,3.14159265f})for(float distance:{0.f,.015f,.03f,.05f,.08f,.12f,.2f,.35f,.5f,.75f}){
+  if(distance>reach.preview)continue;
   Vec direction=Rotate(forward,angle);
-  Vec probe=hand+direction*(reach.preview*fraction);Hit top;
+  Vec probe=hand+direction*distance;Hit top;
   if(!Ray(probe+Vec{0,0,reach.vertical},probe-Vec{0,0,reach.vertical},top)||top.normal.z<.65f)continue;
   // Find the boundary of the top itself. A thin roof can have no side
   // triangles, and the building wall may be recessed behind the overhang.
@@ -174,16 +187,23 @@ bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.5
   Vec axis=Cross({0,0,1},direction);
   const float d=Length(edge-hand);const float n=Length(axis);
   if(d>=best||n<.1f)continue;
-  best=d;point=edge;tangent=axis*(1.f/n);found=true;bestTop=top;bestInside=top.point;bestOutside=hand-direction*reach.preview;
+  best=d;point=edge;tangent=axis*(1.f/n);found=true;bestTop=top;bestInside=edge+direction*.008f;bestOutside=edge-direction*.025f;
  }
  if(found){
   const auto planeZ=[&](Vec p){return bestTop.point.z-((p.x-bestTop.point.x)*bestTop.normal.x+(p.y-bestTop.point.y)*bestTop.normal.y)/bestTop.normal.z;};
   const auto sample=[&](Vec p){p.z=planeZ(p);Hit h;return Ray(p+Vec{0,0,.06f},p-Vec{0,0,.06f},h)&&h.normal.z>=.65f&&std::abs(h.point.z-p.z)<.045f;};
   const auto trace=[&](Vec offset,Vec& out){
-   Vec inside=bestInside+offset,outside=bestOutside+offset;
-   if(!sample(inside)||sample(outside))return false;
-   for(int i=0;i<8;++i){Vec mid=(inside+outside)*.5f;if(sample(mid))inside=mid;else outside=mid;}
-   out=inside;out.z=planeZ(out);return true;
+   Vec direction=bestInside-bestOutside;direction.z=0;
+   const float length=Length(direction);if(length<.001f)return false;direction=direction*(1.f/length);
+   Vec outside=point+offset-direction*.16f;
+   if(sample(outside))return false;
+   for(int step=1;step<=32;++step){
+    Vec inside=point+offset+direction*(-.16f+step*.01f);
+    if(!sample(inside)){outside=inside;continue;}
+    for(int i=0;i<8;++i){Vec mid=(inside+outside)*.5f;if(sample(mid))inside=mid;else outside=mid;}
+    out=inside;out.z=planeZ(out);return true;
+   }
+   return false;
   };
   Vec a=point,b=point;
   for(float half:{.12f,.06f,.03f}){Vec start{},end{};if(trace(tangent*(-half),start)&&trace(tangent*half,end)){a=start;b=end;break;}}
@@ -208,14 +228,27 @@ void Install(void* h){
   const bool b=Hook(launch,launchCode,reinterpret_cast<void*>(&OnLaunch),l);originalLaunch=reinterpret_cast<LaunchFn>(l);
   hooksReady=a&&b;
  }
+ const std::uint32_t damageCode[]{0xd10283ff,0xa9067bfd,0xf9003bf7,0xa90857f6};void* damageOriginal{};
+ if(Hook(dlsym(h,"_ZN28CPedDamageResponseCalculator21ComputeDamageResponseEP4CPedR18CPedDamageResponseb"),damageCode,reinterpret_cast<void*>(&OnDamage),damageOriginal))originalDamage=reinterpret_cast<DamageFn>(damageOriginal);
+ LOGI("[ledge] fall damage %s",originalDamage?"ready":"unavailable");
  LOGI("[ledge] hand climbing %s",hooksReady?"ready":"DISABLED: retail hooks unavailable");
 }
 bool JumpInProgress(){return Now()<jumpUntil;}
 unsigned ClaimedHands(){return claimed;}
 void Append(vehicledoors::MarkerFrame& f){if(f.epoch==markers.epoch)for(int i=0;i<markers.count&&f.count<f.kCapacity;++i)f.markers[f.count++]=markers.markers[i];}
 void ApplyHandVisuals(xr::HandPose hands[2]){
- for(int h=0;h<2;++h)if(held[h]){float a[]{anchor[h].x,anchor[h].y,anchor[h].z},out[3]{};if(vrcam::WorldPointToTracking(a,out)){std::copy_n(out,3,hands[h].gripPos);hands[h].grip=1.f;}}
+ for(int h=0;h<2;++h)if(held[h]){
+  float a[]{anchor[h].x,anchor[h].y,anchor[h].z},out[3]{};
+  if(!vrcam::WorldPointToTracking(a,out))continue;
+  const Vec right=gripAxis[h],up=gripNormal[h],forward=Cross(up,right);
+  const Vec axes[]{right,forward,up};float* outputs[]{hands[h].climbRight,hands[h].climbForward,hands[h].climbUp};
+  bool valid=true;
+  for(int i=0;i<3;++i){Vec end=anchor[h]+axes[i];float w[]{end.x,end.y,end.z},t[3]{};if(!vrcam::WorldPointToTracking(w,t)){valid=false;break;}for(int j=0;j<3;++j)outputs[i][j]=t[j]-out[j];}
+  if(!valid)continue;
+  std::copy_n(out,3,hands[h].gripPos);hands[h].grip=1.f;hands[h].trigger=0.f;hands[h].climbGrip=true;hands[h].ledgeGrip=true;
+ }
 }
+
 void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned occupied){
  const double now=Now();const float dt=float(now-last);last=now;markers={};markers.epoch=epoch;
  void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
@@ -236,6 +269,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
  const bool airborne=(Read<std::uint8_t>(ped,0x584)&1)==0||std::abs(speed.z)>.015f;
  const Reach reach=ReachFor(speed,airborne);
  const bool wasHeld=held[0]||held[1];
+ if(!fallValid||fallPed!=ped||(!airborne&&!wasHeld))BeginFall(ped);
  const float releaseZ=held[0]?anchor[0].z:anchor[1].z;
  Vec releaseMotion{};int released=0;bool cancelled=false;
  for(int h=0;h<2;++h){
@@ -250,7 +284,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
   Vec point{},tangent{},lineA{},lineB{},normal{};
   if(valid&&!held[h]&&Find(world,forward,point,tangent,reach,&lineA,&lineB,&normal)){
    Marker m{(lineA+lineB)*.5f+normal*.006f,tangent,normal,false};m.bikeGrip=true;m.climbPipe=true;m.ledge=true;m.pipeLength=Length(lineB-lineA);m.opacity=.45f;if(m.pipeLength>.01f)markers.markers[markers.count++]=m;
-   if(fresh[h]&&Length(point-world)<reach.grab){if(!wasHeld){pullVelocity={};velocityTime=0;}held[h]=true;anchor[h]=point;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
+   if(fresh[h]&&Length(point-world)<reach.grab){if(!wasHeld){pullVelocity={};velocityTime=0;}held[h]=true;anchor[h]=point;gripAxis[h]=tangent;gripNormal[h]=normal;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
   }
   if(!held[h])continue;
   if(dt>.15f){previous[h]=raw;pullVelocity={};velocityTime=0;}
@@ -259,7 +293,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
   previous[h]=raw;motion=motion+prevWorld-world;++count;claimed|=1u<<h;
  }
  if(count){
-  Suspend(ped);const bool clear=Move(ped,root,root+motion*(1.f/count));
+  BeginFall(ped);Suspend(ped);const bool clear=Move(ped,root,root+motion*(1.f/count));
   SampleVelocity(Position(ped)-root,dt,now);if(!clear)pullVelocity={};
   Write(ped,0x68,Vec{});
  }else{
@@ -270,6 +304,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
    impulse=ReleaseVelocity(now);
   }
   if(wasHeld)Stand(ped,Position(ped),eye,releaseZ);
+  if(wasHeld)BeginFall(ped);
   Resume();
   if(Length(impulse)>.0f){
    Write(ped,0x68,impulse*(1.f/50.f));
