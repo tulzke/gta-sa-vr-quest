@@ -189,6 +189,7 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
                 if(!vrcam::WorldPointToTracking(input,out)){validFrame=false;break;}
                 for(int c=0;c<3;++c)outputs[a][c]=out[c]-tracking[c];
             }
+            if(!hands[h].wristAnchorValid){std::copy_n(hands[h].gripPos,3,hands[h].wristGripPos);hands[h].wristAnchorValid=true;}
             std::copy_n(tracking,3,hands[h].gripPos);hands[h].grip=1.f;hands[h].trigger=0.f;hands[h].climbGrip=validFrame;
         }
     }

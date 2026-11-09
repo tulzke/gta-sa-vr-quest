@@ -14,7 +14,7 @@ double testNow=1;
 namespace savr {
 GameSymbols g;
 namespace xr {
-struct HandPose {bool valid{true};float gripPos[3]{};float grip{},trigger{};float gripOri[4]{0,0,0,1};bool climbGrip{};float climbRight[3]{},climbForward[3]{},climbUp[3]{};};
+struct HandPose {bool valid{true};float gripPos[3]{};float grip{},trigger{};float gripOri[4]{0,0,0,1};bool wristAnchorValid{};float wristGripPos[3]{};bool climbGrip{};float climbRight[3]{},climbForward[3]{},climbUp[3]{};};
 void TriggerHaptic(int,float,float,float){}
 }
 namespace driving {

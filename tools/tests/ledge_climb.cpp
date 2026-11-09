@@ -10,7 +10,7 @@ double testNow=1;
 namespace savr {
 GameSymbols g;
 namespace xr {
-struct HandPose {bool valid=true;float gripPos[3]{};float grip{},trigger{};bool climbGrip{},ledgeGrip{};float climbRight[3]{},climbForward[3]{},climbUp[3]{};};
+struct HandPose {bool valid=true;float gripPos[3]{};float grip{},trigger{};float gripOri[4]{0,0,0,1},aimOri[4]{0,0,0,1};bool wristAnchorValid{};float wristGripPos[3]{};bool climbGrip{},ledgeGrip{};float climbRight[3]{},climbForward[3]{},climbUp[3]{};};
 bool IsSessionFocused(){return true;}
 void TriggerHaptic(int,float,float,float){}
 }
@@ -148,7 +148,8 @@ int main(){
  // A fixed palm frame is published separately; controller rotation remains
  // available to the renderer for the wrist bone.
  held[0]=true;anchor[0]={0,0,1};gripAxis[0]={1,0,0};gripNormal[0]={0,0,1};
- xr::HandPose visual[2];ApplyHandVisuals(visual);assert(visual[0].ledgeGrip&&visual[0].climbGrip);
+ xr::HandPose visual[2];visual[0].gripPos[0]=.3f;ApplyHandVisuals(visual);
+ assert(visual[0].wristAnchorValid&&visual[0].wristGripPos[0]==.3f&&visual[0].gripPos[0]==0);assert(visual[0].ledgeGrip&&visual[0].climbGrip);
  assert(visual[0].climbRight[0]<-.99f&&visual[0].climbUp[2]>.99f);
  held[1]=true;anchor[1]=anchor[0];gripAxis[1]=gripAxis[0];gripNormal[1]=gripNormal[0];ApplyHandVisuals(visual);
  const auto frame=[&](int h){const auto& v=visual[h];return vehicleclimb::PipeGripMeshFrame({{v.climbRight[0],v.climbRight[1],v.climbRight[2]},{v.climbForward[0],v.climbForward[1],v.climbForward[2]},{v.climbUp[0],v.climbUp[1],v.climbUp[2]},{}},h);};
@@ -169,5 +170,6 @@ int main(){
  testNow+=.8;assert(JumpInProgress());assert(!vrcam::ParachuteStateActive());
  testNow=jumpUntil+.01;assert(!JumpInProgress());assert(vrcam::ParachuteStateActive());
  g.CPedGeometryAnalyser_IsInAir=[](const void*){return false;};assert(!vrcam::ParachuteStateActive());
+ xr::TestWristHud();
  puts("Ledge climbing production checks passed");
 }

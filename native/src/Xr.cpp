@@ -9839,7 +9839,9 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
     if (pda) glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-// Anchor for a panel worn on one arm. Starts from the raw baked grip pose,
+// Anchor for a panel worn on one arm. A climb override preserves the tracked
+// wrist separately from the palm snapped to the ledge. Other contexts start
+// from the raw baked grip pose,
 // then follows the VISIBLE hand: the two-hand grip rotates the primary hand
 // and snaps the support hand onto the weapon, and the panel must ride the
 // hand the player sees, not the raw controller (VC rule).
@@ -9852,7 +9854,8 @@ bool BuildHandPanelAnchor(const HandPose& hp, int hand,
     if (!hp.valid) return false;
     const XrQuaternionf q{hp.gripOri[0], hp.gripOri[1], hp.gripOri[2],
                           hp.gripOri[3]};
-    XrVector3f origin{hp.gripPos[0], hp.gripPos[1], hp.gripPos[2]};
+    const float* wrist=hp.wristAnchorValid?hp.wristGripPos:hp.gripPos;
+    XrVector3f origin{wrist[0],wrist[1],wrist[2]};
     // OpenXR grip axes: +Z runs back towards the wrist, +Y stands away from
     // the palm, +X is the palm normal (mirrored between hands). The right
     // hand takes the left frame with side and palm-up flipped — two flips
@@ -9865,7 +9868,7 @@ bool BuildHandPanelAnchor(const HandPose& hp, int hand,
     side = vscale(side, handSign);
     palmUp = vscale(palmUp, handSign);
 
-    if (TwoHandStateUsable(twoHand)) {
+    if (!hp.wristAnchorValid && TwoHandStateUsable(twoHand)) {
         if (hand == twoHand.primaryHand) {
             // Same pivot/axis correction the baked weapon and hand mesh use.
             origin   = TwoHandRotatePoint(twoHand, origin);

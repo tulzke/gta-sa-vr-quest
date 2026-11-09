@@ -315,7 +315,8 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
   bool valid=true;
   for(int i=0;i<3;++i){Vec end=anchor[h]+axes[i];float w[]{end.x,end.y,end.z},t[3]{};if(!vrcam::WorldPointToTracking(w,t)){valid=false;break;}for(int j=0;j<3;++j)outputs[i][j]=t[j]-out[j];}
   if(!valid)continue;
-  std::copy_n(out,3,hands[h].gripPos);hands[h].grip=1.f;hands[h].trigger=0.f;hands[h].climbGrip=true;hands[h].ledgeGrip=true;
+  if(!hands[h].wristAnchorValid){std::copy_n(hands[h].gripPos,3,hands[h].wristGripPos);hands[h].wristAnchorValid=true;}
+            std::copy_n(out,3,hands[h].gripPos);hands[h].grip=1.f;hands[h].trigger=0.f;hands[h].climbGrip=true;hands[h].ledgeGrip=true;
  }
 }
 

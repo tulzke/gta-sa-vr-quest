@@ -97,6 +97,8 @@ struct HandPose {
     float aimOri[4]{0, 0, 0, 1};
     float grip{};                   // squeeze [0,1]
     float trigger{};                // trigger [0,1]
+    bool wristAnchorValid{};
+    float wristGripPos[3]{}; // tracked wrist position before a visual grip override
     bool ledgeGrip{}; // fixed palm/fingers with a tracked wrist
     bool climbGrip{};              // render-only conventional hand frame
     float climbRight[3]{},climbForward[3]{},climbUp[3]{};

@@ -15,6 +15,9 @@ source=re.sub(r'double Now\(\)\{[^\n]*\}', 'double Now(){return testNow;}',sourc
 camera=(ROOT/'native/src/VrCamera.cpp').read_text()
 a=camera.index('bool ParachuteStateActive() {');b=camera.index('\n}',a)+2
 source+='\nnamespace savr::vehicleclimb {bool Attached(){return false;}}\nnamespace savr::vrcam {\n'+camera[a:b]+'\n}\n'
+xr=(ROOT/'native/src/Xr.cpp').read_text()
+a=xr.index('bool BuildHandPanelAnchor(');b=xr.index('// Dashboard map offset',a)
+source+='\nnamespace savr::xr {\n'+(ROOT/'tools/tests/wrist_anchor.cpp').read_text().replace('// ANCHOR',xr[a:b])+'\n}\n'
 generated=OUT/'ledge_climb.cpp'
 generated.write_text((ROOT/'tools/tests/ledge_climb.cpp').read_text().replace('// PRODUCTION',source))
 exe=OUT/('ledge_climb.exe' if os.name=='nt' else 'ledge_climb')
