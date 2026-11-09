@@ -122,12 +122,29 @@ int main(){
  originalDamage=[](void* c,void*,void* out,bool){*static_cast<float*>(out)=Read<float>(c,8);};
  Put(calculator,8,100.f);Put(calculator,0x10,54);
  Put(matrix,0x30,Vec{0,0,20});BeginFall(ped);
- Put(matrix,0x30,Vec{0,0,15});OnDamage(calculator,ped,&computed,false);assert(computed==0&&Read<float>(calculator,8)==100.f);
- BeginFall(ped);Put(matrix,0x30,Vec{0,0,8});OnDamage(calculator,ped,&computed,false);assert(computed==10.f);
+ Put(matrix,0x30,Vec{0,0,15});OnDamage(calculator,ped,&computed,false);assert(computed==100.f&&Read<float>(calculator,8)==100.f);
+ BeginFall(ped);Put(matrix,0x30,Vec{0,0,8});OnDamage(calculator,ped,&computed,false);assert(computed==100.f);
  Put(calculator,0x10,22);OnDamage(calculator,ped,&computed,false);assert(computed==100.f);
  Put(calculator,0x10,54);OnDamage(calculator,matrix,&computed,false);assert(computed==100.f);
  assert(handanimation::PalmLockWeight(0)==0&&handanimation::PalmLockWeight(.1f)==1);
  assert(handanimation::PalmLockWeight(.04f)>.4f&&handanimation::PalmLockWeight(.04f)<.6f);
+ // One threshold controls damage, fall visuals and landing sound.
+ static_assert(kSafeFallHeight==4.f);
+ Put(matrix,0x30,Vec{0,0,20});BeginFall(ped);
+ char airTask[0x80]{},landTask[0x40]{},assoc[0x60]{},audio[0xc0]{};
+ Put(airTask,0x28,static_cast<void*>(assoc));Put(airTask,0x44,std::uint8_t(1));Put(landTask,0x10,static_cast<void*>(assoc));Put(audio,0xa8,static_cast<void*>(ped));
+ originalAir=[](void* task,void*){assert(Read<unsigned char>(task,0x44)==0);return true;};
+ originalLand=[](void*,void*){return true;};
+ originalLandingAudio=[](void*,int event){assert(event==123);};
+ Put(matrix,0x30,Vec{0,0,16});assert(QuietFall(ped));assert(FallDamage(100,4)==0);
+ Put(assoc,0x44,std::uint16_t(121));Put(assoc,0x30,1.f);assert(OnAir(airTask,ped));assert(Read<float>(assoc,0x30)==0&&Read<unsigned char>(airTask,0x44)==1);
+ assert(OnLand(landTask,ped));OnLandingAudio(audio,999); // suppressed callback
+ Put(matrix,0x30,Vec{0,0,15.99f});assert(!QuietFall(ped));assert(FallDamage(100,4.01f)==100);
+ originalAir=[](void* task,void*){assert(Read<unsigned char>(task,0x44)==1);return true;};
+ OnAir(airTask,ped);assert(Read<float>(assoc,0x30)==1);OnLandingAudio(audio,123);
+ Put(matrix,0x30,Vec{0,0,20});BeginFall(ped);Put(assoc,0x44,std::uint16_t(118));
+ SetFallAnimation(assoc,true,hiddenAir);assert(Read<float>(assoc,0x30)==1); // jump launch preserved
+
  // A fixed palm frame is published separately; controller rotation remains
  // available to the renderer for the wrist bone.
  held[0]=true;anchor[0]={0,0,1};gripAxis[0]={1,0,0};gripNormal[0]={0,0,1};

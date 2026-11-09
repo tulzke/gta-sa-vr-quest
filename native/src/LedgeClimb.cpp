@@ -82,17 +82,47 @@ bool Hook(void* target,const std::uint32_t (&expected)[4],void* hook,void*& orig
 using ClimbFn=void* (*)(void*,Vec&,float&,unsigned char&,bool);
 using LaunchFn=void (*)(void*,void*);
 using DamageFn=void (*)(void*,void*,void*,bool);
-DamageFn originalDamage{};void* fallPed{};float fallOrigin{};bool fallValid{};
-void BeginFall(void* ped){fallPed=ped;fallOrigin=Position(ped).z;fallValid=std::isfinite(fallOrigin);}
-float FallDamage(float original,float drop){return std::min(original,std::max(0.f,drop-6.f)*10.f);}
+DamageFn originalDamage{};void* fallPed{};float fallOrigin{},fallDepth{};bool fallValid{},wasAirborne{};
+void BeginFall(void* ped){fallPed=ped;fallOrigin=Position(ped).z;fallDepth=0;fallValid=std::isfinite(fallOrigin);}
+float FallDamage(float original,float drop){return drop<=kSafeFallHeight?0.f:original;}
 void OnDamage(void* calculator,void* ped,void* response,bool speak){
- const float saved=Read<float>(calculator,8);
+ const float saved=Read<float>(calculator,8);bool quiet=false;
  if(g.FindPlayerPed&&ped==g.FindPlayerPed(-1)&&ped==fallPed&&fallValid&&Read<int>(calculator,0x10)==54){
-  const float drop=fallOrigin-Position(ped).z;
-  if(std::isfinite(drop))Write(calculator,8,FallDamage(saved,drop));
+  const float drop=std::max(fallDepth,fallOrigin-Position(ped).z);
+  if(std::isfinite(drop)){quiet=drop<=kSafeFallHeight;Write(calculator,8,FallDamage(saved,drop));}
  }
- originalDamage(calculator,ped,response,speak);Write(calculator,8,saved);
+ originalDamage(calculator,ped,response,speak&&!quiet);Write(calculator,8,saved);
 }
+bool QuietFall(void* ped){
+ if(!ped||!g.FindPlayerPed||ped!=g.FindPlayerPed(-1)||ped!=fallPed||!fallValid)return false;
+ fallDepth=std::max(fallDepth,fallOrigin-Position(ped).z);
+ return fallDepth<=kSafeFallHeight;
+}
+using FallTaskFn=bool (*)(void*,void*);
+FallTaskFn originalAir{},originalLand{};
+void (*originalLandingAudio)(void*,int){};
+void* hiddenAir{};void* hiddenLand{};
+void SetFallAnimation(void* association,bool quiet,void*& hidden){
+ if(!association)return;
+ const auto id=Read<std::uint16_t>(association,0x44);
+ if(id<120||id>128)return;
+ if(quiet){Write(association,0x30,0.f);Write(association,0x34,0.f);hidden=association;}
+ else if(association==hidden){Write(association,0x30,1.f);Write(association,0x34,0.f);hidden=nullptr;}
+}
+bool OnAir(void* task,void* ped){
+ const bool quiet=QuietFall(ped);const auto speech=Read<unsigned char>(task,0x44);
+ if(quiet)Write(task,0x44,std::uint8_t(0));
+ const bool result=originalAir(task,ped);
+ if(quiet)Write(task,0x44,speech);
+ if(ped==fallPed)SetFallAnimation(Read<void*>(task,0x28),quiet,hiddenAir);
+ return result;
+}
+bool OnLand(void* task,void* ped){
+ const bool quiet=QuietFall(ped);const bool result=originalLand(task,ped);
+ if(ped==fallPed)SetFallAnimation(Read<void*>(task,0x10),quiet,hiddenLand);
+ return result;
+}
+void OnLandingAudio(void* audio,int event){if(!QuietFall(Read<void*>(audio,0xa8)))originalLandingAudio(audio,event);}
 ClimbFn originalClimb{};LaunchFn originalLaunch{};
 bool hooksReady{};bool installed{};double jumpUntil{},hoverUntil{};bool hovered{};
 void* OnClimb(void* ped,Vec& point,float& angle,unsigned char& surface,bool launch){
@@ -261,6 +291,14 @@ void Install(void* h){
  }
  const std::uint32_t damageCode[]{0xd10283ff,0xa9067bfd,0xf9003bf7,0xa90857f6};void* damageOriginal{};
  if(Hook(dlsym(h,"_ZN28CPedDamageResponseCalculator21ComputeDamageResponseEP4CPedR18CPedDamageResponseb"),damageCode,reinterpret_cast<void*>(&OnDamage),damageOriginal))originalDamage=reinterpret_cast<DamageFn>(damageOriginal);
+ const std::uint32_t airCode[]{0xd102c3ff,0xfd0033e8,0xa9077bfd,0xa9085ff8};
+ const std::uint32_t landCode[]{0xfc1d0fe8,0xa900fbfd,0xf9000ff5,0xa9024ff4};
+ const std::uint32_t audioCode[]{0xfc1d0fe8,0xa9017bfd,0xa9024ff4,0x910043fd};
+ void* airOriginal{};void* landOriginal{};void* audioOriginal{};
+ if(Hook(dlsym(h,"_ZN16CTaskSimpleInAir10ProcessPedEP4CPed"),airCode,reinterpret_cast<void*>(&OnAir),airOriginal))originalAir=reinterpret_cast<FallTaskFn>(airOriginal);
+ if(Hook(dlsym(h,"_ZN15CTaskSimpleLand10ProcessPedEP4CPed"),landCode,reinterpret_cast<void*>(&OnLand),landOriginal))originalLand=reinterpret_cast<FallTaskFn>(landOriginal);
+ if(Hook(dlsym(h,"_ZN17CAEPedAudioEntity18HandleLandingEventEi"),audioCode,reinterpret_cast<void*>(&OnLandingAudio),audioOriginal))originalLandingAudio=reinterpret_cast<decltype(originalLandingAudio)>(audioOriginal);
+ LOGI("[ledge] quiet falls air=%d land=%d audio=%d",originalAir!=nullptr,originalLand!=nullptr,originalLandingAudio!=nullptr);
  LOGI("[ledge] fall damage %s",originalDamage?"ready":"unavailable");
  LOGI("[ledge] hand climbing %s",hooksReady?"ready":"DISABLED: retail hooks unavailable");
 }
@@ -301,7 +339,10 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
  const bool airborne=(Read<std::uint8_t>(ped,0x584)&1)==0||std::abs(speed.z)>.015f;
  const Reach reach=ReachFor(speed,airborne);
  const bool wasHeld=held[0]||held[1];
- if(!fallValid||fallPed!=ped||(!airborne&&!wasHeld))BeginFall(ped);
+ if(!fallValid||fallPed!=ped||(airborne&&!wasAirborne&&!wasHeld))BeginFall(ped);
+ if(!airborne&&!wasHeld)fallOrigin=root.z;
+ if(airborne&&fallPed==ped)fallDepth=std::max(fallDepth,fallOrigin-root.z);
+ wasAirborne=airborne;
  const float releaseZ=held[0]?anchor[0].z:anchor[1].z;
  Vec releaseMotion{};int released=0;bool cancelled=false;
  for(int h=0;h<2;++h){
