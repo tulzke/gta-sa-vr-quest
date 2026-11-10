@@ -8,6 +8,13 @@ bool Near(float a,float b,float e=1e-5f){return std::abs(a-b)<e;}
 struct Pose {float position[3]{},right[3]{1,0,0},forward[3]{0,1,0},up[3]{0,0,1};};
 float Det(const Pose& p){return Dot(Cross(Read(p.right),Read(p.forward)),Read(p.up));}
 int main(){
+    // User-verified correction: five times the original angular response,
+    // keeping the deliberately subtle backward translation unchanged.
+    const auto pistol=ForWeapon(22,0,false,2);
+    assert(Near(pistol.kick,8.f*kRad));
+    assert(Near(pistol.limit,35.f*kRad));
+    assert(Near(pistol.sideways,1.9f*kRad));
+    assert(Near(pistol.back,.002f));
     for(int type=0;type<47;++type){
         const auto p=ForWeapon(type,0,false,2);
         assert((p.kick>0)==Supported(type));
@@ -73,4 +80,24 @@ int main(){
     }
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,0)==36);
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,1)==22);
+    // Actual XR convention: -Z is a level barrel, +Y is physical up. The
+    // model axis previously used as "top" is allowed to point LEFT/RIGHT
+    // after calibration. Pure pitch must never turn into horizontal recoil.
+    for(float yaw:{0.f,.7f,1.8f,-2.4f}){
+        const Vec barrel{std::sin(yaw),0,-std::cos(yaw)};
+        const Vec sideways{std::cos(yaw),0,std::sin(yaw)};
+        float b[3],top[3];Write(b,barrel);
+        for(float parity:{-1.f,1.f}){
+            Write(top,sideways*parity);
+            const auto kick=Build({.2f,0,.002f},b,top,pivot);
+            const Vec raised=kick.Vector(barrel);
+            assert(Near(raised.y,std::sin(.2f)));
+            assert(Near(Dot(raised,sideways),0));
+            assert(Near(kick.translation.y,0));
+            assert(Near(Dot(kick.translation,barrel),-.002f));
+            const auto jitter=Build({0,.02f,0},b,top,pivot);
+            assert(Near(jitter.Vector(barrel).y,0));
+            assert(std::abs(Dot(jitter.Vector(barrel),sideways))>.01f);
+        }
+    }
 }

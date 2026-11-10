@@ -28,11 +28,14 @@ inline Profile ForWeapon(int type, float skill, bool support, int level) {
     }
     skill = std::isfinite(skill) ? std::clamp(skill,0.f,1.f) : .5f;
     const float scale = (level == 1 ? .6f : level == 2 ? 1.f : 1.4f);
+    // Quest feedback: initial angular motion was barely visible even on HIGH.
+    // Scale both impulse and envelope so the soft ceiling does not swallow it.
+    const float angularScale = 5.f * scale;
     const float mastery = 1.f - .4f*skill;
     const float hold = support ? .35f : 1.f;
-    return {kick*kRad*mastery*hold*scale,
-            limit*kRad*mastery*(support?.38f:1.f)*scale,
-            .38f*kRad*mastery*(support?.45f:1.f)*scale,
+    return {kick*kRad*mastery*hold*angularScale,
+            limit*kRad*mastery*(support?.38f:1.f)*angularScale,
+            .38f*kRad*mastery*(support?.45f:1.f)*angularScale,
             .002f*mastery*(support?.6f:1.f)*scale,
             .006f*mastery*(support?.6f:1.f)*scale,
             support?26.f:20.f};
@@ -119,8 +122,19 @@ struct Transform {
         Write(p.up,Vector(Read(p.up)));
     }
 };
-inline Transform Build(Sample s,const float* barrel,const float* top,const float* pivot){
-    const Vec b=Unit(Read(barrel)),u=Unit(Read(top)),axis=Unit(Cross(b,u));
+inline Transform Build(Sample s,const float* barrel,const float* modelTop,const float* pivot){
+    const Vec b=Unit(Read(barrel));
+    // OpenXR LOCAL is Y-up. A calibrated model's named "forward/top" axis
+    // can actually point sideways: it must not define the pitch direction.
+    // Project gravity-up perpendicular to the barrel; only an almost vertical
+    // barrel needs the model axis as a fallback (no unique upward pitch there).
+    Vec u=Vec{0,1,0}-b*b.y;
+    if(Dot(u,u)<.0001f){
+        const Vec fallback=Read(modelTop);
+        u=fallback-b*Dot(fallback,b);
+    }
+    u=Unit(u);
+    const Vec axis=Unit(Cross(b,u));
     if (Dot(axis,axis)<.5f || (s.pitch==0 && s.yaw==0 && s.rear==0)) return {};
     return {Read(pivot),axis,u,b*(-s.rear),s.pitch,s.yaw,true};
 }
