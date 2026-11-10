@@ -7,6 +7,7 @@
 #include "Log.h"
 #include "PhysicalWeapon.h"
 #include "Symbols.h"
+#include "WeaponSkillPreset.h"
 
 #include <algorithm>
 #include <atomic>
@@ -28,7 +29,7 @@ enum class Kind : unsigned char { Plain, Vehicle, GodMode, UnlockCities, Reset,
                                   MissionSkip, TutorialSkip, MissionSelect,
                                   MissionLaunch, Respect, NeverTired,
                                   Teleport, Basketball, SpawnByButton,
-                                  InstallHydraulics };
+                                  InstallHydraulics, WeaponSkills };
 
 struct Entry {
     const char* label;
@@ -71,7 +72,7 @@ Entry g_cheats[] = {
     {"WEAPONS SET TWO",        "_ZN6CCheat12WeaponCheat2Ev",           -1, Kind::Plain, nullptr},
     {"WEAPONS SET THREE",      "_ZN6CCheat12WeaponCheat3Ev",           -1, Kind::Plain, nullptr},
     {"WEAPONS SET FOUR",       "_ZN6CCheat12WeaponCheat4Ev",           -1, Kind::Plain, nullptr},
-    {"HITMAN WEAPON SKILLS",   "_ZN6CCheat17WeaponSkillsCheatEv",      -1, Kind::Plain, nullptr},
+    {"SET ALL WEAPON SKILLS",  "_ZN6CStats12SetStatValueEtf",          -1, Kind::WeaponSkills, nullptr},
     {"MAX VEHICLE SKILLS",     "_ZN6CCheat18VehicleSkillsCheatEv",     -1, Kind::Plain, nullptr},
     {"MAX STAMINA",            "_ZN6CCheat12StaminaCheatEv",           -1, Kind::Plain, nullptr},
     {"MAX MUSCLE",             "_ZN6CCheat11MuscleCheatEv",            -1, Kind::Plain, nullptr},
@@ -173,6 +174,8 @@ bool* g_nativeInvincible = nullptr;
 bool* g_playerIsOffTheMap = nullptr;
 float (*g_getStatValue)(unsigned short) = nullptr;
 void (*g_setStatValue)(unsigned short, float) = nullptr;
+std::atomic<int> g_weaponSkillSelected{2};
+constexpr const char* kWeaponSkillNames[]{"POOR", "GANGSTER", "HITMAN"};
 bool (*g_isPlayerOnAMission)() = nullptr;
 int* g_currentMissionPage = nullptr;
 int* g_currentSkipToMissionNumber = nullptr;
@@ -555,6 +558,12 @@ int Count() { return static_cast<int>(std::size(g_cheats)); }
 
 const char* Name(int index) {
     if (index < 0 || index >= Count()) return "";
+    if (g_cheats[index].kind == Kind::WeaponSkills) {
+        static thread_local char label[64];
+        std::snprintf(label, sizeof(label), "SET ALL SKILLS < %s >",
+                      kWeaponSkillNames[g_weaponSkillSelected.load()]);
+        return label;
+    }
     if (g_cheats[index].kind == Kind::MissionSelect ||
         g_cheats[index].kind == Kind::MissionLaunch) {
         static thread_local char label[3][128];
@@ -589,6 +598,9 @@ const char* Name(int index) {
 }
 
 bool Available(int index) {
+    if (index >= 0 && index < Count() &&
+        g_cheats[index].kind == Kind::WeaponSkills)
+        return g_getStatValue && g_setStatValue && g.CPed_GetWeaponSkill;
     if (index >= 0 && index < Count() &&
         g_cheats[index].kind == Kind::MissionLaunch &&
         g_missionPageSel.load() == missioncatalog::kDirectPage)
@@ -628,6 +640,20 @@ void Activate(int index) {
         return;
     }
     Entry& cheat = g_cheats[index];
+    if (cheat.kind == Kind::WeaponSkills) {
+        if (!Available(index)) return;
+        void* ped = g.FindPlayerPed(-1);
+        const int level = g_weaponSkillSelected.load();
+        const bool applied = ApplyWeaponSkillPreset(level,
+            [](int stat) { return g_getStatValue(static_cast<unsigned short>(stat)); },
+            [](int stat, float value) {
+                g_setStatValue(static_cast<unsigned short>(stat), value);
+            },
+            [ped](int type) { return g.CPed_GetWeaponSkill(ped, type); });
+        LOGI("cheat: all weapon skills %s %s", kWeaponSkillNames[level],
+             applied ? "applied" : "unavailable; previous stats restored");
+        return;
+    }
     if (cheat.kind == Kind::Basketball) {
         savr::basketball::SpawnBall();
         LOGI("cheat: basketball spawn requested");
@@ -1092,6 +1118,12 @@ bool CycleCategoryItem(int category,int item,int direction) {
     if (direction==0) return false;
     {
         const int source=CategorySourceIndex(category,item);
+        if (source>=0&&source<Count()&&
+            g_cheats[source].kind==Kind::WeaponSkills) {
+            g_weaponSkillSelected.store((g_weaponSkillSelected.load()+
+                                         (direction<0?2:1))%3);
+            return true;
+        }
         if (source>=0&&source<Count()&&
             g_cheats[source].kind==Kind::MissionSelect) {
             const bool pageRow =

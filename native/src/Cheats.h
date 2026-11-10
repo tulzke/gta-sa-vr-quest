@@ -55,8 +55,8 @@ int         CategoryCount(int category);
 const char* CategoryItemName(int category, int item);
 bool        CategoryItemAvailable(int category, int item);
 void        ActivateCategoryItem(int category, int item);
-// Returns true only for a selector row (currently the compact vehicle spawn
-// rows). L2/R2 can therefore edit the row without activating a cheat.
+// Returns true only for a selector row (vehicles, weapon giver, skill preset,
+// missions). L2/R2 edit the selection; A applies the selected cheat.
 bool        CycleCategoryItem(int category, int item, int direction);
 
 }  // namespace savr::cheats
