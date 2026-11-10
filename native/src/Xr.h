@@ -334,8 +334,8 @@ void SetHolsterMarkers(const float positions[][3], int count);
 void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& frame);
 void SetNpcGrabMarkers(const vehicledoors::MarkerFrame& frame);
 void SetVehicleTestMarkers(const vehicledoors::MarkerFrame& frame);
-void SetRadialHolsterMenu(const radialholster::Frame& frame);
-radialholster::Frame GetRadialHolsterMenu();
+void SetRadialHolsterMenu(const radialholster::Frames& frames);
+radialholster::Frames GetRadialHolsterMenu();
 void SetRadialHolsterAtlas(unsigned int texture);
 void SetHolsterMarkerStates(const holstermarker::Marker* markers, int count,
                            std::uint64_t epoch, const float headPosition[3]);

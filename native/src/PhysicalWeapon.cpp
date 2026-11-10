@@ -109,7 +109,7 @@ bool gInteractionsBlocked = true;
 bool gGripLock = false;
 bool gDualHoldEnabled = true;
 int gPendingMissionSlot = -1;
-radialholster::Menu gRadialMenu{};
+radialholster::Menu gRadialMenus[kHandCount]{};
 bool gRadialTriggerLatched[kHandCount] = {true, true};
 
 xr::HandPose gHands[kHandCount]{};
@@ -356,7 +356,7 @@ void ClearHeldLocked(int hand) {
 void ResetRuntimeLocked() {
     gHolsterTrackingReady = false;
     pairedweapon::Reset();
-    gRadialMenu.Cancel();
+    for (auto& menu : gRadialMenus) menu.Cancel();
     gRadialTriggerLatched[0] = gRadialTriggerLatched[1] = true;
     xr::SetRadialHolsterMenu({});
     for (auto& intent : gReachIntent) intent.Invalidate();
@@ -1072,18 +1072,25 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     const V3 radialUp = Rotate(radialHead,{0,1,0});
     const float axisRight[] = {radialRight.x,radialRight.y,radialRight.z};
     const float axisUp[] = {radialUp.x,radialUp.y,radialUp.z};
-    if (gRadialMenu.open) {
-        const int h = gRadialMenu.hand;
+    for (int h=0; h<kHandCount; ++h) {
+        auto& menu=gRadialMenus[h];
+        if (!menu.open) continue;
         if (ValidHand(h)) radialHandledHands |= 1u << h;
-        const int point = gRadialMenu.point;
+        const int point = menu.point;
         int selectedSlot = -1;
-        const bool available = radialUsable && gRadialMenu.SetAxes(axisRight,axisUp) && ValidHand(h) && gHands[h].valid &&
+        const bool available = radialUsable && menu.SetAxes(axisRight,axisUp) && ValidHand(h) && gHands[h].valid &&
             !((doorHands | basketball::HeldHandMask()) & (1u << h)) &&
             !ValidSlot(gHeldSlot[h]) && !IsSupportHandLocked(h);
-        const auto result = gRadialMenu.Update(ValidHand(h) ? gHands[h].trigger : 0.f,
+        const auto result = menu.Update(ValidHand(h) ? gHands[h].trigger : 0.f,
             ValidHand(h) && gHands[h].grip >= kGripClose, available, trackingEpoch,
             ValidHand(h) ? gHands[h].gripPos : nullptr, &selectedSlot);
         if (result == radialholster::Result::Selected) {
+            // The other hand may have committed since this menu opened.
+            // Resolve against the current layout without stealing its weapon.
+            const int base=pairedweapon::Base(selectedSlot);
+            const int owner=holster::FindPointForSlot(base);
+            if (selectedSlot>=0) selectedSlot=owner>=0 && owner!=point
+                ? base+pairedweapon::kNativeSlots : base;
             const int oldSlot = holster::PointSlot(point);
             const std::uint32_t occupied = OccupiedSlotMaskLocked();
             const bool oldBusy = ValidSlot(oldSlot) && (occupied & ((1u << pairedweapon::Base(oldSlot)) | (1u << (pairedweapon::Base(oldSlot)+pairedweapon::kNativeSlots))));
@@ -1094,14 +1101,17 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 holster::SetPointSlot(point, selectedSlot);
         }
     }
-    if (!gRadialMenu.open && radialUsable) {
+    if (radialUsable) {
         for (int h = 0; h < kHandCount; ++h) {
+            auto& menu=gRadialMenus[h];
+            if (menu.open) continue;
             if (!triggerEdge[h] || ValidSlot(gHeldSlot[h]) || IsSupportHandLocked(h) ||
                 gHands[h].grip >= kGripOpen || ((doorHands | basketball::HeldHandMask()) & (1u << h))) continue;
             int nearest = -1;
             float distance = holster::GrabRadiusMetres();
             for (int p = 0; p < holster::PointCount(); ++p) {
-                if (!anchorValid[p] || !holster::PointGrabbable(p)) continue;
+                if (!anchorValid[p] || !holster::PointGrabbable(p) ||
+                    (gRadialMenus[1-h].open && gRadialMenus[1-h].point==p)) continue;
                 const float d = Distance(GripPosition(gHands[h]), {anchors[p][0], anchors[p][1], anchors[p][2]});
                 if (d < distance) { nearest = p; distance = d; }
             }
@@ -1114,29 +1124,36 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 entries[count++] = owner >= 0 && owner != nearest ? slot + pairedweapon::kNativeSlots : slot;
             }
             entries[count++] = -1;
-            gRadialMenu.ObserveReleased(0);
-            if (gRadialMenu.Begin(h, nearest, gHands[h].gripPos, axisRight, axisUp,
+            menu.ObserveReleased(0);
+            if (menu.Begin(h, nearest, gHands[h].gripPos, axisRight, axisUp,
                                   entries, count, trackingEpoch)) {
                 radialHandledHands |= 1u << h;
                 xr::TriggerHaptic(h, .2f, 0, 20);
             }
-            break;
         }
     }
-    radialholster::Frame radialFrame{};
-    if (gRadialMenu.open) {
-        radialFrame.visible = true; radialFrame.count = gRadialMenu.count;
-        radialFrame.selected = gRadialMenu.selected; radialFrame.epoch = trackingEpoch;
-        std::memcpy(radialFrame.origin, gRadialMenu.origin, sizeof(radialFrame.origin));
-        std::memcpy(radialFrame.right, gRadialMenu.right, sizeof(radialFrame.right));
-        std::memcpy(radialFrame.up, gRadialMenu.up, sizeof(radialFrame.up));
+    radialholster::Frames radialFrames{};
+    for (int h=0; h<kHandCount; ++h) {
+        const auto& menu=gRadialMenus[h];
+        auto& radialFrame=radialFrames.hands[h];
+        if (!menu.open) continue;
+        radialFrame.hand=h;
+        radialFrame.visible = true; radialFrame.count = menu.count;
+        radialFrame.selected = menu.selected; radialFrame.epoch = trackingEpoch;
+        std::memcpy(radialFrame.origin, menu.origin, sizeof(radialFrame.origin));
+        std::memcpy(radialFrame.right, menu.right, sizeof(radialFrame.right));
+        std::memcpy(radialFrame.up, menu.up, sizeof(radialFrame.up));
         for (int i = 0; i < radialFrame.count; ++i) {
-            radialFrame.weaponTypes[i] = pairedweapon::Type(ped, gRadialMenu.slots[i]);
-            radialFrame.slots[i] = gRadialMenu.slots[i];
-            radialFrame.unavailable[i]=RadialUnavailable(ped,gRadialMenu.slots[i],inVehicle);
+            const int base=pairedweapon::Base(menu.slots[i]);
+            const int owner=holster::FindPointForSlot(base);
+            const int slot=menu.slots[i]<0 ? -1 : owner>=0 && owner!=menu.point
+                ? base+pairedweapon::kNativeSlots : base;
+            radialFrame.weaponTypes[i] = pairedweapon::Type(ped,slot);
+            radialFrame.slots[i] = slot;
+            radialFrame.unavailable[i]=RadialUnavailable(ped,slot,inVehicle);
         }
     }
-    xr::SetRadialHolsterMenu(radialFrame);
+    xr::SetRadialHolsterMenu(radialFrames);
 
     if (!interactionsBlocked) {
         std::uint32_t handledHands = doorHands | radialHandledHands;

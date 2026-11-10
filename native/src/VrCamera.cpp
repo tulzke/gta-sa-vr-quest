@@ -20492,7 +20492,7 @@ bool PrepareRadialIconRasters() {
     if (!g.RwRasterCreate) return false;
     if (!g_radialIconRaster[0]) {
         for (int i=0;i<kEyeSets;++i) {
-            g_radialIconRaster[i]=g.RwRasterCreate(512,512,32,5);
+            g_radialIconRaster[i]=g.RwRasterCreate(512,1024,32,5);
             if (!g_radialIconRaster[i]) {
                 for (int j=0;j<kEyeSets;++j) {
                     if (g_radialIconRaster[j] && g.RwRasterDestroy)
@@ -20509,7 +20509,7 @@ bool PrepareRadialIconRasters() {
     return true;
 }
 
-void RenderRadialIconAtlas(const radialholster::Frame& frame) {
+void RenderRadialIconAtlas(const radialholster::Frames& frames) {
     if (!g.TextureDatabaseRuntime_GetDatabase || !g.TextureDatabaseRuntime_Register ||
         !g.RwTextureRead || !g.CSprite2d_Draw ||
         !g.CWeaponInfo_GetWeaponInfo || !g.CModelInfo_ms_modelInfoPtrs) return;
@@ -20524,7 +20524,8 @@ void RenderRadialIconAtlas(const radialholster::Frame& frame) {
         g.RwRenderStateSet(20,reinterpret_cast<void*>(1));
     }
     const unsigned char color[4]={255,255,255,255};
-    for (int i=0;i<frame.count;++i) {
+    for (const auto& frame : frames.hands)
+    for (int i=0;frame.visible && i<frame.count;++i) {
         const int type=frame.weaponTypes[i];
         if (type<=0 || type>=64) continue;
         if (!g_radialWeaponIcons[type]) {
@@ -20546,7 +20547,7 @@ void RenderRadialIconAtlas(const radialholster::Frame& frame) {
         }
         if (!g_radialWeaponIcons[type]) continue;
         void* sprite=g_radialWeaponIcons[type];
-        const float x=static_cast<float>((i%4)*128), y=static_cast<float>((i/4)*128);
+        const float x=static_cast<float>((i%4)*128), y=static_cast<float>((i/4+frame.hand*4)*128);
         const float rect[4]={x,y,x+128,y+128};
         g.CSprite2d_Draw(&sprite,rect,color);
     }
@@ -21309,8 +21310,8 @@ void OnRenderScene(bool underwater) {
     const bool pdaReady=pdaNeeded && PreparePdaRasterRing();
     if (pdaReady) for (int i=0;i<kEyeSets;++i) pdaTex[i]=EyeRasterTexId(g_pdaRaster[i]);
     const auto radialMenu = xr::GetRadialHolsterMenu();
-    if (radialMenu.visible && !g_radialIconRaster[0]) closeEnginePreFinish();
-    const bool radialReady = radialMenu.visible && PrepareRadialIconRasters();
+    if (radialMenu.Visible() && !g_radialIconRaster[0]) closeEnginePreFinish();
+    const bool radialReady = radialMenu.Visible() && PrepareRadialIconRasters();
     if (hudReady)
         for (int setIndex=0;setIndex<kEyeSets;++setIndex)
             hudTex[setIndex]=EyeRasterTexId(g_hudRaster[setIndex]);
@@ -22126,7 +22127,7 @@ void OnRenderScene(bool underwater) {
             g.RwCameraEndUpdate(sc);
         }
         if (radialReady) {
-            screenDimensions.Set(512,512);
+            screenDimensions.Set(512,1024);
             *reinterpret_cast<void**>(scc+0x80)=g_radialIconRaster[set];
             WriteCam(camU,base);
             if (g.CCamera_CalculateDerivedValues)

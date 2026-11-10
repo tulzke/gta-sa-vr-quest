@@ -23,6 +23,7 @@ inline AtlasCell IconCell(int index) {
 
 struct Frame {
     bool visible{};
+    int hand{};
     int count{};
     int selected{-1};
     unsigned int atlasTexture{};
@@ -38,6 +39,16 @@ struct Frame {
                count > 0 && count <= kMaxEntries;
     }
 };
+
+// Both hands are published together so stereo never mixes menu generations.
+struct Frames {
+    Frame hands[2]{};
+    bool Visible() const { return hands[0].visible || hands[1].visible; }
+};
+inline AtlasCell IconCell(int index, int hand) {
+    const float x=(index%4)*.25f, y=(index/4+hand*4)*.125f;
+    return {x,y,x+.25f,y+.125f};
+}
 
 struct Menu {
     bool open = false;

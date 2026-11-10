@@ -53,6 +53,14 @@ int main() {
     assert(first.left==0&&first.top==0&&first.right==.25f&&first.bottom==.25f);
     assert(last.left==0&&last.top==.75f&&last.bottom==1.f);
     assert(fourth.left==.75f&&fourth.right==1.f&&fourth.top==0);
+    for(int i=0;i<kMaxEntries;++i) {
+        const auto left=IconCell(i,0),rightCell=IconCell(i,1);
+        assert(left.bottom<=.5f&&rightCell.top>=.5f&&rightCell.bottom<=1.f);
+        assert(left.left==rightCell.left&&left.right==rightCell.right);
+        assert(rightCell.top-left.top==.5f);
+    }
+    Frames frames;
+    assert(!frames.Visible());frames.hands[1].visible=true;assert(frames.Visible());
     savr::missionweapon::WeaponSnapshot before[13]{}, after[13]{};
     assert(savr::missionweapon::GrantedSlot(before,after)==-1);
     after[2].type=22; after[2].total=20;

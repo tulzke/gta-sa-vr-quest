@@ -647,8 +647,8 @@ vehicledoors::MarkerFrame g_vehicleDoorMarkers{};
 vehicledoors::MarkerFrame g_stereoVehicleDoorMarkers[kStereoSets]{};
 vehicledoors::MarkerFrame g_vehicleTestMarkers{};
 vehicledoors::MarkerFrame g_stereoVehicleTestMarkers[kStereoSets]{};
-radialholster::Frame g_radialHolsterMenu{};
-radialholster::Frame g_stereoRadialHolsterMenu[kStereoSets]{};
+radialholster::Frames g_radialHolsterMenu{};
+radialholster::Frames g_stereoRadialHolsterMenu[kStereoSets]{};
 unsigned int g_radialHolsterAtlas{};
 int                   g_holsterCount = 0;
 // Active weapon object-space geometry (guarded by g_headPoseMutex). Published by
@@ -5721,12 +5721,12 @@ void SetVehicleTestMarkers(const vehicledoors::MarkerFrame& frame) {
     g_vehicleTestMarkers=frame;
 }
 
-void SetRadialHolsterMenu(const radialholster::Frame& frame) {
+void SetRadialHolsterMenu(const radialholster::Frames& frames) {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
-    g_radialHolsterMenu = frame;
+    g_radialHolsterMenu = frames;
 }
 
-radialholster::Frame GetRadialHolsterMenu() {
+radialholster::Frames GetRadialHolsterMenu() {
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
     return g_radialHolsterMenu;
 }
@@ -6335,7 +6335,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         g_stereoNpcGrabMarkers[ws] = g_npcGrabMarkers;
         g_stereoVehicleTestMarkers[ws] = g_vehicleTestMarkers;
         g_stereoRadialHolsterMenu[ws] = g_radialHolsterMenu;
-        g_stereoRadialHolsterMenu[ws].atlasTexture = g_radialHolsterAtlas;
+        for (auto& frame : g_stereoRadialHolsterMenu[ws].hands) frame.atlasTexture = g_radialHolsterAtlas;
         g_stereoScopeState[ws] = scopeaim::Snapshot();
         g_stereoDrivingWheelState[ws] = drivingWheel;
         g_stereoBallHandLock[ws] = g_ballHandLock;
@@ -10583,7 +10583,7 @@ void DrawRadialHolsterMenu(const float* mvp, const radialholster::Frame& frame) 
             for (int i=0;i<frame.count;++i) {
                 if (!frame.weaponTypes[i]) continue;
                 const float a=width*i, cx=.105f*std::sin(a), cy=.105f*std::cos(a), half=.028f;
-                const auto cell=radialholster::IconCell(i);
+                const auto cell=radialholster::IconCell(i,frame.hand);
                 float vertices[30]{}; int n=0;
                 const auto vertex=[&](float x,float y,float s,float t) {
                     for (int c=0;c<3;++c) vertices[n++]=frame.origin[c]+(cx+x)*frame.right[c]+(cy+y)*frame.up[c];
@@ -12229,7 +12229,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const vehicledoors::MarkerFrame& bakedDoors,
                      const vehicledoors::MarkerFrame& bakedNpcGrabs,
                      const vehicledoors::MarkerFrame& bakedTestArea,
-                     const radialholster::Frame& bakedRadial,
+                     const radialholster::Frames& bakedRadials,
                      unsigned int hudSourceTex, unsigned int pdaSourceTex, float pdaHeading,
                      const int handTypes[2], const holstermarker::Frame& ammoHolsters,
                      const WeaponAmmoPose ammoPoses[2]) {
@@ -12263,7 +12263,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                              throwableTrajectory[1].count <= 1)) &&
         !chuteVisuals && !chuteRingVisual &&
         !wristWanted &&
-        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && bakedNpcGrabs.count<=0 && bakedTestArea.count<=0 && !bakedRadial.visible) return;
+        tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && bakedNpcGrabs.count<=0 && bakedTestArea.count<=0 && !bakedRadials.Visible()) return;
     if (haveHands) EnsureHandProgram();
 
     const float sign = (e == 0) ? -1.0f : 1.0f;
@@ -12438,7 +12438,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,false,true);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,true);
-    if (!scope.active) DrawRadialHolsterMenu(mvp,bakedRadial);
+    if (!scope.active) for (const auto& frame : bakedRadials.hands) DrawRadialHolsterMenu(mvp,frame);
     if (trackedVisuals && (hud::ShouldRenderWristHud() || (g_calibActive.load(std::memory_order_relaxed) && g_calibGroup.load()==weaponmenu::AMMO))) {
         const auto lower=QuatRotate(rp.orientation,{0,-.05f,0});
         for (int h=0;h<2;++h) if ((weaponHandMask&(1u<<h)) && ammoPoses[h].valid) {
@@ -12449,6 +12449,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
             XrVector3f at{label.position[0],label.position[1],label.position[2]};
             DrawAmmoLabel(mvp,rp,vadd(at,lower),label.weaponType,.10f,true,nullptr,1,label.inventorySlot);
         }
+        for (const auto& bakedRadial : bakedRadials.hands)
         if (bakedRadial.visible) for (int i=0;i<bakedRadial.count;++i) {
             const float a=6.28318530718f*i/bakedRadial.count;
             XrVector3f at{bakedRadial.origin[0],bakedRadial.origin[1],bakedRadial.origin[2]};
@@ -12665,7 +12666,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     vehicledoors::MarkerFrame bakedDoors{};
     vehicledoors::MarkerFrame bakedNpcGrabs{};
     vehicledoors::MarkerFrame bakedTestArea{};
-    radialholster::Frame bakedRadial{};
+    radialholster::Frames bakedRadial{};
     scopeaim::VisualState bakedScope{};
     driving::WheelVisualState drivingWheel{};
     BallHandLock ballHandLock{};
@@ -12693,7 +12694,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedTestArea = g_stereoVehicleTestMarkers[set];
         if (!bakedTestArea.Usable(g_headPoseValid,g_trackingRecovery.epoch)||IsMenuVisible()) bakedTestArea.count=0;
         bakedRadial = g_stereoRadialHolsterMenu[set];
-        if (!bakedRadial.Usable(g_headPoseValid,g_trackingRecovery.epoch)) bakedRadial.visible=false;
+        for (auto& frame : bakedRadial.hands)
+            if (!frame.Usable(g_headPoseValid,g_trackingRecovery.epoch)) frame.visible=false;
         bakedScope     = g_stereoScopeState[set];
         drivingWheel   = g_stereoDrivingWheelState[set];
         ballHandLock   = g_stereoBallHandLock[set];
