@@ -32,6 +32,7 @@
 #include "VehicleTestArea.h"
 #include "MissionWeaponGrant.h"
 #include "PerfTelemetry.h"
+#include "AudioDiagnostics.h"
 #include "Basketball.h"
 #include "MapZoom.h"
 #include "FrontendPointer.h"
@@ -1970,6 +1971,9 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     // can suppress their button while the player is navigating any menu page,
     // not only the cheat page (g_menuVisible).
     xr::SetAnyMenuOpen(anyMenu);
+    audiodiag::Tick(xr::IsSessionFocused(), vrcam::IsStereoActive(), anyMenu,
+        (g.CTimer_m_UserPause && *g.CTimer_m_UserPause) ||
+        (g.CTimer_m_CodePause && *g.CTimer_m_CodePause));
     // Arm the jetpack B-drop lockout HERE (this menu loop runs every frame, even
     // while game input is blocked and WritePad is skipped). This is what finally
     // stops closing a menu with B from also dropping the belt.
@@ -2712,6 +2716,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 
 JNIEXPORT void JNICALL
 Java_com_savr_SavrApplication_nativeOnApplicationCreate(JNIEnv* env, jclass, jobject classLoader) {
+    savr::audiodiag::Configure();
     savr::g_classLoader = env->NewGlobalRef(classLoader);
     LOGI("application created");
 }

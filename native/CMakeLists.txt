@@ -63,6 +63,7 @@ add_library(savr SHARED
     "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S"
     "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S"
     src/main.cpp
+    src/AudioDiagnostics.cpp
     src/AircraftHlod.cpp
     src/AircraftHlodData.S
     src/AnimatedTextures.cpp
