@@ -16,6 +16,7 @@ struct Tuning {
     float verticalDegrees{}, horizontalDegrees{1.9f}, shoulderMm{2.f}, supportReductionPercent{65.f};
     bool disarmOneHanded{};
 };
+#include "DefaultRecoilCalibration.inl"
 struct Shape {float kick,limit;};
 inline Shape WeaponShape(int type) {
     float kick = 1.6f, limit = 7.f;
@@ -34,6 +35,9 @@ inline Shape WeaponShape(int type) {
     return {kick,limit};
 }
 inline Tuning Defaults(int type,int skill=0) {
+    skill=std::clamp(skill,0,2);
+    for(const auto& captured:kCapturedRecoil)
+        if(captured.type==type && captured.skill==skill)return captured.tuning;
     const float mastery=1.f-.2f*std::clamp(skill,0,2);
     return {std::round(WeaponShape(type).kick*50.f*mastery)*.1f,
             std::round(19.f*mastery)*.1f,std::round(20.f*mastery)*.1f,65.f,type==25};

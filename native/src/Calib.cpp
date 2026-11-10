@@ -32,7 +32,7 @@ std::atomic<int> g_active{0};
 std::mutex       g_calibMutex;
 std::atomic<bool> g_laserEnabled{true};
 std::atomic<int> g_recoilLevel{2};
-std::atomic<int> g_physicalRecoilLevel{2};
+std::atomic<int> g_physicalRecoilLevel{recoil::kDefaultRecoilLevel};
 recoil::Tuning g_recoilTuning[kMaxWeapons][3]{};
 std::atomic<int> g_recoilEditingSkill{1};
 std::atomic<bool> g_laserLocked[kMaxWeapons]{};
@@ -234,7 +234,7 @@ void Init() {
     }
     g_laserEnabled.store(true, std::memory_order_relaxed);
     g_recoilLevel.store(2, std::memory_order_relaxed);
-    g_physicalRecoilLevel.store(2, std::memory_order_relaxed);
+    g_physicalRecoilLevel.store(recoil::kDefaultRecoilLevel, std::memory_order_relaxed);
     for(int type=0;type<kMaxWeapons;++type)for(int skill=0;skill<3;++skill)
         g_recoilTuning[type][skill]=recoil::Defaults(type,skill);
 

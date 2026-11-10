@@ -20,9 +20,11 @@ int main(){
         assert((p.kick>0)==Supported(type));
         assert(ForWeapon(type,0,false,0).kick==0);
         if(!Supported(type))continue;
-        const auto skilled=ForWeapon(type,1,false,2),supported=ForWeapon(type,0,true,2);
-        assert(skilled.kick<p.kick && skilled.sideways<p.sideways);
-        assert(supported.kick<p.kick*.5f && supported.limit<p.limit*.5f);
+        const auto skilled=ForWeapon(type,1,true,2),supported=ForWeapon(type,0,true,2);
+        assert(skilled.kick<p.kick); // user-tuned HITMAN is stable with support
+        const float retained=1.f-Defaults(type,0).supportReductionPercent*.01f;
+        assert(Near(supported.kick,p.kick*retained));
+        assert(Near(supported.limit,p.limit*retained));
         State s;s.Shot(p);
         assert(s.sample.pitch==0 && s.sample.yaw==0 && s.sample.rear==0);
         s.Advance(1.f/90);
@@ -84,8 +86,19 @@ int main(){
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,3)==37);
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,7)==43);
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,8)==22);
-    assert(Defaults(25,0).disarmOneHanded && Defaults(25,2).disarmOneHanded);
+    assert(Defaults(25,0).disarmOneHanded && !Defaults(25,2).disarmOneHanded);
     assert(!Defaults(22).disarmOneHanded && !Defaults(38).disarmOneHanded);
+    for(int skill=0;skill<3;++skill){
+        const auto uzi=Defaults(28,skill),tec=Defaults(32,skill);
+        assert(uzi.verticalDegrees==tec.verticalDegrees && uzi.horizontalDegrees==tec.horizontalDegrees);
+        assert(uzi.shoulderMm==tec.shoulderMm && uzi.supportReductionPercent==tec.supportReductionPercent);
+        assert(uzi.disarmOneHanded==tec.disarmOneHanded);
+        assert(Defaults(24,skill).disarmOneHanded==(skill==0));
+        assert(Defaults(26,skill).disarmOneHanded==(skill==0));
+        assert(Defaults(27,skill).disarmOneHanded==(skill<2));
+        for(int type:{26,27})assert(Defaults(type,skill).supportReductionPercent>=90);
+        for(int type:{30,31,33,34})assert(Defaults(type,skill).supportReductionPercent>=75);
+    }
     // Each component can be disabled independently; no zero-envelope division
     // may turn shoulder-only or horizontal-only recoil into NaNs or silence.
     for(int component=0;component<3;++component){

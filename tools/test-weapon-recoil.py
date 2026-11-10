@@ -138,7 +138,7 @@ settings += r'''
 int main(){
  using namespace savr::calib;
  {std::ofstream f("recoil-calib.ini");f<<"recoil_level 1\n";}
- Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==2);
+ Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==savr::recoil::kDefaultRecoilLevel);
  SetPhysicalRecoilLevel(3);Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==3);
  CyclePhysicalRecoil(1);assert(PhysicalRecoilLevel()==0);
  Init();assert(PhysicalRecoilLevel()==0 && RecoilLevel()==1);
