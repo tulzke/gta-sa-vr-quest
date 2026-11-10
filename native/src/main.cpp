@@ -1345,6 +1345,13 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             } else if (fieldRow == 23) {                           // TRACER COLOR
                 if (enter) vrcam::AdjustTracerColorMode(+1);
                 else if (firstTick) vrcam::AdjustTracerColorMode(dir);
+            } else if (fieldRow == 41) {
+                if(enter)savr::calib::CycleRecoilEditingSkill(1);
+                else if(firstTick)savr::calib::CycleRecoilEditingSkill(dir);
+            } else if (fieldRow == 42) {
+                if(enter)savr::cheats::ApplyWeaponSkillLevel(type,savr::calib::RecoilEditingSkill());
+            } else if (fieldRow >= 37 && fieldRow <= 40) {
+                if(fire)savr::calib::AdjustRecoilTuning(type,fieldRow-37,dir*mult,savr::calib::RecoilEditingSkill());
             } else if (fieldRow == 36) {
                 if (enter) savr::calib::CyclePhysicalRecoil(+1);
                 else if (firstTick) savr::calib::CyclePhysicalRecoil(dir);

@@ -11,19 +11,23 @@ namespace savr::cheats {
 // on the GameThread, and restore all stats if the requested tier is unavailable.
 // https://github.com/gta-reversed/gta-reversed/blob/master/source/game_sa/Entity/Ped/Ped.cpp
 template<class GetStat, class SetStat, class GetSkill>
-bool ApplyWeaponSkillPreset(int level, GetStat get, SetStat set, GetSkill skill) {
-    if (level < 0 || level > 2) return false;
+bool ApplyWeaponSkillPreset(int level, GetStat get, SetStat set, GetSkill skill,int weaponType=0) {
+    if (level < 0 || level > 2 || (weaponType!=0 && (weaponType<22 || weaponType>34)))return false;
+    const int onlyStat=weaponType==0?-1:weaponType==32?75:weaponType>=33?79:69+weaponType-22;
     std::array<float, 11> before{};
     for (int i = 0; i < 11; ++i) {
+        if(onlyStat!=-1 && onlyStat!=69+i)continue;
         before[i] = get(69 + i);
         if (!std::isfinite(before[i])) return false;
     }
     const auto restore = [&] {
-        for (int i = 0; i < 11; ++i) set(69 + i, before[i]);
+        for (int i = 0; i < 11; ++i)
+            if(onlyStat==-1 || onlyStat==69+i)set(69 + i, before[i]);
         return false;
     };
     for (int i = 0; i < 10; ++i) {
         const int stat = 69 + i, weapon = 22 + i;
+        if(onlyStat!=-1 && onlyStat!=stat)continue;
         const auto query = [&](int value) {
             set(stat, static_cast<float>(value));
             return skill(weapon);
@@ -56,7 +60,7 @@ bool ApplyWeaponSkillPreset(int level, GetStat get, SetStat set, GetSkill skill)
     }
     // Native rifles have no POOR/STD/PRO weapon-info variants. Keep their
     // progress stat testable too; do not fake a CPed skill variant for them.
-    set(79, static_cast<float>(level * 500));
+    if(onlyStat==-1 || onlyStat==79)set(79, static_cast<float>(level * 500));
     return true;
 }
 

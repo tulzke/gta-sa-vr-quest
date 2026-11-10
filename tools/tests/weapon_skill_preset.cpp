@@ -55,9 +55,26 @@ int main() {
     assert(!savr::cheats::ApplyWeaponSkillPreset(1, get, set,
         [](int) { return 2; }));
     assert(stats == saved);
+    // The recoil-page action changes only its weapon, not all skills. Shared
+    // Uzi/Tec-9 and rifle progress are the only intentional coupled cases.
+    for(int type:{22,24,28,32,33,34}){
+        const auto old=stats;
+        const int changed=type==32?75:type>=33?79:69+type-22;
+        assert(savr::cheats::ApplyWeaponSkillPreset(0,get,set,ordinarySkill,type));
+        for(int stat=0;stat<100;++stat)
+            if(stat!=changed)assert(stats[stat]==old[stat]);
+        assert(stats[changed]==0);
+        const auto atPoor=stats;
+        if(type<33){
+            assert(!savr::cheats::ApplyWeaponSkillPreset(1,get,set,
+                [](int){return 2;},type));
+            assert(stats==atPoor);
+        }
+    }
     writes = 0;
     assert(!savr::cheats::ApplyWeaponSkillPreset(-1, get, set, skill));
     assert(!savr::cheats::ApplyWeaponSkillPreset(3, get, set, skill));
+    assert(!savr::cheats::ApplyWeaponSkillPreset(1,get,set,skill,38));
     assert(writes == 0);
     stats[79] = std::numeric_limits<float>::quiet_NaN();
     assert(!savr::cheats::ApplyWeaponSkillPreset(1, get, set, skill));

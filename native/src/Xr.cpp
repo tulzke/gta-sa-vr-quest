@@ -8393,7 +8393,10 @@ void BuildCalibMenu() {
     std::snprintf(hdr, sizeof(hdr), "%s   RIGHT MASTER",
                   savr::calib::WeaponName(type));
     PanelText(hdr, cx, 44, 2, 255, 200, 120);
-    PanelText("LEFT USES THE SAME MIRRORED PROFILE", cx, 64, 2, 145, 185, 205);
+    if(group==weaponmenu::EFFECTS) {
+        std::snprintf(hdr,sizeof(hdr),"EDIT SKILL: %s",calib::RecoilSkillName(calib::RecoilEditingSkill()));
+        PanelText(hdr,cx,64,2,145,185,205);
+    } else PanelText("LEFT USES THE SAME MIRRORED PROFILE", cx, 64, 2, 145, 185, 205);
 
     // A scrolling window keeps selection centred, including optional optic rows, so the
     // fixed panel stays readable at arm's length instead of shrinking the font.
@@ -8446,6 +8449,18 @@ void BuildCalibMenu() {
         } else if (r == 23) {
             std::snprintf(row, sizeof(row), "TRACER COLOR   < %s >",
                           vrcam::GetTracerColorModeName());
+        } else if (r == 41) {
+            std::snprintf(row,sizeof(row),"SKILL < %s >",calib::RecoilSkillName(calib::RecoilEditingSkill()));
+        } else if (r == 42) {
+            std::snprintf(row,sizeof(row),"%s",cheats::CanApplyWeaponSkillLevel(type)?"APPLY SKILL LEVEL":"SKILL NOT AVAILABLE");
+        } else if (r >= 37 && r <= 40) {
+            const auto tuning=calib::SnapshotRecoil(type,calib::RecoilEditingSkill());
+            const float values[]{tuning.verticalDegrees,tuning.horizontalDegrees,
+                                 tuning.shoulderMm,tuning.supportReductionPercent};
+            static constexpr const char* names[]{"VERTICAL","HORIZONTAL JITTER","INTO SHOULDER","TWO-HAND REDUCTION"};
+            const int field=r-37;
+            std::snprintf(row,sizeof(row),"%s < %.1f %s >",names[field],values[field],
+                          field==3?"%":field==2?"MM":"DEG");
         } else if (r == 36) {
             std::snprintf(row, sizeof(row), "PHYSICAL RECOIL   < %s >",
                           savr::calib::PhysicalRecoilLevelName());

@@ -555,6 +555,21 @@ void Tick() {
 }
 
 int Count() { return static_cast<int>(std::size(g_cheats)); }
+bool CanApplyWeaponSkillLevel(int type) {
+    return type>=22 && type<=34 && g_getStatValue && g_setStatValue &&
+           g.CPed_GetWeaponSkill && g.FindPlayerPed;
+}
+bool ApplyWeaponSkillLevel(int type,int level) {
+    if(!CanApplyWeaponSkillLevel(type))return false;
+    void* ped=g.FindPlayerPed(-1);
+    if(!ped)return false;
+    const bool applied=ApplyWeaponSkillPreset(level,
+        [](int stat){return g_getStatValue(static_cast<unsigned short>(stat));},
+        [](int stat,float value){g_setStatValue(static_cast<unsigned short>(stat),value);},
+        [ped](int type){return g.CPed_GetWeaponSkill(ped,type);},type);
+    LOGI("weapon skill: type=%d level=%d applied=%d",type,level,applied?1:0);
+    return applied;
+}
 
 const char* Name(int index) {
     if (index < 0 || index >= Count()) return "";

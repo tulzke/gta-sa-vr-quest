@@ -1,4 +1,5 @@
 #pragma once
+#include "RecoilModel.h"
 
 #include <cstdint>
 #include "WeaponOptic.h"
@@ -119,6 +120,12 @@ int PhysicalRecoilLevel();
 const char* PhysicalRecoilLevelName();
 void SetPhysicalRecoilLevel(int level);
 void CyclePhysicalRecoil(int direction);
+recoil::Tuning SnapshotRecoil(int weaponType,int skill=0);
+void SetRecoilTuning(int weaponType,recoil::Tuning tuning,int skill=0); // persists
+void AdjustRecoilTuning(int weaponType,int field,int direction,int skill=0); // 0..3
+int RecoilEditingSkill();
+void CycleRecoilEditingSkill(int direction);
+const char* RecoilSkillName(int skill);
 bool LaserLocked(int weaponType);
 bool LaserLocked();
 void MarkLaserDirty();                // active weapon's working AIM is unconfirmed

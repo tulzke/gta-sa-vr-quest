@@ -50,14 +50,15 @@ void Update(bool blocked){
 }
 void OnShot(int hand,int type,int skill){
     if(hand<0 || hand>1 || !Supported(type))return;
-    float progress=std::clamp(skill,0,2)*.5f;
+    int profileSkill=std::clamp(skill,0,2);
     if((type==33 || type==34) && g.CStats_StatTypesFloat)
-        progress=std::clamp(g.CStats_StatTypesFloat[79]/1000.f,0.f,1.f);
-    if(type==38)progress=.5f; // no native progression for the minigun
+        profileSkill=g.CStats_StatTypesFloat[79]<333.f?0:g.CStats_StatTypesFloat[79]<666.f?1:2;
+    if(type==38)profileSkill=1; // no native progression for the minigun
+    const auto tuning=calib::SnapshotRecoil(type,profileSkill);
     std::lock_guard<std::mutex> lock(mutex);
     auto& r=hands[hand];
     if(r.type!=type || r.slot<=0)return;
-    r.state.Shot(ForWeapon(type,progress,r.supported,calib::PhysicalRecoilLevel()));
+    r.state.Shot(ForWeapon(type,r.supported,calib::PhysicalRecoilLevel(),tuning));
 }
 Sample Snapshot(int hand,int type){
     if(hand<0 || hand>1)return {};

@@ -40,7 +40,11 @@ harness = r'''
 double testTime=1;
 namespace savr {
 namespace xr { struct HandPose {bool valid=true,aimValid=true;}; }
-namespace calib {int level=2;int PhysicalRecoilLevel(){return level;}}
+namespace calib {
+int level=2;int PhysicalRecoilLevel(){return level;}
+recoil::Tuning tuning[64][3]{};
+recoil::Tuning SnapshotRecoil(int type,int skill){return tuning[type][skill];}
+}
 int inventory[13*8+0x730/4]{};float stats[100]{};
 void* Find(int){return inventory;}
 struct {void*(*FindPlayerPed)(int)=Find;float* CStats_StatTypesFloat=stats;} g;
@@ -59,6 +63,8 @@ int SupportHand(int h){return support[h];}
 int main(){
  using namespace savr;using namespace savr::recoil;
  inventory[0x730/4+2*8]=22;inventory[0x730/4+5*8]=30;
+ for(int type=0;type<64;++type)for(int skill=0;skill<3;++skill)
+     calib::tuning[type][skill]=Defaults(type,skill);
  auto step=[] {testTime+=1./90;Update(false);};
  step();step();
  OnShot(0,22,0);assert(Snapshot(0,22).pitch==0);
@@ -82,6 +88,12 @@ int main(){
  assert(Snapshot(1,31).pitch==0);
  physicalweapon::valid=false;step();OnShot(1,31,0);
  assert(Snapshot(1,31).pitch==0);
+ physicalweapon::valid=true;step();Invalidate(1);step();
+ // The actual native tier selects an independent profile, even when it is
+ // intentionally stronger than POOR. Never apply a hidden skill multiplier.
+ calib::tuning[31][2]={0,0,0,65};
+ OnShot(1,31,2);step();assert(Snapshot(1,31).pitch==0);
+ OnShot(1,31,0);step();assert(Snapshot(1,31).pitch>0);
 }
 '''
 owner = OUT/'runtime.cpp'
@@ -114,6 +126,32 @@ int main(){
  SetPhysicalRecoilLevel(-10);assert(PhysicalRecoilLevel()==0);
  SetPhysicalRecoilLevel(10);Init();assert(PhysicalRecoilLevel()==3);
  SetRecoilLevel(0);Init();assert(RecoilLevel()==0 && PhysicalRecoilLevel()==3);
+ SetRecoilTuning(22,{12.3f,2.4f,4.5f,71.f});
+ SetRecoilTuning(32,{6.7f,.8f,1.9f,42.f});
+ SetRecoilTuning(22,{22.1f,4.2f,6.3f,81.f},2);
+ Init();
+ auto p=SnapshotRecoil(22),tec=SnapshotRecoil(32),ak=SnapshotRecoil(30);
+ assert(p.verticalDegrees==12.3f && p.horizontalDegrees==2.4f);
+ assert(p.shoulderMm==4.5f && p.supportReductionPercent==71.f);
+ assert(tec.verticalDegrees==6.7f && tec.supportReductionPercent==42.f);
+ assert(ak.verticalDegrees==savr::recoil::Defaults(30).verticalDegrees);
+ assert(SnapshotRecoil(22,2).verticalDegrees==22.1f);
+ assert(SnapshotRecoil(22,1).verticalDegrees==savr::recoil::Defaults(22,1).verticalDegrees);
+ AdjustRecoilTuning(22,0,1);AdjustRecoilTuning(22,3,-1);Init();
+ p=SnapshotRecoil(22);assert(p.verticalDegrees==12.4f && p.supportReductionPercent==70.f);
+ assert(SnapshotRecoil(32).verticalDegrees==6.7f);
+ assert(SnapshotRecoil(22,2).verticalDegrees==22.1f);
+ AdjustRecoilTuning(22,0,1,2);Init();
+ assert(SnapshotRecoil(22,2).verticalDegrees==22.2f && SnapshotRecoil(22,0).verticalDegrees==12.4f);
+ {std::ifstream f("recoil-calib.ini");std::string text((std::istreambuf_iterator<char>(f)),{});
+  assert(text.find("recoil_weapon_skill 22 2 22.2 4.2 6.3 81.0")!=std::string::npos);}
+ {std::ofstream f("recoil-calib.ini");
+  f<<"recoil_weapon 22 -5 100 90 200\nrecoil_weapon 32 nan 2 3 nan\n";}
+ Init();p=SnapshotRecoil(22);tec=SnapshotRecoil(32);
+ assert(p.verticalDegrees==0 && p.horizontalDegrees==20 && p.shoulderMm==50 && p.supportReductionPercent==100);
+ assert(std::isfinite(tec.verticalDegrees) && std::isfinite(tec.supportReductionPercent));
+ {std::ofstream f("recoil-calib.ini");f<<"recoil_weapon 22 1 2\nrecoil_weapon 80 1 2 3 4\n";}
+ Init();assert(SnapshotRecoil(22).verticalDegrees==savr::recoil::Defaults(22).verticalDegrees);
 }
 '''
 setting_file = OUT/'settings.cpp'

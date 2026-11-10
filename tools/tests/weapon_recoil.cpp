@@ -78,8 +78,35 @@ int main(){
         const auto copy=model;Transform{}.Apply(model);
         assert(Near(model.position[0],copy.position[0]));
     }
-    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,0)==36);
-    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,1)==22);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,0)==41);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,1)==42);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,2)==36);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,3)==37);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,7)==22);
+    // Each component can be disabled independently; no zero-envelope division
+    // may turn shoulder-only or horizontal-only recoil into NaNs or silence.
+    for(int component=0;component<3;++component){
+        Tuning t{0,0,0,65};
+        if(component==0)t.verticalDegrees=10;
+        if(component==1)t.horizontalDegrees=2;
+        if(component==2)t.shoulderMm=3;
+        State s;s.Shot(ForWeapon(22,false,2,t));s.Advance(.02f);
+        assert(std::isfinite(s.sample.pitch)&&std::isfinite(s.sample.yaw)&&std::isfinite(s.sample.rear));
+        assert((s.sample.pitch>0)==(component==0));
+        assert((std::abs(s.sample.yaw)>0)==(component==1));
+        assert((s.sample.rear>0)==(component==2));
+    }
+    for(float reduction:{0.f,25.f,65.f,100.f}){
+        const Tuning t{10,2,3,reduction};
+        State one,two;
+        one.Shot(ForWeapon(22,false,2,t));
+        two.Shot(ForWeapon(22,true,2,t));
+        one.Advance(.03f);two.Advance(.03f);
+        const float retained=1.f-reduction*.01f;
+        assert(Near(two.sample.pitch,one.sample.pitch*retained));
+        assert(Near(two.sample.yaw,one.sample.yaw*retained));
+        assert(Near(two.sample.rear,one.sample.rear*retained));
+    }
     // Actual XR convention: -Z is a level barrel, +Y is physical up. The
     // model axis previously used as "top" is allowed to point LEFT/RIGHT
     // after calibration. Pure pitch must never turn into horizontal recoil.

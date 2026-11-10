@@ -39,6 +39,9 @@ bool ToggleState(int index, bool* enabled);
 
 // Activate the cheat at `index`. No-op unless in gameplay (a player ped exists).
 void Activate(int index);
+// Apply only this weapon's real progress stat (Tec-9/Uzi share a stat).
+bool CanApplyWeaponSkillLevel(int weaponType);
+bool ApplyWeaponSkillLevel(int weaponType,int level);
 
 // Dev-only vehicle-spawn-by-button (calibration aid). The hidden cheat row
 // "SPAWN VEHICLE BY BUTTON" flips SpawnByButtonEnabled(); while it is on, the

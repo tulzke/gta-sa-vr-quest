@@ -11,8 +11,11 @@ struct Sample { float pitch{}, yaw{}, rear{}; };
 struct Profile {
     float kick{}, limit{}, sideways{}, back{}, backLimit{}, omega{20};
 };
-inline Profile ForWeapon(int type, float skill, bool support, int level) {
-    if (!Supported(type) || level <= 0) return {};
+struct Tuning {
+    float verticalDegrees{}, horizontalDegrees{1.9f}, shoulderMm{2.f}, supportReductionPercent{65.f};
+};
+struct Shape {float kick,limit;};
+inline Shape WeaponShape(int type) {
     float kick = 1.6f, limit = 7.f;
     switch (type) {
     case 23: kick=1.3f; limit=6.f; break;
@@ -26,19 +29,42 @@ inline Profile ForWeapon(int type, float skill, bool support, int level) {
     case 33: case 34: kick=3.f; limit=10.f; break;
     case 38: kick=.12f; limit=3.f; break;
     }
-    skill = std::isfinite(skill) ? std::clamp(skill,0.f,1.f) : .5f;
+    return {kick,limit};
+}
+inline Tuning Defaults(int type,int skill=0) {
+    const float mastery=1.f-.2f*std::clamp(skill,0,2);
+    return {std::round(WeaponShape(type).kick*50.f*mastery)*.1f,
+            std::round(19.f*mastery)*.1f,std::round(20.f*mastery)*.1f,65.f};
+}
+inline Tuning Sanitize(Tuning t,int type,int skill=0) {
+    const Tuning fallback=Defaults(type,skill);
+    const auto clamp=[](float v,float fallback,float max){
+        return std::isfinite(v)?std::clamp(v,0.f,max):fallback;
+    };
+    return {clamp(t.verticalDegrees,fallback.verticalDegrees,45.f),
+            clamp(t.horizontalDegrees,fallback.horizontalDegrees,20.f),
+            clamp(t.shoulderMm,fallback.shoulderMm,50.f),
+            clamp(t.supportReductionPercent,fallback.supportReductionPercent,100.f)};
+}
+inline Profile ForWeapon(int type, bool support, int level,Tuning tuning) {
+    if (!Supported(type) || level <= 0) return {};
+    tuning=Sanitize(tuning,type);
     const float scale = (level == 1 ? .6f : level == 2 ? 1.f : 1.4f);
-    // Quest feedback: initial angular motion was barely visible even on HIGH.
-    // Scale both impulse and envelope so the soft ceiling does not swallow it.
-    const float angularScale = 5.f * scale;
-    const float mastery = 1.f - .4f*skill;
-    const float hold = support ? .35f : 1.f;
-    return {kick*kRad*mastery*hold*angularScale,
-            limit*kRad*mastery*(support?.38f:1.f)*angularScale,
-            .38f*kRad*mastery*(support?.45f:1.f)*angularScale,
-            .002f*mastery*(support?.6f:1.f)*scale,
-            .006f*mastery*(support?.6f:1.f)*scale,
-            support?26.f:20.f};
+    const float hold = support ? 1.f-tuning.supportReductionPercent*.01f : 1.f;
+    // Skill is selected by the caller's profile, with no second hidden mastery
+    // multiplier. The displayed values are the actual baseline for that tier.
+    const float strength=hold*scale;
+    const Shape shape=WeaponShape(type);
+    return {tuning.verticalDegrees*kRad*strength,
+            std::min(85.f,tuning.verticalDegrees*shape.limit/shape.kick)*kRad*strength,
+            tuning.horizontalDegrees*kRad*strength,
+            tuning.shoulderMm*.001f*strength,
+            tuning.shoulderMm*.003f*strength,
+            20.f}; // The configured percentage is the complete support modifier.
+}
+inline Profile ForWeapon(int type,float skill,bool support,int level) {
+    skill=std::isfinite(skill)?std::clamp(skill,0.f,1.f):.5f;
+    return ForWeapon(type,support,level,Defaults(type,static_cast<int>(std::round(skill*2))));
 }
 
 struct Spring {
@@ -54,10 +80,11 @@ struct State {
     Spring angle{}, back{};
     Profile target{}, live{};
     float heat{}, phase{};
+    bool initialized{};
     Sample sample{}; // Published only by Advance, never by Shot or a reader.
     void Shot(Profile p) {
-        if (p.kick<=0) return;
-        if (live.limit<=0) live=p;
+        if (p.kick<=0 && p.sideways<=0 && p.back<=0) return;
+        if (!initialized) { live=p;initialized=true; }
         target=p;
         constexpr float e=2.718281828f;
         angle.v=std::min(angle.v+p.kick*p.omega*e, p.limit*p.omega*3.f);
@@ -66,7 +93,7 @@ struct State {
     }
     void Advance(float dt) {
         if (!std::isfinite(dt) || dt<0 || dt>.25f) { *this={}; return; }
-        if (dt==0 || live.limit<=0) return;
+        if (dt==0 || !initialized) return;
         const float blend=1.f-std::exp(-12.f*dt);
         live.limit+=(target.limit-live.limit)*blend;
         live.backLimit+=(target.backLimit-live.backLimit)*blend;
@@ -78,14 +105,14 @@ struct State {
         phase=std::fmod(phase+dt,60.f);
         // Reserve headroom for jitter: the mean approaches a soft ceiling,
         // while the total signal stays strictly inside the weapon's limit.
-        const float mean=.88f*live.limit*std::tanh(angle.x/(.88f*live.limit));
-        const float nearTop=std::clamp((mean/live.limit-.55f)/.25f,0.f,1.f);
+        const float mean=live.limit>1e-8f ? .88f*live.limit*std::tanh(angle.x/(.88f*live.limit)):0.f;
+        const float nearTop=live.limit>1e-8f ? std::clamp((mean/live.limit-.55f)/.25f,0.f,1.f):0.f;
         const float jitter=.06f*live.limit*heat*nearTop*
             (.65f*std::sin(phase*67.f)+.35f*std::sin(phase*101.f));
         sample.pitch=std::max(0.f,mean+jitter);
         sample.yaw=live.sideways*heat*(.6f*std::sin(phase*53.f)+
                                                 .4f*std::sin(phase*89.f));
-        sample.rear=live.backLimit*std::tanh(back.x/live.backLimit);
+        sample.rear=live.backLimit>1e-8f ? live.backLimit*std::tanh(back.x/live.backLimit):0.f;
         if (heat<.001f && angle.x<.00001f && back.x<.000001f) *this={};
     }
 };

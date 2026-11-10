@@ -33,6 +33,8 @@ std::mutex       g_calibMutex;
 std::atomic<bool> g_laserEnabled{true};
 std::atomic<int> g_recoilLevel{2};
 std::atomic<int> g_physicalRecoilLevel{2};
+recoil::Tuning g_recoilTuning[kMaxWeapons][3]{};
+std::atomic<int> g_recoilEditingSkill{1};
 std::atomic<bool> g_laserLocked[kMaxWeapons]{};
 // Per-weapon visible-laser override: 0 = follow the global toggle,
 // 1 = always on for this weapon, 2 = always off for this weapon.
@@ -233,6 +235,8 @@ void Init() {
     g_laserEnabled.store(true, std::memory_order_relaxed);
     g_recoilLevel.store(2, std::memory_order_relaxed);
     g_physicalRecoilLevel.store(2, std::memory_order_relaxed);
+    for(int type=0;type<kMaxWeapons;++type)for(int skill=0;skill<3;++skill)
+        g_recoilTuning[type][skill]=recoil::Defaults(type,skill);
 
     FILE* f = std::fopen(kPath, "r");
     if (!f) { LOGI("[calib] no profile file, defaults"); return; }
@@ -244,6 +248,24 @@ void Init() {
     bool anyTypedLockSeen = false;
     bool legacyLaserLocked = false;
     while (std::fgets(line, sizeof(line), f)) {
+        int recoilType{},recoilSkill{};recoil::Tuning recoilTuning;
+        if(std::sscanf(line,"recoil_weapon_skill %d %d %f %f %f %f",&recoilType,&recoilSkill,
+            &recoilTuning.verticalDegrees,&recoilTuning.horizontalDegrees,
+            &recoilTuning.shoulderMm,&recoilTuning.supportReductionPercent)==6) {
+            if(recoilType>=0 && recoilType<kMaxWeapons && recoil::Supported(recoilType) &&
+               recoilSkill>=0 && recoilSkill<3)
+                g_recoilTuning[recoilType][recoilSkill]=recoil::Sanitize(recoilTuning,recoilType,recoilSkill);
+            continue;
+        }
+        // Compatibility for the earlier weapon-only format, if present.
+        if(std::sscanf(line,"recoil_weapon %d %f %f %f %f",&recoilType,
+            &recoilTuning.verticalDegrees,&recoilTuning.horizontalDegrees,
+            &recoilTuning.shoulderMm,&recoilTuning.supportReductionPercent)==5) {
+            if(recoilType>=0 && recoilType<kMaxWeapons && recoil::Supported(recoilType))
+                for(int skill=0;skill<3;++skill)
+                    g_recoilTuning[recoilType][skill]=recoil::Sanitize(recoilTuning,recoilType,skill);
+            continue;
+        }
         int opticSet{}, opticType{};
         weaponoptic::Profile optic;
         if (weaponoptic::ParseProfile(line,opticSet,opticType,optic)) {
@@ -376,6 +398,12 @@ void Save() {
     std::fprintf(f, "laser_enabled %d\n", LaserEnabled() ? 1 : 0);
     std::fprintf(f, "recoil_level %d\n", RecoilLevel());
     std::fprintf(f, "physical_recoil_level %d\n", PhysicalRecoilLevel());
+    std::fputs("# recoil_weapon_skill <type> <skill:0=poor,1=gangster,2=hitman> <vertical_deg> <jitter_deg> <shoulder_mm> <two_hand_reduction_pct>\n",f);
+    for(int type=0;type<kMaxWeapons;++type)if(recoil::Supported(type))for(int skill=0;skill<3;++skill) {
+        const auto& t=g_recoilTuning[type][skill];
+        std::fprintf(f,"recoil_weapon_skill %d %d %.1f %.1f %.1f %.1f\n",type,skill,
+            t.verticalDegrees,t.horizontalDegrees,t.shoulderMm,t.supportReductionPercent);
+    }
     // Retain the compatibility row for readers that do not support per-weapon state.
     std::fprintf(f, "laser_locked %d\n", LaserLocked() ? 1 : 0);
     int saved = 0;
@@ -510,6 +538,35 @@ void ToggleLaser() { SetLaserEnabled(!LaserEnabled()); }
 
 int PhysicalRecoilLevel() {
     return std::clamp(g_physicalRecoilLevel.load(std::memory_order_relaxed),0,3);
+}
+int RecoilEditingSkill(){return g_recoilEditingSkill.load(std::memory_order_relaxed);}
+void CycleRecoilEditingSkill(int direction){
+    if(direction)g_recoilEditingSkill.store((RecoilEditingSkill()+(direction>0?1:2))%3);
+}
+const char* RecoilSkillName(int skill){
+    static constexpr const char* names[]{"POOR","GANGSTER","HITMAN"};
+    return names[std::clamp(skill,0,2)];
+}
+recoil::Tuning SnapshotRecoil(int weaponType,int skill) {
+    std::lock_guard<std::mutex> guard(g_calibMutex);
+    return g_recoilTuning[ClampType(weaponType)][std::clamp(skill,0,2)];
+}
+void SetRecoilTuning(int weaponType,recoil::Tuning tuning,int skill) {
+    if(!recoil::Supported(weaponType))return;
+    {
+        std::lock_guard<std::mutex> guard(g_calibMutex);
+        skill=std::clamp(skill,0,2);
+        g_recoilTuning[weaponType][skill]=recoil::Sanitize(tuning,weaponType,skill);
+    }
+    Save();
+}
+void AdjustRecoilTuning(int weaponType,int field,int direction,int skill) {
+    if(field<0 || field>3 || !direction || !recoil::Supported(weaponType))return;
+    auto t=SnapshotRecoil(weaponType,skill);
+    float* values[]{&t.verticalDegrees,&t.horizontalDegrees,&t.shoulderMm,&t.supportReductionPercent};
+    const float step=field==3 ? 1.f : .1f;
+    *values[field]=std::round((*values[field]+direction*step)*10.f)/10.f;
+    SetRecoilTuning(weaponType,t,skill);
 }
 const char* PhysicalRecoilLevelName() {
     static constexpr const char* names[]{"OFF","LOW","MEDIUM","HIGH"};
