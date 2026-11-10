@@ -8,7 +8,7 @@ constexpr CapturedRecoil kCapturedRecoil[] = {
     {23, 0, {6.4f, 1.5f, 1.6f, 65.0f, false}},
     {23, 1, {5.1f, 1.2f, 1.3f, 65.0f, false}},
     {23, 2, {3.8f, 0.9f, 1.0f, 65.0f, false}},
-    {24, 0, {35.0f, 7.0f, 6.0f, 70.0f, true}},
+    {24, 0, {29.9f, 7.0f, 43.4f, 70.0f, true}},
     {24, 1, {20.0f, 1.5f, 4.0f, 75.0f, false}},
     {24, 2, {10.8f, 1.1f, 1.2f, 75.0f, false}},
     {25, 0, {25.0f, 20.0f, 200.0f, 40.0f, true}},
