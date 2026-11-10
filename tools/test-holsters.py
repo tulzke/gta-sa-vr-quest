@@ -47,7 +47,7 @@ transitions = release + grab
 transitions = transitions.rstrip()
 assert transitions.endswith('}')
 transitions = transitions[:-1]
-markers = physical[physical.index('    holstermarker::Marker markers['):physical.index('        // Current reference Quest build exposes the model-bound foregrip')]
+markers = physical[physical.index('    holstermarker::Marker markers['):physical.index('        // Only calibration exposes the model-bound foregrip cube.')]
 prefix = r'''
 #include "HolsterMarker.h"
 #include <algorithm>
@@ -57,6 +57,8 @@ prefix = r'''
 #include <cstdio>
 #include <cstdlib>
 using namespace savr;
+std::uint64_t trackingEpoch=1;
+namespace savr::xr {void SetAmmoHolsters(const holstermarker::Frame&) {}}
 #define LOGI(...) ((void)0)
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 constexpr int kHandCount=2;
@@ -105,15 +107,18 @@ tests = r'''
 int main(){
     for(int p=0;p<7;++p)anchors[p][0]=float(p);
     holstermarker::Marker m[8];CHECK(Publish(m)==0);
-    slots[6]=-1; gHands[0].pos={6,0,0}; CHECK(Publish(m)==1 && m[0].kind==holstermarker::Kind::Empty && m[0].opacity > 0.34f);
-    gHands[0].pos={0,0,0}; CHECK(Publish(m)==1 && m[0].opacity < 0.16f); slots[6]=7;
+    slots[6]=-1; gHands[0].pos={6,0,0}; CHECK(Publish(m)==1);
+    CHECK(m[0].kind==holstermarker::Kind::Empty && m[0].opacity>.34f);
+    gHands[0].pos={0,0,0}; CHECK(Publish(m)==1);
+    CHECK(m[0].opacity==.15f); slots[6]=7;
     // Both hands grab different sockets using the real nearest-available filter.
     for(int h=0;h<2;++h){gHands[h].grip=1;gHands[h].pos={float(h),0,0};}
     Transition();CHECK(gHeldSlot[0]==1&&gHeldSlot[1]==2);
-    CHECK(Publish(m)==2);CHECK(m[0].kind==holstermarker::Kind::Return&&m[1].kind==holstermarker::Kind::Return);
+    CHECK(Publish(m)==2);
+    CHECK(m[0].kind==holstermarker::Kind::Return && m[1].kind==holstermarker::Kind::Return);
     // Hand-to-hand ownership state retains the same return point and count.
     gHeldSlot[1]=-1;gHeldSlot[0]=2;
-    CHECK(Publish(m)==1);CHECK(m[0].kind==holstermarker::Kind::Return);
+    CHECK(Publish(m)==1 && m[0].kind==holstermarker::Kind::Return);
     // Release into its own socket returns; a different socket is a drop.
     gHands[0].pos={1,0,0};gHands[0].grip=0;Transition();CHECK(gHeldSlot[0]==-1&&gDropped[0].slot==-1);
     CHECK(Publish(m)==0);

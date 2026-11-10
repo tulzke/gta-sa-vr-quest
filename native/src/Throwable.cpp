@@ -54,6 +54,7 @@ struct HandThrowState {
     bool triggerDown{};
     int slot{-1};
     int weaponType{-1};
+    int triggerHand{-1};
 };
 HandThrowState g_handState[2]{};
 
@@ -132,7 +133,8 @@ bool BuildLauncherAim(void* player, int type, Vec3& source, Vec3& direction,
     }
     const int hand = requestedHand >= 0 ? requestedHand
                                         : physicalweapon::FiringHand();
-    if (hand < 0 || hand > 1 || WeaponTypeInHeldSlot(player, hand) != type)
+    if (hand < 0 || hand > 1 || WeaponTypeInHeldSlot(player, hand) != type ||
+        physicalweapon::LauncherTriggerHand(hand) < 0)
         return false;
 
     float origin[3]{}, aim[3]{};
@@ -183,7 +185,7 @@ bool BuildLauncherAim(void* player, int type, Vec3& source, Vec3& direction,
 }
 
 int WeaponTypeInHeldSlot(void* ped, int hand) {
-    const int slot = physicalweapon::HeldSlot(hand);
+    const int slot = physicalweapon::VisualHeldSlot(hand);
     if (!ped || slot <= 0 || slot >= 13) return -1;
     const auto* bytes = static_cast<const std::uint8_t*>(ped);
     return *reinterpret_cast<const std::int32_t*>(
@@ -191,7 +193,7 @@ int WeaponTypeInHeldSlot(void* ped, int hand) {
 }
 
 void* WeaponInHeldSlot(void* ped, int hand, int& slotOut, int& typeOut) {
-    slotOut = physicalweapon::HeldSlot(hand);
+    slotOut = physicalweapon::VisualHeldSlot(hand);
     typeOut = -1;
     if (!ped || slotOut <= 0 || slotOut >= 13) return nullptr;
     auto* weapon = static_cast<std::uint8_t*>(ped) + 0x730 +
@@ -388,6 +390,7 @@ bool FireTrackedRelease(void* weapon, void* player, int hand, int slot,
 bool FireTrackedLauncher(void* weapon, void* player, int hand, int type) {
     if (!weapon || !player || !g.CWeapon_Fire || !IsLauncher(type))
         return false;
+    if (physicalweapon::LauncherTriggerHand(hand) < 0) return false;
     // ProcessPlayerWeapon normally enforces this before calling CWeapon::Fire.
     // Our independent trigger edge must reproduce the gate because Fire itself
     // also accepts WEAPONSTATE_FIRING and would otherwise allow rapid re-presses
@@ -426,6 +429,11 @@ bool OnFireProjectile(void* weapon, void* shooter, Vec3* origin,
     }
     const int type = *reinterpret_cast<const std::int32_t*>(weapon);
     if (IsLauncher(type)) {
+        if (g.FindPlayerPed && shooter == g.FindPlayerPed(-1)) {
+            for (int owner=0;owner<2;++owner)
+                if (WeaponTypeInHeldSlot(shooter,owner)==type &&
+                    physicalweapon::LauncherTriggerHand(owner)<0) return false;
+        }
         const int firingHand = g_directLauncherHand >= 0
             ? g_directLauncherHand : physicalweapon::FiringHand();
         const bool localHeld = g.FindPlayerPed &&
@@ -606,31 +614,34 @@ void Update(bool interactionsBlocked) {
 
     for (int hand = 0; hand < 2; ++hand) {
         HandThrowState& state = g_handState[hand];
-        const float level = std::isfinite(input.triggers[hand])
-            ? std::clamp(input.triggers[hand], 0.0f, 1.0f) : 0.0f;
-        const bool triggerDown = state.triggerDown
-            ? level >= kTriggerRelease : level >= kTriggerPress;
-
         int slot = -1, type = -1;
         void* const weapon = unavailable
             ? nullptr : WeaponInHeldSlot(player, hand, slot, type);
         const bool validThrowable = weapon && IsThrowable(type);
         const bool validLauncher = weapon && IsLauncher(type);
-        if (unavailable || (!validThrowable && !validLauncher)) {
+        const int triggerHand = validLauncher ? physicalweapon::LauncherTriggerHand(hand) : hand;
+        const float level = triggerHand>=0 && triggerHand<2 && std::isfinite(input.triggers[triggerHand])
+            ? std::clamp(input.triggers[triggerHand],0.0f,1.0f) : 0.0f;
+        const bool triggerDown = state.triggerDown
+            ? level >= kTriggerRelease : level >= kTriggerPress;
+        if (unavailable || (!validThrowable && !validLauncher) ||
+            (validLauncher && triggerHand<0)) {
             state.armed = false;
             state.triggerDown = triggerDown;
             state.slot = slot;
             state.weaponType = type;
+            state.triggerHand = triggerHand;
             ClearPreview(hand);
             continue;
         }
 
-        if (state.slot != slot || state.weaponType != type) {
+        if (state.slot != slot || state.weaponType != type || state.triggerHand != triggerHand) {
             // A trigger already held while a grenade is grabbed is not a fresh
             // arming press. This also prevents a menu/weapon switch from throwing.
             state = {};
             state.slot = slot;
             state.weaponType = type;
+            state.triggerHand = triggerHand;
             state.triggerDown = triggerDown;
             ClearPreview(hand);
             continue;

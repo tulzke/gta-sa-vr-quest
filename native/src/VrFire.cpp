@@ -255,6 +255,20 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
         shooter != g.FindPlayerPed(-1)) {
         return false;
     }
+    // A pending native shot must not fall back to CJ/camera aim after the
+    // primary hand leaves a weapon that is still held at its support socket.
+    for (int owner=0;owner<2;++owner) {
+        if (!physicalweapon::IsPrimaryDetached(owner)) continue;
+        const int slot=physicalweapon::VisualHeldSlot(owner);
+        if (slot<=0 || slot>=13) continue;
+        const auto* bytes=static_cast<const std::uint8_t*>(shooter);
+        const int heldType=*reinterpret_cast<const std::int32_t*>(
+            bytes+kPedWeaponsOffset+static_cast<std::uintptr_t>(slot)*kWeaponStride);
+        if (heldType==weaponType) {
+            if (suppressShot) *suppressShot=true;
+            return false;
+        }
+    }
     const scopeaim::VisualState scope = scopeaim::Snapshot();
     const bool scopedType = scope.active && scope.weaponType == weaponType;
     if (suppressShot) *suppressShot = scopedType;

@@ -22,7 +22,8 @@ inline bool ReadCombineEye(const GameSymbols& symbols, GameSymbols::Vec3* eye) {
     return true;
 }
 // Migrate the recognized legacy seat triple at load; preserve custom values.
-inline bool MigrateCombineSeat(int model,int mode,int& side,int& forward,int& height) {
+template<class Number>
+inline bool MigrateCombineSeat(int model,int mode,Number& side,Number& forward,Number& height) {
     if(model!=532 || mode!=1 || side!=-98 || forward!=290 || height!=43)return false;
     side=forward=height=0;return true;
 }

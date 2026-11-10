@@ -12,6 +12,7 @@
 
 #include "AircraftHlod.h"
 #include "Calib.h"
+#include "HandAnimation.h"
 #include "Driving.h"
 #include "RearMirrorPolicy.h"
 #include "EyeDepth.h"
@@ -3056,7 +3057,7 @@ bool BuildModelBoundWeaponRayTracking(
     static unsigned rayLogCount[2]{};
     const unsigned logIndex = rayLogCount[hand]++;
     if (logIndex < 8 || (logIndex % 720) == 0) {
-        LOGI("[aim.ray] hand=%s type=%d aim=(%d,%d,%d;%d,%d,%d) "
+        LOGI("[aim.ray] hand=%s type=%d aim=(%.1f,%.1f,%.1f;%.1f,%.1f,%.1f) "
              "origin=(%.3f,%.3f,%.3f) dir=(%.3f,%.3f,%.3f) "
              "axes=(%.2f,%.2f,%.2f|%.2f,%.2f,%.2f)",
              hand == 0 ? "LEFT" : "RIGHT", weaponType,
@@ -20528,6 +20529,7 @@ void RenderRadialIconAtlas(const radialholster::Frame& frame) {
         if (type<=0 || type>=64) continue;
         if (!g_radialWeaponIcons[type]) {
             // These HUD textures have uppercase names in gta3.
+            if (type == 31) g_radialWeaponIcons[type]=g.RwTextureRead("M4icon","");
             if (type == 34) g_radialWeaponIcons[type]=g.RwTextureRead("SNIPERicon","");
             if (type == 41) g_radialWeaponIcons[type]=g.RwTextureRead("SPRAYCANicon","");
         }
@@ -21485,11 +21487,16 @@ void OnRenderScene(bool underwater) {
         // Held models. The exact final matrix is fed back in OpenXR LOCAL space;
         // release/throw on the input thread therefore starts from these pixels.
         for (int hand = 0; hand < physicalweapon::kHandCount; ++hand) {
-            const int slot = physicalweapon::HeldSlot(hand);
+            const int slot = physicalweapon::VisualHeldSlot(hand);
             const int weaponType = WeaponTypeInSlot(playerPed, slot);
             if (slot <= 0 || weaponType == 0 || slot == previewSlot) continue;
             RwMat heldMatrix{};
-            if (!HandWeaponMatrix(hand, weaponType, heldMatrix)) continue;
+            const bool supportOnly=physicalweapon::IsPrimaryDetached(hand);
+            if (supportOnly) {
+                physicalweapon::TrackingPose pose{};
+                if (!physicalweapon::GetSupportOnlyWeaponPoseTracking(hand,&pose) ||
+                    !TrackingWeaponMatrix(pose,heldMatrix)) continue;
+            } else if (!HandWeaponMatrix(hand, weaponType, heldMatrix)) continue;
 
             // Publish one-hand BASE separately from two-hand FINAL to prevent support-pose feedback.
             physicalweapon::TrackingPose basePose{};
@@ -21537,8 +21544,10 @@ void OnRenderScene(bool underwater) {
                 weapon_optic_render::Prepare(hand,weaponType,heldMatrix,base);
             }
             if (heldClump) {
-                renderedHeldMask |= 1u << hand;
-                renderedWeaponTypes[hand] = weaponType;
+                if (!supportOnly) {
+                    renderedHeldMask |= 1u << hand;
+                    renderedWeaponTypes[hand] = weaponType;
+                }
                 // During PG_CALIB, pin the otherwise free visual hand to the
                 // live support socket even without a real grip relation. A zero
                 // angle keeps the weapon under the primary controller while the
@@ -21551,7 +21560,9 @@ void OnRenderScene(bool underwater) {
                 if (support >= 0 && support < physicalweapon::kHandCount) {
                     renderedHeldMask |= 1u << support;
                     twoHandVisualState.active = true;
+                    twoHandVisualState.weaponType = weaponType;
                     twoHandVisualState.primaryHand = hand;
+                    twoHandVisualState.primaryAttached = !supportOnly;
                     twoHandVisualState.supportHand = support;
                     if (twoHandActive) {
                         std::memcpy(twoHandVisualState.pivot, twoHandPivot,
@@ -21590,7 +21601,12 @@ void OnRenderScene(bool underwater) {
                     }
                     const calib::WeaponCalib supportCalib = calib::Snapshot(1, weaponType);
                     twoHandVisualState.supportGestureValid = true;
-                    if (supportCalib.supStyle == calib::SUPPORT_FROM_BELOW) {
+                    if (handanimation::PistolStyleSupport(weaponType) ||
+                        handanimation::ShotgunOffhandWeapon(weaponType)) {
+                        twoHandVisualState.supportGestureGrip = supportCalibrationPreview
+                            ? 1.0f : physicalweapon::SupportAnimationProgress(hand);
+                        twoHandVisualState.supportGestureTrigger = 0.0f;
+                    } else if (supportCalib.supStyle == calib::SUPPORT_FROM_BELOW) {
                         twoHandVisualState.supportGestureGrip = 0.55f;
                         twoHandVisualState.supportGestureTrigger = 0.65f;
                     } else {

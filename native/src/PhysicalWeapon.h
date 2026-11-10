@@ -67,6 +67,9 @@ bool GetInteractionTrackingSnapshot(float head[3], float orientation[4],
 
 // Per-hand ownership. hand: 0=LEFT, 1=RIGHT. Invalid hand returns -1.
 int HeldSlot(int hand);
+int VisualHeldSlot(int hand); // logical owner, including a gun held at its support socket
+bool IsPrimaryDetached(int hand);
+bool GetSupportOnlyWeaponPoseTracking(int primaryHand, TrackingPose* out);
 int HeldHandForSlot(int slot);
 
 // One-handed guns a seated driver can draw and aim (the Vice City "immersive
@@ -105,7 +108,7 @@ int ActiveHeldSlot();
 
 // reference Quest build-style two-handed ownership. A support hand never owns/duplicates the
 // inventory slot: HeldSlot(support) remains -1 and the primary hand continues to
-// drive selection, trigger and rendering. Only SA long guns return true here.
+// drive selection, trigger and rendering. Supports pistols and SA long guns.
 bool IsTwoHandedWeaponType(int weaponType);
 int  SupportHand(int primaryHand);       // support hand for this primary, else -1
 int  PrimaryHand(int supportHand);       // primary using this support, else -1
@@ -118,6 +121,7 @@ bool IsSupportHand(int hand);
 // engagement, so the renderer can draw a reachable socket hint. Its basis is
 // the calibrated support-wrist basis (right/forward/up), not a weapon basis.
 float SupportWeight(int primaryHand);
+float SupportAnimationProgress(int primaryHand); // timed pistol closure [0,1]
 bool GetSupportHandPoseTracking(int primaryHand, TrackingPose* out);
 bool GetSupportAnchorTracking(int primaryHand, TrackingPose* out);
 
@@ -130,6 +134,7 @@ int SupportCalibrationPrimaryHand();
 // One thread-safe shortest-arc snapshot shared by weapon rendering and its
 // laser/fire ray. It rotates the calibrated expected foregrip vector onto the
 // real support controller around the primary controller, capped at 90 degrees.
+// Pistols return an active identity transform to keep close wrists from steering aim.
 // Returns false unless a support grip is currently engaged.
 bool GetTwoHandTransformTracking(int primaryHand, float pivotOut[3],
                                  float axisOut[3], float* angleRadiansOut);
@@ -165,6 +170,9 @@ void PublishHeldBasePoseTracking(int hand, int slot, const TrackingPose* pose);
 // are blocked. Update also keeps CPed's active slot on this hand.
 int   FiringHand();
 float FireTrigger();
+// Launchers retain primary ownership/ray, but only the attached tracked support
+// hand may pull the trigger. Returns -1 without an active usable two-hand grip.
+int LauncherTriggerHand(int primaryHand);
 
 // A consumed physical throwable leaves the hand immediately; if more ammo is
 // available the same inventory slot becomes visible at its holster again. This

@@ -1,10 +1,12 @@
 #include "HudSettings.h"
+#include "MenuPrecision.h"
 
 #include "Log.h"
 
 #include <array>
 #include <atomic>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <mutex>
@@ -45,7 +47,7 @@ constexpr ElementDefaults kElementDefaults[ELEMENT_COUNT] = {
 };
 
 std::atomic<int> g_element[ELEMENT_COUNT][ELEMENT_FIELD_COUNT]{};
-std::atomic<int> g_wrist[WRIST_SLOT_COUNT][ELEMENT_COUNT][WRIST_FIELD_COUNT]{};
+std::atomic<float> g_wrist[WRIST_SLOT_COUNT][ELEMENT_COUNT][WRIST_FIELD_COUNT]{};
 std::atomic<int> g_calibrationElement{RADAR};
 
 const char* const kElementKeys[ELEMENT_COUNT] = {
@@ -86,7 +88,7 @@ constexpr int kDashHealthDefaults[WRIST_FIELD_COUNT] =
 // copy of the shared dash slot. Guarded by g_dashModelMutex (read twice per
 // present frame + on menu edits — cold).
 std::mutex g_dashModelMutex;
-std::map<int, std::array<int, WRIST_FIELD_COUNT>>
+std::map<int, std::array<float, WRIST_FIELD_COUNT>>
     g_dashModel[ELEMENT_COUNT];
 
 int ClampElement(int element) {
@@ -109,15 +111,15 @@ int ClampElementField(int field, int value) {
     }
 }
 
-int ClampWristField(int field, int value) {
+float ClampWristField(int field, float value) {
     switch (field) {
         case WRIST_ALONG_MM:
-        case WRIST_ACROSS_MM:     return std::clamp(value, -400, 400);
-        case WRIST_LIFT_MM:       return std::clamp(value, -300, 300);
+        case WRIST_ACROSS_MM:     return std::clamp<float>(value, -400, 400);
+        case WRIST_LIFT_MM:       return std::clamp<float>(value, -300, 300);
         case WRIST_PITCH_DEG:
         case WRIST_YAW_DEG:
-        case WRIST_ROLL_DEG:      return std::clamp(value, -180, 180);
-        case WRIST_SCALE_TENTHS:  return std::clamp(value, 3, 30);
+        case WRIST_ROLL_DEG:      return std::clamp<float>(value, -180, 180);
+        case WRIST_SCALE_TENTHS:  return std::clamp<float>(value, 3, 30);
         default:                  return 0;
     }
 }
@@ -219,18 +221,20 @@ void Load() {
                             break;
                         }
                     }
+                    float wristValue{};
                     for (int slot = 0; slot < WRIST_SLOT_COUNT && !matched;
                          ++slot) {
                         for (int field = 0; field < WRIST_FIELD_COUNT &&
                              !matched; ++field) {
                             char pattern[96];
                             std::snprintf(pattern, sizeof(pattern),
-                                          "Hud.%s.%s=%%d",
+                                          "Hud.%s.%s=%%f",
                                           kElementKeys[element],
                                           kWristFieldKeys[slot][field]);
-                            if (std::sscanf(line, pattern, &value) == 1) {
+                            if (std::sscanf(line, pattern, &wristValue) == 1 &&
+                                std::isfinite(wristValue)) {
                                 g_wrist[slot][element][field].store(
-                                    ClampWristField(field, value),
+                                    ClampWristField(field, wristValue),
                                     std::memory_order_relaxed);
                                 matched = true;
                             }
@@ -240,21 +244,22 @@ void Load() {
                          ++field) {
                         char pattern[96];
                         std::snprintf(pattern, sizeof(pattern),
-                                      "Hud.%s.DashM%%d.%s=%%d",
+                                      "Hud.%s.DashM%%d.%s=%%f",
                                       kElementKeys[element],
                                       kDashModelFieldKeys[field]);
                         int model = -1;
-                        if (std::sscanf(line, pattern, &model, &value) == 2 &&
+                        if (std::sscanf(line, pattern, &model, &wristValue) == 2 &&
+                            std::isfinite(wristValue) &&
                             model >= 0 && model < 65536) {
                             std::lock_guard<std::mutex> lock(g_dashModelMutex);
                             auto& entry = g_dashModel[element][model];
                             static_assert(WRIST_FIELD_COUNT == 7, "");
-                            if (entry == std::array<int, WRIST_FIELD_COUNT>{})
+                            if (entry == std::array<float, WRIST_FIELD_COUNT>{})
                                 for (int f = 0; f < WRIST_FIELD_COUNT; ++f)
                                     entry[f] = g_wrist[WRIST_SLOT_VEHICLE]
                                         [element][f].load(
                                             std::memory_order_relaxed);
-                            entry[field] = ClampWristField(field, value);
+                            entry[field] = ClampWristField(field, wristValue);
                             matched = true;
                         }
                     }
@@ -310,7 +315,7 @@ void Save() {
                                  std::memory_order_acquire));
             for (int slot = 0; slot < WRIST_SLOT_COUNT; ++slot)
                 for (int field = 0; field < WRIST_FIELD_COUNT; ++field)
-                    std::fprintf(file, "Hud.%s.%s=%d\n",
+                    std::fprintf(file, "Hud.%s.%s=%.7g\n",
                                  kElementKeys[element],
                                  kWristFieldKeys[slot][field],
                                  g_wrist[slot][element][field].load(
@@ -318,7 +323,7 @@ void Save() {
             std::lock_guard<std::mutex> lock(g_dashModelMutex);
             for (const auto& [model, values] : g_dashModel[element])
                 for (int field = 0; field < WRIST_FIELD_COUNT; ++field)
-                    std::fprintf(file, "Hud.%s.DashM%d.%s=%d\n",
+                    std::fprintf(file, "Hud.%s.DashM%d.%s=%.7g\n",
                                  kElementKeys[element], model,
                                  kDashModelFieldKeys[field], values[field]);
         }
@@ -502,28 +507,26 @@ void AdjustWristField(int element, int field, int direction, int slot,
     element = ClampElement(element);
     slot = ClampWristSlot(slot);
     if (!direction || field < 0 || field >= WRIST_FIELD_COUNT) return;
-    // Offsets step 1 mm (0.1 cm) per the on-device calibration feedback;
-    // rotations keep the coarser 5-degree step. `direction` carries the menu
-    // hold-acceleration magnitude.
-    const int increment =
-        (field == WRIST_PITCH_DEG || field == WRIST_YAW_DEG ||
-         field == WRIST_ROLL_DEG) ? 5 : 1;
+    const auto adjusted=[field,direction](float current) {
+        return field==WRIST_SCALE_TENTHS ? current+direction :
+            menu::SpatialValue(current,direction,field<3?.1f:1.f);
+    };
     if (slot == WRIST_SLOT_VEHICLE && vehicleModel >= 0) {
         // Per-vehicle override, seeded from the shared dash slot on first
         // touch so the calibrated defaults carry over.
         std::lock_guard<std::mutex> lock(g_dashModelMutex);
         auto& entry = g_dashModel[element][vehicleModel];
-        if (entry == std::array<int, WRIST_FIELD_COUNT>{})
+        if (entry == std::array<float, WRIST_FIELD_COUNT>{})
             for (int f = 0; f < WRIST_FIELD_COUNT; ++f)
                 entry[f] = g_wrist[WRIST_SLOT_VEHICLE][element][f].load(
                     std::memory_order_acquire);
         entry[field] =
-            ClampWristField(field, entry[field] + direction * increment);
+            ClampWristField(field, adjusted(entry[field]));
     } else {
-        const int current =
+        const float current =
             g_wrist[slot][element][field].load(std::memory_order_acquire);
         g_wrist[slot][element][field].store(
-            ClampWristField(field, current + direction * increment),
+            ClampWristField(field, adjusted(current)),
             std::memory_order_release);
     }
     Save();

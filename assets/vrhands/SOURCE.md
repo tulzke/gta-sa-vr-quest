@@ -20,7 +20,7 @@ grip, trigger and combined poses are baked from UltimateXR's authored finger
 poses. `BigHandsAlbedo.png` is an offline Type 3 skin-colour approximation made
 from the original masks; it does not include Unity or Shader Graph code.
 
-The user's nine Blender Actions, including `GripPistol`, `GripPistolOffhand`,
+The user's fourteen Blender Actions, including `GripPistol`, `GripPistolOffhand`,
 `Fist` and `GripPistolShoot`, can be sampled with `tools/export_hand_actions.py`.
 See [ANIMATIONS.md](ANIMATIONS.md) for the local source, mirrored exports,
 validation and the distinction from the existing runtime blend corners.

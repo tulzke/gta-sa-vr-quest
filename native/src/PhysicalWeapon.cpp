@@ -22,6 +22,7 @@
 #include "RadialHolsterMenu.h"
 #include "MissionWeaponGrant.h"
 #include "Basketball.h"
+#include "HandAnimation.h"
 
 #include <algorithm>
 #include <chrono>
@@ -86,6 +87,10 @@ std::atomic<unsigned int> gHeldMaskRelaxed{0};
 // A support hand does not own a second copy of the primary's inventory slot.
 // gSupportHand[primary] is the other controller or -1.
 int gSupportHand[kHandCount] = {-1, -1};
+double gSupportStartedAt[kHandCount]{};
+bool gPrimaryDetached[kHandCount]{};
+TrackingPose gDetachedModel[kHandCount]{}, gDetachedController[kHandCount]{};
+TrackingPose gDetachedAnchor[kHandCount]{}, gDetachedPrimary[kHandCount]{};
 bool gGripLatched[kHandCount]{};
 bool gAwaitFirstGrip[kHandCount]{};
 bool gDisarmCatchBlocked[kHandCount]{};
@@ -211,9 +216,9 @@ bool ValidHand(int hand) { return hand >= 0 && hand < kHandCount; }
 bool ValidSlot(int slot) { return slot > 0 && slot < kWeaponSlotCount; }
 
 bool IsTwoHandedWeaponTypeInternal(int weaponType) {
-    // SA equivalents of reference Quest build's current Quest long-gun list. Compact SMGs and
-    // pistols intentionally stay one-handed; MP5 and every full-size long gun
-    // use a calibrated foregrip.
+    // Pistols and compact SMGs share the hand-over-hand grip. Long guns keep
+    // the calibrated foregrip and two-controller aim solver.
+    if (handanimation::PistolStyleSupport(weaponType)) return true;
     switch (weaponType) {
         case 25:  // shotgun
         case 26:  // sawnoff
@@ -281,8 +286,12 @@ void ClearSupportForHandLocked(int hand) {
     if (!ValidHand(hand)) return;
     // `hand` may itself be a primary and/or the support side of a stale relation.
     gSupportHand[hand] = -1;
+    gPrimaryDetached[hand] = false;
     for (int primary = 0; primary < kHandCount; ++primary)
-        if (gSupportHand[primary] == hand) gSupportHand[primary] = -1;
+        if (gSupportHand[primary] == hand) {
+            gSupportHand[primary] = -1;
+            gPrimaryDetached[primary] = false;
+        }
 }
 
 int DroppedSourceForSlotLocked(int slot) {
@@ -335,6 +344,7 @@ void ResetRuntimeLocked() {
     for (int hand = 0; hand < kHandCount; ++hand) {
         gHeldSlot[hand] = -1;
         gSupportHand[hand] = -1;
+        gPrimaryDetached[hand] = false;
         gGripLatched[hand] = false;
         gAwaitFirstGrip[hand] = false;
         gDisarmCatchBlocked[hand] = false;
@@ -479,7 +489,7 @@ void GiveToHandLocked(void* ped, int hand, int slot, const char* reason) {
          hand == 0 ? "LEFT" : "RIGHT");
 }
 
-void StartDropLocked(int hand, int slot, double now) {
+void StartDropLocked(int hand, int slot, double now, int velocityHand = -1) {
     if (!ValidHand(hand) || !ValidSlot(slot)) return;
     DroppedWeapon dropped{};
     dropped.slot = slot;
@@ -489,14 +499,15 @@ void StartDropLocked(int hand, int slot, double now) {
     else
         dropped.startPose = RawGripFallbackPose(gHands[hand]);
 
-    const V3 trackedVelocity = gHandVelocity[hand];
+    if (!ValidHand(velocityHand)) velocityHand=hand;
+    const V3 trackedVelocity = gHandVelocity[velocityHand];
     dropped.velocity = trackedVelocity;
     dropped.velocity.y += kReleaseUpwardImpulse;
     const float speed = Length(dropped.velocity);
     if (speed > kMaximumThrowSpeed)
         dropped.velocity = Scale(dropped.velocity, kMaximumThrowSpeed / speed);
 
-    const V3 angularVelocity=gHandAngularVelocity[hand];
+    const V3 angularVelocity=gHandAngularVelocity[velocityHand];
     dropped.angularSpeed=std::clamp(Length(angularVelocity),0.0f,10.0f);
     if (dropped.angularSpeed<0.35f) {
         dropped.angularSpeed=0.0f;
@@ -604,8 +615,31 @@ int ClosestAvailableHolsterSlotLocked(
     return closestSlot;
 }
 
-bool BuildSupportAnchorLocked(int primaryHand, TrackingPose* out) {
+bool MapSupportOnlyPoseLocked(int primaryHand, const TrackingPose& source, TrackingPose* out) {
+    if (!ValidHand(primaryHand) || !out || !gPrimaryDetached[primaryHand]) return false;
+    const int support=gSupportHand[primaryHand];
+    if (!ValidHand(support) || !gHands[support].valid) return false;
+    const auto& from=gDetachedController[primaryHand];
+    const auto to=RawGripFallbackPose(gHands[support]);
+    const auto vector=[&](const float v[3],float result[3]) {
+        const V3 value{v[0],v[1],v[2]};
+        const float x=Dot(value,{from.right[0],from.right[1],from.right[2]});
+        const float y=Dot(value,{from.forward[0],from.forward[1],from.forward[2]});
+        const float z=Dot(value,{from.up[0],from.up[1],from.up[2]});
+        for(int a=0;a<3;++a) result[a]=to.right[a]*x+to.forward[a]*y+to.up[a]*z;
+    };
+    float delta[3];for(int a=0;a<3;++a)delta[a]=source.position[a]-from.position[a];
+    vector(delta,out->position);
+    for(int a=0;a<3;++a)out->position[a]+=to.position[a];
+    vector(source.right,out->right);vector(source.forward,out->forward);vector(source.up,out->up);
+    return true;
+}
+
+bool BuildSupportAnchorLocked(int primaryHand, TrackingPose* out,
+                              const TrackingPose* modelOverride = nullptr) {
     if (!ValidHand(primaryHand) || out == nullptr) return false;
+    if (!modelOverride && gPrimaryDetached[primaryHand])
+        return MapSupportOnlyPoseLocked(primaryHand,gDetachedAnchor[primaryHand],out);
     const int slot = gHeldSlot[primaryHand];
     if (!ValidSlot(slot) || !gHeldBaseValid[primaryHand] ||
         gHeldBaseSlot[primaryHand] != slot)
@@ -619,7 +653,7 @@ bool BuildSupportAnchorLocked(int primaryHand, TrackingPose* out) {
     // model FORWARD is the top candidate, and their canonical cross product is
     // the lateral socket axis. Rebuilding this proper frame also deliberately
     // removes the reflected RenderWare winding from the wrist pose.
-    const TrackingPose& model = gHeldBasePose[primaryHand];
+    const TrackingPose& model = modelOverride ? *modelOverride : gHeldBasePose[primaryHand];
     V3 barrel{model.right[0], model.right[1], model.right[2]};
     V3 top{model.forward[0], model.forward[1], model.forward[2]};
     if (LengthSquared(barrel) < 0.0001f || LengthSquared(top) < 0.0001f)
@@ -634,9 +668,9 @@ bool BuildSupportAnchorLocked(int primaryHand, TrackingPose* out) {
     top = Normalized(Cross(lateral, barrel), top);
 
     const calib::WeaponCalib calibration = calib::Snapshot(1, weaponType);
-    int offsetX = calibration.supOffX;
-    int offsetY = calibration.supOffY;
-    int offsetZ = calibration.supOffZ;
+    float offsetX = calibration.supOffX;
+    float offsetY = calibration.supOffY;
+    float offsetZ = calibration.supOffZ;
     // Derive LEFT support calibration from RIGHT by mirroring lateral offset and handedness-sensitive rotations.
     if (primaryHand == 0) offsetX = -offsetX;
     constexpr float kCalibUnitToMetres = 0.005f;
@@ -666,9 +700,9 @@ bool BuildSupportAnchorLocked(int primaryHand, TrackingPose* out) {
     handRight = Normalized(handRight);
     constexpr float kHalfDegreeToRadians =
         0.5f * 3.14159265358979323846f / 180.0f;
-    int rotationRawX = calibration.supRotX;
-    int rotationRawY = calibration.supRotY;
-    int rotationRawZ = calibration.supRotZ;
+    float rotationRawX = calibration.supRotX;
+    float rotationRawY = calibration.supRotY;
+    float rotationRawZ = calibration.supRotZ;
     if (primaryHand == 0) {
         rotationRawX = -rotationRawX;
         rotationRawZ = -rotationRawZ;
@@ -715,9 +749,27 @@ bool BuildSupportAnchorLocked(int primaryHand, TrackingPose* out) {
 
 bool BuildTwoHandTransformLocked(int primaryHand, V3& pivot, V3& axis,
                                  float& angle) {
-    if (!ValidHand(primaryHand) || !gHands[primaryHand].valid) return false;
+    if (!ValidHand(primaryHand) || (!gPrimaryDetached[primaryHand] && !gHands[primaryHand].valid)) return false;
     const int support = gSupportHand[primaryHand];
     if (!ValidHand(support) || !gHands[support].valid) return false;
+    if (gPrimaryDetached[primaryHand]) {
+        pivot=GripPosition(gHands[support]);axis={0,1,0};angle=0;
+        return true;
+    }
+
+    // A pistol's wrists can be almost coincident. A shortest arc between them
+    // amplifies tracking noise and can flip aim. Keep the primary controller
+    // authoritative while still publishing an active, model-bound support pose.
+    void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
+    const int weaponType = WeaponTypeInSlot(ped, gHeldSlot[primaryHand]);
+    // Tec-9 keeps its pistol hand animation but aims from the fore-end support
+    // exactly like an AK. Its saved support socket is the solver's reference.
+    if (weaponType != 32 && handanimation::PistolStyleSupport(weaponType)) {
+        pivot = GripPosition(gHands[primaryHand]);
+        axis = {0.0f, 1.0f, 0.0f};
+        angle = 0.0f;
+        return true;
+    }
 
     TrackingPose anchor{};
     if (!BuildSupportAnchorLocked(primaryHand, &anchor)) return false;
@@ -748,6 +800,32 @@ bool BuildTwoHandTransformLocked(int primaryHand, V3& pivot, V3& axis,
     }
     return true;
 }
+
+bool BeginSupportOnlyLocked(int primary) {
+    const int support=gSupportHand[primary],slot=gHeldSlot[primary];
+    if (!ValidHand(support) || !gHands[support].valid || !gHeldBaseValid[primary]) return false;
+    const bool haveVisual=gHeldVisualValid[primary] && gHeldVisualSlot[primary]==slot;
+    gDetachedModel[primary]=haveVisual ? gHeldVisualPose[primary] : gHeldBasePose[primary];
+    if (!haveVisual) {
+        V3 pivot{},axis{};float angle{};
+        if (BuildTwoHandTransformLocked(primary,pivot,axis,angle)) {
+            auto& model=gDetachedModel[primary];
+            const V3 position=Add(pivot,RotateAroundAxis(Sub(PositionOf(model),pivot),axis,angle));
+            model.position[0]=position.x;model.position[1]=position.y;model.position[2]=position.z;
+            for(float* basis : {model.right,model.forward,model.up}) {
+                const V3 v=RotateAroundAxis({basis[0],basis[1],basis[2]},axis,angle);
+                basis[0]=v.x;basis[1]=v.y;basis[2]=v.z;
+            }
+        }
+    }
+    if (!BuildSupportAnchorLocked(primary,&gDetachedAnchor[primary],&gDetachedModel[primary])) return false;
+    gDetachedController[primary]=RawGripFallbackPose(gHands[support]);
+    gDetachedPrimary[primary]=RawGripFallbackPose(gHands[primary]);
+    gPrimaryDetached[primary]=true;
+    return true;
+}
+
+bool SinglePointTransfer(int type) {return type==22||type==23||type==24||type==28;}
 
 TrackingPose NormalizedTrackingPose(const TrackingPose& pose) {
     TrackingPose normalized = pose;
@@ -1032,10 +1110,9 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     if (!interactionsBlocked) {
         std::uint32_t handledHands = doorHands | radialHandledHands;
 
-        // Keep/release an established support grip first. Releasing only the
-        // support side detaches it. Releasing the primary while support remains
-        // squeezed naturally promotes that controller instead of throwing the
-        // weapon -- the newer Quest reference Quest build hand-off contract.
+        // Keep/release an established support grip first. Separate foregrips
+        // retain their own contact when the primary leaves; shared pistol grips
+        // may transfer to the remaining hand.
         for (int primary = 0; primary < kHandCount; ++primary) {
             const int support = gSupportHand[primary];
             if (!ValidHand(support)) continue;
@@ -1043,20 +1120,53 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             const int weaponType = WeaponTypeInSlot(ped, slot);
             if (!ValidSlot(slot) || ValidSlot(gHeldSlot[support]) ||
                 !IsTwoHandedWeaponTypeInternal(weaponType) ||
-                !gHands[primary].valid || !gHands[support].valid) {
+                (!gPrimaryDetached[primary] && !gHands[primary].valid) || !gHands[support].valid) {
                 LOGI("[physwpn] support relation cleared primary=%d support=%d",
                      primary, support);
-                gSupportHand[primary] = -1;
+                if (gPrimaryDetached[primary]) {
+                    StartDropLocked(primary,slot,now,support);
+                    ClearHeldLocked(primary);
+                    handledHands |= (1u<<primary)|(1u<<support);
+                } else gSupportHand[primary] = -1;
                 continue;
             }
             if (gHands[support].grip <= kGripOpen) {
                 LOGI("[physwpn] support released slot=%d hand=%d", slot, support);
-                gSupportHand[primary] = -1;
+                if (gPrimaryDetached[primary]) {
+                    TrackingPose pose{};
+                    if (MapSupportOnlyPoseLocked(primary,gDetachedModel[primary],&pose)) {
+                        gHeldVisualPose[primary]=pose;gHeldVisualValid[primary]=true;
+                        gHeldVisualSlot[primary]=slot;
+                    }
+                    const int point=holster::FindPointForSlot(slot);
+                    const bool returned=point>=0 && anchorValid[point] &&
+                        Distance(GripPosition(gHands[support]),{anchors[point][0],anchors[point][1],anchors[point][2]})<=kHolsterReturnRadius;
+                    if (!returned) StartDropLocked(primary,slot,now,support);
+                    ClearHeldLocked(primary);
+                    handledHands |= (1u<<primary)|(1u<<support);
+                } else gSupportHand[primary] = -1;
                 continue;
             }
 
             handledHands |= 1u << support;
-            if (gHands[primary].grip <= kGripOpen && !gGripLock) {
+            if (gPrimaryDetached[primary]) {
+                TrackingPose target{};
+                const bool available=(handledHands&(1u<<primary))==0;
+                if (available && gHands[primary].valid && gHands[primary].grip>=kGripClose &&
+                    !gGripLatched[primary] && MapSupportOnlyPoseLocked(primary,gDetachedPrimary[primary],&target) &&
+                    Distance(GripPosition(gHands[primary]),PositionOf(target))<=.12f) {
+                    gPrimaryDetached[primary]=false;
+                    gGripLatched[primary]=true;
+                }
+                handledHands |= 1u<<primary;
+                continue;
+            }
+            if (gHands[primary].grip <= kGripOpen && !SinglePointTransfer(weaponType)) {
+                BeginSupportOnlyLocked(primary);
+                handledHands |= 1u<<primary;
+                continue;
+            }
+            if (gHands[primary].grip <= kGripOpen && !gGripLock && SinglePointTransfer(weaponType)) {
                 const bool haveFinalPose =
                     gHeldVisualValid[primary] && gHeldVisualSlot[primary] == slot;
                 const TrackingPose finalPose = haveFinalPose
@@ -1096,6 +1206,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             if (reach > kSupportGrabRadius) continue;
 
             gSupportHand[primary] = support;
+            gSupportStartedAt[primary] = NowSeconds();
             gGripLatched[support] = true;
             handledHands |= 1u << support;
             LOGI("[physwpn] support grabbed slot=%d %s supports %s reach=%.3f",
@@ -1103,9 +1214,12 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                  primary == 0 ? "LEFT" : "RIGHT", reach);
 
             // Primary release and support close may arrive in one XR sample.
-            // Promote immediately so the generic drop pass below cannot destroy
-            // this deliberate hand-off.
-            if (gHands[primary].grip <= kGripOpen && !gGripLock) {
+            // Retain the support contact (or transfer shared pistol grips)
+            // before the generic drop pass processes the released primary.
+            if (gHands[primary].grip <= kGripOpen && !SinglePointTransfer(weaponType)) {
+                BeginSupportOnlyLocked(primary);
+                handledHands |= 1u<<primary;
+            } else if (gHands[primary].grip <= kGripOpen && !gGripLock) {
                 const TrackingPose finalPose =
                     gHeldVisualValid[primary] && gHeldVisualSlot[primary] == slot
                         ? gHeldVisualPose[primary]
@@ -1268,8 +1382,9 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     }
     xr::SetAmmoHolsters(ammoHolsters);
     int markerCount = 0;
-    const bool gameplayMarkers = !interactionsBlocked &&
-                                 holster::GripMarkersEnabled();
+    // Keep flat empty/return holster hints; weapon grab/support cubes are
+    // calibration-only. These are separate visual policies.
+    const bool gameplayMarkers = !interactionsBlocked && holster::GripMarkersEnabled();
     const bool holsterCalibrationMarkers = interactionsBlocked &&
         showHolsterMarkersWhileBlocked && holster::GripMarkersEnabled();
     const bool supportCalibrationMarker = interactionsBlocked &&
@@ -1315,13 +1430,8 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             }
         }
 
-        // Current reference Quest build exposes the model-bound foregrip with the same marker
-        // toggle as body holsters during gameplay. Weapon calibration instead
-        // forces this one socket, ignores proximity, and suppresses body markers:
-        // changing SUPPORT OFFSET/ROT therefore has immediate, unambiguous
-        // spatial feedback even when normal grip hints are disabled. Menu
-        // blocking still prevents this marker from becoming an interactive grab.
-        if ((gameplayMarkers || supportCalibrationMarker) &&
+        // Only calibration exposes the model-bound foregrip cube.
+        if (supportCalibrationMarker &&
             markerCount < holster::POINT_COUNT + 1) {
             for (int primary = 0; primary < kHandCount; ++primary) {
                 if (supportCalibrationMarker &&
@@ -1370,7 +1480,10 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
 
     unsigned int heldMask = 0;
     for (int hand = 0; hand < kHandCount; ++hand)
-        if (ValidSlot(gHeldSlot[hand])) heldMask |= 1u << hand;
+        if (ValidSlot(gHeldSlot[hand])) {
+            if (!gPrimaryDetached[hand]) heldMask |= 1u << hand;
+            if (ValidHand(gSupportHand[hand])) heldMask |= 1u << gSupportHand[hand];
+        }
     gHeldMaskRelaxed.store(heldMask, std::memory_order_relaxed);
 }
 
@@ -1555,7 +1668,22 @@ unsigned int HeldHandMaskRelaxed() {
 
 int HeldSlot(int hand) {
     std::lock_guard<std::mutex> lock(gMutex);
+    return ValidHand(hand) && !gPrimaryDetached[hand] ? gHeldSlot[hand] : -1;
+}
+
+int VisualHeldSlot(int hand) {
+    std::lock_guard<std::mutex> lock(gMutex);
     return ValidHand(hand) ? gHeldSlot[hand] : -1;
+}
+
+bool IsPrimaryDetached(int hand) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    return ValidHand(hand) && gPrimaryDetached[hand];
+}
+
+bool GetSupportOnlyWeaponPoseTracking(int hand, TrackingPose* out) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    return ValidHand(hand) && MapSupportOnlyPoseLocked(hand,gDetachedModel[hand],out);
 }
 
 int HeldHandForSlot(int slot) {
@@ -1600,6 +1728,14 @@ float SupportWeight(int primaryHand) {
     const int support = gSupportHand[primaryHand];
     if (!ValidHand(support) || !gHands[support].valid) return 0.0f;
     return std::clamp(gHands[support].grip, 0.0f, 1.0f);
+}
+
+float SupportAnimationProgress(int primaryHand) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    if (!ValidHand(primaryHand) || !ValidHand(gSupportHand[primaryHand])) return 0.0f;
+    // Play the complete authored closure even when grip is only partly held.
+    return std::clamp(static_cast<float>((NowSeconds()-gSupportStartedAt[primaryHand])/0.18),
+                      0.0f, 1.0f);
 }
 
 bool GetSupportHandPoseTracking(int primaryHand, TrackingPose* out) {
@@ -1706,21 +1842,33 @@ bool GetHeldVisualPoseTracking(int hand, int slot, TrackingPose* out) {
 void PublishHeldBasePoseTracking(int hand, int slot, const TrackingPose* pose) {
     if (pose == nullptr) return;
     std::lock_guard<std::mutex> lock(gMutex);
-    if (!ValidHand(hand) || gHeldSlot[hand] != slot) return;
+    if (!ValidHand(hand) || gHeldSlot[hand] != slot || gPrimaryDetached[hand]) return;
     gHeldBasePose[hand] = NormalizedTrackingPose(*pose);
     gHeldBaseSlot[hand] = slot;
     gHeldBaseValid[hand] = true;
 }
 
+int LauncherTriggerHand(int primaryHand) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    if (gInteractionsBlocked || !ValidHand(primaryHand) ||
+        gPrimaryDetached[primaryHand] || !gHands[primaryHand].valid || !ValidSlot(gHeldSlot[primaryHand])) return -1;
+    void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
+    if (!handanimation::Launcher(WeaponTypeInSlot(ped,gHeldSlot[primaryHand]))) return -1;
+    const int support=gSupportHand[primaryHand];
+    return ValidHand(support) && gHands[support].valid && !ValidSlot(gHeldSlot[support])
+        ? support : -1;
+}
+
 int FiringHand() {
     std::lock_guard<std::mutex> lock(gMutex);
-    return gInteractionsBlocked ? -1 : AnyHeldHandLocked();
+    const int hand=gInteractionsBlocked ? -1 : AnyHeldHandLocked();
+    return ValidHand(hand) && !gPrimaryDetached[hand] ? hand : -1;
 }
 
 float FireTrigger() {
     std::lock_guard<std::mutex> lock(gMutex);
     const int hand = gInteractionsBlocked ? -1 : AnyHeldHandLocked();
-    if (hand < 0 || !gHands[hand].valid) return 0.0f;
+    if (hand < 0 || gPrimaryDetached[hand] || !gHands[hand].valid) return 0.0f;
     void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
     const int weaponType = WeaponTypeInSlot(ped, gHeldSlot[hand]);
     // Types 1..15 are driven by Melee's controller-velocity sweep. Forwarding

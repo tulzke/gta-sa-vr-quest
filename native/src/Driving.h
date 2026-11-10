@@ -193,7 +193,7 @@ void SetRearMirrorCalibration(int model, const int values[12]);
 bool GetIgnitionFrame(void* vehicle,bool bike,float out[12]);
 void SetIgnitionPose(int model,bool bike,const float pose[12]);
 void SetRadioPose(int model,const float pose[12]);
-int GetIgnitionCalibration(int field);
+float GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);
 
 enum ControlCalibrationField {
@@ -245,7 +245,7 @@ void SaveDebugCalibration();
 void Init();
 void ResetDefaultPreset();
 
-int  GetOffsetCm(int field);
+float GetOffsetCm(int field);
 void AdjustOffsetCm(int field, int direction);
 const char* FieldLabel(int field);
 
@@ -288,21 +288,21 @@ int GetMenuItemCount(int vehicleType);
 int GetMenuItemForRow(int vehicleType, int row);
 bool IsMenuItemAvailable(int vehicleType, int item);
 
-int GetGlobalSeatForwardCm(int vehicleType);
-int GetGlobalSeatHeightCm(int vehicleType);
-int GetGlobalSeatSideCm(int vehicleType);
+float GetGlobalSeatForwardCm(int vehicleType);
+float GetGlobalSeatHeightCm(int vehicleType);
+float GetGlobalSeatSideCm(int vehicleType);
 void AdjustGlobalSeatForwardCm(int vehicleType, int direction);
 void AdjustGlobalSeatHeightCm(int vehicleType, int direction);
 void AdjustGlobalSeatSideCm(int vehicleType, int direction);
-int GetCurrentModelSeatForwardCm(int vehicleType);
-int GetCurrentModelSeatHeightCm(int vehicleType);
-int GetCurrentModelSeatSideCm(int vehicleType);
+float GetCurrentModelSeatForwardCm(int vehicleType);
+float GetCurrentModelSeatHeightCm(int vehicleType);
+float GetCurrentModelSeatSideCm(int vehicleType);
 void AdjustCurrentModelSeatForwardCm(int vehicleType, int direction);
 void AdjustCurrentModelSeatHeightCm(int vehicleType, int direction);
 void AdjustCurrentModelSeatSideCm(int vehicleType, int direction);
-int GetActiveSeatForwardCm();
-int GetActiveSeatHeightCm();
-int GetActiveSeatSideCm();
+float GetActiveSeatForwardCm();
+float GetActiveSeatHeightCm();
+float GetActiveSeatSideCm();
 int GetActiveVehicleType();
 int GetActiveVehicleModelId();
 const char* GetActiveVehicleModelName();
@@ -310,11 +310,11 @@ bool HasCurrentModelForType(int vehicleType);
 void ResetVehiclePreset(int vehicleType);
 
 bool IsControlCalibrationAvailable(int vehicleType);
-int GetControlCalibrationValue(int hand, int field);
+float GetControlCalibrationValue(int hand, int field);
 void AdjustControlCalibrationValue(int hand, int field, int direction);
 const char* ControlCalibrationFieldName(int field);
 
-int GetWheelCalibrationValue(int field);
+float GetWheelCalibrationValue(int field);
 void AdjustWheelCalibrationValue(int field, int direction);
 const char* WheelCalibrationFieldName(int field);
 

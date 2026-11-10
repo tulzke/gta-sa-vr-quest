@@ -1,6 +1,7 @@
 #include "LedgeClimb.h"
 #include "Symbols.h"
 #include "HandAnimation.h"
+#include "RecoilModel.h"
 #include "VehicleClimbGeometry.h"
 #include <cstring>
 #include <chrono>

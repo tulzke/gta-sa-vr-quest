@@ -22,6 +22,7 @@ def function(signature):
 
 PRELUDE = r'''
 #include "Driving.h"
+#include "MenuPrecision.h"
 #include "IgnitionState.h"
 #include "RadioKnobState.h"
 #include <algorithm>
@@ -60,7 +61,7 @@ int GetModeForVehicleType(int) { return activeMode; }
 int GlobalSeatSideField(int,int) { return F_SIDE; }
 int GlobalSeatField(int,int,bool height) { return height?F_HEIGHT:F_DISTANCE; }
 bool HasCurrentModelForType(int) { return activeModel>=0; }
-std::atomic<int> g_value[F_COUNT]{};
+std::atomic<float> g_value[F_COUNT]{};
 std::atomic<int> g_bikeVisualLeanPercent{50};
 std::atomic<bool> g_bikeLeanSteering{true};
 std::atomic<int> g_bikeLeanSensitivity{100};
@@ -81,7 +82,7 @@ void CheckBasis(const ModelWheelPose& p) {
 
 
 void TestPose() {
-    int preset[F_COUNT]{},delta[WHEEL_CAL_FIELD_COUNT]{};
+    float preset[F_COUNT]{},delta[WHEEL_CAL_FIELD_COUNT]{};
     preset[F_WHEEL_SIDE]=-47;preset[F_WHEEL_DISTANCE]=37;
     preset[F_WHEEL_HEIGHT]=15;preset[F_WHEEL_RADIUS]=17;
     auto wheel=CalibratedWheelPose({1,2,3},{1,0,0},{0,1,0},{0,0,1},preset,delta);
@@ -112,7 +113,7 @@ void TestProfiles() {
     auto& c=g_modelCalibration[411];c.wheel[WHEEL_CAL_SIDE]=-50;
     CHECK(GetWheelCalibrationValue(WHEEL_CAL_SIDE)==-50);
     AdjustWheelCalibrationValue(WHEEL_CAL_SIDE,-1);
-    CHECK(c.wheel[WHEEL_CAL_SIDE]==-51);CHECK(saveCount==1);
+    CHECK(Near(c.wheel[WHEEL_CAL_SIDE],-50.5f));CHECK(saveCount==1);
     g_modelCalibration[400].wheel[WHEEL_CAL_SIDE]=19;
     ResetVehiclePreset(VEHICLE_CAR);
     CHECK(c.wheel[WHEEL_CAL_SIDE]==0);CHECK(g_modelCalibration[400].wheel[WHEEL_CAL_SIDE]==19);
@@ -178,6 +179,27 @@ void TestPersistence() {
     CHECK(contents.find("WheelCalib.411.0=-47\n")!=std::string::npos);
     CHECK(g_modelCalibration[411].wheel[0]==-47);CHECK(g_modelCalibration[411].wheel[4]==-15);
     CHECK(g_modelCalibration[411].wheel[3]==200);
+    ReadWheelLine("WheelCalib.411.0=-47.1");
+    ReadWheelLine("WheelCalib.411.4=0.2");
+    ReadWheelLine("ModelSeat.411.1.SideCm=0.1");
+    ReadWheelLine("Control.411.0.RotationX=0.2");
+    ReadWheelLine("Ignition.411.3=0.1");
+    CHECK(Near(g_modelCalibration[411].seatSide[1],.1f));
+    CHECK(Near(g_modelCalibration[411].control[0][3],.2f));
+    CHECK(Near(g_modelCalibration[411].ignition[3],.1f));
+    file=std::tmpfile();CHECK(file);WriteWheelLines(file,411,g_modelCalibration[411]);
+    std::rewind(file);g_modelCalibration.clear();
+    while(std::fgets(line,sizeof(line),file))ReadWheelLine(line);
+    std::fclose(file);
+    CHECK(Near(g_modelCalibration[411].wheel[0],-47.1f));
+    CHECK(Near(g_modelCalibration[411].wheel[4],.2f));
+    CHECK(Near(g_modelCalibration[411].ignition[3],.1f));
+    menu::fineAdjustment=true;activeModel=411;
+    AdjustWheelCalibrationValue(WHEEL_CAL_PITCH,1);
+    CHECK(Near(GetWheelCalibrationValue(WHEEL_CAL_PITCH),.4f));
+    AdjustControlCalibrationValue(0,CONTROL_OFFSET_X,1);
+    CHECK(Near(GetControlCalibrationValue(0,CONTROL_OFFSET_X),.2f));
+    menu::fineAdjustment=false;
 }
 } // namespace savr::driving
 int main() {
@@ -216,19 +238,19 @@ def main():
     # replace only the game/Quest API and unrelated seat settings.
     math = SOURCE[SOURCE.index("struct V3 {"):SOURCE.index("double MonotonicSeconds()")]
     math += function("V3 RotateAroundAxis(")
-    pose = SOURCE[SOURCE.index("struct ModelCalibration {"):SOURCE.index("int ClampField(")]
-    accessors = function("int ClampModelSeat(") + function("void GetDoorCalibration(") + function("void SetDoorCalibration(") + function("void SetDebugPosition(")
-    accessors += function("int GetWheelCalibrationValue(")
+    pose = SOURCE[SOURCE.index("struct ModelCalibration {"):SOURCE.index("float ClampField(")]
+    accessors = function("float ClampModelSeat(") + function("void GetDoorCalibration(") + function("void SetDoorCalibration(") + function("void SetDebugPosition(")
+    accessors += function("float GetWheelCalibrationValue(")
     accessors += function("void AdjustWheelCalibrationValue(")
     accessors += function("void ResetVehiclePreset(")
     save_start = SOURCE.index("            for (int field = 0; field < WHEEL_CAL_FIELD_COUNT; ++field) {")
     save_end = SOURCE.index("\n        }", save_start)
     persistence = "void WriteWheelLines(FILE* file,int model,const ModelCalibration& calibration) {\n"
     persistence += SOURCE[save_start:save_end] + "\n}\n"
-    load_start = SOURCE.index('} else if (std::sscanf(line, "WheelCalib.') + 2
-    load_end = SOURCE.index("} else {", load_start)
-    persistence += "void ReadWheelLine(const char* line) { int model=0,mode=0,value=0,hand=0; if(false) {} "
-    persistence += SOURCE[load_start:load_end] + "}\n}\n"
+    load_start = SOURCE.index('            float spatial{};')
+    load_end = SOURCE.index('            int value', load_start)
+    persistence += "void ReadWheelLine(const char* line) { float values[F_COUNT]{}; bool immersiveCarSeatSeen=false,immersiveBikeSeatSeen=false; do {\n"
+    persistence += SOURCE[load_start:load_end] + "}while(false); }\n"
     door_save_start = SOURCE.index("            for(int door=0;door<4;")
     door_save_end = SOURCE.index("            for (int mode", door_save_start)
     persistence += "void WriteDoorLines(FILE* file,int model,const ModelCalibration& calibration) {\n" + SOURCE[door_save_start:door_save_end] + "}\n"
@@ -240,7 +262,7 @@ bool IsBicycleModel(int) {return false;}
 bool GetActivePlayerBike(void** vehicle,void*) {static char fake[2048]{};std::uint16_t model=411;std::memcpy(fake+0x32,&model,2);*vehicle=fake;return true;}
 bool ReadScaledBikeLeanFrame(void*,V3* right,V3* forward,V3* up,V3* origin) {*right={1,0,0};*forward={0,1,0};*up={0,0,1};*origin={0,0,0};return true;}
 bool WorldPointToTracking(V3 p,V3* out) {*out=p;return true;}
-""" + function("bool BuildBikeTracking(") + function("int ClampControlValue(") + function("void FillHandleVisuals(") + function("bool IsControlCalibrationAvailable(") + function("int GetControlCalibrationValue(") + function("void AdjustControlCalibrationValue(") + accessors + persistence + HARNESS
+""" + function("bool BuildBikeTracking(") + function("float ClampControlValue(") + function("void FillHandleVisuals(") + function("bool IsControlCalibrationAvailable(") + function("float GetControlCalibrationValue(") + function("void AdjustControlCalibrationValue(") + accessors + persistence + HARNESS
 
     msvc = sorted((Path(subprocess.check_output([
         str(Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"),
@@ -255,7 +277,7 @@ bool WorldPointToTracking(V3 p,V3* out) {*out=p;return true;}
     env["LIB"] = ";".join(str(p) for p in [msvc / "lib/x64", *[sdk / "Lib" / version / n / "x64" for n in ("ucrt", "um")]])
     compiler = msvc / "bin/Hostx64/x64"
     env["PATH"] = str(compiler) + os.pathsep + env.get("PATH", "")
-    with tempfile.TemporaryDirectory(prefix="savr-wheel-pose-") as temp:
+    with tempfile.TemporaryDirectory(prefix="savr-wheel-pose-", dir=ROOT / '.cache') as temp:
         out = Path(temp)
         (out / "test.cpp").write_text(source, encoding="utf-8")
         subprocess.run([str(compiler / "cl.exe"), "/nologo", "/std:c++20", "/EHsc", "/MD",

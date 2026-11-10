@@ -153,8 +153,10 @@ struct TwoHandVisualState {
     // compositor hands/laser must never read the live recoil simulation.
     recoil::Transform weaponRecoil[2]{};
     bool  active{false};
+    int   weaponType{}; // primary weapon; support never owns an inventory slot
     int   primaryHand{-1};
     int   supportHand{-1};
+    bool  primaryAttached{true};
     float pivot[3]{};
     float axis[3]{0.0f, 1.0f, 0.0f};
     float angleRadians{};

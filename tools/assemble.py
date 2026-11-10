@@ -93,10 +93,12 @@ def hand_animation_files(root: Path) -> list[str]:
     try:
         doc = json.loads(manifest.read_text(encoding="utf-8"))
         names = {"Grip", "Pinch", "Point", "OpenPalm", "Beckon", "Fist",
-                 "GripPistol", "GripPistolOffhand", "GripPistolShoot"}
+                 "GripPistol", "GripPistolOffhand", "GripPistolShoot",
+                 "GripDeagle", "GripDeagleOffhand", "GripRifle", "GripShotgun",
+                 "GripShotgunOffhand"}
         clips = doc["clips"]
         if doc["version"] != 1 or len(clips) != len(names) or {c["name"] for c in clips} != names:
-            raise ValueError("expected all nine Blender Actions")
+            raise ValueError("expected all fourteen Blender Actions")
         result = []
         for clip in clips:
             name = clip["name"]

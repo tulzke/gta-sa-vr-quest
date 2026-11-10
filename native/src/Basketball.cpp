@@ -8,6 +8,7 @@
 //   CPhysical move speed @+0x68..0x73, turn speed @+0x74..0x7F
 //   (ApplyForce @0x4a12a8 writes the move vector at +0x68/+0x70)
 #include "Basketball.h"
+#include "MenuPrecision.h"
 #include "VehicleDoors.h"
 #include "NpcGrab.h"
 #include "Driving.h"
@@ -97,7 +98,7 @@ constexpr HandCalibSetting kHandCalibSettings[HAND_CALIB_FIELD_COUNT] = {
     {"HAND YAW",   -180, 180, 1},
     {"HAND ROLL",  -180, 180, 1},
 };
-std::atomic<int> g_handCalib[HAND_CALIB_FIELD_COUNT]{};
+std::atomic<float> g_handCalib[HAND_CALIB_FIELD_COUNT]{};
 std::atomic<bool> g_handCalibrationActive{false};
 const char* const kPhysicsIniPath =
     "/sdcard/Android/data/com.rockstargames.gtasa/files/vr_basketball.ini";
@@ -108,7 +109,7 @@ void SavePhysics() {
             std::fprintf(file, "%s=%d\n", kPhysicsSettings[i].name,
                          g_physics[i].load());
         for (int i = 0; i < HAND_CALIB_FIELD_COUNT; ++i)
-            std::fprintf(file, "%s=%d\n", kHandCalibSettings[i].name,
+            std::fprintf(file, "%s=%.7g\n", kHandCalibSettings[i].name,
                          g_handCalib[i].load());
         std::fclose(file);
     }
@@ -120,6 +121,12 @@ void LoadPhysicsOnce() {
         char line[96];
         while (std::fgets(line, sizeof(line), file)) {
             char key[64];
+            float handValue{};
+            if (std::sscanf(line,"%63[^=]=%f",key,&handValue)==2 && std::isfinite(handValue)) {
+                for (int i=0;i<HAND_CALIB_FIELD_COUNT;++i)
+                    if (std::strcmp(key,kHandCalibSettings[i].name)==0)
+                        g_handCalib[i].store(std::clamp<float>(handValue,kHandCalibSettings[i].minimum,kHandCalibSettings[i].maximum));
+            }
             int value;
             if (std::sscanf(line, "%63[^=]=%d", key, &value) != 2) continue;
             for (int i = 0; i < PHYS_FIELD_COUNT; ++i) {
@@ -129,13 +136,7 @@ void LoadPhysicsOnce() {
                         kPhysicsSettings[i].maximum));
                 }
             }
-            for (int i = 0; i < HAND_CALIB_FIELD_COUNT; ++i) {
-                if (std::strcmp(key, kHandCalibSettings[i].name) == 0) {
-                    g_handCalib[i].store(std::clamp(
-                        value, kHandCalibSettings[i].minimum,
-                        kHandCalibSettings[i].maximum));
-                }
-            }
+
         }
         std::fclose(file);
     }
@@ -1324,7 +1325,7 @@ const char* PhysicsFieldName(int field) {
     return kPhysicsSettings[field].name;
 }
 
-int GetHandCalibValue(int field) {
+float GetHandCalibValue(int field) {
     if (field < 0 || field >= HAND_CALIB_FIELD_COUNT) return 0;
     LoadPhysicsOnce();
     return g_handCalib[field].load(std::memory_order_relaxed);
@@ -1334,11 +1335,9 @@ void AdjustHandCalib(int field, int direction) {
     if (field < 0 || field >= HAND_CALIB_FIELD_COUNT || direction == 0) return;
     LoadPhysicsOnce();
     const HandCalibSetting& setting = kHandCalibSettings[field];
-    const int steps = std::max(1, std::abs(direction));
-    const int value = std::clamp(
-        g_handCalib[field].load() +
-            (direction < 0 ? -setting.step * steps : setting.step * steps),
-        setting.minimum, setting.maximum);
+    const float value=std::clamp<float>(
+        menu::SpatialValue(g_handCalib[field].load(),direction,field<3?.1f:1.f),
+        setting.minimum,setting.maximum);
     g_handCalib[field].store(value);
     SavePhysics();
 }

@@ -1,6 +1,8 @@
 #include "Calib.h"
 
 #include "Log.h"
+#include "HandAnimation.h"
+#include "MenuPrecision.h"
 
 #include <atomic>
 #include <cerrno>
@@ -47,7 +49,7 @@ int ClampType(int t) { return (t < 0) ? 0 : (t >= kMaxWeapons ? kMaxWeapons - 1 
 
 // Field -> member. Order MUST match the Field enum. Returns nullptr for a bad
 // index (clamp-to-noop; never silently alias onto another field).
-int16_t* FieldPtr(WeaponCalib& c, int f) {
+float* FieldPtr(WeaponCalib& c, int f) {
     switch (f) {
         case F_AIM_OX: return &c.aimOffX; case F_AIM_OY: return &c.aimOffY; case F_AIM_OZ: return &c.aimOffZ;
         case F_AIM_RX: return &c.aimRotX; case F_AIM_RY: return &c.aimRotY; case F_AIM_RZ: return &c.aimRotZ;
@@ -60,7 +62,7 @@ int16_t* FieldPtr(WeaponCalib& c, int f) {
     }
 }
 
-int16_t* HolsterFieldPtr(HolsterCalib& c, int f) {
+float* HolsterFieldPtr(HolsterCalib& c, int f) {
     switch (f) {
         case H_OFF_X: return &c.offX; case H_OFF_Y: return &c.offY; case H_OFF_Z: return &c.offZ;
         case H_ROT_X: return &c.rotX; case H_ROT_Y: return &c.rotY; case H_ROT_Z: return &c.rotZ;
@@ -68,7 +70,7 @@ int16_t* HolsterFieldPtr(HolsterCalib& c, int f) {
     }
 }
 
-const int16_t* HolsterFieldPtr(const HolsterCalib& c, int f) {
+const float* HolsterFieldPtr(const HolsterCalib& c, int f) {
     return HolsterFieldPtr(const_cast<HolsterCalib&>(c), f);
 }
 
@@ -158,9 +160,39 @@ WeaponCalib& EditableProfile(int clampedType) {
     return active;
 }
 
-void ApplyEffectiveSupportDefaults(WeaponCalib& c, bool configured) {
+void ApplyEffectiveSupportDefaults(WeaponCalib& c, bool configured, int type) {
     // Seed unset SUPPORT rows from the default socket before applying calibration edits.
-    if (configured) return;
+    // Compact SMG support used to be disabled, but shipped/saved profiles
+    // already contain dormant long-gun sockets. Replace just those exact
+    // defaults; keep custom support and all weapon/aim calibration intact.
+    const bool compact = type==28 || type==32;
+    const bool legacyCompact = compact && c.supOffX==0 &&
+        ((c.supOffY==60 && c.supOffZ==-10) ||
+         (type==32 && c.supOffY==0 && c.supOffZ==0)) &&
+        c.supRotX==0 && c.supRotY==360 && c.supRotZ==0 &&
+        c.supStyle==SUPPORT_MAGAZINE;
+    const bool oldPistolTec = type==32 && c.supOffX==3 && c.supOffY==2 &&
+        c.supOffZ==-3 && c.supRotX==-180 && c.supRotY==-334 && c.supRotZ==0 &&
+        c.supStyle==SUPPORT_MAGAZINE;
+    if (configured && !legacyCompact && !oldPistolTec) return;
+    if (handanimation::PistolStyleSupport(type)) {
+        // BothHands.blend 2026-11-09: HandRight/GripPistolOffhand relative
+        // to colt45_DFF, mirrored to canonical RIGHT primary / LEFT support.
+        // Wrist includes Xr's +5.5 cm forward offset. Rounded to menu units
+        // (0.5 cm / 0.5 degree). Existing saved support edits remain authoritative.
+        c.supOffX = 3; c.supOffY = 2; c.supOffZ = -3;
+        c.supRotX = -180; c.supRotY = -334; c.supRotZ = 0;
+        c.supStyle = SUPPORT_MAGAZINE;
+        if (type==32) {
+            // HD Tec-9: the magazine spans model X=.206..249 m. Place the
+            // support wrist below/behind its front edge so the authored palm
+            // reaches the fore-end in front of it. Intrinsic rotation gives
+            // a diagonal (~45-degree) wrist instead of the pistol-hand wrap.
+            c.supOffX = 8; c.supOffY = 44; c.supOffZ = -3;
+            c.supRotY = -270;
+        }
+        return;
+    }
     if (c.supOffX == 0 && c.supOffY == 0 && c.supOffZ == 0) {
         c.supOffY = 60;   // 30 cm along the model-bound barrel axis
         c.supOffZ = -10;  // 5 cm below the top axis
@@ -209,7 +241,7 @@ void Init() {
         const int t = ClampType(hd.type);
         WeaponCalib& c = g_calibSets[1][kMasterHand][t];
         for (int i = 0; i < F_COUNT; ++i)
-            if (int16_t* p = FieldPtr(c, kFieldOrder[i])) *p = hd.v[i];
+            if (float* p = FieldPtr(c, kFieldOrder[i])) *p = hd.v[i];
     }
     for (int t = 0; t < kMaxWeapons; ++t)
         g_holsterCalib[t] = HolsterCalib{};
@@ -329,23 +361,27 @@ void Init() {
         // Native format: one six-value row per weapon type (no hand).  Also
         // accept the PC SA form `holster 0 <type> ...` for easy migration.
         if (std::strncmp(line, "holster ", 8) == 0) {
-            int ignoredHand = 0, t = -1, v[H_COUNT]{};
-            int got = std::sscanf(line, "holster %d %d %d %d %d %d %d %d",
-                                  &ignoredHand, &t, &v[0], &v[1], &v[2],
-                                  &v[3], &v[4], &v[5]);
-            bool validRow = got == 2 + H_COUNT;
+            int ignoredHand = 0, t = -1; float v[H_COUNT]{};
+            char extra{};
+            // Count complete tokens: a legacy %d must never split -12.8 into
+            // an integer model id and a shifted first offset.
+            int got = std::sscanf(line, "holster %d %f %f %f %f %f %f %c",
+                                  &t, &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &extra);
+            bool validRow = got == 1 + H_COUNT;
             if (!validRow) {
-                got = std::sscanf(line, "holster %d %d %d %d %d %d %d",
-                                  &t, &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]);
-                validRow = got == 1 + H_COUNT;
+                got = std::sscanf(line, "holster %d %d %f %f %f %f %f %f %c",
+                                  &ignoredHand, &t, &v[0], &v[1], &v[2],
+                                  &v[3], &v[4], &v[5], &extra);
+                validRow = got == 2 + H_COUNT;
             }
+            validRow = validRow && std::all_of(v,v+H_COUNT,[](float value){return std::isfinite(value);});
             if (validRow && t >= 0 && t < kMaxWeapons) {
                 HolsterCalib& c = g_holsterCalib[t];
                 c = HolsterCalib{};
                 for (int field = 0; field < H_COUNT; ++field) {
                     int lo, hi; HolsterFieldRange(field, lo, hi);
-                    const int value = v[field] < lo ? lo : (v[field] > hi ? hi : v[field]);
-                    *HolsterFieldPtr(c, field) = static_cast<int16_t>(value);
+                    const float value = v[field] < lo ? lo : (v[field] > hi ? hi : v[field]);
+                    *HolsterFieldPtr(c, field) = static_cast<float>(value);
                 }
                 ++loaded;
             }
@@ -356,20 +392,22 @@ void Init() {
         int set = 0;
         const char* rest = line + 1;
         if (line[1] == 'm') { set = 1; rest = line + 2; }
-        int t, h, v[F_COUNT];
+        int t, h; float v[F_COUNT];
         const int got = std::sscanf(rest,
-            " %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
+            " %d %d %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f",
             &t, &h,
             &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9],
             &v[10], &v[11], &v[12], &v[13], &v[14], &v[15], &v[16], &v[17], &v[18]);
         if (got != 2 + F_COUNT) continue;                   // 21 = 2 + 19; skip malformed
+        if (!std::all_of(v,v+F_COUNT,[](float value){return std::isfinite(value);})) continue;
         if (t < 0 || t >= kMaxWeapons || h < 0 || h >= kHands) continue;
         WeaponCalib& c = g_calibSets[set][h][t];
         c = WeaponCalib{};                                  // start from defaults
         for (int i = 0; i < F_COUNT; ++i) {
             int lo, hi; FieldRange(kFieldOrder[i], lo, hi);
-            int val = v[i] < lo ? lo : (v[i] > hi ? hi : v[i]);
-            if (int16_t* p = FieldPtr(c, kFieldOrder[i])) *p = static_cast<int16_t>(val);
+            float val = v[i] < lo ? lo : (v[i] > hi ? hi : v[i]);
+            if (i == F_SUP_STYLE) val = val >= .5f ? 1.f : 0.f;
+            if (float* p = FieldPtr(c, kFieldOrder[i])) *p = static_cast<float>(val);
         }
         seen[set][h][t] = true;
         supportSeen[set][h][t] = c.supOffX != 0 || c.supOffY != 0 || c.supOffZ != 0 ||
@@ -443,7 +481,7 @@ void Save() {
             if (IsDefault(c)) continue;
             std::fprintf(f, "%s %d %d", s == 1 ? "wm" : "w", t, kMasterHand);
             for (int i = 0; i < F_COUNT; ++i)
-                std::fprintf(f, " %d", static_cast<int>(*FieldPtr(c, kFieldOrder[i])));
+                std::fprintf(f, " %.7g", *FieldPtr(c, kFieldOrder[i]));
             std::fputc('\n', f);
             ++saved;
         }
@@ -454,7 +492,7 @@ void Save() {
         if (IsDefault(c)) continue;
         std::fprintf(f, "holster %d", t);
         for (int field = 0; field < H_COUNT; ++field)
-            std::fprintf(f, " %d", static_cast<int>(*HolsterFieldPtr(c, field)));
+            std::fprintf(f, " %.7g", *HolsterFieldPtr(c, field));
         std::fputc('\n', f);
         ++holsterSaved;
     }
@@ -487,7 +525,7 @@ int  ActiveWeapon() { return g_active.load(std::memory_order_relaxed); }
 WeaponCalib Snapshot(int /*hand*/, int type) {
     std::lock_guard<std::mutex> guard(g_calibMutex);
     WeaponCalib effective = EffectiveSource(ClampType(type));
-    ApplyEffectiveSupportDefaults(effective, g_supportConfigured[ClampType(type)]);
+    ApplyEffectiveSupportDefaults(effective, g_supportConfigured[ClampType(type)], type);
     return effective;
 }
 
@@ -502,34 +540,34 @@ void HolsterFieldRange(int field, int& lo, int& hi) {
     hi = 100;
 }
 
-int16_t GetHolsterField(int type, int field) {
+float GetHolsterField(int type, int field) {
     std::lock_guard<std::mutex> guard(g_calibMutex);
-    const int16_t* value = HolsterFieldPtr(g_holsterCalib[ClampType(type)], field);
+    const float* value = HolsterFieldPtr(g_holsterCalib[ClampType(type)], field);
     return value ? *value : 0;
 }
 
-void SetHolsterField(int type, int field, int value) {
+void SetHolsterField(int type, int field, float value) {
     std::lock_guard<std::mutex> guard(g_calibMutex);
-    int16_t* target = HolsterFieldPtr(g_holsterCalib[ClampType(type)], field);
+    float* target = HolsterFieldPtr(g_holsterCalib[ClampType(type)], field);
     if (!target) return;
     int lo, hi; HolsterFieldRange(field, lo, hi);
-    *target = static_cast<int16_t>(value < lo ? lo : (value > hi ? hi : value));
+    *target = static_cast<float>(value < lo ? lo : (value > hi ? hi : value));
 }
 
 void AdjustHolsterField(int type, int field, int steps) {
     {
         std::lock_guard<std::mutex> guard(g_calibMutex);
-        int16_t* target = HolsterFieldPtr(g_holsterCalib[ClampType(type)], field);
+        float* target = HolsterFieldPtr(g_holsterCalib[ClampType(type)], field);
         if (target) {
             int lo, hi; HolsterFieldRange(field, lo, hi);
-            const int value = static_cast<int>(*target) + steps;
-            *target = static_cast<int16_t>(value < lo ? lo : (value > hi ? hi : value));
+            const float value = menu::SpatialValue(*target,steps,.5f);
+            *target = static_cast<float>(value < lo ? lo : (value > hi ? hi : value));
         }
     }
     Save();
 }
 
-float HolsterDisplayValue(int16_t raw) { return raw * 0.5f; }
+float HolsterDisplayValue(float raw) { return raw * 0.5f; }
 
 const char* HolsterFieldLabel(int field) {
     return (field < 0 || field >= H_COUNT) ? "" : kHolsterLabels[field];
@@ -721,27 +759,28 @@ void FieldRange(int field, int& lo, int& hi) {
     lo = -100; hi = 100;                                                           // aim/weapon offsets
 }
 
-int16_t GetField(int hand, int type, int field) {
+float GetField(int hand, int type, int field) {
     (void)hand;
     std::lock_guard<std::mutex> guard(g_calibMutex);
     WeaponCalib effective = EffectiveSource(ClampType(type));
-    ApplyEffectiveSupportDefaults(effective, g_supportConfigured[ClampType(type)]);
-    int16_t* p = FieldPtr(effective, field);
+    ApplyEffectiveSupportDefaults(effective, g_supportConfigured[ClampType(type)], type);
+    float* p = FieldPtr(effective, field);
     return p ? *p : 0;
 }
 
-void SetField(int hand, int type, int field, int value) {
+void SetField(int hand, int type, int field, float value) {
     (void)hand;
     std::lock_guard<std::mutex> guard(g_calibMutex);
     WeaponCalib& profile = EditableProfile(ClampType(type));
     if (field >= F_SUP_OX && field <= F_SUP_STYLE) {
-        ApplyEffectiveSupportDefaults(profile, g_supportConfigured[ClampType(type)]);
+        ApplyEffectiveSupportDefaults(profile, g_supportConfigured[ClampType(type)], type);
         g_supportConfigured[ClampType(type)] = true;
     }
-    int16_t* p = FieldPtr(profile, field);
+    float* p = FieldPtr(profile, field);
     if (!p) return;
     int lo, hi; FieldRange(field, lo, hi);
-    const int16_t clamped = static_cast<int16_t>(value < lo ? lo : (value > hi ? hi : value));
+    const float clamped = field == F_SUP_STYLE ? (value >= .5f ? 1.f : 0.f) :
+        static_cast<float>(value < lo ? lo : (value > hi ? hi : value));
     if (*p == clamped) return;
     *p = clamped;
     if (field >= F_AIM_OX && field <= F_AIM_RZ)
@@ -756,14 +795,14 @@ void AdjustField(int hand, int type, int field, int steps) {
         const int clampedType = ClampType(type);
         WeaponCalib& profile = EditableProfile(clampedType);
         if (field >= F_SUP_OX && field <= F_SUP_STYLE) {
-            ApplyEffectiveSupportDefaults(profile, g_supportConfigured[clampedType]);
+            ApplyEffectiveSupportDefaults(profile, g_supportConfigured[clampedType], type);
             g_supportConfigured[clampedType] = true;
         }
-        int16_t* p = FieldPtr(profile, field);
+        float* p = FieldPtr(profile, field);
         if (p) {
             int lo, hi; FieldRange(field, lo, hi);
-            const int value = static_cast<int>(*p) + steps;
-            const int16_t clamped = static_cast<int16_t>(
+            const float value = field == F_SUP_STYLE ? *p+steps : menu::SpatialValue(*p,steps,.5f);
+            const float clamped = static_cast<float>(
                 value < lo ? lo : (value > hi ? hi : value));
             if (*p != clamped) {
                 *p = clamped;
@@ -777,7 +816,7 @@ void AdjustField(int hand, int type, int field, int steps) {
     if (changed) Save();   // Vice City persists on every real adjustment
 }
 
-float DisplayValue(int /*field*/, int16_t raw) { return raw * 0.5f; }
+float DisplayValue(int /*field*/, float raw) { return raw * 0.5f; }
 
 const char* FieldLabel(int field) {
     return (field < 0 || field >= F_COUNT) ? "" : kLabels[field];
@@ -786,7 +825,7 @@ const char* FieldUnit(int field) {
     if (field < 0 || field >= F_COUNT || field == F_SUP_STYLE) return "";
     return IsRot(field) ? "DEG" : "CM";
 }
-const char* StyleName(int16_t style) { return style ? "FROM BELOW" : "MAGAZINE"; }
+const char* StyleName(float style) { return style ? "FROM BELOW" : "MAGAZINE"; }
 
 void ResetActive(int hand) {
     (void)hand;

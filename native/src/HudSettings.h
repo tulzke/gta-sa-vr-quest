@@ -78,7 +78,8 @@ enum ElementField {
 // City Quest port calibrates: millimetre (0.1 cm step) offsets ride the
 // anchor's own axes (along the forearm / across it / off the skin — or, in
 // the vehicle slot, toward the driver / across the dash / above the wheel),
-// then three rotations turn the panel plane, then a width multiplier. Only
+// then three rotations turn the panel plane, then a width multiplier. Decimal
+// degrees are retained; pose edits use 0.5 cm/deg, or 0.1 while holding grip. Only
 // RADAR and HEALTH wear panels; the text elements ignore these.
 enum WristField {
     WRIST_ALONG_MM = 0,
@@ -92,9 +93,9 @@ enum WristField {
 };
 
 struct WristSettings {
-    int alongMm{}, acrossMm{}, liftMm{};
-    int pitchDeg{}, yawDeg{}, rollDeg{};
-    int scaleTenths{10}; // panel width multiplier, 10 == 1.0x
+    float alongMm{}, acrossMm{}, liftMm{};
+    float pitchDeg{}, yawDeg{}, rollDeg{};
+    float scaleTenths{10}; // panel width multiplier, 10 == 1.0x
 };
 
 struct ElementSettings {

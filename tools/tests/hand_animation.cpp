@@ -25,7 +25,15 @@ int main(int argc,char** argv) {
         const bool firearm=(type>=22 && type<=34)||type==38;
         assert(Firearm(type)==firearm);
         const auto selected=Select(1,.7f,{false,false,false,false,false,true,type});
-        assert(selected.first==(firearm?Gesture::GripPistolShoot:Gesture::Grip));
+        assert(selected.first==(type==24?Gesture::GripDeagle:
+            (type==35||type==36)?Gesture::GripPistol:
+            (type==25||type==26)?Gesture::GripShotgun:
+            RifleGripWeapon(type)?Gesture::GripRifle:
+            firearm?Gesture::GripPistolShoot:Gesture::Grip));
+        if(type==25||type==26||RifleGripWeapon(type)) {
+            assert(selected.progress==1.f);
+            assert(Select(1,0,{false,false,false,false,false,true,type}).first==selected.first);
+        }
     }
     Context context;
     context.holdsWeapon=true;context.weaponType=22;
@@ -34,7 +42,21 @@ int main(int argc,char** argv) {
     context.weaponType=8; // Katana keeps the ordinary grip.
     assert(Select(1,1,context).first==Gesture::Grip);
     context.support=true;context.weaponType=22;
-    assert(Select(1,1,context).first==Gesture::Grip); // Offhand is not assigned.
+    assert(Select(1,1,context).first==Gesture::GripPistolOffhand);
+    for (int type=0;type<48;++type) {
+        context.weaponType=type;
+        const auto support=Select(.4f,1,context);
+        const bool foregrip=(type>=25&&type<=27)||(type>=29&&type<=31)||type==33||type==34;
+        assert(support.first==((type==35||type==36)?Gesture::GripPistolShoot:
+            type==24?Gesture::GripDeagleOffhand:
+            foregrip?Gesture::GripShotgunOffhand:
+            PistolStyleSupport(type)?Gesture::GripPistolOffhand:Gesture::Grip));
+        assert(Near(support.progress,Launcher(type)?1.f:.4f));
+        if(Launcher(type)) {
+            assert(Select(1,0,context).progress==0.f);
+            assert(Near(Select(1,.6f,context).progress,.6f));
+        }
+    }
     context.ball=true;
     assert(Select(1,1,context).first==Gesture::OpenPalm);
     context.steering=true;

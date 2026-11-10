@@ -1,6 +1,8 @@
 using XrVector3f=vehicledoors::Vec;
 struct XrQuaternionf {float x{},y{},z{},w{1};};
 struct TwoHandVisualState {
+ recoil::Transform weaponRecoil[2]{};
+ bool primaryAttached=true;
  bool enabled{},supportAnchorValid{},supportBasisValid{};int primaryHand{},supportHand=1;
  float supportAnchor[3]{},supportRight[3]{1,0,0},supportUp[3]{0,0,1},supportForward[3]{0,1,0};
 };
@@ -22,6 +24,10 @@ void TestWristHud(){
   XrVector3f base,along,across,lift,right,up,normal;
   assert(BuildHandPanelAnchor(raw,hand,{},base,along,across,lift,right,up,normal));
   const auto expected=base,expectedAlong=along;
+  TwoHandVisualState released;released.enabled=true;released.primaryHand=hand;
+  released.supportHand=1-hand;released.primaryAttached=false;
+  assert(BuildHandPanelAnchor(raw,hand,released,base,along,across,lift,right,up,normal));
+  assert(vehicledoors::Length(base-expected)<.00001f&&vehicledoors::Length(along-expectedAlong)<.00001f);
   HandPose pinned=raw;pinned.wristAnchorValid=true;std::copy_n(raw.gripPos,3,pinned.wristGripPos);
   pinned.gripPos[0]=100;pinned.gripPos[1]=-100;pinned.gripPos[2]=50;
   TwoHandVisualState weapon;weapon.enabled=true;

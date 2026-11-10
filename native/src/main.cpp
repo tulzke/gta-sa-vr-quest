@@ -24,6 +24,7 @@
 #include "MissionControls.h"
 #include "Catalyst.h"
 #include "MenuNavigation.h"
+#include "MenuPrecision.h"
 #include "Swimming.h"
 #include "BoatEntry.h"
 #include "VehicleDoors.h"
@@ -1172,6 +1173,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             aboutArmed = false;
         }
 
+        savr::menu::fineAdjustment = in.grip[0] >= 0.55f || in.grip[1] >= 0.55f;
         const bool openChord = grips && (in.menu || in.y);
         if (openChord && !openPrev) {
             if (menuPage == PG_HOLSTER_CALIB) savr::holster::EndCalibrationPreview();
@@ -1340,7 +1342,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 if(enter) savr::calib::AdjustOptic(type,field,current ? -1 : 1);
                 else if(firstTick) savr::calib::AdjustOptic(type,field,dir);
             } else if (calibGroup==savr::weaponmenu::OPTIC && fieldRow>=25) {
-                if(fire) savr::calib::AdjustOptic(type,fieldRow-25,dir*(in.l3 ? 1 : 5*mult));
+                if(fire) savr::calib::AdjustOptic(type,fieldRow-25,dir*(savr::menu::fineAdjustment ? 1 : 5*mult));
             } else if (fieldRow == 24) {                           // TRACER SMOKE SPREAD
                 if (enter) vrcam::AdjustTracerSmokeSpread(+1);
                 else if (firstTick) vrcam::AdjustTracerSmokeSpread(dir);

@@ -25,7 +25,9 @@ from mathutils import Matrix
 
 ROOT = Path(__file__).resolve().parents[1]
 ACTIONS = ("Grip", "Pinch", "Point", "OpenPalm", "Beckon",
-           "GripPistol", "GripPistolOffhand", "Fist", "GripPistolShoot")
+           "GripPistol", "GripPistolOffhand", "Fist", "GripPistolShoot",
+           "GripDeagle", "GripDeagleOffhand", "GripRifle", "GripShotgun",
+           "GripShotgunOffhand")
 
 
 def action_key(name):

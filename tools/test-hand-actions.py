@@ -51,7 +51,9 @@ def main():
     reference_uvs = [struct.unpack_from('<2f', reference, 16+i*104+96) for i in range(vc)]
     reference_indices = struct.unpack_from(f'<{ic}H', reference, 16+vc*104)
     expected_names = {'Grip', 'Pinch', 'Point', 'OpenPalm', 'Beckon',
-                      'GripPistol', 'GripPistolOffhand', 'Fist', 'GripPistolShoot'}
+                      'GripPistol', 'GripPistolOffhand', 'Fist', 'GripPistolShoot',
+                      'GripDeagle', 'GripDeagleOffhand', 'GripRifle', 'GripShotgun',
+                      'GripShotgunOffhand'}
     assert {c['name'] for c in manifest['clips']} == expected_names
     assert len(manifest['clips']) == len(expected_names)
     total_samples, total_blocks = 0, 0

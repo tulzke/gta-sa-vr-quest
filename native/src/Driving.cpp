@@ -2,6 +2,7 @@
 #include "BeachDance.h"
 #include "JustBusiness.h"
 #include "Driving.h"
+#include "MenuPrecision.h"
 #include "Combat.h"
 #include "VehicleDoors.h"
 #include "VehicleEntry.h"
@@ -154,7 +155,7 @@ std::atomic<int> g_airView{VIEW_FIRST_PERSON};
 std::atomic<int> g_boatView{VIEW_FIRST_PERSON};
 std::atomic<int> g_activeVehicleAppearance{0};
 constexpr int kRhinoModelId = 432;
-std::atomic<int> g_value[F_COUNT] = {
+std::atomic<float> g_value[F_COUNT] = {
     0, 0, 15, 0, 15,
     0, 15, 0, 15,
     0, 48, 43, 18, 30, 30, 82,
@@ -279,12 +280,12 @@ struct ModelCalibration {
     int doorPanel[4][2][6]{};
     int climb[2][12]{};
     int entry[4][3]{};
-    int seatSide[MODE_COUNT]{};
-    int seatForward[MODE_COUNT]{};
-    int seatHeight[MODE_COUNT]{};
-    int control[2][CONTROL_FIELD_COUNT]{};
-    int wheel[WHEEL_CAL_FIELD_COUNT]{};
-    int ignition[6]{};
+    float seatSide[MODE_COUNT]{};
+    float seatForward[MODE_COUNT]{};
+    float seatHeight[MODE_COUNT]{};
+    float control[2][CONTROL_FIELD_COUNT]{};
+    float wheel[WHEEL_CAL_FIELD_COUNT]{};
+    float ignition[6]{};
     float ignitionPose[12]{};
     bool ignitionPoseSet{};
     bool ignitionPoseLean{};
@@ -294,13 +295,13 @@ struct ModelCalibration {
     int acceleratorMode{BIKE_ACCEL_HOLD_TRIGGER};
 };
 
-int ClampWheelCalibration(int field, int value) {
+float ClampWheelCalibration(int field, float value) {
     switch (field) {
         case WHEEL_CAL_SIDE:
         case WHEEL_CAL_FORWARD:
-        case WHEEL_CAL_HEIGHT:  return std::clamp(value, -500, 500);  // cm
-        case WHEEL_CAL_RADIUS:  return std::clamp(value, -100, 200);  // cm delta
-        default:                return std::clamp(value, -1440, 1440);// half-deg
+        case WHEEL_CAL_HEIGHT:  return std::clamp<float>(value, -500, 500);  // cm
+        case WHEEL_CAL_RADIUS:  return std::clamp<float>(value, -100, 200);  // cm delta
+        default:                return std::clamp<float>(value, -1440, 1440);// half-deg
     }
 }
 std::mutex g_modelMutex;
@@ -350,7 +351,7 @@ struct ModelWheelPose {
 };
 
 ModelWheelPose CalibratedWheelPose(V3 seat, V3 right, V3 forward,
-                                   V3 up, const int* preset, const int* delta) {
+                                   V3 up, const float* preset, const float* delta) {
     ModelWheelPose pose{};
     pose.center=seat+
         right*((static_cast<float>(preset[F_WHEEL_SIDE])+
@@ -382,7 +383,7 @@ ModelWheelPose CalibratedWheelPose(V3 seat, V3 right, V3 forward,
     return pose;
 }
 
-int ClampField(int field, int value) {
+float ClampField(int field, float value) {
     switch (field) {
         case F_SIDE:
         case F_BIKE_SEAT_SIDE:
@@ -410,9 +411,9 @@ int ClampField(int field, int value) {
         case F_WHEEL_HEIGHT:
         case F_BIKE_DISTANCE:
         case F_BIKE_HEIGHT:
-            return std::clamp(value, -500, 500);
-        case F_WHEEL_RADIUS:   return std::clamp(value, 1, 200);
-        case F_BIKE_HALF_WIDTH:return std::clamp(value, 1, 200);
+            return std::clamp<float>(value, -500, 500);
+        case F_WHEEL_RADIUS:   return std::clamp<float>(value, 1, 200);
+        case F_BIKE_HALF_WIDTH:return std::clamp<float>(value, 1, 200);
         default:               return 0;
     }
 }
@@ -449,13 +450,13 @@ int GlobalSeatField(int vehicleType, int mode, bool height) {
     return height ? F_HEIGHT : F_DISTANCE;
 }
 
-int ClampModelSeat(bool height, int value) {
+float ClampModelSeat(bool height, float value) {
     (void)height;
-    return std::clamp(value, -500, 500);
+    return std::clamp<float>(value, -500, 500);
 }
 
-int ClampControlValue(int field, int value) {
-    return std::clamp(value, field >= CONTROL_ROT_X ? -2880 : -2000,
+float ClampControlValue(int field, float value) {
+    return std::clamp<float>(value, field >= CONTROL_ROT_X ? -2880 : -2000,
                              field >= CONTROL_ROT_X ?  2880 :  2000);
 }
 
@@ -490,50 +491,50 @@ void Save() {
     std::fprintf(file, "BikeCameraView=%d\n", g_bikeView.load());
     std::fprintf(file, "AirCameraView=%d\n", g_airView.load());
     std::fprintf(file, "BoatCameraView=%d\n", g_boatView.load());
-    std::fprintf(file, "PlaneSeatDistanceCm=%d\n",
+    std::fprintf(file, "PlaneSeatDistanceCm=%.7g\n",
                  g_value[F_PLANE_SEAT_DISTANCE].load());
-    std::fprintf(file, "PlaneSeatHeightCm=%d\n",
+    std::fprintf(file, "PlaneSeatHeightCm=%.7g\n",
                  g_value[F_PLANE_SEAT_HEIGHT].load());
-    std::fprintf(file, "PlaneSeatSideCm=%d\n",
+    std::fprintf(file, "PlaneSeatSideCm=%.7g\n",
                  g_value[F_PLANE_SEAT_SIDE].load());
-    std::fprintf(file, "BoatSeatDistanceCm=%d\n",
+    std::fprintf(file, "BoatSeatDistanceCm=%.7g\n",
                  g_value[F_BOAT_SEAT_DISTANCE].load());
-    std::fprintf(file, "BoatSeatHeightCm=%d\n",
+    std::fprintf(file, "BoatSeatHeightCm=%.7g\n",
                  g_value[F_BOAT_SEAT_HEIGHT].load());
-    std::fprintf(file, "BoatSeatSideCm=%d\n",
+    std::fprintf(file, "BoatSeatSideCm=%.7g\n",
                  g_value[F_BOAT_SEAT_SIDE].load());
-    std::fprintf(file, "ImmersiveBoatSeatDistanceCm=%d\n",
+    std::fprintf(file, "ImmersiveBoatSeatDistanceCm=%.7g\n",
                  g_value[F_IMMERSIVE_BOAT_SEAT_DISTANCE].load());
-    std::fprintf(file, "ImmersiveBoatSeatHeightCm=%d\n",
+    std::fprintf(file, "ImmersiveBoatSeatHeightCm=%.7g\n",
                  g_value[F_IMMERSIVE_BOAT_SEAT_HEIGHT].load());
-    std::fprintf(file, "ImmersiveBoatSeatSideCm=%d\n",
+    std::fprintf(file, "ImmersiveBoatSeatSideCm=%.7g\n",
                  g_value[F_IMMERSIVE_BOAT_SEAT_SIDE].load());
-    std::fprintf(file, "DefaultSeatSideCm=%d\n", g_value[F_SIDE].load());
-    std::fprintf(file, "DefaultSeatDistanceCm=%d\n", g_value[F_DISTANCE].load());
-    std::fprintf(file, "DefaultSeatHeightCm=%d\n", g_value[F_HEIGHT].load());
-    std::fprintf(file, "DefaultBikeSeatDistanceCm=%d\n", g_value[F_BIKE_SEAT_DISTANCE].load());
-    std::fprintf(file, "DefaultBikeSeatHeightCm=%d\n", g_value[F_BIKE_SEAT_HEIGHT].load());
-    std::fprintf(file, "DefaultBikeSeatSideCm=%d\n",
+    std::fprintf(file, "DefaultSeatSideCm=%.7g\n", g_value[F_SIDE].load());
+    std::fprintf(file, "DefaultSeatDistanceCm=%.7g\n", g_value[F_DISTANCE].load());
+    std::fprintf(file, "DefaultSeatHeightCm=%.7g\n", g_value[F_HEIGHT].load());
+    std::fprintf(file, "DefaultBikeSeatDistanceCm=%.7g\n", g_value[F_BIKE_SEAT_DISTANCE].load());
+    std::fprintf(file, "DefaultBikeSeatHeightCm=%.7g\n", g_value[F_BIKE_SEAT_HEIGHT].load());
+    std::fprintf(file, "DefaultBikeSeatSideCm=%.7g\n",
                  g_value[F_BIKE_SEAT_SIDE].load());
-    std::fprintf(file, "ImmersiveCarSeatDistanceCm=%d\n",
+    std::fprintf(file, "ImmersiveCarSeatDistanceCm=%.7g\n",
                  g_value[F_IMMERSIVE_CAR_SEAT_DISTANCE].load());
-    std::fprintf(file, "ImmersiveCarSeatHeightCm=%d\n",
+    std::fprintf(file, "ImmersiveCarSeatHeightCm=%.7g\n",
                  g_value[F_IMMERSIVE_CAR_SEAT_HEIGHT].load());
-    std::fprintf(file, "ImmersiveCarSeatSideCm=%d\n",
+    std::fprintf(file, "ImmersiveCarSeatSideCm=%.7g\n",
                  g_value[F_IMMERSIVE_CAR_SEAT_SIDE].load());
-    std::fprintf(file, "ImmersiveBikeSeatDistanceCm=%d\n",
+    std::fprintf(file, "ImmersiveBikeSeatDistanceCm=%.7g\n",
                  g_value[F_IMMERSIVE_BIKE_SEAT_DISTANCE].load());
-    std::fprintf(file, "ImmersiveBikeSeatHeightCm=%d\n",
+    std::fprintf(file, "ImmersiveBikeSeatHeightCm=%.7g\n",
                  g_value[F_IMMERSIVE_BIKE_SEAT_HEIGHT].load());
-    std::fprintf(file, "ImmersiveBikeSeatSideCm=%d\n",
+    std::fprintf(file, "ImmersiveBikeSeatSideCm=%.7g\n",
                  g_value[F_IMMERSIVE_BIKE_SEAT_SIDE].load());
-    std::fprintf(file, "WheelCenterSideCm=%d\n", g_value[F_WHEEL_SIDE].load());
-    std::fprintf(file, "WheelCenterDistanceCm=%d\n", g_value[F_WHEEL_DISTANCE].load());
-    std::fprintf(file, "WheelCenterHeightCm=%d\n", g_value[F_WHEEL_HEIGHT].load());
-    std::fprintf(file, "WheelRadiusCm=%d\n", g_value[F_WHEEL_RADIUS].load());
-    std::fprintf(file, "BikeHalfWidthCm=%d\n", g_value[F_BIKE_HALF_WIDTH].load());
-    std::fprintf(file, "BikeDistanceCm=%d\n", g_value[F_BIKE_DISTANCE].load());
-    std::fprintf(file, "BikeHeightCm=%d\n", g_value[F_BIKE_HEIGHT].load());
+    std::fprintf(file, "WheelCenterSideCm=%.7g\n", g_value[F_WHEEL_SIDE].load());
+    std::fprintf(file, "WheelCenterDistanceCm=%.7g\n", g_value[F_WHEEL_DISTANCE].load());
+    std::fprintf(file, "WheelCenterHeightCm=%.7g\n", g_value[F_WHEEL_HEIGHT].load());
+    std::fprintf(file, "WheelRadiusCm=%.7g\n", g_value[F_WHEEL_RADIUS].load());
+    std::fprintf(file, "BikeHalfWidthCm=%.7g\n", g_value[F_BIKE_HALF_WIDTH].load());
+    std::fprintf(file, "BikeDistanceCm=%.7g\n", g_value[F_BIKE_DISTANCE].load());
+    std::fprintf(file, "BikeHeightCm=%.7g\n", g_value[F_BIKE_HEIGHT].load());
     std::fprintf(file, "ImmersiveWheelVisible=%d\n", g_wheelVisible.load()?1:0);
     std::fprintf(file, "HandleHighlights=%d\n", g_highlights.load()?1:0);
     std::fprintf(file, "BikeHandsFollowTilt=%d\n",
@@ -578,27 +579,27 @@ void Save() {
             for(int door=0;door<4;++door) for(int inside=0;inside<2;++inside) for(int axis=0;axis<6;++axis)
                 if(calibration.doorPanel[door][inside][axis]) std::fprintf(file,"DoorPanel.%d.%d.%d.%d=%d\n",model,door,inside,axis,calibration.doorPanel[door][inside][axis]);
             for (int mode = 0; mode < MODE_COUNT; ++mode) {
-                std::fprintf(file, "ModelSeat.%d.%d.SideCm=%d\n",
+                std::fprintf(file, "ModelSeat.%d.%d.SideCm=%.7g\n",
                              model, mode, calibration.seatSide[mode]);
-                std::fprintf(file, "ModelSeat.%d.%d.ForwardCm=%d\n",
+                std::fprintf(file, "ModelSeat.%d.%d.ForwardCm=%.7g\n",
                              model, mode, calibration.seatForward[mode]);
-                std::fprintf(file, "ModelSeat.%d.%d.HeightCm=%d\n",
+                std::fprintf(file, "ModelSeat.%d.%d.HeightCm=%.7g\n",
                              model, mode, calibration.seatHeight[mode]);
             }
             std::fprintf(file, "BikeAccelerator.%d=%d\n", model,
                          calibration.acceleratorMode);
             for (int hand = 0; hand < 2; ++hand)
                 for (int field = 0; field < CONTROL_FIELD_COUNT; ++field) {
-                    std::fprintf(file, "Control.%d.%d.%s=%d\n",
+                    std::fprintf(file, "Control.%d.%d.%s=%.7g\n",
                                  model, hand, controlKeys[field],
                                  calibration.control[hand][field]);
                 }
             for (int field = 0; field < WHEEL_CAL_FIELD_COUNT; ++field) {
-                std::fprintf(file, "WheelCalib.%d.%d=%d\n",
+                std::fprintf(file, "WheelCalib.%d.%d=%.7g\n",
                              model, field, calibration.wheel[field]);
             }
             for (int field=0; field<6; ++field)
-                std::fprintf(file, "Ignition.%d.%d=%d\n", model, field,
+                std::fprintf(file, "Ignition.%d.%d=%.7g\n", model, field,
                              calibration.ignition[field]);
             if (calibration.radioPoseSet)
                 for (int field=0;field<12;++field)
@@ -631,7 +632,7 @@ void Load() {
     int bicycleMode=BICYCLE_HANDLEBAR_TRIGGER;
     bool carModeSeen=false,bikeModeSeen=false;
     bool immersiveCarSeatSeen=false, immersiveBikeSeatSeen=false;
-    int values[F_COUNT];
+    float values[F_COUNT];
     std::copy(std::begin(kDefaults), std::end(kDefaults), values);
     int visible = 1, highlights = 1, bikeHandsFollowTilt = 1;
     int bikeLockHorizon = 1, bikeVisualLeanPercent = 50;
@@ -645,6 +646,48 @@ void Load() {
     if (FILE* file = std::fopen(kPath, "r")) {
         char line[128];
         while (std::fgets(line, sizeof(line), file)) {
+            float spatial{}; int spatialModel{}, spatialMode{}, spatialHand{};
+            bool spatialMatched=false;
+            if (std::sscanf(line,"PlaneSeatDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_PLANE_SEAT_DISTANCE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"PlaneSeatHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_PLANE_SEAT_HEIGHT]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"PlaneSeatSideCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_PLANE_SEAT_SIDE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"BoatSeatDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BOAT_SEAT_DISTANCE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"BoatSeatHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BOAT_SEAT_HEIGHT]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"BoatSeatSideCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BOAT_SEAT_SIDE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"ImmersiveBoatSeatDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_BOAT_SEAT_DISTANCE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"ImmersiveBoatSeatHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_BOAT_SEAT_HEIGHT]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"ImmersiveBoatSeatSideCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_BOAT_SEAT_SIDE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"DefaultSeatSideCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_SIDE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"DefaultSeatDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_DISTANCE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"DefaultSeatHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_HEIGHT]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"DefaultBikeSeatDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BIKE_SEAT_DISTANCE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"DefaultBikeSeatHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BIKE_SEAT_HEIGHT]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"DefaultBikeSeatSideCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BIKE_SEAT_SIDE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"ImmersiveCarSeatDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_CAR_SEAT_DISTANCE]=spatial; spatialMatched=true; immersiveCarSeatSeen=true;}
+            if (std::sscanf(line,"ImmersiveCarSeatHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_CAR_SEAT_HEIGHT]=spatial; spatialMatched=true; immersiveCarSeatSeen=true;}
+            if (std::sscanf(line,"ImmersiveCarSeatSideCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_CAR_SEAT_SIDE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"ImmersiveBikeSeatDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_BIKE_SEAT_DISTANCE]=spatial; spatialMatched=true; immersiveBikeSeatSeen=true;}
+            if (std::sscanf(line,"ImmersiveBikeSeatHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_BIKE_SEAT_HEIGHT]=spatial; spatialMatched=true; immersiveBikeSeatSeen=true;}
+            if (std::sscanf(line,"ImmersiveBikeSeatSideCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_IMMERSIVE_BIKE_SEAT_SIDE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"WheelCenterSideCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_WHEEL_SIDE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"WheelCenterDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_WHEEL_DISTANCE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"WheelCenterHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_WHEEL_HEIGHT]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"WheelRadiusCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_WHEEL_RADIUS]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"BikeHalfWidthCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BIKE_HALF_WIDTH]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"BikeDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BIKE_DISTANCE]=spatial; spatialMatched=true;}
+            if (std::sscanf(line,"BikeHeightCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_BIKE_HEIGHT]=spatial; spatialMatched=true;}
+            if (spatialMatched) continue;
+            if (std::sscanf(line,"ModelSeat.%d.%d.SideCm=%f",&spatialModel,&spatialMode,&spatial)==3 && spatialModel>=0 && spatialMode>=0 && spatialMode<MODE_COUNT && std::isfinite(spatial)) {g_modelCalibration[spatialModel].seatSide[spatialMode]=ClampModelSeat(false,spatial);continue;}
+            if (std::sscanf(line,"ModelSeat.%d.%d.ForwardCm=%f",&spatialModel,&spatialMode,&spatial)==3 && spatialModel>=0 && spatialMode>=0 && spatialMode<MODE_COUNT && std::isfinite(spatial)) {g_modelCalibration[spatialModel].seatForward[spatialMode]=ClampModelSeat(false,spatial);continue;}
+            if (std::sscanf(line,"ModelSeat.%d.%d.HeightCm=%f",&spatialModel,&spatialMode,&spatial)==3 && spatialModel>=0 && spatialMode>=0 && spatialMode<MODE_COUNT && std::isfinite(spatial)) {g_modelCalibration[spatialModel].seatHeight[spatialMode]=ClampModelSeat(false,spatial);continue;}
+            if (std::sscanf(line,"WheelCalib.%d.%d=%f",&spatialModel,&spatialMode,&spatial)==3 && spatialModel>=0 && spatialMode>=0 && spatialMode<WHEEL_CAL_FIELD_COUNT && std::isfinite(spatial)) {g_modelCalibration[spatialModel].wheel[spatialMode]=ClampWheelCalibration(spatialMode,spatial);continue;}
+            if (std::sscanf(line,"Ignition.%d.%d=%f",&spatialModel,&spatialMode,&spatial)==3 && spatialModel>=400 && spatialModel<=611 && spatialMode>=0 && spatialMode<6 && std::isfinite(spatial)) {g_modelCalibration[spatialModel].ignition[spatialMode]=std::clamp(spatial,-720.f,720.f);continue;}
+            if (std::sscanf(line,"Control.%d.%d.OffsetX=%f",&spatialModel,&spatialHand,&spatial)==3 && spatialModel>=0 && spatialHand>=0 && spatialHand<2 && std::isfinite(spatial)) {g_modelCalibration[spatialModel].control[spatialHand][0]=ClampControlValue(0,spatial);continue;}
+            if (std::sscanf(line,"Control.%d.%d.OffsetY=%f",&spatialModel,&spatialHand,&spatial)==3 && spatialModel>=0 && spatialHand>=0 && spatialHand<2 && std::isfinite(spatial)) {g_modelCalibration[spatialModel].control[spatialHand][1]=ClampControlValue(1,spatial);continue;}
+            if (std::sscanf(line,"Control.%d.%d.OffsetZ=%f",&spatialModel,&spatialHand,&spatial)==3 && spatialModel>=0 && spatialHand>=0 && spatialHand<2 && std::isfinite(spatial)) {g_modelCalibration[spatialModel].control[spatialHand][2]=ClampControlValue(2,spatial);continue;}
+            if (std::sscanf(line,"Control.%d.%d.RotationX=%f",&spatialModel,&spatialHand,&spatial)==3 && spatialModel>=0 && spatialHand>=0 && spatialHand<2 && std::isfinite(spatial)) {g_modelCalibration[spatialModel].control[spatialHand][3]=ClampControlValue(3,spatial);continue;}
+            if (std::sscanf(line,"Control.%d.%d.RotationY=%f",&spatialModel,&spatialHand,&spatial)==3 && spatialModel>=0 && spatialHand>=0 && spatialHand<2 && std::isfinite(spatial)) {g_modelCalibration[spatialModel].control[spatialHand][4]=ClampControlValue(4,spatial);continue;}
+            if (std::sscanf(line,"Control.%d.%d.RotationZ=%f",&spatialModel,&spatialHand,&spatial)==3 && spatialModel>=0 && spatialHand>=0 && spatialHand<2 && std::isfinite(spatial)) {g_modelCalibration[spatialModel].control[spatialHand][5]=ClampControlValue(5,spatial);continue;}
             int value = 0;
             if      (std::sscanf(line, "DrivingConfigVersion=%d", &value)==1)
                 configVersion=value;
@@ -910,7 +953,7 @@ void Load() {
     g_carCameraTilt.store(carCameraTilt!=0);
     g_motionHand.store(std::clamp(motionHand,0,1));
     g_boatCameraTilt.store(boatCameraTilt!=0);
-    LOGI("[driving] car=%s bike=%s seat=%+d/%+d/%+d wheel=%+d/%+d/%+d r=%dcm",
+    LOGI("[driving] car=%s bike=%s seat=%+.1f/%+.1f/%+.1f wheel=%+.1f/%+.1f/%+.1f r=%.1fcm",
          g_carMode.load()==MODE_IMMERSIVE?"IMMERSIVE":"DEFAULT",
          g_bikeMode.load()==MODE_IMMERSIVE?"IMMERSIVE":"DEFAULT",
          g_value[F_SIDE].load(), g_value[F_DISTANCE].load(), g_value[F_HEIGHT].load(),
@@ -1524,7 +1567,7 @@ bool BuildWheelTracking(WheelVisualState* visual) {
                 vu*g_wheelSeatLocal.z;
         }
     }
-    int wheelCal[WHEEL_CAL_FIELD_COUNT]{};
+    float wheelCal[WHEEL_CAL_FIELD_COUNT]{};
     {
         std::lock_guard<std::mutex> modelLock(g_modelMutex);
         const auto found=g_modelCalibration.find(modelId);
@@ -1532,7 +1575,7 @@ bool BuildWheelTracking(WheelVisualState* visual) {
             std::memcpy(wheelCal,found->second.wheel,
                         sizeof(wheelCal));
     }
-    int wheelPreset[F_COUNT]{};
+    float wheelPreset[F_COUNT]{};
     wheelPreset[F_WHEEL_SIDE]=g_value[F_WHEEL_SIDE].load();
     wheelPreset[F_WHEEL_DISTANCE]=g_value[F_WHEEL_DISTANCE].load();
     wheelPreset[F_WHEEL_HEIGHT]=g_value[F_WHEEL_HEIGHT].load();
@@ -1605,7 +1648,7 @@ bool BuildBikeTracking(WheelVisualState* visual) {
             usedModelHandle=true;
         }
     }
-    int wheelCalibration[WHEEL_CAL_FIELD_COUNT]{};
+    float wheelCalibration[WHEEL_CAL_FIELD_COUNT]{};
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
         const auto it=g_modelCalibration.find(modelId);
@@ -1747,7 +1790,7 @@ void FillHandleVisuals(WheelVisualState* visual) {
         // centimetre / half-degree scale as current Quest Vice City. Position
         // corrections stay in the turned vehicle control frame, then rotations
         // refine the actual wrist frame shown by the pinned calibration hand.
-        const int* value=calibration.control[hand];
+        const float* value=calibration.control[hand];
         pos=pos+wheelRight*(static_cast<float>(value[CONTROL_OFFSET_X])/200.0f)+
                 wheelUp*(static_cast<float>(value[CONTROL_OFFSET_Y])/200.0f)+
                 normal*(static_cast<float>(value[CONTROL_OFFSET_Z])/200.0f);
@@ -1833,7 +1876,7 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
     // Keep the key outside both the rim and its hand-grab zones.
     const float offset=visual.bike ? visual.radius*.7f : visual.radius+.12f;
     center=center+right*offset-up*offset;
-    int adjustment[6]{};
+    float adjustment[6]{};
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
         const auto it=g_modelCalibration.find(visual.modelId);
@@ -3375,12 +3418,12 @@ void ResetDefaultPreset() {
     for (int field=0;field<F_COUNT;++field) g_value[field].store(kDefaults[field]);
     Save(); ResetInteraction();
 }
-int GetOffsetCm(int field) {
+float GetOffsetCm(int field) {
     EnsureInit(); return field>=0&&field<F_COUNT?g_value[field].load():0;
 }
 void AdjustOffsetCm(int field,int direction) {
     EnsureInit(); if (field<0||field>=F_COUNT||direction==0) return;
-    g_value[field].store(ClampField(field,g_value[field].load()+(direction<0?-1:1)));
+    g_value[field].store(ClampField(field,menu::SpatialValue(g_value[field].load(),direction)));
     Save();
 }
 const char* FieldLabel(int field) {
@@ -3764,7 +3807,7 @@ void SetRadioPose(int model,const float pose[12]) {
     std::lock_guard<std::mutex> lock(g_modelMutex);
     auto& c=g_modelCalibration[model]; std::copy_n(pose,12,c.radioPose); c.radioPoseSet=true;
 }
-int GetIgnitionCalibration(int field) {
+float GetIgnitionCalibration(int field) {
     if (field<0||field>=6) return 0;
     const int model=GetActiveVehicleModelId();
     std::lock_guard<std::mutex> lock(g_modelMutex);
@@ -3776,8 +3819,8 @@ void AdjustIgnitionCalibration(int field,int direction) {
     if (model<400||field<0||field>=6||!direction) return;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        int& v=g_modelCalibration[model].ignition[field];
-        v=std::clamp(v+(direction<0?-1:1),-720,720);
+        float& v=g_modelCalibration[model].ignition[field];
+        v=std::clamp(menu::SpatialValue(v,direction),-720.f,720.f);
     }
     Save();
 }
@@ -3820,17 +3863,17 @@ bool IsMenuItemAvailable(int vehicleType,int item) {
     }
 }
 
-int GetGlobalSeatForwardCm(int vehicleType) {
+float GetGlobalSeatForwardCm(int vehicleType) {
     EnsureInit();
     return g_value[GlobalSeatField(vehicleType,
         GetModeForVehicleType(vehicleType),false)].load();
 }
-int GetGlobalSeatSideCm(int vehicleType) {
+float GetGlobalSeatSideCm(int vehicleType) {
     EnsureInit();
     return g_value[GlobalSeatSideField(
         vehicleType, GetModeForVehicleType(vehicleType))].load();
 }
-int GetGlobalSeatHeightCm(int vehicleType) {
+float GetGlobalSeatHeightCm(int vehicleType) {
     EnsureInit();
     return g_value[GlobalSeatField(vehicleType,
         GetModeForVehicleType(vehicleType),true)].load();
@@ -3839,14 +3882,14 @@ void AdjustGlobalSeatForwardCm(int vehicleType,int direction) {
     EnsureInit(); if (!direction) return;
     const int field=GlobalSeatField(vehicleType,
         GetModeForVehicleType(vehicleType),false);
-    g_value[field].store(ClampField(field,g_value[field].load()+(direction<0?-1:1)));
+    g_value[field].store(ClampField(field,menu::SpatialValue(g_value[field].load(),direction)));
     Save();
 }
 void AdjustGlobalSeatHeightCm(int vehicleType,int direction) {
     EnsureInit(); if (!direction) return;
     const int field=GlobalSeatField(vehicleType,
         GetModeForVehicleType(vehicleType),true);
-    g_value[field].store(ClampField(field,g_value[field].load()+(direction<0?-1:1)));
+    g_value[field].store(ClampField(field,menu::SpatialValue(g_value[field].load(),direction)));
     Save();
 }
 void AdjustGlobalSeatSideCm(int vehicleType,int direction) {
@@ -3854,7 +3897,7 @@ void AdjustGlobalSeatSideCm(int vehicleType,int direction) {
     const int field=GlobalSeatSideField(
         vehicleType, GetModeForVehicleType(vehicleType));
     g_value[field].store(ClampField(
-        field, g_value[field].load()+(direction<0?-1:1)));
+        field, menu::SpatialValue(g_value[field].load(),direction)));
     Save();
 }
 
@@ -3969,7 +4012,7 @@ void SetDebugWheelPitch(int model,int value) {
 }
 void SaveDebugCalibration() { Save(); }
 
-int GetCurrentModelSeatSideCm(int vehicleType) {
+float GetCurrentModelSeatSideCm(int vehicleType) {
     if (!HasCurrentModelForType(vehicleType)) return 0;
     const int model=GetActiveVehicleModelId();
     const int mode=GetModeForVehicleType(vehicleType);
@@ -3977,7 +4020,7 @@ int GetCurrentModelSeatSideCm(int vehicleType) {
     const auto found=g_modelCalibration.find(model);
     return found==g_modelCalibration.end()?0:found->second.seatSide[mode];
 }
-int GetCurrentModelSeatForwardCm(int vehicleType) {
+float GetCurrentModelSeatForwardCm(int vehicleType) {
     if (!HasCurrentModelForType(vehicleType)) return 0;
     const int model=GetActiveVehicleModelId();
     const int mode=GetModeForVehicleType(vehicleType);
@@ -3985,7 +4028,7 @@ int GetCurrentModelSeatForwardCm(int vehicleType) {
     const auto found=g_modelCalibration.find(model);
     return found==g_modelCalibration.end()?0:found->second.seatForward[mode];
 }
-int GetCurrentModelSeatHeightCm(int vehicleType) {
+float GetCurrentModelSeatHeightCm(int vehicleType) {
     if (!HasCurrentModelForType(vehicleType)) return 0;
     const int model=GetActiveVehicleModelId();
     const int mode=GetModeForVehicleType(vehicleType);
@@ -3999,8 +4042,8 @@ void AdjustCurrentModelSeatSideCm(int vehicleType,int direction) {
     const int mode=GetModeForVehicleType(vehicleType);
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        int& value=g_modelCalibration[model].seatSide[mode];
-        value=ClampModelSeat(false,value+(direction<0?-1:1));
+        float& value=g_modelCalibration[model].seatSide[mode];
+        value=ClampModelSeat(false,menu::SpatialValue(value,direction));
     }
     Save();
 }
@@ -4010,8 +4053,8 @@ void AdjustCurrentModelSeatForwardCm(int vehicleType,int direction) {
     const int mode=GetModeForVehicleType(vehicleType);
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        int& value=g_modelCalibration[model].seatForward[mode];
-        value=ClampModelSeat(false,value+(direction<0?-1:1));
+        float& value=g_modelCalibration[model].seatForward[mode];
+        value=ClampModelSeat(false,menu::SpatialValue(value,direction));
     }
     Save();
 }
@@ -4021,25 +4064,25 @@ void AdjustCurrentModelSeatHeightCm(int vehicleType,int direction) {
     const int mode=GetModeForVehicleType(vehicleType);
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        int& value=g_modelCalibration[model].seatHeight[mode];
-        value=ClampModelSeat(true,value+(direction<0?-1:1));
+        float& value=g_modelCalibration[model].seatHeight[mode];
+        value=ClampModelSeat(true,menu::SpatialValue(value,direction));
     }
     Save();
 }
 
-int GetActiveSeatForwardCm() {
+float GetActiveSeatForwardCm() {
     const int vehicleType=GetActiveVehicleType();
     if (vehicleType==VEHICLE_NONE) return 0;
     return GetGlobalSeatForwardCm(vehicleType)+
            GetCurrentModelSeatForwardCm(vehicleType);
 }
-int GetActiveSeatSideCm() {
+float GetActiveSeatSideCm() {
     const int vehicleType=GetActiveVehicleType();
     if (vehicleType==VEHICLE_NONE) return 0;
     return GetGlobalSeatSideCm(vehicleType)+
            GetCurrentModelSeatSideCm(vehicleType);
 }
-int GetActiveSeatHeightCm() {
+float GetActiveSeatHeightCm() {
     const int vehicleType=GetActiveVehicleType();
     if (vehicleType==VEHICLE_NONE) return 0;
     return GetGlobalSeatHeightCm(vehicleType)+
@@ -4050,7 +4093,7 @@ bool IsControlCalibrationAvailable(int vehicleType) {
     return GetModeForVehicleType(vehicleType)==MODE_IMMERSIVE&&
            HasCurrentModelForType(vehicleType);
 }
-int GetControlCalibrationValue(int hand,int field) {
+float GetControlCalibrationValue(int hand,int field) {
     if (hand<0||hand>1||field<0||field>=CONTROL_FIELD_COUNT) return 0;
     const int model=GetActiveVehicleModelId();
     if (model<0) return 0;
@@ -4067,8 +4110,8 @@ void AdjustControlCalibrationValue(int hand,int field,int direction) {
     const int model=GetActiveVehicleModelId();
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        int& value=g_modelCalibration[model].control[hand][field];
-        value=ClampControlValue(field,value+(direction<0?-1:1));
+        float& value=g_modelCalibration[model].control[hand][field];
+        value=ClampControlValue(field,menu::SpatialValue(value,direction,.5f));
     }
     Save(); ResetInteraction();
 }
@@ -4080,7 +4123,7 @@ const char* ControlCalibrationFieldName(int field) {
     return field>=0&&field<CONTROL_FIELD_COUNT?names[field]:"CONTROL";
 }
 
-int GetWheelCalibrationValue(int field) {
+float GetWheelCalibrationValue(int field) {
     EnsureInit();
     if (field<0||field>=WHEEL_CAL_FIELD_COUNT) return 0;
     const int model=GetActiveVehicleModelId();
@@ -4097,8 +4140,8 @@ void AdjustWheelCalibrationValue(int field,int direction) {
     if (model<0) return;
     {
         std::lock_guard<std::mutex> lock(g_modelMutex);
-        int& value=g_modelCalibration[model].wheel[field];
-        value=ClampWheelCalibration(field,value+(direction<0?-1:1));
+        float& value=g_modelCalibration[model].wheel[field];
+        value=ClampWheelCalibration(field,menu::SpatialValue(value,direction,field>=WHEEL_CAL_PITCH?.5f:1.f));
     }
     Save();
 }

@@ -70,7 +70,7 @@ enum HandCalibField {
     HAND_CALIB_ROLL,
     HAND_CALIB_FIELD_COUNT
 };
-int         GetHandCalibValue(int field);
+float       GetHandCalibValue(int field);
 void        AdjustHandCalib(int field, int direction);
 const char* HandCalibFieldName(int field);
 void        ResetHandCalibration();

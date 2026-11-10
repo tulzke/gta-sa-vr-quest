@@ -7504,7 +7504,7 @@ void BuildHolsterCalibMenu() {
         }
         PanelText(row, cx, y, 2, c, c, rowIndex == sel ? 120 : c);
     }
-    PanelText("A NEXT WEAPON   L2/R2 ADJUST   B BACK", cx, kPanelH - 18,
+    PanelText("L2/R2 0.5   GRIP 0.1   B BACK", cx, kPanelH - 18,
               2, 150, 185, 150);
 }
 
@@ -7763,26 +7763,26 @@ void BuildDrivingMenu() {
                 break;
             case driving::MENU_GLOBAL_SIDE:
                 std::snprintf(rows[row],sizeof(rows[row]),
-                    "ALL %sS SEAT SIDE   < %+d CM >",
+                    "ALL %sS SEAT SIDE   < %+.1f CM >",
                     driving::VehicleTypeName(vehicleType),
                     driving::GetGlobalSeatSideCm(vehicleType));
                 break;
             case driving::MENU_GLOBAL_FORWARD:
                 std::snprintf(rows[row],sizeof(rows[row]),
-                    "ALL %sS SEAT FORWARD   < %+d CM >",
+                    "ALL %sS SEAT FORWARD   < %+.1f CM >",
                     driving::VehicleTypeName(vehicleType),
                     driving::GetGlobalSeatForwardCm(vehicleType));
                 break;
             case driving::MENU_GLOBAL_HEIGHT:
                 std::snprintf(rows[row],sizeof(rows[row]),
-                    "ALL %sS SEAT HEIGHT   < %+d CM >",
+                    "ALL %sS SEAT HEIGHT   < %+.1f CM >",
                     driving::VehicleTypeName(vehicleType),
                     driving::GetGlobalSeatHeightCm(vehicleType));
                 break;
             case driving::MENU_MODEL_SIDE:
                 if (haveModel)
                     std::snprintf(rows[row],sizeof(rows[row]),
-                        "THIS MODEL SIDE CORRECTION   < %+d CM >",
+                        "THIS MODEL SIDE CORRECTION   < %+.1f CM >",
                         driving::GetCurrentModelSeatSideCm(vehicleType));
                 else
                     std::snprintf(rows[row],sizeof(rows[row]),
@@ -7792,7 +7792,7 @@ void BuildDrivingMenu() {
             case driving::MENU_MODEL_FORWARD:
                 if (haveModel)
                     std::snprintf(rows[row],sizeof(rows[row]),
-                        "THIS MODEL FORWARD CORRECTION   < %+d CM >",
+                        "THIS MODEL FORWARD CORRECTION   < %+.1f CM >",
                         driving::GetCurrentModelSeatForwardCm(vehicleType));
                 else
                     std::snprintf(rows[row],sizeof(rows[row]),
@@ -7802,7 +7802,7 @@ void BuildDrivingMenu() {
             case driving::MENU_MODEL_HEIGHT:
                 if (haveModel)
                     std::snprintf(rows[row],sizeof(rows[row]),
-                        "THIS MODEL HEIGHT CORRECTION   < %+d CM >",
+                        "THIS MODEL HEIGHT CORRECTION   < %+.1f CM >",
                         driving::GetCurrentModelSeatHeightCm(vehicleType));
                 else
                     std::snprintf(rows[row],sizeof(rows[row]),
@@ -7823,7 +7823,7 @@ void BuildDrivingMenu() {
             case driving::MENU_IGNITION_RY: case driving::MENU_IGNITION_RZ: {
                 const int field=item-driving::MENU_IGNITION_X;
                 static const char* const names[]={"SIDE", "UP", "DEPTH", "PITCH", "YAW", "ROLL"};
-                std::snprintf(rows[row],sizeof(rows[row]),"DEBUG KEY %s < %+d %s >",
+                std::snprintf(rows[row],sizeof(rows[row]),"DEBUG KEY %s < %+.1f %s >",
                     names[field],driving::GetIgnitionCalibration(field),field<3?"CM":"DEG");
                 break;
             }
@@ -7965,20 +7965,20 @@ void BuildDrivingCalibrationMenu() {
     char text[driving::WHEEL_CAL_FIELD_COUNT+
               driving::CONTROL_FIELD_COUNT+2][88]{};
     for (int field=0;field<wheelRows;++field) {
-        const int value=driving::GetWheelCalibrationValue(field);
+        const float value=driving::GetWheelCalibrationValue(field);
         if (field>=driving::WHEEL_CAL_PITCH)
             std::snprintf(text[field],sizeof(text[field]),
                 "%s   < %+.1f DEG >",
                 driving::WheelCalibrationFieldName(field),value/2.0f);
         else
             std::snprintf(text[field],sizeof(text[field]),
-                "%s   < %+d CM >",
+                "%s   < %+.1f CM >",
                 driving::WheelCalibrationFieldName(field),value);
     }
     std::snprintf(text[wheelRows],sizeof(text[wheelRows]),
                   "EDIT GRIP   < %s >",hand==0?"LEFT":"RIGHT");
     for (int field=0;field<driving::CONTROL_FIELD_COUNT;++field) {
-        const int value=driving::GetControlCalibrationValue(hand,field);
+        const float value=driving::GetControlCalibrationValue(hand,field);
         char* line=text[wheelRows+field+1];
         if (field>=driving::CONTROL_ROT_X)
             std::snprintf(line,88,"%s   < %+.1f DEG >",
@@ -8068,10 +8068,10 @@ void BuildBasketballCalibMenu() {
         const int c = i == sel ? 255 : 200;
         char row[72]{};
         if (i < basketball::HAND_CALIB_FIELD_COUNT) {
-            const char* unit = i < basketball::HAND_CALIB_PITCH ? "MM" : "DEG";
-            std::snprintf(row, sizeof(row), "%s   < %d %s >",
+            const char* unit = i < basketball::HAND_CALIB_PITCH ? "CM" : "DEG";
+            std::snprintf(row, sizeof(row), "%s   < %.1f %s >",
                           basketball::HandCalibFieldName(i),
-                          basketball::GetHandCalibValue(i), unit);
+                          basketball::GetHandCalibValue(i) * (i<3?.1f:1.f), unit);
         } else if (i == basketball::HAND_CALIB_FIELD_COUNT) {
             std::snprintf(row, sizeof(row), "RESET HAND POSE");
         } else {
@@ -8275,11 +8275,11 @@ void BuildHudMenu() {
         std::snprintf(rows[2],sizeof(rows[2]),
                       dash?"UP   < %.1f CM >":"LIFT   < %.1f CM >",
                       wrist.liftMm/10.0f);
-        std::snprintf(rows[3],sizeof(rows[3]),"PITCH   < %d DEG >",
+        std::snprintf(rows[3],sizeof(rows[3]),"PITCH   < %.1f DEG >",
                       wrist.pitchDeg);
-        std::snprintf(rows[4],sizeof(rows[4]),"YAW   < %d DEG >",
+        std::snprintf(rows[4],sizeof(rows[4]),"YAW   < %.1f DEG >",
                       wrist.yawDeg);
-        std::snprintf(rows[5],sizeof(rows[5]),"ROLL   < %d DEG >",
+        std::snprintf(rows[5],sizeof(rows[5]),"ROLL   < %.1f DEG >",
                       wrist.rollDeg);
         std::snprintf(rows[6],sizeof(rows[6]),"SIZE   < %.1f X >",
                       static_cast<float>(wrist.scaleTenths)/10.0f);
@@ -8425,12 +8425,12 @@ void BuildCalibMenu() {
                           index==4 && !hasOptic?" (NOT AVAILABLE)":" ...");
         } else if (group==weaponmenu::AMMO) {
             const auto ammo=hud::GetWristSettings(hud::AMMO,hud::WRIST_SLOT_HAND,-1);
-            const int values[]={ammo.alongMm,ammo.acrossMm,ammo.liftMm,
+            const float values[]={ammo.alongMm,ammo.acrossMm,ammo.liftMm,
                                 ammo.pitchDeg,ammo.yawDeg,ammo.rollDeg,ammo.scaleTenths};
             static const char* names[]={"ALONG BARREL","SIDE","UP","PITCH","YAW","ROLL","SIZE"};
             if (index==0) std::snprintf(row,sizeof(row),"VISIBLE   < %s >",hud::GetElementSettings(hud::AMMO).enabled?"ON":"OFF");
             else if(index<=3) std::snprintf(row,sizeof(row),"%s   < %+.1f CM >",names[index-1],values[index-1]/10.0f);
-            else if(index<=6) std::snprintf(row,sizeof(row),"%s   < %+d DEG >",names[index-1],values[index-1]);
+            else if(index<=6) std::snprintf(row,sizeof(row),"%s   < %+.1f DEG >",names[index-1],values[index-1]);
             else std::snprintf(row,sizeof(row),"SIZE   < %.1f X >",ammo.scaleTenths/10.0f);
         } else if (group==weaponmenu::OPTIC && r == 35) {
             std::snprintf(row,sizeof(row),"RESET SCOPE   < PRESS A >");
@@ -9102,7 +9102,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                      hand, pos.x, pos.y, pos.z);
             }
         } else if (TwoHandStateUsable(twoHand)) {
-            if (hand == twoHand.primaryHand) {
+            if (hand == twoHand.primaryHand && twoHand.primaryAttached) {
                 // The game-baked weapon used this same pivot/axis correction.
                 // Move the visible wrist with it instead of leaving the hand at
                 // the raw controller pose while the gun follows the support hand.
@@ -9151,6 +9151,12 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                     ? std::clamp(twoHand.supportGestureGrip, 0.0f, 1.0f) : 1.0f;
                 trig = twoHand.supportGestureValid
                     ? std::clamp(twoHand.supportGestureTrigger, 0.0f, 1.0f) : 1.0f;
+                if (handanimation::Launcher(twoHand.weaponType)) {
+                    // This hand owns the launcher's trigger, not its inventory
+                    // slot. Use its real analog squeeze for the shooting finger.
+                    grip = 1.0f;
+                    trig = handanimation::Unit(hp[hand].trigger);
+                }
             }
         }
 
@@ -9204,7 +9210,9 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             debugPinch || drivingWheel.radioGrabbed[hand] || drivingWheel.ignitionGrabbed[hand],
             steeringHand, basketballFlatPalm,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand,
-            (weaponHandMask & (1u<<hand))!=0,weaponTypes[hand]});
+            (weaponHandMask & (1u<<hand))!=0,
+            TwoHandStateUsable(twoHand) && hand==twoHand.supportHand
+                ? twoHand.weaponType : weaponTypes[hand]});
         const auto& firstClip = g_handAnimations.Get(selected.first);
         const auto& secondClip = g_handAnimations.Get(selected.second);
         const auto& pinchClip = g_handAnimations.Get(Gesture::Pinch);
@@ -9897,7 +9905,7 @@ bool BuildHandPanelAnchor(const HandPose& hp, int hand,
     palmUp = vscale(palmUp, handSign);
 
     if (!hp.wristAnchorValid && TwoHandStateUsable(twoHand)) {
-        if (hand == twoHand.primaryHand) {
+        if (hand == twoHand.primaryHand && twoHand.primaryAttached) {
             // Same pivot/axis correction the baked weapon and hand mesh use.
             origin   = TwoHandRotatePoint(twoHand, origin);
             side     = vnorm(TwoHandRotateVector(twoHand, side));
