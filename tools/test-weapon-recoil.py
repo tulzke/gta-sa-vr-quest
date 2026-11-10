@@ -35,6 +35,7 @@ runtime = runtime[:start] + 'double Now(){return testTime;}' + runtime[end:]
 harness = r'''
 #include "WeaponRecoil.h"
 #include "PhysicalWeapon.h"
+#include "PairedWeapons.h"
 #include <cassert>
 #include <mutex>
 #include <cstdint>
@@ -203,6 +204,7 @@ def function(source, signature):
 
 feedback = r'''
 #include "PhysicalWeapon.h"
+#include "PairedWeapons.h"
 #include <cassert>
 #include <mutex>
 namespace savr::physicalweapon {
@@ -241,6 +243,7 @@ compile_run(feedback_file, 'recoil-base-feedback')
 # deliberate re-grip behavior below are the actual gameplay implementation.
 disarm = r'''
 #include "PhysicalWeapon.h"
+#include "PairedWeapons.h"
 #include "RecoilModel.h"
 #include <atomic>
 #include <cassert>
@@ -332,6 +335,7 @@ hand_end=xr.index('        const bool debugPinch=',hand_start)
 hand_test=r'''
 #include "RecoilModel.h"
 #include "PhysicalWeapon.h"
+#include "PairedWeapons.h"
 #include <cassert>
 namespace recoil=savr::recoil;
 struct XrVector3f{float x{},y{},z{};};

@@ -1,6 +1,7 @@
 #include "WeaponRecoil.h"
 #include "Calib.h"
 #include "PhysicalWeapon.h"
+#include "PairedWeapons.h"
 #include "Symbols.h"
 #include "Xr.h"
 #include <mutex>
@@ -30,10 +31,9 @@ void Update(bool blocked){
     for(int h=0;h<2;++h){
         if(blocked || !ped || !tracked[h].valid || !tracked[h].aimValid)continue;
         slots[h]=physicalweapon::HeldSlot(h);
-        if(slots[h]<=0 || slots[h]>=13)continue;
+        if(!pairedweapon::Valid(slots[h]))continue;
         // Same audited inventory layout as VrFire, not a render-time cache.
-        types[h]=*reinterpret_cast<const int*>(static_cast<const unsigned char*>(ped)+
-                                              0x730+slots[h]*0x20);
+        types[h]=pairedweapon::Type(ped,slots[h]);
         support[h]=physicalweapon::SupportHand(h)>=0;
     }
     const double now=Now();

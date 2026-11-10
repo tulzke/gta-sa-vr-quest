@@ -235,6 +235,7 @@ globals_text=holsters[holsters.index('constexpr int kDefaultSlots['):holsters.in
 globals_text=globals_text.replace('/sdcard/Android/data/com.rockstargames.gtasa/files/vr_holsters.ini',str(OUT/'settings.ini').replace('\\','/'))
 settings_prefix=r'''
 #include "Holster.h"
+#include "PairedWeapons.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -247,11 +248,22 @@ settings_prefix=r'''
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 namespace savr::xr {void SetHolsterMarkers(const float (*)[3],int){}}
 namespace savr::holster {
+alignas(16) unsigned char pairPed[0xa00]{},pairInfo[0x70]{};
+void SaveSettingsLocked();
+int testSkill=1;
+void* PairPed(int){return pairPed;}
+int PairSkill(void*,int){return testSkill;}
+void* PairInfo(int,signed char){return pairInfo;}
+struct {void*(*FindPlayerPed)(int)=PairPed;int(*CPed_GetWeaponSkill)(void*,int)=PairSkill;
+void*(*CWeaponInfo_GetWeaponInfo)(int,signed char)=PairInfo;} g;
+const char* PointName(int){return "test";}
+bool VehicleSidearmWeaponType(int type){return type==22;}
 '''+globals_text
 settings_production='\n'.join(function(sig,holsters) for sig in (
-    'bool ValidPoint(', 'bool SelectableSlot(', 'void LoadSettings(',
+    'bool ValidPoint(', 'bool SelectableSlot(', 'void AssignPointSlotLocked(', 'int PointCount()', 'int PointSlot(', 'int FindPointForSlot(', 'const char* SlotName(', 'bool SetPointSlot(', 'void LoadSettings(',
     'void SaveSettingsLocked(', 'void Init()', 'bool BodyFrameEnabled()', 'void SetBodyFrameEnabled(',
     'float BodyReachIdleSeconds()', 'float BodyReachMotionMetres()'))
+settings_production+='\n'+function('bool PairAllowed(')+'\n'+function('bool RadialUnavailable(')
 settings_tests=r'''
 void Write(const char* text){FILE* f=std::fopen(kSettingsPath,"w");CHECK(f);std::fputs(text,f);std::fclose(f);}
 }
@@ -280,7 +292,24 @@ int main(){
     SaveSettingsLocked();gLeftHanded=false;LoadSettings();
     CHECK(gLeftHanded&&gPointSlots[0]==12&&gPointSlots[1]==8&&gPointSlots[2]==3);
     Write("p 0 12\np 1 12\n");LoadSettings();CHECK(gPointSlots[0]==12&&gPointSlots[1]==-1);
-    std::puts("PASS: production settings old configs, BODY round trip, legacy visibility, invalid values and reset");
+    Write("p 0 2\np 1 4\n");LoadSettings();
+    *reinterpret_cast<int*>(pairPed+0x730+2*0x20)=22;
+    *reinterpret_cast<unsigned*>(pairInfo+0x18)=0x800;
+    CHECK(RadialUnavailable(pairPed,15,false));
+    CHECK(!SetPointSlot(1,15));CHECK(PointSlot(0)==2 && PointSlot(1)==4);
+    testSkill=2;CHECK(!RadialUnavailable(pairPed,15,false));
+    CHECK(SetPointSlot(1,15));CHECK(PointSlot(0)==2 && PointSlot(1)==15);
+    SaveSettingsLocked();LoadSettings();CHECK(PointSlot(0)==2 && PointSlot(1)==15);
+    CHECK(FindPointForSlot(2)==0 && FindPointForSlot(15)==1);
+    CHECK(!RadialUnavailable(pairPed,15,true));
+    testSkill=1;CHECK(RadialUnavailable(pairPed,15,false));
+    CHECK(!SetPointSlot(1,15));CHECK(PointSlot(0)==2 && PointSlot(1)==15);
+    testSkill=2;*reinterpret_cast<int*>(pairPed+0x730+2*0x20)=23;
+    CHECK(RadialUnavailable(pairPed,15,false));CHECK(!SetPointSlot(1,15));
+    *reinterpret_cast<int*>(pairPed+0x730+2*0x20)=22;
+    CHECK(SetPointSlot(0,-1));CHECK(PointSlot(0)==-1 && PointSlot(1)==2);
+    Write("p 0 15\np 1 4\n");LoadSettings();CHECK(PointSlot(0)==2 && PointSlot(1)==4);
+    std::puts("PASS: production settings, paired wheel skill/vehicle gates, rejection without changes, paired persistence and removing primary");
 }
 '''
 generated=OUT/'settings.cpp'

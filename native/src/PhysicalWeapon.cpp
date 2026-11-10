@@ -20,6 +20,8 @@
 #include "NpcGrab.h"
 #include "VehicleTestArea.h"
 #include "RadialHolsterMenu.h"
+#include "PairedWeapons.h"
+#include "PhysicalGunCycle.h"
 #include "MissionWeaponGrant.h"
 #include "Basketball.h"
 #include "HandAnimation.h"
@@ -34,7 +36,7 @@
 namespace savr::physicalweapon {
 namespace {
 
-constexpr int   kWeaponSlotCount = 13;
+constexpr int   kWeaponSlotCount = pairedweapon::kSlots;
 constexpr int   kOffWeapons = 0x730;
 constexpr int   kWeaponStride = 0x20;
 constexpr int   kOffActiveWeaponSlot = 0x8DC;
@@ -213,7 +215,7 @@ TrackingPose RawGripFallbackPose(const xr::HandPose& hand) {
 }
 
 bool ValidHand(int hand) { return hand >= 0 && hand < kHandCount; }
-bool ValidSlot(int slot) { return slot > 0 && slot < kWeaponSlotCount; }
+bool ValidSlot(int slot) { return pairedweapon::Valid(slot); }
 
 bool IsTwoHandedWeaponTypeInternal(int weaponType) {
     // Pistols and compact SMGs share the hand-over-hand grip. Long guns keep
@@ -240,13 +242,28 @@ bool IsTwoHandedWeaponTypeInternal(int weaponType) {
 
 int WeaponTypeInSlot(void* ped, int slot) {
     if (ped == nullptr || !ValidSlot(slot)) return 0;
-    const auto* bytes = reinterpret_cast<const std::uint8_t*>(ped);
-    const int type = *reinterpret_cast<const std::int32_t*>(
-        bytes + kOffWeapons + slot * kWeaponStride);
+    if (pairedweapon::Mirror(slot) && !pairedweapon::Enabled(slot)) return 0;
+    const int type = pairedweapon::Type(ped, slot);
     // Native inventory keeps the remote after UseDetonator. Physical ownership
     // exists only while a placed satchel is still active, not while spare C4
     // remains in the inventory. This also excludes grabs and script auto-handoff.
     return type==40 && !throwable::HasLiveSatchels() ? 0 : type;
+}
+
+bool VehicleSidearmWeaponType(int weaponType);
+
+bool PairAllowed(void* ped, int slot) {
+    const int type = pairedweapon::Type(ped,slot);
+    const int skill = ped && g.CPed_GetWeaponSkill ? g.CPed_GetWeaponSkill(ped,type) : -1;
+    const auto* info = skill >= 0 && g.CWeaponInfo_GetWeaponInfo
+        ? static_cast<const std::uint8_t*>(g.CWeaponInfo_GetWeaponInfo(type,static_cast<signed char>(skill))) : nullptr;
+    return info && pairedweapon::Allowed(type,skill,*reinterpret_cast<const unsigned*>(info+0x18));
+}
+
+bool RadialUnavailable(void* ped, int slot, bool inVehicle) {
+    const int type = pairedweapon::Type(ped,slot);
+    return slot >= 0 && ((pairedweapon::Mirror(slot) && !PairAllowed(ped,slot)) ||
+        (inVehicle && type && !VehicleSidearmWeaponType(type)));
 }
 
 bool OwnedConfiguredSlot(void* ped, int slot) {
@@ -262,6 +279,7 @@ int CurrentWeaponSlot(void* ped) {
 
 void SelectCurrentSlot(void* ped, int slot) {
     if (ped == nullptr || !ValidSlot(slot) || g.CPed_SetCurrentWeaponSlot == nullptr) return;
+    slot = pairedweapon::Base(slot);
     if (CurrentWeaponSlot(ped) != slot) g.CPed_SetCurrentWeaponSlot(ped, slot);
 }
 
@@ -337,6 +355,7 @@ void ClearHeldLocked(int hand) {
 
 void ResetRuntimeLocked() {
     gHolsterTrackingReady = false;
+    pairedweapon::Reset();
     gRadialMenu.Cancel();
     gRadialTriggerLatched[0] = gRadialTriggerLatched[1] = true;
     xr::SetRadialHolsterMenu({});
@@ -917,6 +936,18 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         return;
     }
 
+    unsigned pairedMask = 0, capacities[pairedweapon::kNativeSlots]{};
+    for (int point=0; point<holster::PointCount(); ++point) {
+        const int slot=holster::PointSlot(point);
+        if (!pairedweapon::Mirror(slot) || !PairAllowed(ped,slot)) continue;
+        const int base=pairedweapon::Base(slot), type=pairedweapon::Type(ped,slot);
+        const int skill=g.CPed_GetWeaponSkill(ped,type);
+        const auto* info=static_cast<const std::uint8_t*>(g.CWeaponInfo_GetWeaponInfo(type,static_cast<signed char>(skill)));
+        capacities[base]=vrfire::PhysicalMagazineCapacity(*reinterpret_cast<const short*>(info+0x20),*reinterpret_cast<const unsigned*>(info+0x18));
+        pairedMask |= 1u << base;
+    }
+    pairedweapon::Refresh(ped,pairedMask,capacities,
+        g.CTimer_m_snTimeInMilliseconds ? *g.CTimer_m_snTimeInMilliseconds : 0);
     ValidateInventoryLocked(ped);
     if(inVehicle&&!scriptedGunner)for(int h=0;h<kHandCount;++h)
         if(ValidSlot(gHeldSlot[h])&&!VehicleSidearmWeaponType(WeaponTypeInSlot(ped,gHeldSlot[h]))) {ClearHeldLocked(h);SelectCurrentSlot(ped,0);gGripLatched[h]=true;}
@@ -1055,11 +1086,11 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         if (result == radialholster::Result::Selected) {
             const int oldSlot = holster::PointSlot(point);
             const std::uint32_t occupied = OccupiedSlotMaskLocked();
-            const bool oldBusy = ValidSlot(oldSlot) && (occupied & (1u << oldSlot));
+            const bool oldBusy = ValidSlot(oldSlot) && (occupied & ((1u << pairedweapon::Base(oldSlot)) | (1u << (pairedweapon::Base(oldSlot)+pairedweapon::kNativeSlots))));
             const bool newBusy = ValidSlot(selectedSlot) && (occupied & (1u << selectedSlot));
             const int other = holster::FindPointForSlot(selectedSlot);
             if (!oldBusy && !newBusy && (selectedSlot < 0 ||
-                (WeaponTypeInSlot(ped, selectedSlot) && (!inVehicle || VehicleSidearmWeaponType(WeaponTypeInSlot(ped, selectedSlot))) && (other < 0 || other == point))))
+                (pairedweapon::Type(ped, selectedSlot) && !RadialUnavailable(ped,selectedSlot,inVehicle) && (other < 0 || other == point))))
                 holster::SetPointSlot(point, selectedSlot);
         }
     }
@@ -1077,11 +1108,10 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             if (nearest < 0) continue;
             int entries[radialholster::kMaxEntries]{};
             int count = 0;
-            for (int slot = 1; slot < kWeaponSlotCount; ++slot) {
+            for (int slot = 1; slot < pairedweapon::kNativeSlots; ++slot) {
                 if (slot == 10 || slot == 11 || !WeaponTypeInSlot(ped, slot)) continue;
                 const int owner = holster::FindPointForSlot(slot);
-                if (owner >= 0 && owner != nearest) continue;
-                entries[count++] = slot;
+                entries[count++] = owner >= 0 && owner != nearest ? slot + pairedweapon::kNativeSlots : slot;
             }
             entries[count++] = -1;
             gRadialMenu.ObserveReleased(0);
@@ -1101,8 +1131,9 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         std::memcpy(radialFrame.right, gRadialMenu.right, sizeof(radialFrame.right));
         std::memcpy(radialFrame.up, gRadialMenu.up, sizeof(radialFrame.up));
         for (int i = 0; i < radialFrame.count; ++i) {
-            radialFrame.weaponTypes[i] = WeaponTypeInSlot(ped, gRadialMenu.slots[i]);
-            radialFrame.unavailable[i]=inVehicle && radialFrame.weaponTypes[i] && !VehicleSidearmWeaponType(radialFrame.weaponTypes[i]);
+            radialFrame.weaponTypes[i] = pairedweapon::Type(ped, gRadialMenu.slots[i]);
+            radialFrame.slots[i] = gRadialMenu.slots[i];
+            radialFrame.unavailable[i]=RadialUnavailable(ped,gRadialMenu.slots[i],inVehicle);
         }
     }
     xr::SetRadialHolsterMenu(radialFrame);
@@ -1379,6 +1410,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         auto& label=ammoHolsters.markers[ammoHolsters.count++];
         std::memcpy(label.position,anchors[point],sizeof(label.position));
         label.weaponType=WeaponTypeInSlot(ped,slot);
+        label.inventorySlot=slot;
     }
     xr::SetAmmoHolsters(ammoHolsters);
     int markerCount = 0;

@@ -1,4 +1,5 @@
 #include "Holster.h"
+#include "PairedWeapons.h"
 
 #include "Calib.h"
 #include "Jetpack.h"
@@ -24,7 +25,7 @@ constexpr int kEmptySlot = -1;
 // first int32 is m_eWeaponType; zero is unarmed / no weapon in that slot.
 constexpr int kOffWeapons = 0x730;
 constexpr int kWeaponStride = 0x20;
-constexpr int kWeaponSlotCount = 13;
+constexpr int kWeaponSlotCount = pairedweapon::kSlots;
 constexpr int kOffActiveWeaponSlot = 0x8DC;
 
 const char* kSettingsPath =
@@ -74,7 +75,7 @@ bool ValidPoint(int point) { return point >= 0 && point < POINT_COUNT; }
 bool SelectableSlot(int slot) {
     // 9 = the gadget slot (spray can, fire extinguisher, camera): mission
     // items land there and must be reachable from a body point.
-    return slot == kEmptySlot || (slot >= 1 && slot <= 8) ||
+    return pairedweapon::Mirror(slot) || slot == kEmptySlot || (slot >= 1 && slot <= 8) ||
            slot == 9 || slot == 12;
 }
 int WeaponTypeInSlot(void* ped, int slot);
@@ -103,6 +104,13 @@ void AssignPointSlotLocked(int point, int slot) {
     gPointSlots[point].store(slot, std::memory_order_release);
     if (occupiedPoint >= 0)
         gPointSlots[occupiedPoint].store(previous, std::memory_order_release);
+    for (int p = 0; p < 2; ++p) {
+        const int assigned = gPointSlots[p].load(std::memory_order_acquire);
+        if (pairedweapon::Mirror(assigned) &&
+            gPointSlots[1-p].load(std::memory_order_acquire) != pairedweapon::Base(assigned))
+            gPointSlots[p].store(pairedweapon::Base(assigned), std::memory_order_release);
+    }
+
 }
 
 int DefaultPreviewPoint(int slot) {
@@ -234,6 +242,9 @@ void LoadSettings() {
         proposed[point] = slot;
         if (slot >= 0) used[slot] = true;
     }
+    for (int point = 0; point < 2; ++point)
+        if (pairedweapon::Mirror(proposed[point]) && proposed[1-point] != pairedweapon::Base(proposed[point]))
+            proposed[point] = pairedweapon::Base(proposed[point]);
     for (int i = 0; i < POINT_COUNT; ++i)
         gPointSlots[i].store(proposed[i], std::memory_order_release);
     for (int i = 0; i < POINT_COUNT; ++i)
@@ -274,9 +285,7 @@ void SaveSettingsLocked() {
 }
 
 int WeaponTypeInSlot(void* ped, int slot) {
-    if (ped == nullptr || slot <= 0 || slot >= kWeaponSlotCount) return 0;
-    const auto* bytes = reinterpret_cast<const uint8_t*>(ped);
-    return *reinterpret_cast<const int32_t*>(bytes + kOffWeapons + slot * kWeaponStride);
+    return pairedweapon::Type(ped, slot);
 }
 
 }  // namespace
@@ -351,6 +360,7 @@ int FindPointForSlot(int slot) {
 }
 
 const char* SlotName(int slot) {
+    if (pairedweapon::Mirror(slot)) return SlotName(pairedweapon::Base(slot));
     switch (slot) {
         case -1: return "EMPTY";
         case 1:  return "MELEE";
@@ -371,6 +381,15 @@ bool SetPointSlot(int point, int slot) {
     Init();
     if (point < 0 || point >= PointCount() || !SelectableSlot(slot)) return false;
 
+    if (pairedweapon::Mirror(slot)) {
+        void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
+        const int type = pairedweapon::Type(ped, slot);
+        const int skill = ped && g.CPed_GetWeaponSkill ? g.CPed_GetWeaponSkill(ped,type) : -1;
+        const auto* info = g.CWeaponInfo_GetWeaponInfo && skill >= 0
+            ? static_cast<const std::uint8_t*>(g.CWeaponInfo_GetWeaponInfo(type,static_cast<signed char>(skill))) : nullptr;
+        if (PointSlot(1-point) != pairedweapon::Base(slot) || !info ||
+            !pairedweapon::Allowed(type,skill,*reinterpret_cast<const unsigned*>(info+0x18))) return false;
+    }
     std::lock_guard<std::mutex> lock(gSettingsMutex);
     const int previous = gPointSlots[point].load(std::memory_order_acquire);
     if (previous == slot) return true;

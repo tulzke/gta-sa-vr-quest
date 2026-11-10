@@ -121,6 +121,7 @@ std::atomic<int> g_watchMoney{-1};
 std::atomic<float> g_watchHealth{-1}, g_watchArmour{-1};
 std::atomic<int> g_watchWanted{0};
 std::atomic<std::uint64_t> g_ammoHud[64]{};
+std::atomic<std::uint64_t> g_ammoSlotHud[26]{};
 HudTextTexture g_signalTextTexture;
 std::atomic<int> g_signalPercent{-1};
 
@@ -5209,6 +5210,15 @@ void PublishWeaponHud(int wanted, const int types[13], const int clips[13], cons
     for (int i=0;i<64;++i) g_ammoHud[i].store(next[i],std::memory_order_relaxed);
 }
 
+void PublishWeaponSlotHud(const int types[26], const int clips[26], const int totals[26]) {
+    for (int slot=0; slot<26; ++slot) {
+        const bool valid=types[slot]>=16 && types[slot]<=43 && types[slot]!=40;
+        const auto clip=static_cast<std::uint64_t>(std::clamp(clips[slot],0,9999));
+        const auto total=static_cast<std::uint64_t>(std::clamp(totals[slot],0,99999));
+        g_ammoSlotHud[slot].store(valid ? (1ull<<63)|(clip<<32)|total : 0,std::memory_order_relaxed);
+    }
+}
+
 void PublishRadioText(const char* text) {
     std::u16string next;
     if (text) {
@@ -10098,9 +10108,12 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
 
 void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
                    int type, float width, bool backdrop=true, const WeaponAmmoPose* weaponPose=nullptr,
-                   int weaponHand=1) {
+                   int weaponHand=1, int inventorySlot=-1) {
     if (type<0 || type>=64 || (!hud::ShouldRenderWristHud() && !g_calibActive.load(std::memory_order_relaxed))) return;
-    const auto ammo=g_ammoHud[type].load(std::memory_order_relaxed);
+    if (weaponPose) inventorySlot=weaponPose->inventorySlot;
+    const auto ammo=inventorySlot>=0 && inventorySlot<26
+        ? g_ammoSlotHud[inventorySlot].load(std::memory_order_relaxed)
+        : g_ammoHud[type].load(std::memory_order_relaxed);
     if (!(ammo&(1ull<<63))) return;
     const int clip=static_cast<int>((ammo>>32)&0x7fffffffu);
     const int total=static_cast<int>(ammo&0xffffffffu);
@@ -12434,7 +12447,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         if (ammoHolsters.Usable(true,bakedHolsters.epoch)) for (int i=0;i<ammoHolsters.count;++i) {
             const auto& label=ammoHolsters.markers[i];
             XrVector3f at{label.position[0],label.position[1],label.position[2]};
-            DrawAmmoLabel(mvp,rp,vadd(at,lower),label.weaponType,.10f);
+            DrawAmmoLabel(mvp,rp,vadd(at,lower),label.weaponType,.10f,true,nullptr,1,label.inventorySlot);
         }
         if (bakedRadial.visible) for (int i=0;i<bakedRadial.count;++i) {
             const float a=6.28318530718f*i/bakedRadial.count;
@@ -12442,7 +12455,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
             const XrVector3f right{bakedRadial.right[0],bakedRadial.right[1],bakedRadial.right[2]};
             const XrVector3f up{bakedRadial.up[0],bakedRadial.up[1],bakedRadial.up[2]};
             at=vadd(at,vadd(vscale(right,.105f*std::sin(a)),vscale(up,.105f*std::cos(a)-.038f)));
-            DrawAmmoLabel(mvp,rp,at,bakedRadial.weaponTypes[i],.065f,false);
+            DrawAmmoLabel(mvp,rp,at,bakedRadial.weaponTypes[i],.065f,false,nullptr,1,bakedRadial.slots[i]);
         }
     }
     // Riser controls are their own world-space interaction. They must remain

@@ -6,7 +6,7 @@
 
 namespace savr::holstermarker {
 enum class Kind { Grab, Return, Support, Preview, Empty };
-struct Marker { float position[3]{}; Kind kind{Kind::Grab}; bool unavailable{}; float opacity{0.15f}; int weaponType{}; };
+struct Marker { float position[3]{}; Kind kind{Kind::Grab}; bool unavailable{}; float opacity{0.15f}; int weaponType{}; int inventorySlot{-1}; };
 constexpr int kCapacity = 8;
 struct Frame {
     std::array<Marker, kCapacity> markers{};

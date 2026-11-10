@@ -2,6 +2,7 @@
 #include "JustBusiness.h"
 #include "VrFire.h"
 #include "PhysicalGunCycle.h"
+#include "PairedWeapons.h"
 #include "WeaponRecoil.h"
 #include "Catalyst.h"
 
@@ -44,6 +45,7 @@ using WeaponUpdateFn = void (*)(void*, void*);
 WeaponUpdateFn g_origWeaponUpdate{};
 void* g_cyclePed{};
 int g_managedGunType[13]{};
+thread_local int g_directHand = -1;
 thread_local bool g_insideHook = false;
 thread_local bool g_insideScriptedFire = false;
 std::atomic<bool> g_padTriggerDown[2]{};
@@ -177,15 +179,15 @@ void OnWeaponUpdate(void* object, void* ped) {
     if (!g_origWeaponUpdate) return;
     auto* weapon = static_cast<std::uint8_t*>(object);
     if (ped && g.FindPlayerPed && ped == g.FindPlayerPed(-1) &&
-        ped == g_cyclePed && g.CTimer_m_snTimeInMilliseconds) {
+        (ped == g_cyclePed || ped == pairedweapon::owner) && g.CTimer_m_snTimeInMilliseconds) {
         for (int slot = 1; slot < 13; ++slot) {
             if (weapon != static_cast<std::uint8_t*>(ped) + kPedWeaponsOffset +
                           slot * kWeaponStride) continue;
             const int type = *reinterpret_cast<const int*>(weapon);
-            if (g_managedGunType[slot] != type || !SupportedHitscan(type)) break;
+            if ((g_managedGunType[slot] != type && !pairedweapon::Enabled(slot)) || !SupportedHitscan(type)) break;
             auto& state = *reinterpret_cast<std::uint32_t*>(weapon + 4);
             AdvancePhysicalGun(state, *reinterpret_cast<std::uint32_t*>(weapon + 8),
-                *reinterpret_cast<const std::uint32_t*>(weapon + 12),
+                pairedweapon::insideShot ? *reinterpret_cast<const std::uint32_t*>(weapon + 12) : pairedweapon::Available(ped,slot),
                 *reinterpret_cast<const std::uint32_t*>(weapon + 16),
                 *g.CTimer_m_snTimeInMilliseconds, MagazineCapacity(ped, type));
             // Native reloading consults CJ's one shared use-gun animation.
@@ -260,10 +262,8 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
     for (int owner=0;owner<2;++owner) {
         if (!physicalweapon::IsPrimaryDetached(owner)) continue;
         const int slot=physicalweapon::VisualHeldSlot(owner);
-        if (slot<=0 || slot>=13) continue;
-        const auto* bytes=static_cast<const std::uint8_t*>(shooter);
-        const int heldType=*reinterpret_cast<const std::int32_t*>(
-            bytes+kPedWeaponsOffset+static_cast<std::uintptr_t>(slot)*kWeaponStride);
+        if (!pairedweapon::Valid(slot)) continue;
+        const int heldType=pairedweapon::Type(shooter,slot);
         if (heldType==weaponType) {
             if (suppressShot) *suppressShot=true;
             return false;
@@ -1026,20 +1026,27 @@ void Update(bool blocked) {
     const auto saved = active;
     for (int hand = 0; hand < 2; ++hand) {
         const int slot = physicalweapon::HeldSlot(hand);
-        if (slot <= 0 || slot >= 13) {
+        if (!pairedweapon::Valid(slot)) {
             g_directTriggerDown[hand].store(false, std::memory_order_relaxed);
             g_directNextFireMs[hand] = 0;
             g_directWeaponType[hand] = -1;
             g_detonatorReleaseRequired[hand] = true;
             continue;
         }
-        const int type = *reinterpret_cast<const int*>(ped + kPedWeaponsOffset + slot*kWeaponStride);
+        const int type = pairedweapon::Type(ped,slot);
         if (!SupportedDirectFire(type)) continue;
-        active = static_cast<std::int8_t>(slot);
-        UpdateHand(hand);
+        active = static_cast<std::int8_t>(pairedweapon::Base(slot));
+        g_directHand = hand;
+        {
+            pairedweapon::Shot shot(ped,slot);
+            UpdateHand(hand);
+        }
+        g_directHand = -1;
         active = saved;
     }
 }
+
+int DirectFiringHand() { return g_directHand; }
 
 bool Install() {
     if (g_installed.load(std::memory_order_acquire)) return true;

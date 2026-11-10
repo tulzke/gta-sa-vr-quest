@@ -79,9 +79,11 @@ void PublishWeaponHud(int wanted, const int types[13], const int clips[13], cons
 void SetAmmoHolsters(const holstermarker::Frame& frame);
 struct WeaponAmmoPose {
     bool valid{};
+    int inventorySlot{-1};
     float position[3]{}, right[3]{}, forward[3]{}, up[3]{};
 };
 void SetWeaponAmmoPose(int hand, const WeaponAmmoPose& pose);
+void PublishWeaponSlotHud(const int types[26], const int clips[26], const int totals[26]);
 // Transient radio-station line, shown in the TIMERS text layer while the
 // station changes (empty string clears it).
 void PublishRadioText(const char* text);

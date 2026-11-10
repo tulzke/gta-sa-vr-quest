@@ -50,7 +50,8 @@ bool PointGrabbable(int point);        // != OFF
 const char* PointVisibilityName(int point);   // "SHOW" / "HIDE" / "OFF"
 void CyclePointVisibility(int point, int dir);
 
-// Configured SA eWeaponSlot for a body point. -1 means EMPTY.
+// Configured inventory instance: SA slot, or slot+13 for its paired copy.
+// -1 means EMPTY. Native CPed selection always uses the underlying SA slot.
 int PointSlot(int point);
 int FindPointForSlot(int slot);
 const char* SlotName(int slot);
@@ -58,7 +59,7 @@ const char* SlotName(int slot);
 // Assigns EMPTY (-1) or an SA weapon category (slots 1..9 or 12) to a configurable
 // point and persists it. If the requested category already lives on another
 // point, the two point values are swapped in one persisted operation; this keeps the loadout
-// duplicate-free while allowing a weapon to be moved without first clearing
+// duplicate-free (apart from an explicitly skill-gated paired copy) while allowing a weapon to be moved without first clearing
 // its old point. The fixed centre throwable point cannot be changed.
 // Returns false for an invalid/fixed point or an invalid slot.
 bool SetPointSlot(int point, int slot);

@@ -24,6 +24,10 @@ PRELUDE=r"""
 #include <ctime>
 #include <iterator>
 #include "PhysicalGunCycle.h"
+#include "PairedWeapons.h"
+namespace pairedweapon=savr::pairedweapon;
+thread_local int g_directHand=-1;
+namespace vrfire {int DirectFiringHand(){return g_directHand;}}
 using savr::vrfire::AdvancePhysicalGun;
 using savr::vrfire::PhysicalMagazineCapacity;
 #define LOGI(...) ((void)0)
@@ -44,9 +48,9 @@ int ReloadTime(void* ptr){auto* p=static_cast<std::uint8_t*>(ptr);return (*reint
 bool FakeFire(void* object,void*,Vec3* origin,Vec3*,void*,Vec3*,Vec3*){
     auto* p=static_cast<std::uint8_t*>(object); auto& clip=*reinterpret_cast<unsigned*>(p+8);
     auto& total=*reinterpret_cast<unsigned*>(p+12); if(!clip||!total)return false;
-    int hand=object==player+0x730+held[0]*0x20?0:1;
+    int hand=g_directHand;
     Check(origin->x==float(hand+1),"shot uses its own hand ray");
-    Check(player[0x8dc]==held[hand],"native fire sees its own active slot");
+    Check(player[0x8dc]==pairedweapon::Base(held[hand]),"native fire sees its own active slot");
     ++shots[hand]; --clip;--total;
     *reinterpret_cast<unsigned*>(p+4)=clip?1:2;
     *reinterpret_cast<unsigned*>(p+16)=tick+(clip?100:500);return true;
@@ -126,6 +130,38 @@ int main(){
     triggers[0]=triggers[1]=1;int a=shots[0],b=shots[1];Update(true);
     Check(shots[0]==a && shots[1]==b,"blocked gameplay fires neither hand");
     Check(!g_directTriggerDown[0] && !g_directTriggerDown[1],"block resets both latches");
+    // Identical pistols share the original ammo total, but never magazine/state/ray.
+    ResetDirectTrigger();Setup(0,2,22,5,40,34,2000,0x800);held[1]=15;
+    unsigned capacities[13]{};capacities[2]=17;
+    pairedweapon::Refresh(player,1u<<2,capacities);
+    pairedweapon::Field(pairedweapon::copies[2].bytes,8)=1;
+    triggers[0]=triggers[1]=1;tick=4400;a=shots[0];b=shots[1];Update(false);
+    Check(shots[0]==a+1 && shots[1]==b+1,"identical pistols fire from both hand rays");
+    Check(Field(2,8)==4 && pairedweapon::Clip(player,15)==0,"identical magazines remain separate");
+    Check(Field(2,12)==38,"two identical shots consume exactly two original rounds");
+    Check(pairedweapon::Field(pairedweapon::copies[2].bytes,4)==2,"mirror reload belongs to mirror");
+    Check(Field(2,4)==1,"mirror reload leaves primary firing state alone");
+    Check(pairedweapon::Field(pairedweapon::copies[2].bytes,16)==6400,"mirror keeps its own reload deadline");
+    triggers[0]=triggers[1]=0;tick=4600;Update(false);
+    triggers[0]=1;tick=4800;Update(false);
+    Check(shots[0]==a+2 && shots[1]==b+1,"primary fires while identical mirror reloads");
+    Check(Field(2,12)==37,"primary shot preserves shared reserve during mirror reload");
+    triggers[0]=0;tick=6500;Update(false);
+    Check(pairedweapon::Clip(player,15)==17 && Field(2,8)==3,"mirror refill does not overwrite primary clip");
+    Check(Field(2,12)==37,"reload never creates or consumes total ammo");
+    Check(pairedweapon::Available(player,15)==34 && pairedweapon::Available(player,2)==20,
+          "each counter excludes the opposite magazine");
+    pairedweapon::Field(pairedweapon::copies[2].bytes,8)=0;
+    pairedweapon::Field(pairedweapon::copies[2].bytes,4)=2;
+    pairedweapon::Field(pairedweapon::copies[2].bytes,16)=7000;
+    pairedweapon::Refresh(player,1u<<2,capacities,7100);
+    Check(pairedweapon::Clip(player,15)==17 && Field(2,12)==37,
+          "holstered mirror completes its own reload without changing total");
+    pairedweapon::Refresh(player,0,capacities);
+    Check(Field(2,12)==37 && pairedweapon::Clip(player,15)==0,"disabling pair preserves all original ammo");
+    Check(!pairedweapon::Allowed(22,1,0x800) && !pairedweapon::Allowed(22,0,0x800),"low skills cannot choose paired pistol");
+    Check(pairedweapon::Allowed(22,2,0x800),"native twin pistol skill permits pairing");
+    Check(!pairedweapon::Allowed(23,2,0x800) && !pairedweapon::Allowed(31,2,0x800),"unsupported weapons cannot form pairs");
     unsigned state=2,clip=0;AdvancePhysicalGun(state,clip,20,0xfffffff0u,5,17);
     Check(state==0 && clip==17,"reload deadline supports timer wrap");
     Check(PhysicalMagazineCapacity(2,0x800)==1,"single sawn-off uses one half of twin capacity");

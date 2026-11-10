@@ -27,6 +27,7 @@
 #include "RenderDiagnostics.h"
 #include "PerfTelemetry.h"
 #include "PhysicalWeapon.h"
+#include "PairedWeapons.h"
 #include "Melee.h"
 #include "Combat.h"
 #include "TrackingRecovery.h"
@@ -2652,15 +2653,14 @@ struct HolsterModelCache {
     void* modelInfo{};
     void* clump{};
 };
-constexpr int kWeaponSlotCount = 13;
+constexpr int kWeaponSlotCount = pairedweapon::kSlots;
 constexpr int kOffWeapons = 0x730;
 constexpr int kWeaponStride = 0x20;
 HolsterModelCache g_weaponModels[kWeaponSlotCount]{};
 
 int WeaponTypeInSlot(void* ped, int slot) {
-    if (!ped || slot <= 0 || slot >= kWeaponSlotCount) return 0;
-    return *reinterpret_cast<const std::int32_t*>(
-        reinterpret_cast<const char*>(ped) + kOffWeapons + slot * kWeaponStride);
+    if (pairedweapon::Mirror(slot) && !pairedweapon::Enabled(slot)) return 0;
+    return pairedweapon::Type(ped,slot);
 }
 
 void ReleaseHolsterModel(HolsterModelCache& cache) {
@@ -21619,6 +21619,7 @@ void OnRenderScene(bool underwater) {
                 physicalweapon::PublishHeldVisualPoseTracking(hand, slot, &finalPose);
                 xr::WeaponAmmoPose ammoPose{};
                 ammoPose.valid=true;
+                ammoPose.inventorySlot=slot;
                 std::memcpy(ammoPose.position,finalPose.position,sizeof(ammoPose.position));
                 std::memcpy(ammoPose.right,finalPose.right,sizeof(ammoPose.right));
                 std::memcpy(ammoPose.forward,finalPose.forward,sizeof(ammoPose.forward));
@@ -21646,7 +21647,7 @@ void OnRenderScene(bool underwater) {
             if (!holster::PointVisible(point)) continue;
             const int slot = holster::PointSlot(point);
             if (havePreview && point == previewPoint) continue;
-            if (slot <= 0 || slot >= 13) {
+            if (!pairedweapon::Valid(slot)) {
                 continue;
             }
             const int weaponType = WeaponTypeInSlot(playerPed, slot);

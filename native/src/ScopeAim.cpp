@@ -3,6 +3,7 @@
 
 #include "Log.h"
 #include "PhysicalWeapon.h"
+#include "PairedWeapons.h"
 #include "Symbols.h"
 #include "VrCamera.h"
 #include "Xr.h"
@@ -154,10 +155,7 @@ bool CoreReady() {
 }
 
 int WeaponTypeInSlot(void* ped, int slot) {
-    if (!ped || slot <= 0 || slot >= kWeaponSlots) return -1;
-    const auto* bytes = static_cast<const std::uint8_t*>(ped);
-    return *reinterpret_cast<const std::int32_t*>(
-        bytes + kOffWeapons + slot * kWeaponStride);
+    return pairedweapon::Valid(slot) ? pairedweapon::Type(ped,slot) : -1;
 }
 
 void ResetCandidate() {

@@ -38,6 +38,7 @@
 #include "BrainDiag.h"
 #include "Pickups.h"
 #include "PhysicalWeapon.h"
+#include "PairedWeapons.h"
 #include "ScopeAim.h"
 #include "Symbols.h"
 #include "Throwable.h"
@@ -164,10 +165,10 @@ bool QueryPhysicalFireHand(int weaponType, int* firingHand) {
     void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
     if (!ped) return false;
     for (int hand = 0; hand < physicalweapon::kHandCount; ++hand) {
+        if (vrfire::DirectFiringHand() >= 0 && vrfire::DirectFiringHand() != hand) continue;
         const int slot = physicalweapon::HeldSlot(hand);
-        if (slot <= 0 || slot >= 13) continue;
-        const int heldType = *reinterpret_cast<const std::int32_t*>(
-            reinterpret_cast<const std::uint8_t*>(ped) + 0x730 + slot * 0x20);
+        if (!pairedweapon::Valid(slot)) continue;
+        const int heldType = pairedweapon::Type(ped,slot);
         if (heldType != weaponType) continue;
         *firingHand = hand;
         return true;
@@ -970,18 +971,19 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     xr::PublishWatch(clockHours && watchPed ? *clockHours : -1,
                      clockMinutes && watchPed ? *clockMinutes : -1,
                      watchHealth, watchArmour, watchMoney);
-    int wantedLevel=0, ammoTypes[13]{}, ammoClips[13]{}, ammoTotals[13]{};
+    int wantedLevel=0, ammoTypes[26]{}, ammoClips[26]{}, ammoTotals[26]{};
     if (watchPed) {
         void* wanted=g.FindPlayerWanted?g.FindPlayerWanted(0):nullptr;
         if (wanted) std::memcpy(&wantedLevel,static_cast<const char*>(wanted)+0x2c,4);
-        for (int i=0;i<13;++i) {
-            const char* weapon=static_cast<const char*>(watchPed)+0x730+i*0x20;
-            std::memcpy(&ammoTypes[i],weapon,4);
-            std::memcpy(&ammoClips[i],weapon+8,4);
-            std::memcpy(&ammoTotals[i],weapon+12,4);
+        for (int i=1;i<pairedweapon::kSlots;++i) {
+            if (!pairedweapon::Valid(i) || (pairedweapon::Mirror(i) && !pairedweapon::Enabled(i))) continue;
+            ammoTypes[i]=pairedweapon::Type(watchPed,i);
+            ammoClips[i]=static_cast<int>(pairedweapon::Clip(watchPed,i));
+            ammoTotals[i]=static_cast<int>(pairedweapon::Available(watchPed,i));
         }
     }
     xr::PublishWeaponHud(wantedLevel,ammoTypes,ammoClips,ammoTotals);
+    xr::PublishWeaponSlotHud(ammoTypes,ammoClips,ammoTotals);
     if (g.implOnGamepadAxesChanged == nullptr) {
         return;
     }

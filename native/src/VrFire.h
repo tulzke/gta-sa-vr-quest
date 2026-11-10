@@ -21,5 +21,7 @@ bool Install();
 // GameThread owner for both physical guns, each with its own trigger and ray.
 // Native CWeapon owns ammo/sound; per-slot clocks replace shared CJ reload tasks.
 void Update(bool blocked);
+// Synchronous native-shot context, -1 outside the two-hand firing loop.
+int DirectFiringHand();
 
 } // namespace savr::vrfire
