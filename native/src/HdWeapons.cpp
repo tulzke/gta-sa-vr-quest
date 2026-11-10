@@ -13,6 +13,7 @@
 // removing the files restores the original look.
 #include "HdWeapons.h"
 #include "PngRasterUpload.h"
+#include "StreamingBuffer.h"
 #include <dlfcn.h>
 
 #include <atomic>
@@ -308,24 +309,27 @@ void Apply() {
             LOGI("[hdweapons] fire_ex=366 compatibility: main archive retained");
             continue;
         }
-        // SA streams a model across BOTH halves of the double buffer, so the
-        // largest single model it can load is 2 * ms_streamingBufferSize. A DFF
-        // bigger than that cannot be read and corrupts adjacent engine memory
-        // (crash surfaces later, e.g. CWorld::Process / AddEventsToPed). Keep
-        // the ORIGINAL model for any such oversized HD DFF. Models up to the 2x
-        // limit stream fine (double-buffered), matching what the engine does
-        // for the base archive.
-        if (g.CStreaming_ms_streamingBufferSize &&
-            entry.sizeSectors > 2 * *g.CStreaming_ms_streamingBufferSize) {
+        // HD M4 exceeds the retail buffer. Grow the actual aligned allocation,
+        // not just its size counter; drain channels before replacing it.
+        const int previousBuffer = g.CStreaming_ms_streamingBufferSize
+            ? *g.CStreaming_ms_streamingBufferSize : 0;
+        if (!streamingbuffer::Ensure(entry.sizeSectors,
+                g.CStreaming_ms_streamingBufferSize, g.CStreaming_ms_pStreamingBuffer,
+                g.CMemoryMgr_MallocAlign, g.CMemoryMgr_FreeAlign, g.CStreaming_FlushChannels)) {
             ++oversized;
             if (missingLen < static_cast<int>(sizeof(missingNames)) - 48) {
                 missingLen += std::snprintf(missingNames + missingLen,
                                             sizeof(missingNames) - missingLen,
                                             " %s=%dsec>buf%d", base,
                                             entry.sizeSectors,
-                                            *g.CStreaming_ms_streamingBufferSize);
+                                            previousBuffer);
             }
             continue;
+        }
+        if (previousBuffer != *g.CStreaming_ms_streamingBufferSize) {
+            channelsFlushed = true;
+            LOGI("[hdweapons] streaming buffer grown %d -> %d sectors per half",
+                 previousBuffer, *g.CStreaming_ms_streamingBufferSize);
         }
         std::uint8_t* info = g.CStreaming_ms_aInfoForModel +
             static_cast<std::size_t>(modelId) * kInfoStride;

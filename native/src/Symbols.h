@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 
 namespace savr {
 
@@ -293,10 +294,12 @@ struct GameSymbols {
     // CEntity::m_nModelIndex (u16 at +0x32) is 0 — the player model.
     std::uint8_t* CCutsceneMgr_ms_pCutsceneObjects;
     std::int32_t* CCutsceneMgr_ms_numCutsceneObjs;
-    // Per-model streaming read buffer size (sectors). A model larger than this
-    // overflows ms_pStreamingBuffer when streamed. LoadCdDirectory grows it at
-    // boot for the base archive; direct HD repoints must respect the value.
+    // Streaming half-buffer size in sectors; large models span both halves.
+    // Init2 allocates one aligned block after scanning the retail directories.
     std::int32_t* CStreaming_ms_streamingBufferSize;
+    std::uint8_t** CStreaming_ms_pStreamingBuffer;
+    void* (*CMemoryMgr_MallocAlign)(std::size_t bytes, std::size_t alignment);
+    void (*CMemoryMgr_FreeAlign)(void* buffer);
     void* (*CClumpModelInfo_CreateInstance)(void* modelInfo);
     void  (*CBaseModelInfo_AddRef)(void* modelInfo);
     void  (*CBaseModelInfo_RemoveRef)(void* modelInfo);
