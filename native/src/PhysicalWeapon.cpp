@@ -88,6 +88,7 @@ std::atomic<unsigned int> gHeldMaskRelaxed{0};
 int gSupportHand[kHandCount] = {-1, -1};
 bool gGripLatched[kHandCount]{};
 bool gAwaitFirstGrip[kHandCount]{};
+bool gDisarmCatchBlocked[kHandCount]{};
 int gLastObservedActiveSlot = -1;
 bool gWasScriptedWeaponCamera = false;
 bool gHolsterTrackingReady = false;
@@ -336,6 +337,7 @@ void ResetRuntimeLocked() {
         gSupportHand[hand] = -1;
         gGripLatched[hand] = false;
         gAwaitFirstGrip[hand] = false;
+        gDisarmCatchBlocked[hand] = false;
         gHands[hand] = xr::HandPose{};
         gHandVelocity[hand] = {};
         gHandAngularVelocity[hand] = {};
@@ -463,6 +465,7 @@ void UpdateHandVelocityLocked(double now) {
 
 void GiveToHandLocked(void* ped, int hand, int slot, const char* reason) {
     if (!ValidHand(hand) || !ValidSlot(slot)) return;
+    gDisarmCatchBlocked[hand]=false;
     ClearSupportForHandLocked(hand);
     gHeldSlot[hand] = slot;
     gAwaitFirstGrip[hand] = false;
@@ -1161,9 +1164,14 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                  modelDistance, handleDistance);
         }
 
+        // Recoil-ejected weapons cannot snap back into the same still-closed
+        // hand. A deliberate release restores catching; the other hand is free.
+        for(int h=0;h<kHandCount;++h)
+            if(gHands[h].valid && gHands[h].grip<=kGripOpen)gDisarmCatchBlocked[h]=false;
         // A flying weapon can be caught by either free, closed hand.
         for (int receiver = 0; receiver < kHandCount; ++receiver) {
             if (ValidSlot(gHeldSlot[receiver]) || !gHands[receiver].valid ||
+                gDisarmCatchBlocked[receiver] ||
                 IsSupportHandLocked(receiver) ||
                 (handledHands & (1u << receiver)) != 0 ||
                 gHands[receiver].grip < kGripCatch ||
@@ -1728,6 +1736,33 @@ float FireTrigger() {
     // the legacy rocket-camera task as a second competing fire path.
     if (weaponType == 35 || weaponType == 36) return 0.0f;
     return std::clamp(gHands[hand].trigger, 0.0f, 1.0f);
+}
+
+bool DisarmAfterShot(int hand,int slot,int weaponType,float angularImpulse) {
+    void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    std::lock_guard<std::mutex> lock(gMutex);
+    if(!ped || !ValidHand(hand) || !ValidSlot(slot) || gInteractionsBlocked ||
+       gHeldSlot[hand]!=slot || WeaponTypeInSlot(ped,slot)!=weaponType ||
+       ValidHand(gSupportHand[hand]) || !gHands[hand].valid)return false;
+    StartDropLocked(hand,slot,NowSeconds());
+    auto& dropped=gDropped[hand];
+    const recoil::Vec barrel=recoil::Unit(recoil::Read(dropped.startPose.right));
+    const auto frame=recoil::Build({.1f,0,0},dropped.startPose.right,
+                                   dropped.startPose.forward,dropped.startPose.position);
+    const float strength=std::clamp(angularImpulse/(30.f*recoil::kRad),.6f,1.8f);
+    dropped.velocity=Add(dropped.velocity,{-barrel.x*strength,1.6f*strength-barrel.y*strength,-barrel.z*strength});
+    const float speed=Length(dropped.velocity);
+    if(speed>kMaximumThrowSpeed)dropped.velocity=Scale(dropped.velocity,kMaximumThrowSpeed/speed);
+    dropped.angularAxis={frame.pitchAxis.x,frame.pitchAxis.y,frame.pitchAxis.z};
+    dropped.angularSpeed=6.f*strength;
+    ClearHeldLocked(hand);
+    gDisarmCatchBlocked[hand]=true;
+    gGripLatched[hand]=true;
+    gHeldMaskRelaxed.fetch_and(~(1u<<hand),std::memory_order_relaxed);
+    const int other=AnyHeldHandLocked();
+    SelectCurrentSlot(ped,ValidHand(other)?gHeldSlot[other]:0);
+    LOGI("[physwpn] recoil disarmed type=%d slot=%d hand=%d",weaponType,slot,hand);
+    return true;
 }
 
 void ReleaseAfterUse(int hand, int slot) {

@@ -13,6 +13,7 @@ struct Profile {
 };
 struct Tuning {
     float verticalDegrees{}, horizontalDegrees{1.9f}, shoulderMm{2.f}, supportReductionPercent{65.f};
+    bool disarmOneHanded{};
 };
 struct Shape {float kick,limit;};
 inline Shape WeaponShape(int type) {
@@ -34,7 +35,7 @@ inline Shape WeaponShape(int type) {
 inline Tuning Defaults(int type,int skill=0) {
     const float mastery=1.f-.2f*std::clamp(skill,0,2);
     return {std::round(WeaponShape(type).kick*50.f*mastery)*.1f,
-            std::round(19.f*mastery)*.1f,std::round(20.f*mastery)*.1f,65.f};
+            std::round(19.f*mastery)*.1f,std::round(20.f*mastery)*.1f,65.f,type==25};
 }
 inline Tuning Sanitize(Tuning t,int type,int skill=0) {
     const Tuning fallback=Defaults(type,skill);
@@ -44,7 +45,7 @@ inline Tuning Sanitize(Tuning t,int type,int skill=0) {
     return {clamp(t.verticalDegrees,fallback.verticalDegrees,45.f),
             clamp(t.horizontalDegrees,fallback.horizontalDegrees,20.f),
             clamp(t.shoulderMm,fallback.shoulderMm,50.f),
-            clamp(t.supportReductionPercent,fallback.supportReductionPercent,100.f)};
+            clamp(t.supportReductionPercent,fallback.supportReductionPercent,100.f),t.disarmOneHanded};
 }
 inline Profile ForWeapon(int type, bool support, int level,Tuning tuning) {
     if (!Supported(type) || level <= 0) return {};

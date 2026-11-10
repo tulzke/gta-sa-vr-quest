@@ -57,6 +57,11 @@ bool GetInteractionTrackingSnapshot(float*,float*,xr::HandPose* p,std::uint64_t*
 bool IsPrimaryDetached(int h){return detached[h];}
 int HeldSlot(int h){return detached[h]?-1:slots[h];}
 int SupportHand(int h){return support[h];}
+int disarmCalls[2]{};
+bool DisarmAfterShot(int h,int slot,int type,float impulse){
+ assert(slots[h]==slot && inventory[0x730/4+slot*8]==type);
+ assert(impulse>=0);++disarmCalls[h];recoil::Invalidate(h);return true;
+}
 }
 }
 ''' + runtime + r'''
@@ -83,6 +88,16 @@ int main(){
  inventory[0x730/4+5*8]=31;step();assert(Snapshot(1,31).pitch==0);
  OnShot(1,30,0);step();assert(Snapshot(1,31).pitch==0); // stale shot identity
  OnShot(1,31,0);step();assert(Snapshot(1,31).pitch>0);
+ inventory[0x730/4+2*8]=25;step();
+ OnShot(0,25,0);assert(physicalweapon::disarmCalls[0]==0);
+ FinishShots();assert(physicalweapon::disarmCalls[0]==1); // deferred until native fire returned
+ FinishShots();assert(physicalweapon::disarmCalls[0]==1); // one request, not one per pellet
+ step();physicalweapon::support[0]=1;step();OnShot(0,25,0);FinishShots();
+ assert(physicalweapon::disarmCalls[0]==1);
+ physicalweapon::support[0]=-1;step();calib::tuning[25][0].disarmOneHanded=false;
+ OnShot(0,25,0);FinishShots();assert(physicalweapon::disarmCalls[0]==1);
+ calib::tuning[25][0].disarmOneHanded=true;OnShot(0,25,0);Invalidate(0);FinishShots();
+ assert(physicalweapon::disarmCalls[0]==1);
  calib::level=0;step();assert(Snapshot(1,31).pitch==0);
  calib::level=2;step();OnShot(1,31,0);step();testTime+=1;step();
  assert(Snapshot(1,31).pitch==0);
@@ -152,6 +167,16 @@ int main(){
  assert(std::isfinite(tec.verticalDegrees) && std::isfinite(tec.supportReductionPercent));
  {std::ofstream f("recoil-calib.ini");f<<"recoil_weapon 22 1 2\nrecoil_weapon 80 1 2 3 4\n";}
  Init();assert(SnapshotRecoil(22).verticalDegrees==savr::recoil::Defaults(22).verticalDegrees);
+ // Old four-component rows retain the shotgun's default disarm. Explicit
+ // per-skill ON/OFF survives save/load and is independent of row order.
+ {std::ofstream f("recoil-calib.ini");
+  f<<"recoil_one_hand_disarm 25 1 0\nrecoil_weapon_skill 25 1 38 12 6 95\n";}
+ Init();assert(SnapshotRecoil(25,0).disarmOneHanded);
+ assert(!SnapshotRecoil(25,1).disarmOneHanded);
+ assert(!SnapshotRecoil(22,0).disarmOneHanded);
+ auto shotgun=SnapshotRecoil(25,2);shotgun.disarmOneHanded=false;
+ SetRecoilTuning(25,shotgun,2);Init();
+ assert(!SnapshotRecoil(25,2).disarmOneHanded && SnapshotRecoil(25,0).disarmOneHanded);
 }
 '''
 setting_file = OUT/'settings.cpp'
@@ -202,3 +227,86 @@ int main(){
 feedback_file = OUT/'feedback.cpp'
 feedback_file.write_text(feedback, encoding='utf8')
 compile_run(feedback_file, 'recoil-base-feedback')
+
+# Compile the production ejection and catch paths together. Engine access and
+# tracked poses are mocked, but the release trajectory, ownership guards and
+# deliberate re-grip behavior below are the actual gameplay implementation.
+disarm = r'''
+#include "PhysicalWeapon.h"
+#include "RecoilModel.h"
+#include <atomic>
+#include <cassert>
+#include <mutex>
+#define LOGI(...) ((void)0)
+namespace disarm_test {
+using savr::physicalweapon::TrackingPose;
+namespace recoil=savr::recoil;
+constexpr int kHandCount=2;
+constexpr float kMaximumThrowSpeed=6,kReleaseUpwardImpulse=1,kGripOpen=.2f,kGripCatch=.7f,kCatchRadius=.2f;
+struct V3{float x{},y{},z{};};
+V3 Add(V3 a,V3 b){return{a.x+b.x,a.y+b.y,a.z+b.z};}
+V3 Scale(V3 a,float s){return{a.x*s,a.y*s,a.z*s};}
+float Length(V3 a){return std::sqrt(a.x*a.x+a.y*a.y+a.z*a.z);}
+float Distance(V3 a,V3 b){return Length(Add(a,Scale(b,-1)));}
+struct Hand{bool valid=true;float grip=1;float position[3]{};}gHands[2];
+struct DroppedWeapon{int slot=-1;TrackingPose startPose{};V3 velocity{},angularAxis{};float angularSpeed{};double startedAt{};}gDropped[2];
+std::mutex gMutex;bool gInteractionsBlocked{},gDualHoldEnabled=true,gGripLock=true;
+int gHeldSlot[2]{-1,-1},gSupportHand[2]{-1,-1},gHeldVisualSlot[2]{3,3};
+bool gHeldVisualValid[2]{true,true},gDisarmCatchBlocked[2]{},gGripLatched[2]{};
+TrackingPose gHeldVisualPose[2]{};V3 gHandVelocity[2]{},gHandAngularVelocity[2]{};
+std::atomic<unsigned>gHeldMaskRelaxed{};
+int slotType[13]{},selectedSlot=-1,caught{};
+void* Find(int){return slotType;}struct{void*(*FindPlayerPed)(int)=Find;}g;
+bool ValidHand(int h){return h>=0&&h<2;}
+bool ValidSlot(int s){return s>0&&s<13;}
+bool IsSupportHandLocked(int h){return gSupportHand[1-h]==h;}
+int AnyHeldHandLocked(){return ValidSlot(gHeldSlot[0])?0:ValidSlot(gHeldSlot[1])?1:-1;}
+int WeaponTypeInSlot(void*,int slot){return slotType[slot];}
+double NowSeconds(){return 1;}
+V3 PositionOf(const TrackingPose& p){return{p.position[0],p.position[1],p.position[2]};}
+V3 GripPosition(const Hand& h){return{h.position[0],h.position[1],h.position[2]};}
+TrackingPose RawGripFallbackPose(const Hand&){return {};}
+void ClearHeldLocked(int h){gHeldSlot[h]=-1;}
+void SelectCurrentSlot(void*,int s){selectedSlot=s;}
+void GiveToHandLocked(void*,int h,int slot,const char*){gHeldSlot[h]=slot;gDisarmCatchBlocked[h]=false;++caught;}
+bool DroppedPoseAtLocked(int h,double,TrackingPose* out){
+ if(!ValidSlot(gDropped[h].slot))return false;*out=gDropped[h].startPose;return true;
+}
+'''
+disarm += function(physical, 'void StartDropLocked(')
+disarm += function(physical, 'bool DisarmAfterShot(')
+catch_start = physical.index('// Recoil-ejected weapons cannot snap back')
+catch_end = physical.index('// Release returns at the matching socket', catch_start)
+disarm += 'void CatchTick(){void* ped=Find(-1);double now=1;unsigned handledHands=0;\n'
+disarm += physical[catch_start:catch_end] + '\n}\n}\n'
+disarm += r'''
+int main(){
+ using namespace disarm_test;
+ slotType[3]=25;
+ for(int hand:{0,1}){
+  for(int h:{0,1}){gHands[h]={};gHands[h].valid=h==hand;gHeldSlot[h]=-1;
+    gDropped[h]={};gSupportHand[h]=-1;gDisarmCatchBlocked[h]=false;}
+  gHeldSlot[hand]=3;gHeldMaskRelaxed=1u<<hand;
+  assert(DisarmAfterShot(hand,3,25,.8f));
+  assert(gGripLock && gHeldSlot[hand]==-1 && gDropped[hand].slot==3);
+  assert(gDisarmCatchBlocked[hand] && gGripLatched[hand]);
+  assert(gHeldMaskRelaxed==0 && selectedSlot==0);
+  assert(gDropped[hand].velocity.y>1 && gDropped[hand].velocity.x<0);
+  assert(gDropped[hand].angularSpeed>0);
+  const int old=caught;
+  CatchTick();assert(caught==old); // closed grip cannot immediately recatch
+  gHands[hand].grip=0;CatchTick();assert(!gDisarmCatchBlocked[hand] && caught==old);
+  gHands[hand].grip=1;CatchTick();assert(caught==old+1 && gHeldSlot[hand]==3);
+ }
+ gHeldSlot[0]=3;gHands[0].valid=true;gSupportHand[0]=1;
+ assert(!DisarmAfterShot(0,3,25,.8f));assert(gHeldSlot[0]==3);
+ gSupportHand[0]=-1;gInteractionsBlocked=true;
+ assert(!DisarmAfterShot(0,3,25,.8f));gInteractionsBlocked=false;
+ assert(!DisarmAfterShot(0,3,26,.8f));
+ assert(!DisarmAfterShot(0,2,25,.8f));
+ gHands[0].valid=false;assert(!DisarmAfterShot(0,3,25,.8f));
+}
+'''
+disarm_file=OUT/'disarm.cpp'
+disarm_file.write_text(disarm,encoding='utf8')
+compile_run(disarm_file,'recoil-disarm')

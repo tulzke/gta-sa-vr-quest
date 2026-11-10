@@ -248,13 +248,22 @@ void Init() {
     bool anyTypedLockSeen = false;
     bool legacyLaserLocked = false;
     while (std::fgets(line, sizeof(line), f)) {
+        int disarmType{},disarmSkill{},disarm{};
+        if(std::sscanf(line,"recoil_one_hand_disarm %d %d %d",&disarmType,&disarmSkill,&disarm)==3){
+            if(recoil::Supported(disarmType) && disarmSkill>=0 && disarmSkill<3)
+                g_recoilTuning[disarmType][disarmSkill].disarmOneHanded=disarm!=0;
+            continue;
+        }
         int recoilType{},recoilSkill{};recoil::Tuning recoilTuning;
         if(std::sscanf(line,"recoil_weapon_skill %d %d %f %f %f %f",&recoilType,&recoilSkill,
             &recoilTuning.verticalDegrees,&recoilTuning.horizontalDegrees,
             &recoilTuning.shoulderMm,&recoilTuning.supportReductionPercent)==6) {
             if(recoilType>=0 && recoilType<kMaxWeapons && recoil::Supported(recoilType) &&
                recoilSkill>=0 && recoilSkill<3)
+            {
+                recoilTuning.disarmOneHanded=g_recoilTuning[recoilType][recoilSkill].disarmOneHanded;
                 g_recoilTuning[recoilType][recoilSkill]=recoil::Sanitize(recoilTuning,recoilType,recoilSkill);
+            }
             continue;
         }
         // Compatibility for the earlier weapon-only format, if present.
@@ -263,7 +272,10 @@ void Init() {
             &recoilTuning.shoulderMm,&recoilTuning.supportReductionPercent)==5) {
             if(recoilType>=0 && recoilType<kMaxWeapons && recoil::Supported(recoilType))
                 for(int skill=0;skill<3;++skill)
+                {
+                    recoilTuning.disarmOneHanded=g_recoilTuning[recoilType][skill].disarmOneHanded;
                     g_recoilTuning[recoilType][skill]=recoil::Sanitize(recoilTuning,recoilType,skill);
+                }
             continue;
         }
         int opticSet{}, opticType{};
@@ -403,6 +415,7 @@ void Save() {
         const auto& t=g_recoilTuning[type][skill];
         std::fprintf(f,"recoil_weapon_skill %d %d %.1f %.1f %.1f %.1f\n",type,skill,
             t.verticalDegrees,t.horizontalDegrees,t.shoulderMm,t.supportReductionPercent);
+        std::fprintf(f,"recoil_one_hand_disarm %d %d %d\n",type,skill,t.disarmOneHanded?1:0);
     }
     // Retain the compatibility row for readers that do not support per-weapon state.
     std::fprintf(f, "laser_locked %d\n", LaserLocked() ? 1 : 0);

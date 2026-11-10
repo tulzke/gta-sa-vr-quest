@@ -9,7 +9,7 @@
 namespace savr::recoil {
 namespace {
 std::mutex mutex;
-struct Record { State state{}; int type{},slot{-1}; bool supported{}; } hands[2];
+struct Record { State state{}; int type{},slot{-1}; bool supported{},pendingDisarm{}; float impulse{}; } hands[2];
 double previousTime{};
 std::uint64_t previousEpoch{};
 double Now(){timespec t{};clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
@@ -59,6 +59,24 @@ void OnShot(int hand,int type,int skill){
     auto& r=hands[hand];
     if(r.type!=type || r.slot<=0)return;
     r.state.Shot(ForWeapon(type,r.supported,calib::PhysicalRecoilLevel(),tuning));
+    if(tuning.disarmOneHanded && !r.supported){
+        r.pendingDisarm=true;
+        r.impulse=ForWeapon(type,false,calib::PhysicalRecoilLevel(),tuning).kick;
+    }
+}
+void FinishShots(){
+    struct Request{int slot{-1},type{};float impulse{};} pending[2];
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for(int h=0;h<2;++h)if(hands[h].pendingDisarm){
+            pending[h]={hands[h].slot,hands[h].type,hands[h].impulse};
+            hands[h].pendingDisarm=false;
+        }
+    }
+    // Disarm clears physical ownership, which calls Invalidate back into us.
+    // The recoil mutex must be released before entering PhysicalWeapon.
+    for(int h=0;h<2;++h)if(pending[h].slot>0)
+        physicalweapon::DisarmAfterShot(h,pending[h].slot,pending[h].type,pending[h].impulse);
 }
 Sample Snapshot(int hand,int type){
     if(hand<0 || hand>1)return {};

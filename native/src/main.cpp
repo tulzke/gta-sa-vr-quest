@@ -1345,6 +1345,13 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             } else if (fieldRow == 23) {                           // TRACER COLOR
                 if (enter) vrcam::AdjustTracerColorMode(+1);
                 else if (firstTick) vrcam::AdjustTracerColorMode(dir);
+            } else if (fieldRow == 43) {
+                if(enter || firstTick){
+                    const int skill=savr::calib::RecoilEditingSkill();
+                    auto tuning=savr::calib::SnapshotRecoil(type,skill);
+                    tuning.disarmOneHanded=enter?!tuning.disarmOneHanded:dir>0;
+                    savr::calib::SetRecoilTuning(type,tuning,skill);
+                }
             } else if (fieldRow == 41) {
                 if(enter)savr::calib::CycleRecoilEditingSkill(1);
                 else if(firstTick)savr::calib::CycleRecoilEditingSkill(dir);
@@ -2027,6 +2034,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         savr::recoil::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::scopeaim::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::vrfire::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
+        savr::recoil::FinishShots();
         savr::throwable::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::physicalweapon::EnforceBikeWeaponLimit();
         savr::physicalweapon::AutoEquipParachute();

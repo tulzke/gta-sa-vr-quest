@@ -82,7 +82,10 @@ int main(){
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,1)==42);
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,2)==36);
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,3)==37);
-    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,7)==22);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,7)==43);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,8)==22);
+    assert(Defaults(25,0).disarmOneHanded && Defaults(25,2).disarmOneHanded);
+    assert(!Defaults(22).disarmOneHanded && !Defaults(38).disarmOneHanded);
     // Each component can be disabled independently; no zero-envelope division
     // may turn shoulder-only or horizontal-only recoil into NaNs or silence.
     for(int component=0;component<3;++component){

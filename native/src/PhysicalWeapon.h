@@ -169,6 +169,9 @@ float FireTrigger();
 // available the same inventory slot becomes visible at its holster again. This
 // is not a generic grip release and never creates a flying weapon-model record.
 void ReleaseAfterUse(int hand, int slot);
+// Recoil ejection after a confirmed shot: bypass Grip Lock, preserve inventory,
+// and require grip release before this hand can catch again. Support prevents it.
+bool DisarmAfterShot(int hand,int slot,int weaponType,float angularImpulse);
 
 // reference Quest build WeaponGripLock semantics: releasing away from the assigned socket keeps
 // the weapon held; releasing at the socket still returns it. Runtime only here;

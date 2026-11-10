@@ -6,6 +6,9 @@ namespace savr::recoil {
 // every consumer in this game frame sees the same published sample.
 void Update(bool blocked);
 void OnShot(int hand,int weaponType,int skill);
+// Complete queued disarms after native CWeapon::Fire has returned. Never change
+// the active slot while the engine is still finishing ammo/state for that shot.
+void FinishShots();
 Sample Snapshot(int hand,int weaponType);
 // Called when physical ownership or tracking history is invalidated. Does not
 // call back into PhysicalWeapon (safe while its state mutex is held).

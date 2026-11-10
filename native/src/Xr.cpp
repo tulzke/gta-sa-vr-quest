@@ -8449,6 +8449,9 @@ void BuildCalibMenu() {
         } else if (r == 23) {
             std::snprintf(row, sizeof(row), "TRACER COLOR   < %s >",
                           vrcam::GetTracerColorModeName());
+        } else if (r == 43) {
+            std::snprintf(row,sizeof(row),"ONE-HAND DISARM < %s >",
+                calib::SnapshotRecoil(type,calib::RecoilEditingSkill()).disarmOneHanded?"ON":"OFF");
         } else if (r == 41) {
             std::snprintf(row,sizeof(row),"SKILL < %s >",calib::RecoilSkillName(calib::RecoilEditingSkill()));
         } else if (r == 42) {
