@@ -166,9 +166,9 @@ int main(){
  {std::ifstream f("recoil-calib.ini");std::string text((std::istreambuf_iterator<char>(f)),{});
   assert(text.find("recoil_weapon_skill 22 2 22.2 4.2 6.3 81.0")!=std::string::npos);}
  {std::ofstream f("recoil-calib.ini");
-  f<<"recoil_weapon 22 -5 100 90 200\nrecoil_weapon 32 nan 2 3 nan\n";}
+  f<<"recoil_weapon 22 -5 100 900 200\nrecoil_weapon 32 nan 2 3 nan\n";}
  Init();p=SnapshotRecoil(22);tec=SnapshotRecoil(32);
- assert(p.verticalDegrees==0 && p.horizontalDegrees==20 && p.shoulderMm==50 && p.supportReductionPercent==100);
+ assert(p.verticalDegrees==0 && p.horizontalDegrees==20 && p.shoulderMm==200 && p.supportReductionPercent==100);
  assert(std::isfinite(tec.verticalDegrees) && std::isfinite(tec.supportReductionPercent));
  {std::ofstream f("recoil-calib.ini");f<<"recoil_weapon 22 1 2\nrecoil_weapon 80 1 2 3 4\n";}
  Init();assert(SnapshotRecoil(22).verticalDegrees==savr::recoil::Defaults(22).verticalDegrees);
@@ -182,6 +182,9 @@ int main(){
  auto shotgun=SnapshotRecoil(25,2);shotgun.disarmOneHanded=false;
  SetRecoilTuning(25,shotgun,2);Init();
  assert(!SnapshotRecoil(25,2).disarmOneHanded && SnapshotRecoil(25,0).disarmOneHanded);
+ shotgun=SnapshotRecoil(25,0);shotgun.shoulderMm=200;SetRecoilTuning(25,shotgun,0);Init();
+ assert(SnapshotRecoil(25,0).shoulderMm==200);
+ AdjustRecoilTuning(25,2,10,0);assert(SnapshotRecoil(25,0).shoulderMm==200);
 }
 '''
 setting_file = OUT/'settings.cpp'

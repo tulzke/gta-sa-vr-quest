@@ -146,4 +146,18 @@ int main(){
         assert(launch.velocity.x*yaw<0); // same signed deflection as the muzzle
         assert(launch.spinSpeed>0);
     }
+    // Shoulder recoil adds backward momentum, not upward momentum. Increasing
+    // it must flatten the ejection even with large pitch and horizontal jitter.
+    Vec previous=DisarmLaunch({.8f,.2f,0},barrel,modelTop,pivot).velocity;
+    for(float rear:{.05f,.2f}){
+        const auto launch=DisarmLaunch({.8f,.2f,rear},barrel,modelTop,pivot);
+        assert(launch.velocity.z>previous.z);
+        assert(Near(launch.velocity.y,previous.y));
+        assert(Near(launch.velocity.x,previous.x));
+        assert(launch.velocity.z>std::abs(launch.velocity.y));
+        assert(std::atan2(launch.velocity.y,launch.velocity.z)<std::atan2(previous.y,previous.z));
+        previous=launch.velocity;
+    }
+    assert(Sanitize({10,2,200,65},25).shoulderMm==200);
+    assert(Sanitize({10,2,900,65},25).shoulderMm==200);
 }

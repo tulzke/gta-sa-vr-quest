@@ -5,11 +5,12 @@
 
 namespace savr::recoil {
 constexpr float kRad = .01745329252f;
+constexpr float kReturnOmega = 20.f;
 inline bool Supported(int type) { return (type >= 22 && type <= 34) || type == 38; }
 
 struct Sample { float pitch{}, yaw{}, rear{}; };
 struct Profile {
-    float kick{}, limit{}, sideways{}, back{}, backLimit{}, omega{20};
+    float kick{}, limit{}, sideways{}, back{}, backLimit{}, omega{kReturnOmega};
 };
 struct Tuning {
     float verticalDegrees{}, horizontalDegrees{1.9f}, shoulderMm{2.f}, supportReductionPercent{65.f};
@@ -44,7 +45,7 @@ inline Tuning Sanitize(Tuning t,int type,int skill=0) {
     };
     return {clamp(t.verticalDegrees,fallback.verticalDegrees,45.f),
             clamp(t.horizontalDegrees,fallback.horizontalDegrees,20.f),
-            clamp(t.shoulderMm,fallback.shoulderMm,50.f),
+            clamp(t.shoulderMm,fallback.shoulderMm,200.f),
             clamp(t.supportReductionPercent,fallback.supportReductionPercent,100.f),t.disarmOneHanded};
 }
 inline Profile ForWeapon(int type, bool support, int level,Tuning tuning) {
@@ -61,7 +62,7 @@ inline Profile ForWeapon(int type, bool support, int level,Tuning tuning) {
             tuning.horizontalDegrees*kRad*strength,
             tuning.shoulderMm*.001f*strength,
             tuning.shoulderMm*.003f*strength,
-            20.f}; // The configured percentage is the complete support modifier.
+            kReturnOmega}; // The configured percentage is the complete support modifier.
 }
 inline Profile ForWeapon(int type,float skill,bool support,int level) {
     skill=std::isfinite(skill)?std::clamp(skill,0.f,1.f):.5f;
@@ -177,7 +178,15 @@ inline Launch DisarmLaunch(Sample kick,const float* barrel,const float* modelTop
     const float magnitude=std::sqrt(kick.pitch*kick.pitch+kick.yaw*kick.yaw);
     const float strength=std::clamp(magnitude/(30.f*kRad),.6f,1.8f);
     const Vec axis=Unit(muzzle.pitchAxis*kick.pitch+muzzle.yawAxis*kick.yaw);
-    return {back.Vector(b*(-1.f))*(2.f*strength),axis,
+    // The shoulder displacement contributes its own backward impulse. For a
+    // critically damped spring, peak x = initialVelocity / (omega * e). Convert
+    // that peak back to velocity and add it before the shared speed cap, so a
+    // stronger shoulder setting flattens the launch toward the shooter instead
+    // of increasing an upward throw. Pitch/yaw still supply their deflection.
+    constexpr float e=2.718281828f;
+    const float shoulderVelocity=std::max(0.f,kick.rear)*kReturnOmega*e;
+    const Vec velocity=back.Vector(b*(-1.f))*(2.f*strength)-b*shoulderVelocity;
+    return {velocity,axis,
             Dot(axis,axis)>.5f?6.f*strength:0.f};
 }
 } // namespace savr::recoil
