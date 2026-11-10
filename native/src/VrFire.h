@@ -3,7 +3,7 @@
 namespace savr::vrfire {
 
 // The physical-weapon layer owns holster/hand state. It must return true only
-// when `weaponType` is currently held in its firing hand, and write that OpenXR
+// when `weaponType` is currently held in either usable hand, and write that OpenXR
 // hand (0 left, 1 right). A missing weapon or a type mismatch must return false.
 using PhysicalFireQuery = bool (*)(int weaponType, int* firingHand);
 
@@ -18,8 +18,8 @@ bool IsScriptedWeaponCamera();
 // functions unchanged.
 bool Install();
 
-// GameThread owner for physical guns. This bypasses CJ's animation-driven
-// attack task while retaining native CWeapon ammo/state/sound handling.
+// GameThread owner for both physical guns, each with its own trigger and ray.
+// Native CWeapon owns ammo/sound; per-slot clocks replace shared CJ reload tasks.
 void Update(bool blocked);
 
 } // namespace savr::vrfire

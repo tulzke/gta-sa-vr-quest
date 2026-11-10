@@ -213,6 +213,8 @@ bool ResolveGameSymbols(void* handle) {
         {"_Z23RwCameraSetFarClipPlaneP8RwCameraf",                               reinterpret_cast<void**>(&g.RwCameraSetFarClipPlane),               false},
         {"_ZN7CWeapon14FireInstantHitEP7CEntityP7CVectorS3_S1_S3_S3_bb",         reinterpret_cast<void**>(&g.CWeapon_FireInstantHit),                false},
         {"_ZN7CWeapon10FireSniperEP4CPedP7CEntityP7CVector",                     reinterpret_cast<void**>(&g.CWeapon_FireSniper),                    false},
+        {"_ZN7CWeapon6UpdateEP4CPed", reinterpret_cast<void**>(&g.CWeapon_Update), false},
+        {"_ZN11CWeaponInfo19GetWeaponReloadTimeEv", reinterpret_cast<void**>(&g.CWeaponInfo_GetWeaponReloadTime), false},
         {"_ZN7CWeapon4FireEP7CEntityP7CVectorS3_S1_S3_S3_",                     reinterpret_cast<void**>(&g.CWeapon_Fire),                          false},
         {"_ZN7CWeapon14FireProjectileEP7CEntityP7CVectorS1_S3_f",                reinterpret_cast<void**>(&g.CWeapon_FireProjectile),                false},
         {"_ZN15CProjectileInfo13AddProjectileEP7CEntity11eWeaponType7CVectorfPS3_S1_", reinterpret_cast<void**>(&g.CProjectileInfo_AddProjectile), false},

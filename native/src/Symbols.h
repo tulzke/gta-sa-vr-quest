@@ -346,6 +346,8 @@ struct GameSymbols {
                                     Vec3* driveByOrigin, bool arg6, bool muzzle);
     bool  (*CWeapon_FireSniper)(void* weapon, void* shooter,
                                 void* targetEntity, Vec3* target);
+    void  (*CWeapon_Update)(void* weapon, void* ped);
+    int   (*CWeaponInfo_GetWeaponReloadTime)(void* info);
     bool  (*CWeapon_Fire)(void* weapon, void* shooter,
                           Vec3* startPos, Vec3* barrelPos,
                           void* targetEntity, Vec3* target,

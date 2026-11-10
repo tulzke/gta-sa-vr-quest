@@ -1,6 +1,7 @@
 #include "VehicleEntry.h"
 #include "JustBusiness.h"
 #include "VrFire.h"
+#include "PhysicalGunCycle.h"
 #include "WeaponRecoil.h"
 #include "Catalyst.h"
 
@@ -9,6 +10,7 @@
 #include "Calib.h"
 #include "Driving.h"
 #include "Log.h"
+#include "PhysicalWeapon.h"
 #include "ScopeAim.h"
 #include "Symbols.h"
 #include "VrCamera.h"
@@ -38,6 +40,10 @@ std::atomic<bool> g_installed{false};
 FireInstantHitFn g_origFireInstantHit{};
 FireSniperFn g_origFireSniper{};
 PadGetWeaponFn g_origPadGetWeaponBody{};
+using WeaponUpdateFn = void (*)(void*, void*);
+WeaponUpdateFn g_origWeaponUpdate{};
+void* g_cyclePed{};
+int g_managedGunType[13]{};
 thread_local bool g_insideHook = false;
 thread_local bool g_insideScriptedFire = false;
 std::atomic<bool> g_padTriggerDown[2]{};
@@ -45,6 +51,10 @@ std::atomic<bool> g_directTriggerDown[2]{};
 bool g_detonatorReleaseRequired[2]{true, true};
 std::uint32_t g_directNextFireMs[2]{};
 int g_directWeaponType[2]{-1, -1};
+
+constexpr std::uint32_t kWeaponUpdatePrologue[4] = {
+    0xA9BB7BFD, 0xA90167FA, 0xA9025FF8, 0xA90357F6,
+};
 
 constexpr std::uint32_t kFireInstantHitPrologue[4] = {
     0xFC180FEA, 0x6D0123E9, 0xA9027BFD, 0xA9036FFC,
@@ -147,6 +157,59 @@ std::uint32_t PhysicalFireIntervalMs(void* ped, int weaponType) {
             return static_cast<std::uint32_t>(std::clamp(interval, 45.0f, 1100.0f));
     }
     return AutomaticHitscan(weaponType) ? 90u : 280u;
+}
+
+void* PhysicalWeaponInfo(void* ped, int type) {
+    int skill = g.CPed_GetWeaponSkill ? g.CPed_GetWeaponSkill(ped, type) : 1;
+    if (skill < 0 || skill > 3) skill = 1;
+    return g.CWeaponInfo_GetWeaponInfo
+        ? g.CWeaponInfo_GetWeaponInfo(type, static_cast<signed char>(skill)) : nullptr;
+}
+
+unsigned MagazineCapacity(void* ped, int type) {
+    const auto* info = static_cast<const std::uint8_t*>(PhysicalWeaponInfo(ped, type));
+    return info ? PhysicalMagazineCapacity(
+        *reinterpret_cast<const std::int16_t*>(info + 0x20),
+        *reinterpret_cast<const std::uint32_t*>(info + 0x18)) : 1u;
+}
+
+void OnWeaponUpdate(void* object, void* ped) {
+    if (!g_origWeaponUpdate) return;
+    auto* weapon = static_cast<std::uint8_t*>(object);
+    if (ped && g.FindPlayerPed && ped == g.FindPlayerPed(-1) &&
+        ped == g_cyclePed && g.CTimer_m_snTimeInMilliseconds) {
+        for (int slot = 1; slot < 13; ++slot) {
+            if (weapon != static_cast<std::uint8_t*>(ped) + kPedWeaponsOffset +
+                          slot * kWeaponStride) continue;
+            const int type = *reinterpret_cast<const int*>(weapon);
+            if (g_managedGunType[slot] != type || !SupportedHitscan(type)) break;
+            auto& state = *reinterpret_cast<std::uint32_t*>(weapon + 4);
+            AdvancePhysicalGun(state, *reinterpret_cast<std::uint32_t*>(weapon + 8),
+                *reinterpret_cast<const std::uint32_t*>(weapon + 12),
+                *reinterpret_cast<const std::uint32_t*>(weapon + 16),
+                *g.CTimer_m_snTimeInMilliseconds, MagazineCapacity(ped, type));
+            // Native reloading consults CJ's one shared use-gun animation.
+            // Keep that animation from extending either physical gun's clock.
+            if (state == 1u || state == 2u) return;
+            break;
+        }
+    }
+    g_origWeaponUpdate(object, ped);
+}
+
+void CorrectPhysicalReload(void* ped, std::uint8_t* weapon, int type, std::uint32_t now) {
+    if (!SupportedHitscan(type) ||
+        *reinterpret_cast<const std::uint32_t*>(weapon + 4) != 2u) return;
+    const void* info = PhysicalWeaponInfo(ped, type);
+    if (!info || !g.CWeaponInfo_GetWeaponReloadTime) return;
+    // GetWeaponReloadTime is read-only in retail 2.11.311. Clear the native
+    // twin flag in a local copy: this hand reloads ONE physical gun.
+    alignas(16) std::uint8_t singleInfo[0x70];
+    std::memcpy(singleInfo, info, sizeof(singleInfo));
+    *reinterpret_cast<std::uint32_t*>(singleInfo + 0x18) &= ~0x800u;
+    const int duration = g.CWeaponInfo_GetWeaponReloadTime(singleInfo);
+    *reinterpret_cast<std::uint32_t*>(weapon + 16) =
+        now + static_cast<unsigned>(std::clamp(duration, 1, 30000));
 }
 
 void ResetDirectTrigger() {
@@ -732,6 +795,7 @@ bool CoreSymbolsReady() {
            g.CPed_GetWeaponSkill && g.CWeaponInfo_GetWeaponInfo &&
            g.CWeapon_CheckForShootingVehicleOccupant &&
            g.CWeapon_DoBulletImpact && g.CWeapon_DoWeaponEffect &&
+           g.CWeapon_Update && g.CWeaponInfo_GetWeaponReloadTime &&
            g.CEventGunShot_Construct && g.CEventGunShot_Destruct &&
            g.GetEventGlobalGroup && g.CEventGroup_Add &&
            g.FindPlayerPed && g.FindPlayerVehicle && g.CPad_GetWeapon;
@@ -765,14 +829,20 @@ bool IsScriptedWeaponCamera() {
     return SupportedHitscan(type);
 }
 
-void Update(bool blocked) {
-    if (blocked || !g_installed.load(std::memory_order_acquire) ||
+void UpdateHand(int requestedHand) {
+    const auto resetHand = [requestedHand] {
+        g_directTriggerDown[requestedHand].store(false, std::memory_order_relaxed);
+        g_directNextFireMs[requestedHand] = 0;
+        g_directWeaponType[requestedHand] = -1;
+        g_detonatorReleaseRequired[requestedHand] = true;
+    };
+    if (!g_installed.load(std::memory_order_acquire) ||
         !PlayerFireEnabled() ||
         !g.CWeapon_Fire || !g.CTimer_m_snTimeInMilliseconds ||
         !g.FindPlayerPed ||
         (g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false) &&
          !driving::VehicleWeaponsImmersive() && !IsScriptedWeaponCamera())) {
-        ResetDirectTrigger();
+        resetHand();
         return;
     }
 
@@ -782,7 +852,7 @@ void Update(bool blocked) {
     float trigger = 0.0f;
     if (!GetPhysicalTrigger(ped, weaponType, hand, trigger) ||
         !SupportedDirectFire(weaponType)) {
-        ResetDirectTrigger();
+        resetHand();
         return;
     }
 
@@ -790,18 +860,25 @@ void Update(bool blocked) {
     const int slot = static_cast<int>(*reinterpret_cast<const std::int8_t*>(
         pedBytes + kPedActiveSlotOffset));
     if (slot <= 0 || slot >= 13) {
-        ResetDirectTrigger();
+        resetHand();
         return;
     }
     auto* weapon = const_cast<std::uint8_t*>(pedBytes) + kPedWeaponsOffset +
         static_cast<std::uintptr_t>(slot) * kWeaponStride;
     if (*reinterpret_cast<const std::int32_t*>(weapon) != weaponType) {
-        ResetDirectTrigger();
+        resetHand();
         return;
+    }
+    if (SupportedHitscan(weaponType)) {
+        if (g_cyclePed != ped) {
+            g_cyclePed = ped;
+            std::fill(std::begin(g_managedGunType), std::end(g_managedGunType), 0);
+        }
+        g_managedGunType[slot] = weaponType;
+        OnWeaponUpdate(weapon, ped);
     }
     if (!DetonatorTriggerReady(weaponType, hand, trigger)) return;
 
-    g_directTriggerDown[1 - hand].store(false, std::memory_order_relaxed);
     const bool wasDown = g_directTriggerDown[hand].load(std::memory_order_relaxed);
     const bool down = wasDown ? trigger >= kTriggerRelease
                               : trigger >= kTriggerPress;
@@ -899,6 +976,7 @@ void Update(bool blocked) {
         *playerWeaponMode = savedPlayerWeaponMode;
         g_insideScriptedFire = false;
     }
+    if (fired) CorrectPhysicalReload(ped, weapon, weaponType, now);
     if (!fired) {
         static double lastFireFail = 0.0;
         timespec ts{};
@@ -922,6 +1000,30 @@ void Update(bool blocked) {
     if (n <= 8 || (n % 120u) == 0u) {
         LOGI("[vr.fire] direct physical shot type=%d hand=%d next=%u",
              weaponType, hand, g_directNextFireMs[hand]);
+    }
+}
+
+void Update(bool blocked) {
+    // The active slot is engine context only. Restore it after each hand so
+    // simultaneous fire never performs SetCurrentWeaponSlot model/task changes.
+    auto* ped = g.FindPlayerPed ? static_cast<std::uint8_t*>(g.FindPlayerPed(-1)) : nullptr;
+    if (blocked || !ped) { ResetDirectTrigger(); return; }
+    auto& active = *reinterpret_cast<std::int8_t*>(ped + kPedActiveSlotOffset);
+    const auto saved = active;
+    for (int hand = 0; hand < 2; ++hand) {
+        const int slot = physicalweapon::HeldSlot(hand);
+        if (slot <= 0 || slot >= 13) {
+            g_directTriggerDown[hand].store(false, std::memory_order_relaxed);
+            g_directNextFireMs[hand] = 0;
+            g_directWeaponType[hand] = -1;
+            g_detonatorReleaseRequired[hand] = true;
+            continue;
+        }
+        const int type = *reinterpret_cast<const int*>(ped + kPedWeaponsOffset + slot*kWeaponStride);
+        if (!SupportedDirectFire(type)) continue;
+        active = static_cast<std::int8_t>(slot);
+        UpdateHand(hand);
+        active = saved;
     }
 }
 
@@ -960,6 +1062,10 @@ bool Install() {
         return false;
     }
 
+    g_origWeaponUpdate = reinterpret_cast<WeaponUpdateFn>(InstallVerifiedTrampoline(
+        reinterpret_cast<void*>(g.CWeapon_Update), reinterpret_cast<void*>(&OnWeaponUpdate),
+        kWeaponUpdatePrologue, "CWeapon::Update"));
+    if (!g_origWeaponUpdate || !g.CWeaponInfo_GetWeaponReloadTime) return false;
     g_installed.store(true, std::memory_order_release);
     scopeaim::SetSniperFireAvailable(g_origFireSniper != nullptr);
     LOGI("[vr.fire] controller hitscan + pad trigger installed%s "

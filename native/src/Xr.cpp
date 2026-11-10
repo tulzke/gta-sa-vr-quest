@@ -704,8 +704,8 @@ struct LaserRay {
     XrVector3f origin{};
     XrVector3f direction{0.0f, 0.0f, -1.0f};
 };
-LaserRay g_stereoLaserRay[kStereoSets]{};
-LaserRay BuildCalibratedLaserRay(const HandPose& pose, int hand,
+LaserRay g_stereoLaserRay[kStereoSets][2]{};
+LaserRay BuildCalibratedLaserRay(const HandPose& pose, int hand, int weaponType,
                                  const TwoHandVisualState& twoHand);
 
 constexpr int kMaxThrowableTrajectoryPoints = 41;
@@ -6275,8 +6275,9 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     // g_renderHeadPose for this GameThread frame, so it is the pose that built the
     // eye cameras. The consumer reads slot (seq - kStereoReadLag), whose pose was
     // stored when its seq was current — so pose and pixels always match.
-    int laserHand = -1;
-    HandPose laserPose{};
+    unsigned laserMask = 0;
+    HandPose laserPose[2]{};
+    int laserTypes[2]{};
     TwoHandVisualState laserTwoHand{};
     driving::WheelVisualState drivingWheel{};
     // Driving::UpdateInput takes driving-state -> head-pose locks. Snapshot in
@@ -6331,22 +6332,23 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         g_stereoMobileColor[ws] = g_pendingMobileColor;
         g_stereoThrowableTrajectory[ws][0] = g_throwableTrajectory[0];
         g_stereoThrowableTrajectory[ws][1] = g_throwableTrajectory[1];
-        laserHand = g_weaponHand.load(std::memory_order_relaxed);
-        if (laserHand >= 0 && laserHand < 2) {
-            laserPose = g_stereoHandPose[ws][laserHand];
-            laserTwoHand = g_stereoTwoHandVisualState[ws];
+        laserMask = g_weaponHandMask.load(std::memory_order_relaxed);
+        for (int hand = 0; hand < 2; ++hand) {
+            laserPose[hand] = g_stereoHandPose[ws][hand];
+            laserTypes[hand] = g_stereoHandWeaponTypes[ws][hand];
         }
+        laserTwoHand = g_stereoTwoHandVisualState[ws];
     }
-    // The model-bound ray consults the PhysicalWeapon state. Keep that work
-    // outside g_headPoseMutex: PhysicalWeapon::Update publishes marker data in
-    // the opposite direction (physical-state lock -> head-pose lock), so nesting
-    // the locks here would deadlock the game and compositor threads.
-    const LaserRay laserRay = laserHand >= 0 && laserHand < 2
-        ? BuildCalibratedLaserRay(laserPose, laserHand, laserTwoHand)
-        : LaserRay{};
+    // Build outside the head lock: physical-state publication takes these
+    // locks in the opposite order. Both rays use the same stereo generation.
+    LaserRay laserRays[2]{};
+    for (int hand = 0; hand < 2; ++hand)
+        if (laserMask & (1u << hand))
+            laserRays[hand] = BuildCalibratedLaserRay(
+                laserPose[hand], hand, laserTypes[hand], laserTwoHand);
     {
         std::lock_guard<std::mutex> lock(g_headPoseMutex);
-        g_stereoLaserRay[ws] = laserRay;
+        for (int hand = 0; hand < 2; ++hand) g_stereoLaserRay[ws][hand] = laserRays[hand];
     }
     // Publish only after texture, depth and pose for this ring slot are complete.
     const std::uint64_t publishedNs = MonotonicNowNs();
@@ -8808,15 +8810,13 @@ XrVector3f TwoHandRotatePoint(const TwoHandVisualState& state,
 // calibrated ray used by the visible beam; AIM rows move it live and SAVE LASER
 // commits the chosen values. RIGHT is the canonical profile for both hands.
 namespace {
-LaserRay BuildCalibratedLaserRay(const HandPose& pose, int hand,
+LaserRay BuildCalibratedLaserRay(const HandPose& pose, int hand, int weaponType,
                                  const TwoHandVisualState& twoHand) {
     LaserRay ray{};
-    const int weaponType = calib::ActiveWeapon();
     const bool firearm = (weaponType >= 22 && weaponType <= 35) || weaponType == 38;
     if (!pose.valid || !pose.aimValid || !firearm ||
         !calib::LaserVisibleForWeapon(weaponType) ||
         hand < 0 || hand > 1 ||
-        g_weaponHand.load(std::memory_order_relaxed) != hand ||
         weaponType == 0) return ray;
 
     float origin[3]{};
@@ -12195,7 +12195,7 @@ void DrawWeaponForEye(const float* mvp) {
 void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      unsigned int gameDepthRbo, int gameDepthW, int gameDepthH,
                      float renderedNearZ, float renderedFarZ,
-                     const LaserRay& laser, unsigned int weaponHandMask,
+                     const LaserRay (&laser)[2], unsigned int weaponHandMask,
                      const BulletTracer* tracers, int tracerCount,
                      const ObjectiveMarkerVisual* objectiveMarkers,
                      int objectiveMarkerCount,
@@ -12236,7 +12236,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
           (bakedHands[0].valid || bakedHands[1].valid)));
     if (!haveHands && (!trackedVisuals || bakedHolsters.count <= 0) &&
         (!trackedVisuals || g_wVc <= 0) &&
-        (!trackedVisuals || !laser.valid) &&
+        (!trackedVisuals || !(laser[0].valid || laser[1].valid)) &&
         (!trackedVisuals || !drivingWheel.active) &&
         (!trackedVisuals || (throwableTrajectory[0].count <= 1 &&
                              throwableTrajectory[1].count <= 1)) &&
@@ -12410,7 +12410,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
 
     if (trackedVisuals) {
         DrawHolsterMarkers(mvp, bakedHolsters); // body/support hints share this depth pass
-        DrawWeaponLaser(mvp, laser); // calibrated red beam, occluded by world + weapon
+        for (const auto& ray : laser) DrawWeaponLaser(mvp, ray); // calibrated red beam, occluded by world + weapon
         DrawWeaponForEye(mvp);     // active weapon mesh pinned to the hand (Stage 1)
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
@@ -12638,7 +12638,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     // compositor can reproject to the live head pose (kills rotation ghosting).
     XrPosef rp{};
     HandPose bakedHands[2]{};
-    LaserRay bakedLaser{};
+    LaserRay bakedLaser[2]{};
     TwoHandVisualState bakedTwoHand{};
     holstermarker::Frame bakedHolsters{};
     vehicledoors::MarkerFrame bakedDoors{};
@@ -12661,7 +12661,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         rp             = g_stereoRenderPose[set];
         bakedHands[0]  = g_stereoHandPose[set][0];   // pose the weapon was baked with
         bakedHands[1]  = g_stereoHandPose[set][1];
-        bakedLaser     = g_stereoLaserRay[set];
+        for (int h = 0; h < 2; ++h) bakedLaser[h] = g_stereoLaserRay[set][h];
         bakedTwoHand   = g_stereoTwoHandVisualState[set];
         bakedHolsters = g_stereoHolsterMarkers[set];
         if (!bakedHolsters.Usable(g_headPoseValid, g_trackingRecovery.epoch)) bakedHolsters.count = 0;

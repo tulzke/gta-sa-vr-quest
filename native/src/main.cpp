@@ -160,16 +160,18 @@ bool QueryPhysicalFireHand(int weaponType, int* firingHand) {
     const bool throwable = weaponType == 16 || weaponType == 17 ||
                            weaponType == 18 || weaponType == 39;
     if (!firingHand || weaponType <= 15 || throwable) return false;
-    const int hand = physicalweapon::FiringHand();
-    const int slot = physicalweapon::HeldSlot(hand);
     void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
-    if (hand < 0 || hand >= physicalweapon::kHandCount ||
-        slot <= 0 || slot >= 13 || !ped) return false;
-    const int heldType = *reinterpret_cast<const std::int32_t*>(
-        reinterpret_cast<const std::uint8_t*>(ped) + 0x730 + slot * 0x20);
-    if (heldType != weaponType) return false;
-    *firingHand = hand;
-    return true;
+    if (!ped) return false;
+    for (int hand = 0; hand < physicalweapon::kHandCount; ++hand) {
+        const int slot = physicalweapon::HeldSlot(hand);
+        if (slot <= 0 || slot >= 13) continue;
+        const int heldType = *reinterpret_cast<const std::int32_t*>(
+            reinterpret_cast<const std::uint8_t*>(ped) + 0x730 + slot * 0x20);
+        if (heldType != weaponType) continue;
+        *firingHand = hand;
+        return true;
+    }
+    return false;
 }
 
 // Set once the render loop is ours; from then on the Java loop is inert.

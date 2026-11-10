@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "native/src/VrFire.cpp").read_text(encoding="utf-8")
@@ -36,6 +37,7 @@ alignas(16) std::uint8_t ped[0xa00]{}, camera[0x1000]{}, pad[0x140]{};
 void* FindPed(int) { return ped; }
 void* GetPad(int) { return pad; }
 bool FakeFire(void*,void*,Vec3*,Vec3*,void*,Vec3*,Vec3*);
+void CorrectPhysicalReload(void*,void*,int,unsigned){}
 namespace vrcam {bool FirePhotograph(void*,void*,const float*){return true;}}
 struct Symbols {
     void* TheCamera=camera;
@@ -140,6 +142,24 @@ int main() {
 """
 
 
+output=ROOT / "build" / "mission-weapon-tests"
+def compile_run(source, name):
+    exe = output / (name + ('.exe' if os.name == 'nt' else ''))
+    if os.name == 'nt':
+        vc = os.environ.get('VS_VCVARS64')
+        if not vc:
+            where = Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
+            base = subprocess.check_output([str(where), '-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()
+            vc = str(Path(base) / 'VC/Auxiliary/Build/vcvars64.bat')
+        command = output / (name + '.cmd')
+        command.write_text(f'@echo off\ncall "{vc}" >nul\nif errorlevel 1 exit /b 1\ncl /nologo /std:c++20 /EHsc /W4 /I"{ROOT / "native/src"}" "{source}" /Fe:"{exe}" /Fo:"{output / (name + ".obj")}"\nif errorlevel 1 exit /b 1\n"{exe}"\n', encoding='utf8')
+        subprocess.run(['cmd', '/c', str(command)], cwd=output, check=True)
+    else:
+        compiler = os.environ.get('CXX') or shutil.which('c++')
+        subprocess.run([compiler, '-std=c++20', '-Wall', '-Wextra', '-I'+str(ROOT/'native/src'), str(source), '-o', str(exe)], check=True)
+        subprocess.run([str(exe)], check=True)
+
+
 def main():
     constants = "\n".join(re.findall(
         r"^constexpr (?:std::uintptr_t|float) (?:kPadDisableControlsOffset|"
@@ -151,7 +171,7 @@ def main():
     begin = SOURCE.index("    std::uint16_t* playerWeaponMode = nullptr;")
     end = SOURCE.index("    if (!fired) {", begin)
     fire = ("bool CallProductionFire(int weaponType) {\n"
-            "void* weapon=nullptr; Vec3 origin{}; Vec3* target=nullptr;\n" +
+            "void* weapon=nullptr; void* ped=::ped; unsigned now=0; Vec3 origin{}; Vec3* target=nullptr;\n" +
             SOURCE[begin:end] + "\nreturn fired;\n}\n")
     output = ROOT / "build/mission-weapon-tests"
     output.mkdir(parents=True, exist_ok=True)
@@ -159,23 +179,7 @@ def main():
     source.write_text(PRELUDE + constants + "\n" +
                       "\n".join(function(n) for n in names) + fire + TESTS,
                       encoding="utf-8")
-    msvc = Path(os.environ.get("VCToolsInstallDir", ""))
-    if not (msvc / "include").is_dir():
-        base = Path("C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC")
-        msvc = sorted(base.iterdir())[-1]
-    sdk = Path("C:/Program Files (x86)/Windows Kits/10")
-    version = sorted((sdk / "Include").iterdir())[-1].name
-    env = os.environ.copy()
-    env["INCLUDE"] = ";".join(str(p) for p in [msvc / "include", *[
-        sdk / "Include" / version / name for name in ("ucrt", "shared", "um")]])
-    env["LIB"] = ";".join(str(p) for p in [msvc / "lib/x64", *[
-        sdk / "Lib" / version / name / "x64" for name in ("ucrt", "um")]])
-    compiler_dir = msvc / "bin/Hostx64/x64"
-    env["PATH"] = str(compiler_dir) + os.pathsep + env.get("PATH", "")
-    subprocess.run([str(compiler_dir / "cl.exe"), "/nologo", "/std:c++17", "/EHsc", "/MD",
-                    str(source), "/Fe:" + str(output / "mission_weapons.exe"),
-                    "/Fo:" + str(output / "mission_weapons.obj")], env=env, check=True)
-    subprocess.run([str(output / "mission_weapons.exe")], check=True)
+    compile_run(source, "mission_weapons")
 
 
 if __name__ == "__main__":
