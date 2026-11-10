@@ -8446,8 +8446,11 @@ void BuildCalibMenu() {
         } else if (r == 23) {
             std::snprintf(row, sizeof(row), "TRACER COLOR   < %s >",
                           vrcam::GetTracerColorModeName());
+        } else if (r == 36) {
+            std::snprintf(row, sizeof(row), "PHYSICAL RECOIL   < %s >",
+                          savr::calib::PhysicalRecoilLevelName());
         } else if (r == 22) {
-            std::snprintf(row, sizeof(row), "WEAPON RECOIL   < %s >",
+            std::snprintf(row, sizeof(row), "VIBRATION   < %s >",
                           savr::calib::RecoilLevelName());
         } else if (r == 21) {
             std::snprintf(row, sizeof(row), "SAVE LASER   < %s >",
@@ -9151,6 +9154,13 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             pos=vsub(pos,{pivot.x,pivot.y,pivot.z});
             grip=1.f;trig=0.f; // standard Grip asset, independent of trigger
         }
+        const auto& kick=twoHand.weaponRecoil[hand];
+        const auto recoilVector=[](XrVector3f v){return recoil::Vec{v.x,v.y,v.z};};
+        const auto xrVector=[](recoil::Vec v){return XrVector3f{v.x,v.y,v.z};};
+        pos=xrVector(kick.Point(recoilVector(pos)));
+        right=xrVector(kick.Vector(recoilVector(right)));
+        forward=xrVector(kick.Vector(recoilVector(forward)));
+        up=xrVector(kick.Vector(recoilVector(up)));
         const bool debugPinch=(debugPinchHands&(1u<<hand))!=0;
         if (debugPinch) grip=trig=0.f;
         const bool pinch = debugPinch || (!hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
@@ -9924,6 +9934,13 @@ bool BuildHandPanelAnchor(const HandPose& hp, int hand,
 
     // Underside face — a watch turned to the inner wrist. VC ships both the
     // map and the status readout there.
+    const auto& kick=twoHand.weaponRecoil[hand];
+    const auto rv=[](XrVector3f v){return recoil::Vec{v.x,v.y,v.z};};
+    const auto xv=[](recoil::Vec v){return XrVector3f{v.x,v.y,v.z};};
+    origin=xv(kick.Point(rv(origin)));
+    side=xv(kick.Vector(rv(side)));
+    palmUp=xv(kick.Vector(rv(palmUp)));
+    backward=xv(kick.Vector(rv(backward)));
     constexpr float faceSign = -1.0f;
     right = vscale(side, faceSign);
     up = vscale(backward, -1.0f);           // twelve o'clock to the fingers

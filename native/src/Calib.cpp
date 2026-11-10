@@ -32,6 +32,7 @@ std::atomic<int> g_active{0};
 std::mutex       g_calibMutex;
 std::atomic<bool> g_laserEnabled{true};
 std::atomic<int> g_recoilLevel{2};
+std::atomic<int> g_physicalRecoilLevel{2};
 std::atomic<bool> g_laserLocked[kMaxWeapons]{};
 // Per-weapon visible-laser override: 0 = follow the global toggle,
 // 1 = always on for this weapon, 2 = always off for this weapon.
@@ -231,6 +232,7 @@ void Init() {
     }
     g_laserEnabled.store(true, std::memory_order_relaxed);
     g_recoilLevel.store(2, std::memory_order_relaxed);
+    g_physicalRecoilLevel.store(2, std::memory_order_relaxed);
 
     FILE* f = std::fopen(kPath, "r");
     if (!f) { LOGI("[calib] no profile file, defaults"); return; }
@@ -252,6 +254,10 @@ void Init() {
         int state = 0;
         if (std::sscanf(line, "laser_enabled %d", &state) == 1) {
             g_laserEnabled.store(state != 0, std::memory_order_relaxed);
+            continue;
+        }
+        if (std::sscanf(line, "physical_recoil_level %d", &state) == 1) {
+            g_physicalRecoilLevel.store(std::clamp(state, 0, 3), std::memory_order_relaxed);
             continue;
         }
         if (std::sscanf(line, "recoil_level %d", &state) == 1) {
@@ -369,6 +375,7 @@ void Save() {
     std::fputs("# vr_calib v6  w <type> <hand> <19 fields>; laser_locked_type <type> 1; support_configured <type> 1; holster <type> <6 fields>\n", f);
     std::fprintf(f, "laser_enabled %d\n", LaserEnabled() ? 1 : 0);
     std::fprintf(f, "recoil_level %d\n", RecoilLevel());
+    std::fprintf(f, "physical_recoil_level %d\n", PhysicalRecoilLevel());
     // Retain the compatibility row for readers that do not support per-weapon state.
     std::fprintf(f, "laser_locked %d\n", LaserLocked() ? 1 : 0);
     int saved = 0;
@@ -501,6 +508,20 @@ void SetLaserEnabled(bool enabled) {
 
 void ToggleLaser() { SetLaserEnabled(!LaserEnabled()); }
 
+int PhysicalRecoilLevel() {
+    return std::clamp(g_physicalRecoilLevel.load(std::memory_order_relaxed),0,3);
+}
+const char* PhysicalRecoilLevelName() {
+    static constexpr const char* names[]{"OFF","LOW","MEDIUM","HIGH"};
+    return names[PhysicalRecoilLevel()];
+}
+void SetPhysicalRecoilLevel(int level) {
+    level=std::clamp(level,0,3);
+    if(g_physicalRecoilLevel.exchange(level,std::memory_order_relaxed)!=level)Save();
+}
+void CyclePhysicalRecoil(int direction) {
+    if(direction)SetPhysicalRecoilLevel((PhysicalRecoilLevel()+(direction>0?1:3))%4);
+}
 int RecoilLevel() {
     return std::clamp(g_recoilLevel.load(std::memory_order_relaxed), 0, 3);
 }

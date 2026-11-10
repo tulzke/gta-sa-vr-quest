@@ -8,6 +8,7 @@
 #include "JustBusiness.h"
 #include "VrCamera.h"
 #include "VrFire.h"
+#include "WeaponRecoil.h"
 
 #include "AircraftHlod.h"
 #include "Calib.h"
@@ -2997,6 +2998,12 @@ bool BuildModelBoundWeaponRayTracking(
             ApplyTwoHandRotation(weaponPose, pivot, axis, angle);
         }
     }
+
+    const recoil::Transform kick = capturedTwoHand
+        ? capturedTwoHand->weaponRecoil[hand]
+        : recoil::Build(recoil::Snapshot(hand,weaponType),weaponPose.right,
+                        weaponPose.forward,renderedPose.gripPos);
+    kick.Apply(weaponPose);
 
     V3 barrel = Normalized(V3{weaponPose.right[0], weaponPose.right[1],
                               weaponPose.right[2]});
@@ -21505,6 +21512,24 @@ void OnRenderScene(bool underwater) {
                         twoHandActive = false;
                 }
             }
+            // Final recoil is deliberately downstream of the support solver.
+            // Capture this rigid transform alongside the stereo frame so late
+            // hands and laser use the exact same motion as the baked weapon.
+            xr::HandPose recoilHands[2]{};
+            if (physicalweapon::HeldSlot(hand)==slot &&
+                physicalweapon::GetHandPosesSnapshot(recoilHands) &&
+                WeaponMatrixToTracking(heldMatrix,finalPose)) {
+                const auto kick=recoil::Build(recoil::Snapshot(hand,weaponType),
+                    finalPose.right,finalPose.forward,recoilHands[hand].gripPos);
+                kick.Apply(finalPose);
+                RwMat kickedMatrix{};
+                if (TrackingWeaponMatrix(finalPose,kickedMatrix)) {
+                    heldMatrix=kickedMatrix;
+                    twoHandVisualState.weaponRecoil[hand]=kick;
+                    const int support=physicalweapon::SupportHand(hand);
+                    if(support>=0 && support<2)twoHandVisualState.weaponRecoil[support]=kick;
+                }
+            }
             void* heldClump = WeaponModelClumpForSlot(slot, weaponType);
             queueWeapon(heldClump, heldMatrix);
             if(heldClump) {
@@ -30109,6 +30134,11 @@ bool GetWeaponOpticRay(int hand,int type,float origin[3],float direction[3]) {
         ApplyTwoHandRotation(pose,pivot,axis,angle);
         if(!TrackingWeaponMatrix(pose,matrix)) return false;
     }
+    // Match model and fire/laser rays, including one-handed optic use.
+    if(!WeaponMatrixToTracking(matrix,pose)) return false;
+    recoil::Build(recoil::Snapshot(hand,type),pose.right,pose.forward,
+                  hands[hand].gripPos).Apply(pose);
+    if(!TrackingWeaponMatrix(pose,matrix)) return false;
     WeaponOpticFrame frame{};
     if(!BuildWeaponOpticFrame(type,matrix,frame)) return false;
     origin[0]=frame.camera.pos.x;origin[1]=frame.camera.pos.y;origin[2]=frame.camera.pos.z;

@@ -1,6 +1,7 @@
 #include "VehicleEntry.h"
 #include "JustBusiness.h"
 #include "VrFire.h"
+#include "WeaponRecoil.h"
 #include "Catalyst.h"
 
 #include "Basketball.h"
@@ -545,6 +546,13 @@ bool FireControllerRay(void* weapon, void* shooter, int weaponType,
 
     AddGunShotEvent(shooter, weaponType, origin, firstImpact);
     g.CWeapon_DoWeaponEffect(weapon, origin, direction);
+    // One impulse after the complete shot (all pellets), never on a trigger
+    // press or again at the outer CWeapon::Fire call. This shot used the pose
+    // published before the impulse; its velocity moves subsequent frames.
+    const PhysicalFireQuery recoilQuery = g_physicalFireQuery.load(std::memory_order_acquire);
+    int shotHand = -1;
+    if (recoilQuery && recoilQuery(weaponType, &shotHand))
+        recoil::OnShot(shotHand, weaponType, skill);
     const bool hit = anyHit;
 
     static std::atomic<unsigned> shotCount{0};

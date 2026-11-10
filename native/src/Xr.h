@@ -1,4 +1,5 @@
 #pragma once
+#include "RecoilModel.h"
 
 #include <jni.h>
 
@@ -148,6 +149,9 @@ void SetBallHandLock(const BallHandLock& lock);
 // axes).  supportGestureGrip/Trigger select the baked hand poses; when no
 // explicit gesture is supplied the support hand uses the closed magazine grip.
 struct TwoHandVisualState {
+    // Populated even for one-handed guns. Captured with the stereo pixels;
+    // compositor hands/laser must never read the live recoil simulation.
+    recoil::Transform weaponRecoil[2]{};
     bool  active{false};
     int   primaryHand{-1};
     int   supportHand{-1};

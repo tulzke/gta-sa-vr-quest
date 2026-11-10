@@ -1,4 +1,5 @@
 #include "PhysicalWeapon.h"
+#include "WeaponRecoil.h"
 
 #include "Calib.h"
 #include "Driving.h"
@@ -308,6 +309,7 @@ int AnyHeldHandLocked() {
 
 void ClearVisualPoseLocked(int hand) {
     if (!ValidHand(hand)) return;
+    recoil::Invalidate(hand);
     gHeldVisualValid[hand] = false;
     gHeldVisualSlot[hand] = -1;
     gHeldBaseValid[hand] = false;
@@ -1672,8 +1674,10 @@ void PublishHeldVisualPoseTracking(int hand, int slot, const TrackingPose* pose)
     gHeldVisualPose[hand] = normalized;
     gHeldVisualSlot[hand] = slot;
     gHeldVisualValid[hand] = true;
-    // Freeze the one-hand base when support engages to prevent feedback from the rotated final pose.
-    if (!ValidHand(gSupportHand[hand])) {
+    // Render/fire explicitly publish the unsteered, recoil-free base. Never
+    // feed the final recoil pose back into the support solver, even one-handed.
+    // Retain a first-publish fallback for callers without a separate base.
+    if (!gHeldBaseValid[hand] || gHeldBaseSlot[hand] != slot) {
         gHeldBasePose[hand] = normalized;
         gHeldBaseSlot[hand] = slot;
         gHeldBaseValid[hand] = true;

@@ -114,6 +114,11 @@ const char* RecoilLevelName();
 float RecoilAmplitude();
 void SetRecoilLevel(int level);       // persists immediately when changed
 void CycleRecoil(int direction);      // wraps OFF..HIGH, persists
+// Physical weapon displacement, independent of controller vibration.
+int PhysicalRecoilLevel();
+const char* PhysicalRecoilLevelName();
+void SetPhysicalRecoilLevel(int level);
+void CyclePhysicalRecoil(int direction);
 bool LaserLocked(int weaponType);
 bool LaserLocked();
 void MarkLaserDirty();                // active weapon's working AIM is unconfirmed

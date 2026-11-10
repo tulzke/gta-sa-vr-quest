@@ -72,6 +72,7 @@ add_library(savr SHARED
     src/EyeDepth.cpp
     src/VrCamera.cpp
     src/VrFire.cpp
+    src/WeaponRecoil.cpp
     src/Xr.cpp
     src/Cheats.cpp
     src/HudSettings.cpp

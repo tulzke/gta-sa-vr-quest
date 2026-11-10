@@ -10,6 +10,7 @@
 #include "Jetpack.h"
 #include "Calib.h"
 #include "Cheats.h"
+#include "WeaponRecoil.h"
 #include "Driving.h"
 #include "FrameTarget.h"
 #include "HdWeapons.h"
@@ -1344,7 +1345,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             } else if (fieldRow == 23) {                           // TRACER COLOR
                 if (enter) vrcam::AdjustTracerColorMode(+1);
                 else if (firstTick) vrcam::AdjustTracerColorMode(dir);
-            } else if (fieldRow == 22) {                           // WEAPON RECOIL
+            } else if (fieldRow == 36) {
+                if (enter) savr::calib::CyclePhysicalRecoil(+1);
+                else if (firstTick) savr::calib::CyclePhysicalRecoil(dir);
+            } else if (fieldRow == 22) {                           // CONTROLLER VIBRATION
                 if (enter) savr::calib::CycleRecoil(+1);
                 else if (firstTick) savr::calib::CycleRecoil(dir);
             } else if (fieldRow == 21) {                           // explicit persistent lock
@@ -2013,6 +2017,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             menuPage == PG_CALIB && calibGroup==savr::weaponmenu::SUPPORT);
         savr::melee::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::combat::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
+        savr::recoil::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::scopeaim::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::vrfire::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::throwable::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
@@ -2030,6 +2035,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         savr::melee::Reset();
         savr::combat::Reset();
         savr::scopeaim::Reset();
+        savr::recoil::Update(true);
         savr::vrfire::Update(true);
         savr::throwable::Reset();
         savr::catalyst::Reset();
