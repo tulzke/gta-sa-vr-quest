@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+namespace savr::recoil { struct Sample; }
 
 namespace savr::xr { struct HandPose; }
 
@@ -171,7 +172,7 @@ float FireTrigger();
 void ReleaseAfterUse(int hand, int slot);
 // Recoil ejection after a confirmed shot: bypass Grip Lock, preserve inventory,
 // and require grip release before this hand can catch again. Support prevents it.
-bool DisarmAfterShot(int hand,int slot,int weaponType,float angularImpulse);
+bool DisarmAfterShot(int hand,int slot,int weaponType,const recoil::Sample& kick);
 
 // reference Quest build WeaponGripLock semantics: releasing away from the assigned socket keeps
 // the weapon held; releasing at the socket still returns it. Runtime only here;

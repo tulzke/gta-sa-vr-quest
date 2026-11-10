@@ -21664,6 +21664,16 @@ void OnRenderScene(bool underwater) {
     }
 
     if (preferredType != 0) calib::SetActiveWeapon(preferredType);
+    // A recoil-disarmed wrist still takes the shoulder impulse after the gun
+    // becomes a flying model. Clearing ownership must not pin it to raw tracking
+    // before that impulse has had its first visible frame.
+    for(int hand=0;hand<2;++hand)if((renderedHeldMask&(1u<<hand))==0){
+        const auto offset=recoil::ReleasedHandOffset(hand);
+        if(recoil::Dot(offset,offset)>0){
+            recoil::Transform kick{};kick.active=true;kick.translation=offset;
+            twoHandVisualState.weaponRecoil[hand]=kick;
+        }
+    }
     xr::SetHandWeaponTypes(renderedWeaponTypes[0],renderedWeaponTypes[1]);
     xr::SetTwoHandVisualState(twoHandVisualState);
     xr::SetWeaponHeldHands(renderedHeldMask,

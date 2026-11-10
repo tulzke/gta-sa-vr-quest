@@ -130,4 +130,20 @@ int main(){
             assert(std::abs(Dot(jitter.Vector(barrel),sideways))>.01f);
         }
     }
+    // The ejection angle is derived from recoil pitch/yaw, not a constant
+    // upward/backward velocity ratio. Zero pitch has no upward launch.
+    const float barrel[]{0,0,-1},modelTop[]{1,0,0};
+    for(float pitch:{0.f,.1f,.4f,.8f}){
+        const auto launch=DisarmLaunch({pitch,0,0},barrel,modelTop,pivot);
+        const Vec direction=Unit(launch.velocity);
+        assert(Near(direction.y,std::sin(pitch)));
+        assert(Near(direction.z,std::cos(pitch)));
+        assert(Near(direction.x,0));
+    }
+    for(float yaw:{-.25f,.25f}){
+        const auto launch=DisarmLaunch({0,yaw,0},barrel,modelTop,pivot);
+        assert(Near(launch.velocity.y,0));
+        assert(launch.velocity.x*yaw<0); // same signed deflection as the muzzle
+        assert(launch.spinSpeed>0);
+    }
 }

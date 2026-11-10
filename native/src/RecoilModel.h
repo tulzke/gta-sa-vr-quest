@@ -166,4 +166,18 @@ inline Transform Build(Sample s,const float* barrel,const float* modelTop,const 
     if (Dot(axis,axis)<.5f || (s.pitch==0 && s.yaw==0 && s.rear==0)) return {};
     return {Read(pivot),axis,u,b*(-s.rear),s.pitch,s.yaw,true};
 }
+struct Launch {Vec velocity{},spinAxis{};float spinSpeed{};};
+inline Launch DisarmLaunch(Sample kick,const float* barrel,const float* modelTop,const float* pivot){
+    const Vec b=Unit(Read(barrel));
+    // The backward ejection vector tilts toward the muzzle's upward/sideways
+    // recoil deflection. Negate the angles when rotating -barrel, otherwise a
+    // positive muzzle rise would launch the weapon downward.
+    const auto back=Build({-kick.pitch,-kick.yaw,0},barrel,modelTop,pivot);
+    const auto muzzle=Build(kick,barrel,modelTop,pivot);
+    const float magnitude=std::sqrt(kick.pitch*kick.pitch+kick.yaw*kick.yaw);
+    const float strength=std::clamp(magnitude/(30.f*kRad),.6f,1.8f);
+    const Vec axis=Unit(muzzle.pitchAxis*kick.pitch+muzzle.yawAxis*kick.yaw);
+    return {back.Vector(b*(-1.f))*(2.f*strength),axis,
+            Dot(axis,axis)>.5f?6.f*strength:0.f};
+}
 } // namespace savr::recoil

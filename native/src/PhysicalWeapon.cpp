@@ -1738,7 +1738,7 @@ float FireTrigger() {
     return std::clamp(gHands[hand].trigger, 0.0f, 1.0f);
 }
 
-bool DisarmAfterShot(int hand,int slot,int weaponType,float angularImpulse) {
+bool DisarmAfterShot(int hand,int slot,int weaponType,const recoil::Sample& kick) {
     void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
     std::lock_guard<std::mutex> lock(gMutex);
     if(!ped || !ValidHand(hand) || !ValidSlot(slot) || gInteractionsBlocked ||
@@ -1746,15 +1746,15 @@ bool DisarmAfterShot(int hand,int slot,int weaponType,float angularImpulse) {
        ValidHand(gSupportHand[hand]) || !gHands[hand].valid)return false;
     StartDropLocked(hand,slot,NowSeconds());
     auto& dropped=gDropped[hand];
-    const recoil::Vec barrel=recoil::Unit(recoil::Read(dropped.startPose.right));
-    const auto frame=recoil::Build({.1f,0,0},dropped.startPose.right,
-                                   dropped.startPose.forward,dropped.startPose.position);
-    const float strength=std::clamp(angularImpulse/(30.f*recoil::kRad),.6f,1.8f);
-    dropped.velocity=Add(dropped.velocity,{-barrel.x*strength,1.6f*strength-barrel.y*strength,-barrel.z*strength});
+    const auto launch=recoil::DisarmLaunch(kick,dropped.startPose.right,
+                                           dropped.startPose.forward,dropped.startPose.position);
+    // StartDrop's +Y toss is for deliberate throws, not recoil. Rebuild from
+    // tracked velocity and the recoil-derived vector, with no extra lift.
+    dropped.velocity=Add(gHandVelocity[hand],{launch.velocity.x,launch.velocity.y,launch.velocity.z});
     const float speed=Length(dropped.velocity);
     if(speed>kMaximumThrowSpeed)dropped.velocity=Scale(dropped.velocity,kMaximumThrowSpeed/speed);
-    dropped.angularAxis={frame.pitchAxis.x,frame.pitchAxis.y,frame.pitchAxis.z};
-    dropped.angularSpeed=6.f*strength;
+    dropped.angularAxis={launch.spinAxis.x,launch.spinAxis.y,launch.spinAxis.z};
+    dropped.angularSpeed=launch.spinSpeed;
     ClearHeldLocked(hand);
     gDisarmCatchBlocked[hand]=true;
     gGripLatched[hand]=true;

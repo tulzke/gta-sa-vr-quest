@@ -34,6 +34,7 @@ end = runtime.index('\n}', start)
 runtime = runtime[:start] + 'double Now(){return testTime;}' + runtime[end:]
 harness = r'''
 #include "WeaponRecoil.h"
+#include "PhysicalWeapon.h"
 #include <cassert>
 #include <mutex>
 #include <cstdint>
@@ -58,9 +59,11 @@ bool IsPrimaryDetached(int h){return detached[h];}
 int HeldSlot(int h){return detached[h]?-1:slots[h];}
 int SupportHand(int h){return support[h];}
 int disarmCalls[2]{};
-bool DisarmAfterShot(int h,int slot,int type,float impulse){
+bool GetHeldVisualPoseTracking(int,int,TrackingPose* pose){*pose={};return true;}
+bool GetDroppedPoseTracking(int,TrackingPose* pose){*pose={};return true;}
+bool DisarmAfterShot(int h,int slot,int type,const recoil::Sample& kick){
  assert(slots[h]==slot && inventory[0x730/4+slot*8]==type);
- assert(impulse>=0);++disarmCalls[h];recoil::Invalidate(h);return true;
+ assert(kick.pitch>=0 && std::isfinite(kick.yaw));++disarmCalls[h];slots[h]=-1;recoil::Invalidate(h);return true;
 }
 }
 }
@@ -92,7 +95,9 @@ int main(){
  OnShot(0,25,0);assert(physicalweapon::disarmCalls[0]==0);
  FinishShots();assert(physicalweapon::disarmCalls[0]==1); // deferred until native fire returned
  FinishShots();assert(physicalweapon::disarmCalls[0]==1); // one request, not one per pellet
- step();physicalweapon::support[0]=1;step();OnShot(0,25,0);FinishShots();
+ step();assert(ReleasedHandOffset(0).x<0); // clearing ownership preserves wrist shoulder kick
+ for(int i=0;i<120;++i)step();assert(ReleasedHandOffset(0).x==0);
+ physicalweapon::slots[0]=2;step();physicalweapon::support[0]=1;step();OnShot(0,25,0);FinishShots();
  assert(physicalweapon::disarmCalls[0]==1);
  physicalweapon::support[0]=-1;step();calib::tuning[25][0].disarmOneHanded=false;
  OnShot(0,25,0);FinishShots();assert(physicalweapon::disarmCalls[0]==1);
@@ -287,7 +292,7 @@ int main(){
   for(int h:{0,1}){gHands[h]={};gHands[h].valid=h==hand;gHeldSlot[h]=-1;
     gDropped[h]={};gSupportHand[h]=-1;gDisarmCatchBlocked[h]=false;}
   gHeldSlot[hand]=3;gHeldMaskRelaxed=1u<<hand;
-  assert(DisarmAfterShot(hand,3,25,.8f));
+  assert(DisarmAfterShot(hand,3,25,{.8f,.1f,0}));
   assert(gGripLock && gHeldSlot[hand]==-1 && gDropped[hand].slot==3);
   assert(gDisarmCatchBlocked[hand] && gGripLatched[hand]);
   assert(gHeldMaskRelaxed==0 && selectedSlot==0);
@@ -299,14 +304,61 @@ int main(){
   gHands[hand].grip=1;CatchTick();assert(caught==old+1 && gHeldSlot[hand]==3);
  }
  gHeldSlot[0]=3;gHands[0].valid=true;gSupportHand[0]=1;
- assert(!DisarmAfterShot(0,3,25,.8f));assert(gHeldSlot[0]==3);
+ assert(!DisarmAfterShot(0,3,25,{.8f,0,0}));assert(gHeldSlot[0]==3);
  gSupportHand[0]=-1;gInteractionsBlocked=true;
- assert(!DisarmAfterShot(0,3,25,.8f));gInteractionsBlocked=false;
- assert(!DisarmAfterShot(0,3,26,.8f));
- assert(!DisarmAfterShot(0,2,25,.8f));
- gHands[0].valid=false;assert(!DisarmAfterShot(0,3,25,.8f));
+ assert(!DisarmAfterShot(0,3,25,{.8f,0,0}));gInteractionsBlocked=false;
+ assert(!DisarmAfterShot(0,3,26,{.8f,0,0}));
+ assert(!DisarmAfterShot(0,2,25,{.8f,0,0}));
+ gHands[0].valid=false;assert(!DisarmAfterShot(0,3,25,{.8f,0,0}));
+ gHands[0].valid=true;gHandVelocity[0]={.2f,.3f,-.1f};
+ StartDropLocked(0,3,1);assert(std::abs(gDropped[0].velocity.y-1.3f)<.00001f);
+ assert(DisarmAfterShot(0,3,25,{0,0,.003f}));
+ assert(std::abs(gDropped[0].velocity.y-.3f)<.00001f); // no hard-coded upward impulse
+ assert(gDropped[0].angularSpeed==0);
 }
 '''
 disarm_file=OUT/'disarm.cpp'
 disarm_file.write_text(disarm,encoding='utf8')
 compile_run(disarm_file,'recoil-disarm')
+
+# Exercise the exact compositor block that moves the visible wrists, including
+# translation-only recoil. A model-only test cannot catch a pinned primary hand.
+xr=(ROOT/'native/src/Xr.cpp').read_text(encoding='utf8')
+hand_start=xr.index('        const auto& kick=twoHand.weaponRecoil[hand];')
+hand_end=xr.index('        const bool debugPinch=',hand_start)
+hand_test=r'''
+#include "RecoilModel.h"
+#include "PhysicalWeapon.h"
+#include <cassert>
+namespace recoil=savr::recoil;
+struct XrVector3f{float x{},y{},z{};};
+struct Captured{recoil::Transform weaponRecoil[2];};
+void Apply(int hand,const Captured& twoHand,XrVector3f& pos,XrVector3f& right,
+           XrVector3f& forward,XrVector3f& up){
+''' + xr[hand_start:hand_end] + r'''
+}
+int main(){
+ for(bool support:{false,true}){
+  recoil::State state;
+  state.Shot(recoil::ForWeapon(25,support,3,{0,0,50,92,false}));
+  state.Advance(.05f);
+  assert(state.sample.rear>0);
+  const float barrel[]{0,0,-1},top[]{0,1,0},pivot[]{0,1,-.4f};
+  const auto transform=recoil::Build(state.sample,barrel,top,pivot);
+  Captured captured;captured.weaponRecoil[0]=captured.weaponRecoil[1]=transform;
+  for(int hand:{0,1}){
+   XrVector3f pos{.1f*hand,1,-.4f},right{1,0,0},forward{0,0,-1},up{0,1,0};
+   const float oldZ=pos.z;
+   Apply(hand,captured,pos,right,forward,up);
+   assert(std::abs((pos.z-oldZ)-state.sample.rear)<.000001f);
+   assert(pos.z>oldZ); // both wrists follow the gun toward the shoulder
+   savr::physicalweapon::TrackingPose model;model.position[2]=oldZ;
+   transform.Apply(model);
+   assert(std::abs(model.position[2]-pos.z)<.000001f);
+  }
+ }
+}
+'''
+hands_file=OUT/'shoulder-hands.cpp'
+hands_file.write_text(hand_test,encoding='utf8')
+compile_run(hands_file,'recoil-shoulder-hands')
