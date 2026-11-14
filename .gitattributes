@@ -5,3 +5,6 @@
 *.png -text
 *.rgba -text
 /assets/radio/*.blend -text
+assets/vrhands/skeletal/*.glb filter=lfs diff=lfs merge=lfs -text
+assets/vrhands/source/*.blend filter=lfs diff=lfs merge=lfs -text
+assets/vrhands/BigHandsAlbedo.png filter=lfs diff=lfs merge=lfs -text

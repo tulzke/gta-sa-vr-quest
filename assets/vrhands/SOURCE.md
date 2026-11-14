@@ -15,44 +15,21 @@ Used source assets:
 - `Runtime/Art/Avatars/BigHands/Textures/BigHandsTex_Mask2.png`
 - `Runtime/Art/Avatars/BigHands/Textures/BigHandsTex_Mask3.png`
 
-The FBX meshes are converted offline to the `UXRH` runtime format. The open,
-grip, trigger and combined poses are baked from UltimateXR's authored finger
-poses. `BigHandsAlbedo.png` is an offline Type 3 skin-colour approximation made
-from the original masks; it does not include Unity or Shader Graph code.
+The hands-only Blender source is `source/Hands.blend`. It contains HandRight,
+its deform rig and all fourteen authored Actions. The original local mixed
+scene is not published; helper weapon meshes, cameras and unused data have
+been removed from the published copy. The original scene is never overwritten.
 
-The user's fourteen Blender Actions, including `GripPistol`, `GripPistolOffhand`,
-`Fist` and `GripPistolShoot`, can be sampled with `tools/export_hand_actions.py`.
-See [ANIMATIONS.md](ANIMATIONS.md) for the local source, mirrored exports,
-validation and the distinction from the existing runtime blend corners.
+`tools/export_hand_glb.py` exports one skinned mesh, all weights, inverse bind
+matrices and named bone-animation clips to `skeletal/hands.glb`. Constraints
+are baked to bone TRS if present. No per-frame geometry is used at runtime.
+The old UXRH hand assets and conversion tools have been removed.
 
-`BigHandLeftPalm.uxrh` and `BigHandRightPalm.uxrh` are basketball-only meshes
-with UltimateXR's authored `Wave` pose baked as the open-palm pose. They do not
-replace the ordinary controller hand meshes. Rebuild them with
-`tools/build_ultimatexr_palm_hands.py` after converting the official BigHands
-FBX files to embedded glTF.
+`BigHandsAlbedo.png` is an offline Type 3 skin-colour approximation made from
+the original masks; it does not include Unity or Shader Graph code. It is
+embedded in the GLB material. The original MIT license is retained in
+`ULTIMATEXR_LICENSE.txt`.
 
-`BigHandLeftPinch.uxrh` and `BigHandRightPinch.uxrh` are custom pinch poses made
-by the project user from the UltimateXR hands. See [PINCH.md](PINCH.md) for
-the contextual animation API. Export the posed mesh from Blender to
-GLB with the armature modifier applied, then run
-`python tools/build_pinch_hand.py <posed.glb> assets/vrhands/BigHandRight.uxrh <endpoint.uxrh>`.
-The converter checks UV correspondence and topology before writing the pose.
-Bake the four joint-aware transition frames using the original `.blend`:
-`blender -b <hand.blend> --python tools/build_pinch_transition.py -- assets/vrhands/BigHandRight.uxrh <endpoint.uxrh> assets/vrhands/BigHandRightPinch.uxrh`.
-The transition builder estimates joint rotations using the source mesh weights;
-the fourth frame retains the exact authored pinch endpoint.
-For the left hand, export `HandLeft`, pass `--side left` to the converter and
-pass `left` after the transition builder's three UXRH paths.
-
-UltimateXR is distributed under the MIT License. See
-`ULTIMATEXR_LICENSE.txt` in this directory.
-
-The runtime texture is the raw RGBA8 byte stream of `BigHandsAlbedo.png`:
-
-```python
-from PIL import Image
-Image.open("BigHandsAlbedo.png").convert("RGBA").tobytes()
-```
-
-Expected `BigHandsAlbedo.rgba` SHA-256:
-`46BA8B2F08CE1CA420537E060F64BE139DD39A22357D4EA5B9B7B69DA2BA2AD4`.
+The Blender source, GLB and PNG are versioned using Git LFS. Run `git lfs pull`
+after cloning. See `ANIMATIONS.md` and `../../docs/hand-skeleton.md` for gesture
+mapping, export and validation.

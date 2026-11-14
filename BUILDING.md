@@ -1,5 +1,12 @@
 # Building
 
+## Git LFS hand assets
+
+After cloning, run `git lfs install` and `git lfs pull`. The skeletal hand GLB,
+hands-only Blender source and albedo PNG are stored in LFS. Builds require the
+actual `assets/vrhands/skeletal/hands.glb`; an unresolved pointer fails staging.
+Export and validation commands are in [docs/hand-skeleton.md](docs/hand-skeleton.md).
+
 ## Rear-view mirror prototype
 
 In VR **Vehicle Settings → Cars**, `REAR MIRROR` cycles OFF / ON (LOW) / ON (MEDIUM) for the first-person

@@ -5,6 +5,7 @@
 #include "TrackingRecovery.h"
 #include "TheaterScreen.h"
 #include "HandAnimation.h"
+#include "HandSkeleton.h"
 #include "VehicleDoors.h"
 
 #include "Appearance.h"
@@ -8867,93 +8868,42 @@ void MatMul(float* o, const float* a, const float* b) {
     }
 }
 
-struct UxrhVertex { float pos[4][3]; float nrm[4][3]; float u, v; };   // 104 bytes
-struct HandMesh   { std::vector<UxrhVertex> verts; std::vector<unsigned short> idx; bool loaded = false; };
-HandMesh g_handMesh[2];
-HandMesh g_ballPalmMesh[2];
-HandMesh g_pinchMesh[2];
-handanimation::Library g_handAnimations;
-bool g_handAnimationsLoaded = false;
+handskeleton::Library g_handSkeleton;
+struct SkeletalHandFrame {
+    handskeleton::Palette palette{};
+    handskeleton::Mat model{}, wrist{};
+    bool valid=false, ledge=false;
+};
+SkeletalHandFrame g_skeletalHands[2];
+GLuint g_skeletalProg=0,g_skeletalVbo=0,g_skeletalEbo=0,g_skeletalVao=0;
+GLint g_skeletalMvp=-1,g_skeletalJoints=-1,g_skeletalModel=-1,g_skeletalWrist=-1,
+      g_skeletalLedge=-1,g_skeletalSkin=-1,g_skeletalTex=-1;
+bool EnsureSkeletalRenderer();
 GLuint   g_handTex = 0;
 bool     g_handAssetsTried = false;
-
-bool LoadUxrh(const char* path, HandMesh& m) {
-    FILE* f = std::fopen(path, "rb");
-    if (!f) { LOGE("[hands] cannot open %s", path); return false; }
-    char magic[4]; uint32_t ver = 0, vc = 0, ic = 0;
-    if (std::fread(magic, 1, 4, f) != 4 || std::fread(&ver, 4, 1, f) != 1 ||
-        std::fread(&vc, 4, 1, f) != 1 || std::fread(&ic, 4, 1, f) != 1 ||
-        std::memcmp(magic, "UXRH", 4) != 0) { std::fclose(f); LOGE("[hands] bad header %s", path); return false; }
-    m.verts.resize(vc); m.idx.resize(ic);
-    const bool ok = std::fread(m.verts.data(), sizeof(UxrhVertex), vc, f) == vc &&
-                    std::fread(m.idx.data(), sizeof(unsigned short), ic, f) == ic;
-    std::fclose(f);
-    m.loaded = ok;
-    LOGI("[hands] %s: %u verts %u idx ok=%d", path, vc, ic, ok);
-    return ok;
-}
-
-GLuint LoadRgbaTexture(const char* path, int w, int h) {
-    FILE* f = std::fopen(path, "rb");
-    if (!f) { LOGE("[hands] cannot open tex %s", path); return 0; }
-    std::vector<unsigned char> px(static_cast<size_t>(w) * h * 4);
-    const size_t n = std::fread(px.data(), 1, px.size(), f);
-    std::fclose(f);
-    if (n != px.size()) { LOGE("[hands] tex short read %zu/%zu", n, px.size()); return 0; }
-    GLuint t = 0; glGenTextures(1, &t); glBindTexture(GL_TEXTURE_2D, t);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    LOGI("[hands] albedo texture %d", t);
-    return t;
-}
 
 void EnsureHandAssets() {
     if (g_handAssetsTried) return;
     g_handAssetsTried = true;
     const char* dir = "/sdcard/Android/data/com.rockstargames.gtasa/files/vrhands/";
-    char path[256];
-    std::snprintf(path, sizeof(path), "%sBigHandLeft.uxrh", dir);  LoadUxrh(path, g_handMesh[0]);
-    std::snprintf(path, sizeof(path), "%sBigHandRight.uxrh", dir); LoadUxrh(path, g_handMesh[1]);
-    std::snprintf(path, sizeof(path), "%sBigHandLeftPalm.uxrh", dir);  LoadUxrh(path, g_ballPalmMesh[0]);
-    std::snprintf(path, sizeof(path), "%sBigHandRightPalm.uxrh", dir); LoadUxrh(path, g_ballPalmMesh[1]);
-    std::snprintf(path, sizeof(path), "%sBigHandLeftPinch.uxrh", dir); LoadUxrh(path, g_pinchMesh[0]);
-    std::snprintf(path, sizeof(path), "%sBigHandRightPinch.uxrh", dir); LoadUxrh(path, g_pinchMesh[1]);
-    std::snprintf(path, sizeof(path), "%sBigHandsAlbedo.rgba", dir); g_handTex = LoadRgbaTexture(path, 1024, 1024);
-    g_handAnimationsLoaded = g_handAnimations.Load(std::string(dir) + "animations");
-    if (g_handAnimationsLoaded) {
-        const auto& clip = g_handAnimations.Get(handanimation::Gesture::Grip);
-        g_handAnimationsLoaded = g_handMesh[1].loaded &&
-            clip.uv.size() == g_handMesh[1].verts.size() && clip.indices == g_handMesh[1].idx;
-        if (g_handAnimationsLoaded) {
-            for (size_t i=0;i<clip.uv.size();++i) {
-                const auto& v=g_handMesh[1].verts[i];
-                if (clip.uv[i] != handanimation::Uv{v.u,v.v}) {g_handAnimationsLoaded=false;break;}
-            }
-        }
+    if (g_handSkeleton.Load(std::string(dir)+"skeletal/hands.glb") && EnsureSkeletalRenderer()) {
+        // Keep a positive path marker in player builds for startup diagnosis.
+        __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,
+             "[hands] GLB GPU skinning ACTIVE: %zu joints, %zu vertices, %zu resident CPU bytes",
+             g_handSkeleton.joints.size(),g_handSkeleton.vertices.size(),g_handSkeleton.ResidentBytes());
+        return;
     }
-    LOGI("[hands] authored Blender animations loaded=%d", g_handAnimationsLoaded);
+    LOGE("[hands] GLB path FAILED (%s); hands disabled",g_handSkeleton.error.c_str());
+    g_handSkeleton=handskeleton::Library{};
 }
 
-constexpr int  kHandMaxV = 5000, kHandMaxI = 27000;
-float          g_hVerts[kHandMaxV * 8];   // pos.xyz, normal.xyz, u, v
-unsigned short g_hIdx[kHandMaxI];
-int            g_hVc = 0, g_hIc = 0;
-int            g_hFirstIndex[2] = {0, 0};
-int            g_hIndexCount[2] = {0, 0};
-
-// Build both hands' meshes once per frame from the given pose snapshot (the pose
+// Build both hands' bone palettes once per frame from the given pose snapshot (the pose
 // the displayed eye textures were baked with), so hands + weapon share one frame.
-void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
+void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
                      const driving::WheelVisualState& drivingWheel,
                      const BallHandLock& ballLock, unsigned int weaponHandMask,
                      const float pinchAmounts[2], const int weaponTypes[2], unsigned debugPinchHands) {
-    g_hVc = 0; g_hIc = 0;
-    g_hFirstIndex[0] = g_hFirstIndex[1] = 0;
-    g_hIndexCount[0] = g_hIndexCount[1] = 0;
+    for(auto& frame:g_skeletalHands)frame.valid=false;
     static radio::HandAttachment radioHands[2];
     if (!drivingWheel.trackedHandsEnabled) {
         for (auto& attachment:radioHands) attachment.Reset();
@@ -8962,7 +8912,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
     EnsureHandAssets();
     for (int hand = 0; hand < 2; ++hand) {
         if (!drivingWheel.radioGrabbed[hand] || !hp[hand].valid) radioHands[hand].Reset();
-        if (!hp[hand].valid || !g_handMesh[hand].loaded) continue;
+        if (!hp[hand].valid || !g_handSkeleton.loaded) continue;
         const XrQuaternionf gq{hp[hand].gripOri[0], hp[hand].gripOri[1], hp[hand].gripOri[2], hp[hand].gripOri[3]};
         const XrQuaternionf aq{hp[hand].aimOri[0], hp[hand].aimOri[1], hp[hand].aimOri[2], hp[hand].aimOri[3]};
         XrVector3f pos{hp[hand].gripPos[0], hp[hand].gripPos[1], hp[hand].gripPos[2]};
@@ -9101,7 +9051,7 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
                 right = vnorm(vcross(up, forward));
                 if (hand == 0) right = vscale(right, -1.0f);
             }
-            // Exact UXRH OPEN pose. Even the former 5% grip curl made the
+            // Exact authored OPEN pose. Even the former 5% grip curl made the
             // remaining three fingers read like a pistol hand beside the ball.
             grip = 0.0f;
             trig = 0.0f;
@@ -9199,22 +9149,9 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
         if (debugPinch) grip=trig=0.f;
         const bool pinch = debugPinch || (!hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
             !steeringHand &&
-            !ballLock.locked[hand] && !TwoHandStateUsable(twoHand) &&
-            (g_handAnimationsLoaded || (g_pinchMesh[hand].loaded &&
-             g_pinchMesh[hand].verts.size() == g_handMesh[hand].verts.size())));
+            !ballLock.locked[hand] && !TwoHandStateUsable(twoHand));
         const float pinchAmount = debugPinch ? 1.f : (pinch ? pinchAmounts[hand] : 0.0f);
         const float pinchWeight = pinchAmount * (1.0f - grip);
-        const float pinchFrame = pinchAmount * 4.0f;
-        const int pinchSegment = std::min(static_cast<int>(pinchFrame), 3);
-        const float pinchFraction = pinchFrame - pinchSegment;
-        const float wO = (1 - grip) * (1 - trig), wG = grip * (1 - trig), wT = (1 - grip) * trig, wB = grip * trig;
-        // Both hands use the canonical right topology. The existing per-hand
-        // wrist basis already mirrors it; reflecting local Y again would undo
-        // that anatomical mirroring. Offline Left blocks are not used here.
-        const bool useAuthored = g_handAnimationsLoaded;
-        const HandMesh& m = useAuthored ? g_handMesh[1] :
-            (basketballFlatPalm && g_ballPalmMesh[hand].loaded ? g_ballPalmMesh[hand] : g_handMesh[hand]);
-        using Gesture = handanimation::Gesture;
         const auto selected = handanimation::Select(grip,trig,{
             hp[hand].climbGrip,
             debugPinch || drivingWheel.radioGrabbed[hand] || drivingWheel.ignitionGrabbed[hand],
@@ -9223,90 +9160,24 @@ void BuildHandMeshes(const HandPose hp[2], const TwoHandVisualState& twoHand,
             (weaponHandMask & (1u<<hand))!=0,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand
                 ? twoHand.weaponType : weaponTypes[hand]});
-        const auto& firstClip = g_handAnimations.Get(selected.first);
-        const auto& secondClip = g_handAnimations.Get(selected.second);
-        const auto& pinchClip = g_handAnimations.Get(Gesture::Pinch);
-        const auto firstSegment = firstClip.At(selected.progress);
-        const auto secondSegment = secondClip.At(selected.progress);
-        const auto authoredPinchSegment = pinchClip.At(pinchAmount);
-        const int base = g_hVc;
-        for (size_t vertex = 0; vertex < m.verts.size(); ++vertex) {
-            const UxrhVertex& v = m.verts[vertex];
-            if (g_hVc >= kHandMaxV) break;
-            const auto component = [&](float open, float gripPose,
-                                       float triggerPose, float bothPose) {
-                return open * wO + gripPose * wG +
-                       triggerPose * wT + bothPose * wB;
-            };
-            float lx = component(v.pos[0][0], v.pos[1][0],
-                                       v.pos[2][0], v.pos[3][0]);
-            float ly = component(v.pos[0][1], v.pos[1][1],
-                                       v.pos[2][1], v.pos[3][1]);
-            float lz = component(v.pos[0][2], v.pos[1][2],
-                                       v.pos[2][2], v.pos[3][2]);
-            float nx = component(v.nrm[0][0], v.nrm[1][0],
-                                       v.nrm[2][0], v.nrm[3][0]);
-            float ny = component(v.nrm[0][1], v.nrm[1][1],
-                                       v.nrm[2][1], v.nrm[3][1]);
-            float nz = component(v.nrm[0][2], v.nrm[1][2],
-                                       v.nrm[2][2], v.nrm[3][2]);
-            if (pinchWeight > 0.0f && !useAuthored && g_pinchMesh[hand].loaded &&
-                g_pinchMesh[hand].verts.size()==m.verts.size()) {
-                const UxrhVertex& target = g_pinchMesh[hand].verts[vertex];
-                const float rest = 1.0f - pinchWeight;
-                const auto pinchComponent = [&](bool normal, int axis) {
-                    const float first = pinchSegment == 0
-                        ? (normal ? v.nrm[0][axis] : v.pos[0][axis])
-                        : (normal ? target.nrm[pinchSegment - 1][axis] : target.pos[pinchSegment - 1][axis]);
-                    const float last = normal ? target.nrm[pinchSegment][axis] : target.pos[pinchSegment][axis];
-                    return first + (last - first) * pinchFraction;
-                };
-                lx = lx * rest + pinchComponent(false, 0) * pinchWeight;
-                ly = ly * rest + pinchComponent(false, 1) * pinchWeight;
-                lz = lz * rest + pinchComponent(false, 2) * pinchWeight;
-                nx = nx * rest + pinchComponent(true, 0) * pinchWeight;
-                ny = ny * rest + pinchComponent(true, 1) * pinchWeight;
-                nz = nz * rest + pinchComponent(true, 2) * pinchWeight;
-            }
-            if (useAuthored) {
-                auto value = handanimation::Mix(firstClip.Sample(firstSegment,vertex),
-                    secondClip.Sample(secondSegment,vertex),selected.blend);
-                if (pinchWeight>0.f)
-                    value=handanimation::Mix(value,pinchClip.Sample(authoredPinchSegment,vertex),pinchWeight);
-                lx=value.pos[0]; ly=value.pos[1]; lz=value.pos[2];
-                nx=value.normal[0]; ny=value.normal[1]; nz=value.normal[2];
-            }
-            // UXR local axes: X->forward (wrist pulled 5.5cm back), Z->right, Y->-up.
-            XrVector3f wp = vadd(vadd(vadd(pos, vscale(forward, lx - 0.055f)), vscale(right, lz)), vscale(up, -ly));
-            XrVector3f wn = vnorm(vadd(vadd(vscale(forward, nx), vscale(right, nz)), vscale(up, -ny)));
-            if(hp[hand].ledgeGrip){
-                // The shipped hand mesh is baked, with no bone indices. Two
-                // procedural bone transforms pin palm/fingers while allowing
-                // the wrist region to follow controller rotation.
-                const float palm=handanimation::PalmLockWeight(lx);
-                const auto pivot=vehicleclimb::GripPivotOffset({wristForward.x,wristForward.y,wristForward.z},{wristUp.x,wristUp.y,wristUp.z});
-                const XrVector3f anchor{hp[hand].gripPos[0],hp[hand].gripPos[1],hp[hand].gripPos[2]};
-                const auto wristPos=vsub(anchor,{pivot.x,pivot.y,pivot.z});
-                const auto wristVertex=vadd(vadd(vadd(wristPos,vscale(wristForward,lx-.055f)),vscale(wristRight,lz)),vscale(wristUp,-ly));
-                const auto wristNormal=vnorm(vadd(vadd(vscale(wristForward,nx),vscale(wristRight,nz)),vscale(wristUp,-ny)));
-                wp=vadd(vscale(wp,palm),vscale(wristVertex,1.f-palm));
-                wn=vnorm(vadd(vscale(wn,palm),vscale(wristNormal,1.f-palm)));
-            }
-            float* o = &g_hVerts[g_hVc * 8];
-            o[0] = wp.x; o[1] = wp.y; o[2] = wp.z; o[3] = wn.x; o[4] = wn.y; o[5] = wn.z; o[6] = v.u; o[7] = v.v;
-            ++g_hVc;
+        auto& frame=g_skeletalHands[hand];
+        g_handSkeleton.Evaluate(selected,pinchAmount,pinchWeight,frame.palette);
+        const auto model=[](XrVector3f p,XrVector3f f,XrVector3f r,XrVector3f u) {
+            return handskeleton::Mat{f.x,f.y,f.z,0,-u.x,-u.y,-u.z,0,r.x,r.y,r.z,0,
+                p.x-.055f*f.x,p.y-.055f*f.y,p.z-.055f*f.z,1};
+        };
+        frame.model=model(pos,forward,right,up);
+        frame.wrist=frame.model;frame.ledge=hp[hand].ledgeGrip;
+        if(frame.ledge) {
+            const auto pivot=vehicleclimb::GripPivotOffset({wristForward.x,wristForward.y,wristForward.z},{wristUp.x,wristUp.y,wristUp.z});
+            const XrVector3f anchor{hp[hand].gripPos[0],hp[hand].gripPos[1],hp[hand].gripPos[2]};
+            frame.wrist=model(vsub(anchor,{pivot.x,pivot.y,pivot.z}),wristForward,wristRight,wristUp);
         }
-        g_hFirstIndex[hand] = g_hIc;
-        for (unsigned short id : m.idx) {
-            if (g_hIc >= kHandMaxI) break;
-            g_hIdx[g_hIc++] = static_cast<unsigned short>(base + id);
-        }
-        g_hIndexCount[hand] = g_hIc - g_hFirstIndex[hand];
+        frame.valid=true;
     }
 }
 
-GLuint g_handProg = 0, g_handVbo = 0, g_handEbo = 0, g_handDepthRbo = 0;
-GLint  g_handMvpLoc = -1, g_handTexLoc = -1, g_handSkinLoc = -1;
+GLuint g_handDepthRbo = 0;
 int    g_handDepthW = 0, g_handDepthH = 0;
 GLint  g_handDepthFormat = 0, g_handDepthBits = 0;
 int    g_handDepthRetryCountdown = 0;
@@ -9469,36 +9340,144 @@ GLuint CompileHandShader(GLenum type, const char* src) {
     return sh;
 }
 
-void EnsureHandProgram() {
-    if (g_handProg) return;
-    const char* vs = "#version 300 es\n"
-                     "layout(location=0) in vec3 aPos;\n"
-                     "layout(location=1) in vec3 aNrm;\n"
-                     "layout(location=2) in vec2 aUV;\n"
-                     "uniform mat4 uMVP;\n"
-                     "out vec3 vN; out vec2 vUV;\n"
-                     "void main(){ vN = aNrm; vUV = aUV; gl_Position = uMVP * vec4(aPos,1.0); }\n";
-    const char* fs = "#version 300 es\n"
-                     "precision mediump float;\n"
-                     "in vec3 vN; in vec2 vUV;\n"
-                     "uniform sampler2D uTex; uniform float uDarkSkin; out vec4 o;\n"
-                     "void main(){\n"
-                     "  vec3 L = normalize(vec3(-0.2, 0.7, 0.55));\n"
-                     "  float d = max(dot(normalize(vN), L), 0.0);\n"
-                     "  float sh = 0.72 + 0.28 * d;\n"
-                     "  vec3 base = texture(uTex, vUV).rgb;\n"
-                     "  vec3 dark = base * vec3(0.48, 0.38, 0.30);\n"
-                     "  o = vec4(mix(base, dark, uDarkSkin) * sh, 1.0);\n"
-                     "}\n";
-    const GLuint v = CompileHandShader(GL_VERTEX_SHADER, vs), f = CompileHandShader(GL_FRAGMENT_SHADER, fs);
-    g_handProg = glCreateProgram();
-    glAttachShader(g_handProg, v); glAttachShader(g_handProg, f); glLinkProgram(g_handProg);
-    glDeleteShader(v); glDeleteShader(f);
-    g_handMvpLoc = glGetUniformLocation(g_handProg, "uMVP");
-    g_handTexLoc = glGetUniformLocation(g_handProg, "uTex");
-    g_handSkinLoc = glGetUniformLocation(g_handProg, "uDarkSkin");
-    glGenBuffers(1, &g_handVbo); glGenBuffers(1, &g_handEbo);
-    LOGI("[hands] GL program ready");
+bool EnsureSkeletalRenderer() {
+    // Called once, before building the stereo frame. No file reads or mesh
+    // uploads occur in the per-eye draw. All eight authored weights survive.
+    const char* vs=R"GLSL(#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+layout(location=2) in vec2 aUV;
+layout(location=3) in uvec4 aJoints0;
+layout(location=4) in uvec4 aJoints1;
+layout(location=5) in vec4 aWeights0;
+layout(location=6) in vec4 aWeights1;
+uniform mat4 uJoints[32];
+uniform mat4 uMVP, uModel, uWrist;
+uniform bool uLedge;
+out vec3 vN; out vec2 vUV;
+void main() {
+    mat4 skin=aWeights0.x*uJoints[aJoints0.x]+aWeights0.y*uJoints[aJoints0.y]+
+              aWeights0.z*uJoints[aJoints0.z]+aWeights0.w*uJoints[aJoints0.w]+
+              aWeights1.x*uJoints[aJoints1.x]+aWeights1.y*uJoints[aJoints1.y]+
+              aWeights1.z*uJoints[aJoints1.z]+aWeights1.w*uJoints[aJoints1.w];
+    vec3 p=(skin*vec4(aPos,1.0)).xyz;
+    vec3 n=normalize(transpose(inverse(mat3(skin)))*aNrm);
+    // Inverse of the asset's Y-up conversion only. Controller/weapon bases
+    // retain the established UXR local axes and 5.5 cm wrist calibration.
+    p=vec3(p.x,-p.z,p.y); n=vec3(n.x,-n.z,n.y);
+    vec4 world=uModel*vec4(p,1.0);
+    vec3 normal=normalize(mat3(uModel)*n);
+    if(uLedge) {
+        float palm=smoothstep(.015,.065,p.x);
+        world=mix(uWrist*vec4(p,1.0),world,palm);
+        normal=normalize(mix(normalize(mat3(uWrist)*n),normal,palm));
+    }
+    vN=normal; vUV=aUV; gl_Position=uMVP*world;
+})GLSL";
+    const char* fs=R"GLSL(#version 300 es
+precision mediump float;
+in vec3 vN; in vec2 vUV;
+uniform sampler2D uTex; uniform float uDarkSkin;
+out vec4 o;
+void main() {
+    vec3 L=normalize(vec3(-.2,.7,.55));
+    float sh=.72+.28*max(dot(normalize(vN),L),0.0);
+    vec3 base=texture(uTex,vUV).rgb;
+    o=vec4(mix(base,base*vec3(.48,.38,.30),uDarkSkin)*sh,1.0);
+})GLSL";
+    const GLuint v=CompileHandShader(GL_VERTEX_SHADER,vs),f=CompileHandShader(GL_FRAGMENT_SHADER,fs);
+    g_skeletalProg=glCreateProgram();glAttachShader(g_skeletalProg,v);glAttachShader(g_skeletalProg,f);
+    glLinkProgram(g_skeletalProg);glDeleteShader(v);glDeleteShader(f);
+    GLint linked=0;glGetProgramiv(g_skeletalProg,GL_LINK_STATUS,&linked);
+    if(!linked) {
+        char log[1024]{};glGetProgramInfoLog(g_skeletalProg,sizeof(log),nullptr,log);
+        LOGE("[hands] GLB skin shader link failed: %s",log);
+        glDeleteProgram(g_skeletalProg);g_skeletalProg=0;
+        g_handSkeleton.error="GPU skin shader link failed";return false;
+    }
+    // ImageDecoder is provided by libjnigraphics, not libandroid. Explicitly
+    // load it so GLB does not depend on another game module loading it first.
+    void* decoderLibrary=dlopen("libjnigraphics.so",RTLD_NOW|RTLD_LOCAL);
+    const auto symbol=[&](const char* name){return decoderLibrary?dlsym(decoderLibrary,name):nullptr;};
+    const auto create=reinterpret_cast<int(*)(const void*,size_t,void**)>(symbol("AImageDecoder_createFromBuffer"));
+    const auto decode=reinterpret_cast<int(*)(void*,void*,size_t,size_t)>(symbol("AImageDecoder_decodeImage"));
+    const auto format=reinterpret_cast<int(*)(void*,int)>(symbol("AImageDecoder_setAndroidBitmapFormat"));
+    const auto destroy=reinterpret_cast<void(*)(void*)>(symbol("AImageDecoder_delete"));
+    void* decoder=nullptr;
+    bool decoded=false;
+    std::vector<unsigned char> pixels(1024*1024*4);
+    if(create && decode && format && destroy &&
+       create(g_handSkeleton.albedoPng.data(),g_handSkeleton.albedoPng.size(),&decoder)==0 && decoder) {
+        decoded=format(decoder,1)==0 && decode(decoder,pixels.data(),1024*4,pixels.size())==0;
+    }
+    if(decoder && destroy)destroy(decoder);
+    if(decoderLibrary)dlclose(decoderLibrary);
+    if(!decoded) {
+        glDeleteProgram(g_skeletalProg);g_skeletalProg=0;
+        g_handSkeleton.error="Embedded GLB albedo decode failed";return false;
+    }
+    while(glGetError()!=GL_NO_ERROR){}
+    GLint previousVao=0,previousVbo=0;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&previousVao);glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&previousVbo);
+    glGenVertexArrays(1,&g_skeletalVao);glBindVertexArray(g_skeletalVao);
+    glGenTextures(1,&g_handTex);glBindTexture(GL_TEXTURE_2D,g_handTex);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,1024,1024,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D,0);
+    glGenBuffers(1,&g_skeletalVbo);glBindBuffer(GL_ARRAY_BUFFER,g_skeletalVbo);
+    glBufferData(GL_ARRAY_BUFFER,g_handSkeleton.vertices.size()*sizeof(handskeleton::Vertex),g_handSkeleton.vertices.data(),GL_STATIC_DRAW);
+    glGenBuffers(1,&g_skeletalEbo);glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,g_skeletalEbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,g_handSkeleton.indices.size()*sizeof(std::uint16_t),g_handSkeleton.indices.data(),GL_STATIC_DRAW);
+    using V=handskeleton::Vertex;
+    for(int i=0;i<7;++i)glEnableVertexAttribArray(i);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(V),reinterpret_cast<void*>(offsetof(V,pos)));
+    glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,sizeof(V),reinterpret_cast<void*>(offsetof(V,normal)));
+    glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,sizeof(V),reinterpret_cast<void*>(offsetof(V,uv)));
+    glVertexAttribIPointer(3,4,GL_UNSIGNED_SHORT,sizeof(V),reinterpret_cast<void*>(offsetof(V,joints)));
+    glVertexAttribIPointer(4,4,GL_UNSIGNED_SHORT,sizeof(V),reinterpret_cast<void*>(offsetof(V,joints)+4*sizeof(std::uint16_t)));
+    glVertexAttribPointer(5,4,GL_FLOAT,GL_FALSE,sizeof(V),reinterpret_cast<void*>(offsetof(V,weights)));
+    glVertexAttribPointer(6,4,GL_FLOAT,GL_FALSE,sizeof(V),reinterpret_cast<void*>(offsetof(V,weights)+4*sizeof(float)));
+    const GLenum error=glGetError();
+    glBindVertexArray(static_cast<GLuint>(previousVao));glBindBuffer(GL_ARRAY_BUFFER,static_cast<GLuint>(previousVbo));
+    if(error!=GL_NO_ERROR) {
+        glDeleteBuffers(1,&g_skeletalVbo);glDeleteBuffers(1,&g_skeletalEbo);glDeleteTextures(1,&g_handTex);
+        glDeleteVertexArrays(1,&g_skeletalVao);g_skeletalVao=0;
+        glDeleteProgram(g_skeletalProg);g_skeletalProg=g_skeletalVbo=g_skeletalEbo=g_handTex=0;
+        g_handSkeleton.error="GLB GPU upload failed";return false;
+    }
+    g_skeletalMvp=glGetUniformLocation(g_skeletalProg,"uMVP");
+    g_skeletalJoints=glGetUniformLocation(g_skeletalProg,"uJoints[0]");
+    g_skeletalModel=glGetUniformLocation(g_skeletalProg,"uModel");
+    g_skeletalWrist=glGetUniformLocation(g_skeletalProg,"uWrist");
+    g_skeletalLedge=glGetUniformLocation(g_skeletalProg,"uLedge");
+    g_skeletalSkin=glGetUniformLocation(g_skeletalProg,"uDarkSkin");
+    g_skeletalTex=glGetUniformLocation(g_skeletalProg,"uTex");
+    std::vector<unsigned char>().swap(g_handSkeleton.albedoPng);
+    return true;
+}
+
+void DrawSkeletalHands(const float* mvp,unsigned weaponHandMask,bool usingGameDepth,bool jetpackThrusters) {
+    glUseProgram(g_skeletalProg);
+    glUniformMatrix4fv(g_skeletalMvp,1,GL_FALSE,mvp);
+    glUniform1f(g_skeletalSkin,appearance::GetHandSkin()==appearance::HAND_SKIN_DARK?1.f:0.f);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,g_handTex);glUniform1i(g_skeletalTex,0);
+    GLint previousVao=0;glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&previousVao);glBindVertexArray(g_skeletalVao);
+    for(int hand=0;hand<2;++hand) {
+        const auto& frame=g_skeletalHands[hand];
+        if(!frame.valid || (jetpackThrusters && !(weaponHandMask&(1u<<hand))) ||
+           (!usingGameDepth && (weaponHandMask&(1u<<hand))))continue;
+        glUniformMatrix4fv(g_skeletalJoints,static_cast<GLsizei>(g_handSkeleton.joints.size()),GL_FALSE,frame.palette[0].data());
+        glUniformMatrix4fv(g_skeletalModel,1,GL_FALSE,frame.model.data());
+        glUniformMatrix4fv(g_skeletalWrist,1,GL_FALSE,frame.wrist.data());
+        glUniform1i(g_skeletalLedge,frame.ledge?1:0);
+        glDrawElements(GL_TRIANGLES,static_cast<GLsizei>(g_handSkeleton.indices.size()),GL_UNSIGNED_SHORT,nullptr);
+    }
+    glBindVertexArray(static_cast<GLuint>(previousVao));
+    glBindTexture(GL_TEXTURE_2D,0);
 }
 
 // Flat-colour program + cube geometry for the holster markers.
@@ -9932,7 +9911,7 @@ bool BuildHandPanelAnchor(const HandPose& hp, int hand,
             }
             if (twoHand.supportBasisValid) {
                 // Transform the original grip axes through the same visual
-                // hand frames as BuildHandMeshes. Substituting anatomical
+                // hand frames as BuildHandFrames. Substituting anatomical
                 // axes directly changes the panel's calibrated wrist frame.
                 const XrQuaternionf aq{hp.aimOri[0], hp.aimOri[1],
                                        hp.aimOri[2], hp.aimOri[3]};
@@ -11296,22 +11275,24 @@ extern const unsigned char savr_radio_base_rgba[],savr_radio_base_rgba_end[];
 extern const unsigned char savr_radio_knob_rgba[],savr_radio_knob_rgba_end[];
 }
 
-struct RadioPart { HandMesh mesh; GLuint texture{}; };
+struct RadioVertex { float pos[4][3]; float nrm[4][3]; float u, v; };
+struct RadioMesh { std::vector<RadioVertex> verts; std::vector<unsigned short> idx; bool loaded=false; };
+struct RadioPart { RadioMesh mesh; GLuint texture{}; };
 RadioPart g_radioParts[2];
 GLuint g_radioProgram{},g_radioVbo{},g_radioEbo{};
 GLint g_radioMvp=-1,g_radioSampler=-1,g_radioHighlight=-1;
 bool g_radioAssetsTried=false;
 
-bool LoadEmbeddedRadioMesh(const unsigned char* begin,const unsigned char* end,HandMesh& mesh) {
+bool LoadEmbeddedRadioMesh(const unsigned char* begin,const unsigned char* end,RadioMesh& mesh) {
     const size_t size=static_cast<size_t>(end-begin);
     if (size<16 || std::memcmp(begin,"UXRH",4)!=0) return false;
     uint32_t header[3]{}; std::memcpy(header,begin+4,sizeof(header));
     const uint32_t version=header[0],vertices=header[1],indices=header[2];
     if (version!=1 || !vertices || vertices>65535 || !indices || indices%3 ||
-        size!=16+static_cast<size_t>(vertices)*sizeof(UxrhVertex)+static_cast<size_t>(indices)*2) return false;
+        size!=16+static_cast<size_t>(vertices)*sizeof(RadioVertex)+static_cast<size_t>(indices)*2) return false;
     mesh.verts.resize(vertices); mesh.idx.resize(indices);
-    std::memcpy(mesh.verts.data(),begin+16,vertices*sizeof(UxrhVertex));
-    std::memcpy(mesh.idx.data(),begin+16+vertices*sizeof(UxrhVertex),indices*2);
+    std::memcpy(mesh.verts.data(),begin+16,vertices*sizeof(RadioVertex));
+    std::memcpy(mesh.idx.data(),begin+16+vertices*sizeof(RadioVertex),indices*2);
     for (auto index:mesh.idx) if (index>=vertices) return false;
     return mesh.loaded=true;
 }
@@ -12128,7 +12109,7 @@ void EulerXYZ(const float deg[3], float R[9]) {
 }
 
 // Build the weapon's world-space triangle mesh at the right hand's pose. Mirrors
-// the basis math in BuildHandMeshes for the same hand so the gun sits in the same
+// the basis math in BuildHandFrames for the same hand so the gun sits in the same
 // frame as the hand mesh. Runs on the present thread, once per frame.
 void BuildWeaponMesh(const HandPose hp[2]) {
     g_wVc = 0; g_wIc = 0;
@@ -12241,7 +12222,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         chuteRingVisual = g_chuteRingVisible;
     }
     const bool haveHands = trackedVisuals &&
-                           g_hVc > 0 && g_hIc > 0 && g_handTex != 0;
+        g_handSkeleton.loaded && (g_skeletalHands[0].valid || g_skeletalHands[1].valid) && g_handTex!=0;
     // Wrist HUD panels ride the visible wrists on foot, and the steering-
     // wheel/handlebar centre (Vice City dashboard pattern) in ANY driving
     // mode — the dash anchor does not need tracked hands. While the HUD menu
@@ -12264,7 +12245,6 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         !chuteVisuals && !chuteRingVisual &&
         !wristWanted &&
         tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && bakedNpcGrabs.count<=0 && bakedTestArea.count<=0 && !bakedRadials.Visible()) return;
-    if (haveHands) EnsureHandProgram();
 
     const float sign = (e == 0) ? -1.0f : 1.0f;
     const XrVector3f rr = QuatRotate(rp.orientation, {sign * kStereoHalfIpd, 0, 0});
@@ -12398,35 +12378,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawObjectiveHighlights(mvp, objectiveMarkers, objectiveMarkerCount);
 
     if (haveHands) {
-        glUseProgram(g_handProg);
-        glUniformMatrix4fv(g_handMvpLoc, 1, GL_FALSE, mvp);
-        glUniform1f(g_handSkinLoc,
-                    appearance::GetHandSkin() == appearance::HAND_SKIN_DARK
-                        ? 1.0f : 0.0f);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, g_handTex);
-        glUniform1i(g_handTexLoc, 0);
-        glBindBuffer(GL_ARRAY_BUFFER, g_handVbo);
-        glBufferData(GL_ARRAY_BUFFER, g_hVc * 8 * sizeof(float), g_hVerts, GL_DYNAMIC_DRAW);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_handEbo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, g_hIc * sizeof(unsigned short), g_hIdx, GL_DYNAMIC_DRAW);
-        glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<void*>(0));
-        glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
-        glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<void*>(6 * sizeof(float)));
-        for (int hand = 0; hand < 2; ++hand) {
-            // Turbine replaces the hand — but NOT a hand holding a weapon, so the
-            // player can fly one-handed and keep the gun visible in the other.
-            if (g_jetpackThrusters.load(std::memory_order_relaxed) &&
-                (weaponHandMask & (1u << hand)) == 0) continue;
-            if (!usingGameDepth && (weaponHandMask & (1u << hand)) != 0) continue;
-            if (g_hIndexCount[hand] <= 0) continue;
-            const std::uintptr_t byteOffset =
-                static_cast<std::uintptr_t>(g_hFirstIndex[hand]) * sizeof(unsigned short);
-            glDrawElements(GL_TRIANGLES, g_hIndexCount[hand], GL_UNSIGNED_SHORT,
-                           reinterpret_cast<void*>(byteOffset));
-        }
-        glDisableVertexAttribArray(0); glDisableVertexAttribArray(1); glDisableVertexAttribArray(2);
-        glBindTexture(GL_TEXTURE_2D, 0);
+        DrawSkeletalHands(mvp,weaponHandMask,usingGameDepth,g_jetpackThrusters.load(std::memory_order_relaxed));
     }
 
     if (trackedVisuals) {
@@ -12484,8 +12436,6 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-    static bool logged = false;
-    if (!logged) { LOGI("[hands] mesh drawn %d verts %d idx", g_hVc, g_hIc); logged = true; }
 }
 
 // A repeated game sequence already exists in the OpenXR eye swapchains.  Core
@@ -12720,7 +12670,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     }
 
     if (!bakedScope.active) {
-        BuildHandMeshes(bakedHands, bakedTwoHand, drivingWheel,
+        BuildHandFrames(bakedHands, bakedTwoHand, drivingWheel,
                         ballHandLock, bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes, bakedDebugPinchHands); // same ring pose + cockpit/support correction
         BuildWeaponMesh(bakedHands);   // (weapon-mesh path; dead until Approach-B geometry exists)
     }

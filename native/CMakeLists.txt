@@ -75,6 +75,7 @@ add_library(savr SHARED
     src/VrFire.cpp
     src/WeaponRecoil.cpp
     src/Xr.cpp
+    src/HandSkeleton.cpp
     src/Cheats.cpp
     src/HudSettings.cpp
     src/Hydraulics.cpp

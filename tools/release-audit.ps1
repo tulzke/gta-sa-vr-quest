@@ -68,21 +68,11 @@ if ($audioBytes -ne 1218349029 -or $audioReference.totalBytes -ne $audioBytes) {
     throw "audio-reference.json byte total mismatch: $audioBytes"
 }
 
-$expectedHands = @{
-    'BigHandLeft.uxrh' = '6BB32E6F79ED6DBA401BD36DD39D3178F8259096F889EF01C870D057134EB535'
-    'BigHandRight.uxrh' = '48B14A77EFEA68027F5AE6723994CADC06DAC58708ECB7339CC16ECB1ADE2478'
-    'BigHandLeftPalm.uxrh' = '3F8746A0B5FE2035C6E541856FE236E605B9321ECDDD5CABFFBDBFF5BDE8DC8C'
-    'BigHandRightPalm.uxrh' = '313296B2E720955B039BF1830C5E51568B4CA406FB426ED233B6AFFCC97A5B80'
-    'BigHandLeftPinch.uxrh' = '14AA872D0935BE26CD13AFB0A580DA2E33903729F96BF3B29C422AEF7A82E589'
-    'BigHandRightPinch.uxrh' = 'C9ADDB709BC3C56A9863881F2B655E552982AEC5A01F457D1ADAAA0DE24E8A50'
-    'BigHandsAlbedo.rgba' = '46BA8B2F08CE1CA420537E060F64BE139DD39A22357D4EA5B9B7B69DA2BA2AD4'
-}
-foreach ($entry in $expectedHands.GetEnumerator()) {
-    $path = Join-Path (Join-Path $Root 'assets\vrhands') $entry.Key
-    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-    if ($actual -ne $entry.Value) {
-        throw "VR hand asset hash mismatch: $($entry.Key)"
-    }
+$handGlb = Join-Path $Root 'assets/vrhands/skeletal/hands.glb'
+$handHeader = [IO.File]::ReadAllBytes($handGlb)
+if ($handHeader.Length -lt 20 -or [Text.Encoding]::ASCII.GetString($handHeader,0,4) -ne 'glTF' -or
+    [BitConverter]::ToUInt32($handHeader,4) -ne 2 -or [BitConverter]::ToUInt32($handHeader,8) -ne $handHeader.Length) {
+    throw 'Missing/invalid skeletal GLB (an LFS pointer must be resolved with git lfs pull).'
 }
 
 $xrSource = Get-Content -LiteralPath (Join-Path $Root 'native\src\Xr.cpp') -Raw

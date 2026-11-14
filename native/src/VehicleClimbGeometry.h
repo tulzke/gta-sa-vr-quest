@@ -46,7 +46,7 @@ inline vehicledoors::Basis PipeHandFrame(Vec axis,Vec heading,float pitch,float 
     return {right,forward,up,{}};
 }
 // Centre of the Grip mesh opening at local Z=0, measured from the inner
-// contour of both BigHand*.uxrh pose-1 meshes (metres). The hand builder
+// contour of the authored closed Grip hand pose (metres). The hand renderer
 // maps local X to forward with a -0.055 m wrist adjustment and Y to -up.
 inline Vec GripPivotOffset(Vec forward,Vec up){return forward*(.09869f-.055f)-up*.01410f;}
 // Both baked Grip meshes have the thumb on positive local Z. Local Z is the

@@ -68,55 +68,17 @@ SUPPORTED_AUDIO_ARCHIVE = "gta-sa-ps2-style-mod-pack_1786856007_737162.7z"
 SUPPORTED_AUDIO_PAGE = (
     "https://libertycity.net/files/gta-san-andreas-ios-android/241069-gta-sa-classic-avanced-mod-pack.html"
 )
-HAND_FILES = (
-    "BigHandLeft.uxrh",
-    "BigHandRight.uxrh",
-    "BigHandLeftPalm.uxrh",
-    "BigHandRightPalm.uxrh",
-    "BigHandLeftPinch.uxrh",
-    "BigHandRightPinch.uxrh",
-    "BigHandsAlbedo.rgba",
-)
+HAND_FILES = ("skeletal/hands.glb",)
 
 
-def hand_animation_files(root: Path) -> list[str]:
-    """Optional local Blender exports; the renderer falls back when absent.
-
-    Only the canonical right blocks are needed on Quest: its wrist bases
-    already mirror the mesh for the left hand. Keep all authored clips,
-    including gestures which have no automatic gameplay assignment yet.
-    """
-    folder = root / "animations"
-    manifest = folder / "manifest.json"
-    if not manifest.is_file():
-        return []
-    try:
-        doc = json.loads(manifest.read_text(encoding="utf-8"))
-        names = {"Grip", "Pinch", "Point", "OpenPalm", "Beckon", "Fist",
-                 "GripPistol", "GripPistolOffhand", "GripPistolShoot",
-                 "GripDeagle", "GripDeagleOffhand", "GripRifle", "GripShotgun",
-                 "GripShotgunOffhand"}
-        clips = doc["clips"]
-        if doc["version"] != 1 or len(clips) != len(names) or {c["name"] for c in clips} != names:
-            raise ValueError("expected all fourteen Blender Actions")
-        result = []
-        for clip in clips:
-            name = clip["name"]
-            count = len(clip["samples"])
-            if count < 2 or count > 512 or len(clip["blocks"]) != (count+3)//4:
-                raise ValueError(f"invalid samples for {name}")
-            result.append(f"animations/{name}/timing.txt")
-            for i, block in enumerate(clip["blocks"]):
-                expected = f"{name}/BigHandRight-{i:03d}.uxrh"
-                if block["right"]["path"] != expected:
-                    raise ValueError(f"invalid block path for {name}")
-                result.append(f"animations/{expected}")
-        for relative in result:
-            if not (root / relative).is_file():
-                raise ValueError(f"missing {relative}; rerun export_hand_actions.py")
-        return result
-    except (KeyError, TypeError, ValueError) as error:
-        raise KitError(f"invalid local hand animations: {error}") from error
+def validate_hand_assets(root: Path) -> None:
+    """Require the skeletal asset; a missing LFS object must fail the build."""
+    path = root / HAND_FILES[0]
+    if not path.is_file():
+        raise KitError('Missing hands.glb; run git lfs pull or export_hand_glb.py')
+    data = path.read_bytes()
+    if len(data) < 20 or data[:8] != b'glTF\x02\x00\x00\x00' or int.from_bytes(data[8:12], 'little') != len(data):
+        raise KitError('Invalid hands.glb (possibly an LFS pointer); run git lfs pull')
 
 
 OFFICIAL_ARM64_LIBS = {
@@ -1466,7 +1428,8 @@ def stage_payload(
     hands_source = ROOT / "assets" / "vrhands"
     hands_root = staging / "vrhands"
     hand_entries: list[dict] = []
-    for name in (*HAND_FILES, *hand_animation_files(hands_source)):
+    validate_hand_assets(hands_source)
+    for name in HAND_FILES:
         source = hands_source / name
         if not source.is_file():
             raise KitError(f"required VR hand asset is missing: {source}")

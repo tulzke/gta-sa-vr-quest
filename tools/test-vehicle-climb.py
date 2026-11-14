@@ -3,7 +3,6 @@ from pathlib import Path
 import os
 import re
 import shutil
-import struct
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,18 +35,16 @@ source=source[:start]+source[end:]
 source=re.sub(r'double Now\(\)\{[^\n]*\}', 'double Now(){return testNow;}', source)
 source='\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
 harness=(ROOT / 'tools/tests/vehicle_climb.cpp').read_text(encoding='utf8')
-# Inspect the authored Grip pose, not synthetic hand geometry. The thumb-side
-# cluster is on positive local Z in both shipped meshes.
-thumbs=[]
-for side in ('Left','Right'):
-    data=(ROOT / 'assets/vrhands' / f'BigHand{side}.uxrh').read_bytes()
-    magic,version,count,_=struct.unpack_from('<4sIII',data)
-    assert magic==b'UXRH' and version==1
-    points=[struct.unpack_from('<3f',data,16+i*104+12) for i in range(count)]
-    thumb=[p for p in points if p[1]>.04 and p[2]>.006]
-    assert len(thumb)>100
-    thumbs.append(tuple(sum(p[a] for p in thumb)/len(thumb) for a in range(3)))
-assert abs(thumbs[0][2]-thumbs[1][2])<.001
+# Inspect the authored GLB Grip endpoint in canonical hand-local metres.
+import sys
+sys.path.insert(0,str(ROOT/'tools'))
+from hand_glb import HandGlb
+points=HandGlb(ROOT/'assets/vrhands/skeletal/hands.glb').end_positions('Grip')
+thumb=[p for p in points if p[1]>.04 and p[2]>.006]
+assert len(thumb)>100
+centre=tuple(sum(p[a] for p in thumb)/len(thumb) for a in range(3))
+# Both hands share this mesh; the production per-hand basis supplies reflection.
+thumbs=[centre,centre]
 harness=harness.replace('// ACTUAL_GRIP_THUMBS', '\n'.join(
     'constexpr Vec thumb%d{%.9ff,%.9ff,%.9ff};' % (i,*p) for i,p in enumerate(thumbs)))
 generated=OUT / 'vehicle_climb.cpp'
