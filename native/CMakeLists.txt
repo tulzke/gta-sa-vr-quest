@@ -8,11 +8,6 @@ if(SAVR_DEV)
     add_compile_definitions(SAVR_DEV=1)
 endif()
 
-option(SAVR_EXPERIMENTAL_AUDIO_48KHZ "Task 68 test: request 48 kHz OpenAL output" OFF)
-if(SAVR_EXPERIMENTAL_AUDIO_48KHZ)
-    add_compile_definitions(SAVR_EXPERIMENTAL_AUDIO_48KHZ=1)
-endif()
-
 # Keep the producer-backpressure implementation available in normal builds.
 # Its runtime property remains opt-in, so an ordinary player run pays no
 # atomic traffic while diagnostics can still enable it without rebuilding.

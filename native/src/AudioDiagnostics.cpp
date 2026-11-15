@@ -11,9 +11,7 @@
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#ifdef SAVR_EXPERIMENTAL_AUDIO_48KHZ
 #include <sys/mman.h>
-#endif
 
 #include "Log.h"
 
@@ -96,10 +94,8 @@ void Configure() {
 }
 
 void PrepareGameAudio(void* gameHandle) {
-    const char* status = "stock";
+    const char* status = "symbol_missing";
     int failure = 0;
-#ifdef SAVR_EXPERIMENTAL_AUDIO_48KHZ
-    status = "symbol_missing";
     auto* init = static_cast<std::uint8_t*>(
         dlsym(gameHandle, "_ZN16CAEAudioHardware18InitOpenALListenerEv"));
     if (init) {
@@ -134,15 +130,12 @@ void PrepareGameAudio(void* gameHandle) {
             }
         }
     }
-#else
-    (void)gameHandle;
-#endif
     if (FILE* log = Open()) {
         std::fprintf(log, "OUTPUT_RATE requested=%d patch=%d rx_restored=%d status=%s errno=%d\n",
             outputrate::kRequestedHz, outputRatePatched.load(), outputRateRxRestored.load(), status, failure);
         std::fclose(log);
     }
-    if (outputrate::kRequestedHz == 48000 && (!outputRatePatched.load() || !outputRateRxRestored.load()))
+    if (!outputRatePatched.load() || !outputRateRxRestored.load())
         LOGE("[audio.rate] requested=48000 status=%s errno=%d", status, failure);
 }
 

@@ -13,7 +13,6 @@ param(
     [string]$Keystore,
     [switch]$Package,
     [switch]$Developer,
-    [switch]$Audio48k,
     [switch]$AllowUnofficialSource,
     [switch]$PersonalUpdateSource
 )
@@ -60,8 +59,7 @@ if ($loaderHash -ne $expectedLoaderHash) {
 New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
 
 $SavrDev = if ($Developer.IsPresent) { 'ON' } else { 'OFF' }
-$SavrAudio48k = if ($Audio48k.IsPresent) { 'ON' } else { 'OFF' }
-Write-Host "==> libsavr.so ($Configuration, arm64-v8a, SAVR_DEV=$SavrDev, AUDIO_48KHZ=$SavrAudio48k)"
+Write-Host "==> libsavr.so ($Configuration, arm64-v8a, SAVR_DEV=$SavrDev, audio output=48000 Hz)"
 & $CMake `
     -S (Join-Path $ProjectRoot 'native') `
     -B $NativeBuild `
@@ -72,20 +70,17 @@ Write-Host "==> libsavr.so ($Configuration, arm64-v8a, SAVR_DEV=$SavrDev, AUDIO_
     '-DANDROID_ABI=arm64-v8a' `
     '-DANDROID_PLATFORM=android-28' `
     "-DSAVR_DEV=$SavrDev" `
-    "-DSAVR_EXPERIMENTAL_AUDIO_48KHZ=$SavrAudio48k" `
     '-DSAVR_EXPERIMENTAL_BACKPRESSURE=ON' `
     "-DCMAKE_BUILD_TYPE=$Configuration"
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
 
 $CMakeCache = Join-Path $NativeBuild 'CMakeCache.txt'
 $ExpectedSavrDev = "SAVR_DEV:BOOL=$SavrDev"
-$ExpectedAudio48k = "SAVR_EXPERIMENTAL_AUDIO_48KHZ:BOOL=$SavrAudio48k"
 $ExpectedBackpressure = 'SAVR_EXPERIMENTAL_BACKPRESSURE:BOOL=ON'
 if (-not (Test-Path -LiteralPath $CMakeCache) -or
     -not (Select-String -LiteralPath $CMakeCache -SimpleMatch $ExpectedSavrDev -Quiet) -or
-    -not (Select-String -LiteralPath $CMakeCache -SimpleMatch $ExpectedAudio48k -Quiet) -or
     -not (Select-String -LiteralPath $CMakeCache -SimpleMatch $ExpectedBackpressure -Quiet)) {
-    throw "CMake cache did not retain requested settings: $ExpectedSavrDev, $ExpectedBackpressure, $ExpectedAudio48k"
+    throw "CMake cache did not retain requested settings: $ExpectedSavrDev, $ExpectedBackpressure"
 }
 
 & $CMake --build $NativeBuild

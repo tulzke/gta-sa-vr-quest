@@ -60,11 +60,12 @@ def replace_function(text, signature, replacement):
     return text[:start] + replacement + text[end:]
 
 source = '\n'.join(line for line in source.splitlines() if line not in (
-    '#include <dlfcn.h>', '#include <unistd.h>', '#include "Log.h"'))
+    '#include <dlfcn.h>', '#include <unistd.h>', '#include <sys/mman.h>', '#include "Log.h"'))
 source = replace_function(source, 'double Now()', 'double Now() { return fakeNow; }')
 source = replace_function(source, 'FILE* Open()', 'FILE* Open() { return std::tmpfile(); }')
 source = replace_function(source, 'bool Resolve()', 'bool Resolve() { return api.ready; }')
 source = replace_function(source, 'void Configure()', 'void Configure() {}')
+source = replace_function(source, 'void PrepareGameAudio(void* gameHandle)', 'void PrepareGameAudio(void*) {}')
 prefix = r'''
 #include <cstdio>
 #include <cstdlib>
@@ -87,9 +88,10 @@ tests = r'''
 using namespace savr::audiodiag;
 bool contextPresent = true;
 int queries = 0;
+int deviceHz = 48000;
 void* Context() { return contextPresent ? reinterpret_cast<void*>(1) : nullptr; }
 void* Device(void*) { return reinterpret_cast<void*>(2); }
-void DeviceInt(void*, int param, int, int* out) { *out = param == 0x1007 ? 22050 : 0; }
+void DeviceInt(void*, int param, int, int* out) { *out = param == 0x1007 ? deviceHz : 0; }
 const char* String(int) { return "fake-openal"; }
 void Listener(int, float* out) { *out = .5f; }
 char IsSource(unsigned id) { ++queries; return id == 1 || id == 1024; }
@@ -115,22 +117,24 @@ int main() {
     }
     CHECK(((k48kInstruction >> 5) & 0xffff) == 48000);
     CHECK((k48kInstruction & ~0x1fffe0u) == (kRetailAttributes[1] & ~0x1fffe0u));
-    PrepareGameAudio(nullptr);
-    CHECK(output.find("OUTPUT_RATE requested=22050 patch=0 rx_restored=1 status=stock") != std::string::npos);
-    output.clear();
+    CHECK(kRequestedHz == 48000);
+    outputRatePatched.store(true);
     api = {Context, Device, DeviceInt, String, Listener, IsSource, SourceInt, SourceFloat, BufferInt, true};
     Tick(true, true, false, false);
     CHECK(queries == 1024);
-    CHECK(output.find("frequency=22050") != std::string::npos);
-    CHECK(output.find("requested_hz=22050 rate_patch=0 rx_restored=1 rate_match=1") != std::string::npos);
+    CHECK(output.find("frequency=48000") != std::string::npos);
+    CHECK(output.find("requested_hz=48000 rate_patch=1 rx_restored=1 rate_match=1") != std::string::npos);
     CHECK(output.find("sources=2 playing=1 stopped=1 streaming=1 drained=1 nonfinite=1") != std::string::npos);
     CHECK(output.find("queued=3 processed=3") != std::string::npos);
     CHECK(output.find("hz=44100") != std::string::npos);
     output.clear(); fakeNow = 11.; Tick(true, true, false, false);
     CHECK(output.empty() && queries == 1024);
+    deviceHz = 22050;
     fakeNow = 15.; Tick(false, true, true, true);
     CHECK(queries == 2048);
     CHECK(output.find("focus=0 stereo=1 menu=1 pause=1") != std::string::npos);
+    CHECK(output.find("frequency=22050") != std::string::npos);
+    CHECK(output.find("rate_match=0") != std::string::npos);
     CHECK(output.find("max_frame_gap_ms=4000.00 gaps_gt100ms=2") != std::string::npos);
     output.clear(); contextPresent = false; fakeNow = 20.;
     Tick(true, true, false, false);
