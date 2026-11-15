@@ -11,6 +11,10 @@
 #include <chrono>
 #include <cstdarg>
 #include <dlfcn.h>
+#ifdef __ANDROID__
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 namespace savr::missionscenes {
 namespace {
 void** scripts{};
@@ -59,7 +63,8 @@ struct Script {
     }
 } mansion,burning;
 // SWEET5's phone scene stages CJ in Seville at IP 1527, then returns him
-// to Grove Street at 3103. Observe its dialogue gates; never advance them.
+// to Grove Street at 3103. Its two camera gates must tolerate dialogue that
+// passes the requested line before the independent camera timer expires.
 Script sweet;
 std::uint8_t* missionLocals{};
 void* audioEngine{};
@@ -89,6 +94,68 @@ void SweetTrace(const char* format,...) {
         }
     }
 }
+using ScriptCommand=std::int8_t(*)(void*,int);
+ScriptCommand originalSweetCommands{};
+void (*collectParameters)(void*,short){};
+void (*updateCompareFlag)(void*,unsigned char){};
+constexpr std::uint32_t kSweetCommandPrologue[]{0xd101c3ff,0xfd0013ea,0x6d02a3e9,0xa903fbfd};
+std::int8_t OnSweetCommands(void* s,int opcode) {
+    if(opcode==0x0039 && sweet.valid && s==sweet.thread && missionLocals &&
+       collectParameters && updateCompareFlag && Read<std::uint8_t>(s,0x12c) &&
+       Read<std::uint8_t*>(s,0x18)==sweet.base && Read<int>(missionLocals,135*4)==1) {
+        const auto* ip=Read<std::uint8_t*>(s,0x20);
+        const int scene=Read<int>(missionLocals,156*4);
+        const int target=scene==3 && ip==sweet.base+2401?3:
+                         scene==5 && ip==sweet.base+2571?7:0;
+        // Verify all operands as well as the whole original mission hash.
+        // The real parser still advances IP and populates ScriptParams; the
+        // real compare helper preserves NOT/AND/OR bookkeeping.
+        const std::uint8_t expected[]{3,0x68,1,4,static_cast<std::uint8_t>(target)};
+        if(target && std::memcmp(ip,expected,sizeof(expected))==0) {
+            const int line=Read<int>(missionLocals,360*4);
+            const bool completed=line==0 && Read<int>(missionLocals,362*4)==0 &&
+                Read<int>(missionLocals,361*4)==8;
+            const bool reached=(line>=target && line<=8)||completed;
+            collectParameters(s,2);
+            updateCompareFlag(s,reached);
+            if(reached && line!=target)
+                SweetTrace("CAMERA GATE scene=%d target=%d line=%d completed=%d",scene,target,line,completed);
+            return 0;
+        }
+    }
+    return originalSweetCommands(s,opcode);
+}
+bool InstallSweetHook(void* h) {
+#ifdef __ANDROID__
+    if(originalSweetCommands)return true;
+    auto* code=static_cast<std::uint32_t*>(dlsym(h,"_ZN14CRunningScript20ProcessCommands0To99Ei"));
+    if(!code || !collectParameters || !updateCompareFlag ||
+       std::memcmp(code,kSweetCommandPrologue,sizeof(kSweetCommandPrologue)))return false;
+    const long page=sysconf(_SC_PAGESIZE);if(page<=0)return false;
+    auto* t=static_cast<std::uint32_t*>(mmap(nullptr,page,PROT_READ|PROT_WRITE|PROT_EXEC,
+        MAP_PRIVATE|MAP_ANONYMOUS,-1,0));
+    if(t==MAP_FAILED)return false;
+    // The four version-checked instructions only adjust/store the stack.
+    std::memcpy(t,code,16);t[4]=0x58000051;t[5]=0xd61f0220;
+    const auto resume=reinterpret_cast<std::uintptr_t>(code)+16;
+    std::memcpy(t+6,&resume,sizeof(resume));
+    __builtin___clear_cache(reinterpret_cast<char*>(t),reinterpret_cast<char*>(t)+32);
+    const auto address=reinterpret_cast<std::uintptr_t>(code);
+    const auto start=address&~(static_cast<std::uintptr_t>(page)-1);
+    const auto end=(address+16+page-1)&~(static_cast<std::uintptr_t>(page)-1);
+    if(mprotect(reinterpret_cast<void*>(start),end-start,PROT_READ|PROT_WRITE|PROT_EXEC)) {
+        munmap(t,page);return false;
+    }
+    originalSweetCommands=reinterpret_cast<ScriptCommand>(t);
+    const auto replacement=reinterpret_cast<std::uintptr_t>(&OnSweetCommands);
+    std::memcpy(code+2,&replacement,sizeof(replacement));code[1]=0xd61f0220;
+    __atomic_store_n(code,0x58000051u,__ATOMIC_RELEASE);
+    __builtin___clear_cache(reinterpret_cast<char*>(code),reinterpret_cast<char*>(code)+16);
+    return true;
+#else
+    (void)h;return false;
+#endif
+}
 void TraceSweet(void* s) {
     static bool present=false;
     static int lastStage=-1,lastScene=-1,lastLine=-1,lastAudio=-1;
@@ -100,7 +167,7 @@ void TraceSweet(void* s) {
     if(!present || s!=sweet.thread || Read<std::uint8_t*>(s,0x18)!=sweet.base) {
         std::rename(kSweetLog,kSweetPrevious);
         lastStage=lastScene=lastLine=lastAudio=-1;last=0;
-        SweetTrace("BEGIN v1 locals=%d audio=%d/%d/%d ped=%d/%d",
+        SweetTrace("BEGIN v2 camera_fix=%d locals=%d audio=%d/%d/%d ped=%d/%d",originalSweetCommands!=nullptr,
             missionLocals!=nullptr,audioEngine&&audioLoading,audioEngine&&audioFinished,
             audioEngine&&audioEvent,getPed!=nullptr,pedTalking!=nullptr);
     }
@@ -264,6 +331,10 @@ void Install(void* h) {
     audioEvent=reinterpret_cast<decltype(audioEvent)>(dlsym(h,"_ZN12CAudioEngine20GetMissionAudioEventEh"));
     getPed=reinterpret_cast<decltype(getPed)>(dlsym(h,"_ZN6CPools6GetPedEi"));
     pedTalking=reinterpret_cast<decltype(pedTalking)>(dlsym(h,"_ZN4CPed13GetPedTalkingEv"));
+    collectParameters=reinterpret_cast<decltype(collectParameters)>(dlsym(h,"_ZN14CRunningScript17CollectParametersEs"));
+    updateCompareFlag=reinterpret_cast<decltype(updateCompareFlag)>(dlsym(h,"_ZN14CRunningScript17UpdateCompareFlagEh"));
+    const bool sweetHook=InstallSweetHook(h);
+    SweetTrace("INSTALL camera_fix=%d",sweetHook);
     Trace("INSTALLED",scripts!=nullptr,loadAll!=nullptr,animIndex!=nullptr);
     Trace("KING DIAG V2",canStartMission!=nullptr,g.FindPlayerCoors!=nullptr,g.CTheScripts_ScriptSpace!=nullptr);
 }

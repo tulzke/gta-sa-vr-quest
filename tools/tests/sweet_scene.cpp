@@ -23,6 +23,62 @@ template<class T>void Put(void* p,unsigned offset,T value){std::memcpy(static_ca
 void Local(unsigned i,int value){Put(variables,i*4,value);}
 std::string Log(){std::ifstream f("vr_sweet5.log");return {std::istreambuf_iterator<char>(f),{}};}
 void Step(double seconds){mono+=seconds;Update();}
+int fallback=0,collects=0,compares=0;bool compared=false;
+int params[2]{};
+void Collect(void* s,short count){
+ CHECK(count==2);++collects;auto* ip=Read<std::uint8_t*>(s,0x20);
+ CHECK(ip[0]==3 && ip[3]==4);
+ params[0]=Read<int>(variables,Read<std::uint16_t>(ip,1)*4);params[1]=ip[4];
+ Put(s,0x20,ip+5);
+}
+void Compare(void*,unsigned char value){++compares;compared=value!=0;}
+std::int8_t Original(void* s,int opcode){
+ ++fallback;
+ if(opcode==0x39){Collect(s,2);Compare(s,params[0]==params[1]);return 0;}
+ return 7;
+}
+bool Gate(std::vector<std::uint8_t>& code,int scene,int line,int remaining,int next){
+ Local(156,scene);Local(360,line);Local(362,remaining);Local(361,next);
+ const int offset=scene==3?2399:2569;Put(thread,0x20,code.data()+offset+2);
+ const auto beforeFallback=fallback,beforeCollects=collects,beforeCompares=compares;
+ const std::vector<std::uint8_t> beforeLocals(variables,variables+sizeof(variables));
+ CHECK(OnSweetCommands(thread,0x39)==0);
+ CHECK(collects==beforeCollects+1 && compares==beforeCompares+1 && fallback==beforeFallback);
+ CHECK(Read<std::uint8_t*>(thread,0x20)==code.data()+offset+7);
+ CHECK(std::equal(beforeLocals.begin(),beforeLocals.end(),variables));
+ return compared;
+}
+void CameraRegression(std::vector<std::uint8_t>& code){
+ Local(135,1);collectParameters=Collect;updateCompareFlag=Compare;originalSweetCommands=Original;
+ CHECK(!Gate(code,3,1,7,30));CHECK(!Gate(code,3,2,7,2));
+ CHECK(Gate(code,3,3,6,3));CHECK(Gate(code,3,4,5,4));CHECK(Gate(code,3,8,1,8));
+ CHECK(!Gate(code,3,0,7,30));CHECK(!Gate(code,3,0,0,30));
+ CHECK(Gate(code,3,0,0,8)); // whole dialogue finished while waiting for the camera
+ CHECK(!Gate(code,5,6,3,6));CHECK(Gate(code,5,7,2,7));CHECK(Gate(code,5,8,1,8));
+ CHECK(Gate(code,5,0,0,8));CHECK(!Gate(code,5,0,1,8));
+ // Replay the captured timing at the camera gates. The native timers stay in
+ // charge: line 3 only exists before 7919 ms, so exact equality misses it.
+ int scene=3,due=7919,originalScene=3;
+ for(const auto sample:{std::pair<int,int>{6260,3},{7616,3},{7629,4},{9138,4},
+                       {9178,5},{10988,6},{14233,7},{15978,8},{17424,0}}){
+  const auto [timer,line]=sample;
+  if(timer>7919 && line==3)originalScene=4;
+  if(scene==3 && timer>due && Gate(code,3,line,line?1:0,line?line:8)){scene=4;due=timer+4000;}
+  if(scene==4 && timer>due)scene=5;
+  if(scene==5 && Gate(code,5,line,line?1:0,line?line:8))scene=21;
+ }
+ CHECK(originalScene==3 && scene==21); // old game sticks; fixed game reaches hang-up
+ // Every other equality/opcode/thread/version follows the native handler.
+ const int before=fallback;Local(156,4);Put(thread,0x20,code.data()+2401);OnSweetCommands(thread,0x39);
+ CHECK(fallback==before+1);
+ CHECK(OnSweetCommands(thread,0x38)==7 && fallback==before+2);
+ Local(156,3);Put(thread,0x20,code.data()+2401);Local(135,2);OnSweetCommands(thread,0x39);CHECK(fallback==before+3);
+ Local(135,1);Put(thread,0x20,code.data()+2401);Put<std::uint8_t>(thread,0x12c,0);OnSweetCommands(thread,0x39);CHECK(fallback==before+4);
+ Put(thread,0x20,code.data()+2401);Put<std::uint8_t>(thread,0x12c,1);sweet.valid=false;OnSweetCommands(thread,0x39);CHECK(fallback==before+5);sweet.valid=true;
+ Put(thread,0x20,code.data()+2401);code[2405]=4;OnSweetCommands(thread,0x39);CHECK(fallback==before+6);code[2405]=3;
+ CHECK(Read<std::uint16_t>(code.data(),2399)==0x39 && Read<std::uint16_t>(code.data(),2569)==0x39);
+ std::puts("PASS: captured missed-line race reproduces with equality, reaches hang-up with fix; exact/late/completed dialogue gates, native operand consumption, unchanged locals/bytecode and unrelated-handler fallback");
+}
 int main(){
  std::ifstream f("sweet5.scm",std::ios::binary);
  std::vector<std::uint8_t> code{std::istreambuf_iterator<char>(f),{}};CHECK(code.size()==15739);
@@ -48,6 +104,8 @@ int main(){
  Step(.2);CHECK(queries==12 && gameTime==5000); // heartbeat while paused game time is frozen
  CHECK(code==originalCode && std::equal(originalLocals.begin(),originalLocals.end(),variables));
  CHECK(std::equal(originalThread.begin(),originalThread.end(),thread));
+ CameraRegression(code);CHECK(code==originalCode);
+ Local(135,1);Local(156,5);Local(360,6);Local(363,2);
  Local(360,7);Step(.01);CHECK(queries==18); // dialogue change captured immediately
  Local(135,2);Step(.01);CHECK(queries==24); // return to gameplay once
  Local(360,8);Step(10);CHECK(queries==24); // later dialogue is outside opening scope

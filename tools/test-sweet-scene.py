@@ -1,4 +1,4 @@
-"""Run SWEET5 diagnostics against the user's retail SCM; never commit game bytes."""
+"""Test SWEET5 camera timing and diagnostics against the user's retail SCM."""
 from pathlib import Path
 import argparse
 import os
@@ -9,6 +9,7 @@ import subprocess
 root = Path(__file__).resolve().parents[1]
 args = argparse.ArgumentParser()
 args.add_argument('--scm', type=Path, required=True)
+args.add_argument('--elf', type=Path, help='Optional retail arm64 libGame.so prologue verification')
 options = args.parse_args()
 out = root / 'build/sweet-scene-tests'
 out.mkdir(parents=True, exist_ok=True)
@@ -20,6 +21,21 @@ fixture = data[offsets[18]:offsets[19]]
 assert len(fixture) == 15739 and fixture[3:9] == b'SWEET5'
 (out / 'sweet5.scm').write_bytes(fixture)
 source = (root / 'native/src/MissionScenes.cpp').read_text(encoding='utf8')
+if options.elf:
+    elf = options.elf.read_bytes()
+    address = 0x413020
+    words = re.search(r'kSweetCommandPrologue\[\]\{([^}]+)', source).group(1)
+    expected = struct.pack('<4I', *(int(word.strip(), 16) for word in words.split(',')))
+    phoff = struct.unpack_from('<Q', elf, 32)[0]
+    entry_size, count = struct.unpack_from('<HH', elf, 54)
+    for i in range(count):
+        kind, _, offset, virtual, _, size, _, _ = struct.unpack_from('<IIQQQQQQ', elf, phoff + i * entry_size)
+        if kind == 1 and virtual <= address and address + 16 <= virtual + size:
+            assert elf[offset + address - virtual:offset + address - virtual + 16] == expected
+            print('PASS: retail ARM64 command-handler prologue', flush=True)
+            break
+    else:
+        raise AssertionError('Command handler is absent from ELF load segments')
 source = source.replace('#include "Log.h"', '#define LOGI(...) ((void)0)')
 source = source.replace('#include <dlfcn.h>', 'void* dlsym(void*,const char*){return nullptr;}\ndouble TestNow();')
 source = source.replace('/sdcard/Android/data/com.rockstargames.gtasa/files/', '')
