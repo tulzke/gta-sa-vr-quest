@@ -245,7 +245,7 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
     float head[3]{},orientation[4]{};
     std::uint64_t epoch{};
     physicalweapon::TrackingPose pose{};
-    if (type==25) {
+    if (type==25 && arcadereload::Manual(type)) {
         gesture.Reset();
         const int support=physicalweapon::SupportHand(hand);
         if (support<0 || support>1 || !xr::IsSessionFocused() || physicalweapon::IsPrimaryDetached(hand) ||

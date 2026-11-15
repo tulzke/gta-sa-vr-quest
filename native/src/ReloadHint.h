@@ -64,7 +64,7 @@ inline Motion Animation(int mode,unsigned phaseMs) {
     }
     // The fast downward stroke is the gesture; a slower reset makes the loop
     // readable without teaching an obligatory upward return for DOWN_FLICK.
-    const float reset=mode==arcadereload::DOWN_UP?.20f:.55f;
+    const float reset=.55f;
     const float amount=t<.25f?0:t<.43f?Smooth((t-.25f)/.18f):
                        t<.72f?1:t<.72f+reset?1-Smooth((t-.72f)/reset):0;
     return {.58f*amount,0};
@@ -86,7 +86,7 @@ inline Pose Pivoted(Pose pose,Vec pivot,Vec axis,float angle) {
     return pose;
 }
 inline bool RifleLeverHint(int type,int mode) {
-    return (type==33 || type==34) && (mode==arcadereload::DOWN_FLICK || mode==arcadereload::DOWN_UP);
+    return (type==33 || type==34) && mode==arcadereload::DOWN_FLICK;
 }
 inline Pose BuildRiflePose(const Pose& weapon,Vec wrist,Vec support,int mode,unsigned phaseMs) {
     using namespace arcadereload;
@@ -114,7 +114,7 @@ inline Pose BuildPose(const Pose& weapon,Vec wrist,int hand,int mode,unsigned ph
     if (mode==DOWN_FLICK) {
         const float peakDown=std::min(.58f,std::max(0.f,std::asin(std::clamp(barrel.y,-1.f,1.f))+1.540796327f));
         const float tipDrop=.20f*(barrel.y-Rotated(barrel,nodAxis,-peakDown).y);
-        const float stroke=std::max(.03f,NodDistanceMetres()*1.25f-tipDrop);
+        const float stroke=std::max(.03f,kNodDistanceMetres*1.25f-tipDrop);
         pose.position=Add(pose.position,Scale(up,-stroke*(motion.down/.58f)));
     } else pose.position=Add(pose.position,Scale(up,-motion.down*.10f));
     rotate(barrel,sign*motion.roll);

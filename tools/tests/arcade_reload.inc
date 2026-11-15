@@ -56,27 +56,21 @@ int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0,float amplit
 void ArcadeTests() {
     using namespace arcadereload;
     for(int fps:{36,72,90,120}) {
-        Check(GestureRun(DOWN_UP,fps,0,.12f)==1,"down/up translation recognized once at each frame rate");
-        Check(GestureRun(DOWN_UP,fps,1,-.7f)==1,"wrist dip and return recognized without translating arm");
-        Check(GestureRun(DOWN_UP,fps,3,-.7f)==1,"small incidental hand translation does not hide a wrist dip");
         Check(GestureRun(TWIST,fps,2,1.f)==1,"right twist and return recognized once");
         Check(GestureRun(TWIST,fps,2,-1.f)==1,"left twist and return recognized once");
-        Check(GestureRun(DOWN_UP,fps,0,.12f,.15f,.15f,false)==0,"lowering without return cannot reload");
         Check(GestureRun(TWIST,fps,2,1.f,.15f,.15f,false)==1,"outward roll reloads without any return");
-        Check(GestureRun(DOWN_UP,fps,0,.12f,1.f,.5f)==0,"slow holster movement cannot reload");
         Check(GestureRun(TWIST,fps,2,1.f,1.f,.5f)==0,"slow inspection roll cannot reload");
-        Check(GestureRun(DOWN_UP,fps,0,.02f)==0,"small tracking movement cannot reload");
         Check(GestureRun(TWIST,fps,2,.2f)==0,"small aim roll cannot reload");
         Check(GestureRun(TWIST,fps,1,-.7f)==0,"pitch cannot masquerade as barrel twist");
         Check(GestureRun(AUTOMATIC,fps,0,.12f)==0,"automatic mode ignores gestures");
         Check(FlickRun(fps,0)==0,"old small wrist nod no longer bypasses the tripled amplitude");
         Check(FlickRun(fps,0,.18f,0,1.15f)==1,"larger downward wrist nod reloads without return or braking");
-        Check(FlickRun(fps,1)==1,"downward arc with simultaneous yaw and roll reloads once");
-        Check(FlickRun(fps,1,.18f,1.1f)==1,"rolled starting grip and curved motion remain valid");
+        Check(FlickRun(fps,1,.18f,0,1.15f)==1,"downward arc with simultaneous yaw and roll reloads once");
+        Check(FlickRun(fps,1,.18f,1.1f,1.15f)==1,"rolled starting grip and curved motion remain valid");
         Check(FlickRun(fps,5)==0,"old short curved arm stroke is below the new distance");
-        Check(FlickRun(fps,5,.18f,0,.65f,2.f)==1,"longer curved arm stroke still works without wrist rotation");
-        Check(GestureRun(DOWN_FLICK,fps,0,.20f)==0,"twenty-centimetre stroke stays below the new threshold");
-        Check(GestureRun(DOWN_FLICK,fps,0,.23f)==1,"stroke above twenty-one centimetres reloads");
+        Check(FlickRun(fps,5,.18f,0,.65f,4.5f)==1,"longer curved arm stroke still works without wrist rotation");
+        Check(GestureRun(DOWN_FLICK,fps,0,.49f)==0,"stroke below the approved fifty centimetres cannot reload");
+        Check(GestureRun(DOWN_FLICK,fps,0,.55f)==1,"stroke above the approved fifty centimetres reloads");
         Check(FlickRun(fps,0,1.2f)==0,"slow wrist lowering cannot trigger downward flick");
         Check(FlickRun(fps,1,1.2f)==0,"slow curved holstering with rotations cannot trigger flick");
         Check(FlickRun(fps,2)==0,"sideways arc and yaw alone do not count as downward flick");
@@ -91,23 +85,14 @@ void ArcadeTests() {
     Check(!jump.Update(jumping,.13,1,DOWN_FLICK,1),"no stale history survives the tracking jump");
     Gesture interrupted;
     Sample s;
-    interrupted.Update(s,1.,10,DOWN_UP,1);interrupted.Update(s,1.1,10,DOWN_UP,1);
-    interrupted.Update(s,1.2,10,DOWN_UP,1);s.position.y=-.12f;
-    interrupted.Update(s,1.3,10,DOWN_UP,1);s.position.y=0;
-    Check(!interrupted.Update(s,1.4,10,DOWN_UP,2),"recenter cancels half-completed gesture");
-    s.position.y=-.12f;interrupted.Update(s,1.6,10,DOWN_UP,2);s.position.y=0;
-    Check(!interrupted.Update(s,1.7,11,DOWN_UP,2),"hand transfer cancels half-completed gesture");
+    interrupted.Update(s,1.,10,DOWN_FLICK,1);interrupted.Update(s,1.1,10,DOWN_FLICK,1);
+    interrupted.Update(s,1.2,10,DOWN_FLICK,1);s.position.y=-.3f;
+    interrupted.Update(s,1.3,10,DOWN_FLICK,1);s.position.y=0;
+    Check(!interrupted.Update(s,1.4,10,DOWN_FLICK,2),"recenter cancels half-completed gesture");
+    s.position.y=-.3f;interrupted.Update(s,1.6,10,DOWN_FLICK,2);s.position.y=0;
+    Check(!interrupted.Update(s,1.7,11,DOWN_FLICK,2),"hand transfer cancels half-completed gesture");
     s.orientation.w=std::nanf("");
-    Check(!interrupted.Update(s,1.8,11,DOWN_UP,2) && !interrupted.valid,"invalid tracking clears history");
-
-    SetNodDistanceCm(7);SetNodAngleDegrees(20);
-    Check(FlickRun(90,0)==1 && GestureRun(DOWN_FLICK,90,0,.12f)==1,"temporary tuning can restore original nod amplitudes immediately");
-    SetNodDistanceCm(14);SetNodAngleDegrees(60);
-    Check(GestureRun(DOWN_FLICK,90,0,.12f)==0 && GestureRun(DOWN_FLICK,90,0,.16f)==1,"distance tuning changes the actual stroke threshold");
-    SetNodDistanceCm(60);SetNodAngleDegrees(45);
-    Check(FlickRun(90,0,.18f,0,.9f)==1,"angular tuning works independently of distance");
-    SetNodAngleDegrees(60);
-    Check(FlickRun(90,0,.18f,0,.9f)==0,"raising angle threshold rejects the same short rotation");
-    SetNodDistanceCm(kDefaultNodCm);SetNodAngleDegrees(kDefaultNodDegrees);
+    Check(!interrupted.Update(s,1.8,11,DOWN_FLICK,2) && !interrupted.valid,"invalid tracking clears history");
+    Check(FlickRun(90,0,.18f,0,.84f)==0 && FlickRun(90,0,.18f,0,.90f)==1,"fixed fifty-degree threshold rejects smaller rotations and accepts larger ones");
 
 }

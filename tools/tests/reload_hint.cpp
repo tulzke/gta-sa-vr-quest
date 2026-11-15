@@ -35,7 +35,7 @@ int main() {
         Check(pump.position.y==anchor.position.y && pump.barrel.z==anchor.barrel.z &&
               Animation(PUMP,ms).down==0,"shotgun hint leaves the weapon fixed while the separate hand pumps");
     }
-    for(int mode:{DOWN_FLICK,TWIST,DOWN_UP})for(int fps:{36,72,90,120}) {
+    for(int mode:{DOWN_FLICK,TWIST})for(int fps:{36,72,90,120}) {
         Gesture gesture;int recognized=0;
         const Pose base=BuildPose(anchor,anchor.position,1,mode,0);
         for(int i=0;i<fps*2;++i) {
@@ -52,19 +52,6 @@ int main() {
         }
         Check(recognized>=1,"tutorial motion is recognized by the actual assigned gesture detector");
     }
-    for(int cm:{7,21,40,60})for(int degrees:{20,60}) {
-        SetNodDistanceCm(cm);SetNodAngleDegrees(degrees);Gesture gesture;int recognized=0;
-        const Pose base=BuildPose(anchor,anchor.position,1,DOWN_FLICK,0);
-        for(int i=0;i<144;++i) {
-            const double time=i/72.;const unsigned ms=static_cast<unsigned>(time*1000);
-            const auto pose=BuildPose(anchor,anchor.position,1,DOWN_FLICK,ms);
-            const auto motion=Animation(DOWN_FLICK,ms);const float sine=std::sin(-motion.down*.5f);
-            Sample sample{pose.position,pose.barrel,{base.side.x*sine,base.side.y*sine,base.side.z*sine,std::cos(motion.down*.5f)}};
-            recognized+=gesture.Update(sample,time,1,DOWN_FLICK,1);
-        }
-        Check(recognized>=1,"tutorial adapts to temporary distance and angle tuning");
-    }
-    SetNodDistanceCm(kDefaultNodCm);SetNodAngleDegrees(kDefaultNodDegrees);
     const Pose leftWeapon{{-.25f,1.1f,-.4f},{1,0,0},{0,1,0},{0,0,-1}};
     const Pose rightWeapon{{.20f,1.3f,-.5f},{0,0,-1},{0,1,0},{-1,0,0}};
     const Vec leftWrist{-.20f,1.15f,-.3f},rightWrist{.17f,1.25f,-.35f};
@@ -87,7 +74,7 @@ int main() {
     Check(Dot(difference,difference)<.00001f && Dot(movedRoll.top,Rotated(rolled.top,axis,turn))>.999f,"moving and turning the hand carries the active animation with it");
     Check(Animation(TWIST,1000).roll==Animation(TWIST,600).roll && Animation(TWIST,1400).visibility==0,"side tutorial holds its outward pose and hides the reset instead of returning");
 
-    Check(RifleLeverHint(33,DOWN_FLICK) && RifleLeverHint(34,DOWN_UP) && !RifleLeverHint(33,TWIST) &&
+    Check(RifleLeverHint(33,DOWN_FLICK) && RifleLeverHint(34,DOWN_FLICK) && !RifleLeverHint(33,TWIST) &&
           !RifleLeverHint(30,TWIST) && !RifleLeverHint(22,DOWN_FLICK),"foregrip animation is limited to rifle downward gestures");
     for(int hand:{0,1})for(float pitch:{-.6f,0.f,.6f}) {
         Pose rifle=anchor;rifle.side=Scale(rifle.side,hand==0?-1.f:1.f);

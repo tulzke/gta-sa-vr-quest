@@ -268,10 +268,7 @@ void Init() {
     g_laserEnabled.store(true, std::memory_order_relaxed);
     g_recoilLevel.store(2, std::memory_order_relaxed);
     g_physicalRecoilLevel.store(recoil::kDefaultRecoilLevel, std::memory_order_relaxed);
-    arcadereload::SetMode(arcadereload::DOWN_UP);
-    arcadereload::SetSound(arcadereload::BOLT);
-    arcadereload::SetNodDistanceCm(arcadereload::kDefaultNodCm);
-    arcadereload::SetNodAngleDegrees(arcadereload::kDefaultNodDegrees);
+    arcadereload::SetType(arcadereload::TYPE_ARCADE);
     for(int type=0;type<kMaxWeapons;++type)for(int skill=0;skill<3;++skill)
         g_recoilTuning[type][skill]=recoil::Defaults(type,skill);
 
@@ -323,20 +320,8 @@ void Init() {
             continue;
         }
         int state = 0;
-        if (std::sscanf(line, "arcade_reload_nod_cm %d", &state) == 1) {
-            arcadereload::SetNodDistanceCm(state);
-            continue;
-        }
-        if (std::sscanf(line, "arcade_reload_nod_deg %d", &state) == 1) {
-            arcadereload::SetNodAngleDegrees(state);
-            continue;
-        }
-        if (std::sscanf(line, "arcade_reload_sound %d", &state) == 1) {
-            arcadereload::SetSound(state);
-            continue;
-        }
-        if (std::sscanf(line, "arcade_reload_mode %d", &state) == 1) {
-            arcadereload::SetMode(state);
+        if (std::sscanf(line, "reload_type %d", &state) == 1) {
+            arcadereload::SetType(state);
             continue;
         }
         if (std::sscanf(line, "laser_enabled %d", &state) == 1) {
@@ -469,10 +454,7 @@ void Save() {
     std::fprintf(f, "laser_enabled %d\n", LaserEnabled() ? 1 : 0);
     std::fprintf(f, "recoil_level %d\n", RecoilLevel());
     std::fprintf(f, "physical_recoil_level %d\n", PhysicalRecoilLevel());
-    std::fprintf(f, "arcade_reload_mode %d\n", arcadereload::GetMode());
-    std::fprintf(f, "arcade_reload_sound %d\n", arcadereload::GetSound());
-    std::fprintf(f, "arcade_reload_nod_cm %d\n", arcadereload::NodDistanceCm());
-    std::fprintf(f, "arcade_reload_nod_deg %d\n", arcadereload::NodAngleDegrees());
+    std::fprintf(f, "reload_type %d\n", arcadereload::GetType());
     std::fputs("# recoil_weapon_skill <type> <skill:0=poor,1=gangster,2=hitman> <vertical_deg> <jitter_deg> <shoulder_mm> <two_hand_reduction_pct>\n",f);
     for(int type=0;type<kMaxWeapons;++type)if(recoil::Supported(type))for(int skill=0;skill<3;++skill) {
         const auto& t=g_recoilTuning[type][skill];
@@ -612,38 +594,14 @@ void SetLaserEnabled(bool enabled) {
 
 void ToggleLaser() { SetLaserEnabled(!LaserEnabled()); }
 
-void CycleReloadMode(int direction) {
-    if (!direction) return;
-    SetReloadMode((arcadereload::GetMode()+(direction>0?1:arcadereload::MODE_COUNT-1))%arcadereload::MODE_COUNT);
+void SetReloadType(int type) {
+    const int previous=arcadereload::GetType();
+    arcadereload::SetType(type);
+    if (previous!=arcadereload::GetType()) Save();
 }
-void SetReloadMode(int mode) {
-    const int previous=arcadereload::GetMode();
-    arcadereload::SetMode(mode);
-    if (previous!=arcadereload::GetMode()) Save();
-}
-void CycleReloadSound(int direction) {
-    if (!direction) return;
-    SetReloadSound((arcadereload::GetSound()+(direction>0?1:arcadereload::SOUND_COUNT-1))%arcadereload::SOUND_COUNT);
-}
-void SetReloadSound(int sound) {
-    const int previous=arcadereload::GetSound();
-    arcadereload::SetSound(sound);
-    if (previous!=arcadereload::GetSound()) Save();
-}
-void SetReloadNodDistance(int centimetres) {
-    const int previous=arcadereload::NodDistanceCm();
-    arcadereload::SetNodDistanceCm(centimetres);
-    if (previous!=arcadereload::NodDistanceCm()) Save();
-}
-void SetReloadNodAngle(int degrees) {
-    const int previous=arcadereload::NodAngleDegrees();
-    arcadereload::SetNodAngleDegrees(degrees);
-    if (previous!=arcadereload::NodAngleDegrees()) Save();
-}
-void ResetReloadNodTuning() {
-    arcadereload::SetNodDistanceCm(arcadereload::kDefaultNodCm);
-    arcadereload::SetNodAngleDegrees(arcadereload::kDefaultNodDegrees);
-    Save();
+void ToggleReloadType() {
+    SetReloadType(arcadereload::GetType()==arcadereload::TYPE_ARCADE?
+        arcadereload::TYPE_AUTOMATIC:arcadereload::TYPE_ARCADE);
 }
 
 int PhysicalRecoilLevel() {

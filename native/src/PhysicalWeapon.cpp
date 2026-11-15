@@ -795,7 +795,7 @@ bool BuildTwoHandTransformLocked(int primaryHand, V3& pivot, V3& axis,
     pivot = GripPosition(gHands[primaryHand]);
     V3 expected = Sub(PositionOf(anchor), pivot);
     V3 actual = Sub(GripPosition(gHands[support]), pivot);
-    if (weaponType==25) {
+    if (weaponType==25 && arcadereload::Manual(weaponType)) {
         // Axial pump travel belongs to the sliding wrist, not to the aim solver.
         // Keep the same forward rail position even when the loaded gun is locked.
         const auto& base=gHeldBasePose[primaryHand];

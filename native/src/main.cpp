@@ -1851,7 +1851,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         }
         case PG_CONTROLS: {
             // Menu accessibility remains separate from gameplay remapping.
-            const int firstStick = 3;
+            const int firstStick = 2;
             const int firstButton = firstStick + savr::locomotion::STICK_OPT_COUNT;
             const int tipsRow = firstButton + savr::locomotion::BIND_SRC_COUNT;
             const int resetRow = tipsRow + 1;
@@ -1867,11 +1867,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                         ? savr::locomotion::CONTROLS_LAYOUT_SWAPPED_HANDS
                         : savr::locomotion::CONTROLS_LAYOUT_DEFAULT);
             } else if (controlsSel == 1 && (step || enter)) {
-                savr::calib::SetReloadNodDistance(enter?savr::arcadereload::kDefaultNodCm:
-                    savr::arcadereload::NodDistanceCm()+step);
-            } else if (controlsSel == 2 && (step || enter)) {
-                savr::calib::SetReloadNodAngle(enter?savr::arcadereload::kDefaultNodDegrees:
-                    savr::arcadereload::NodAngleDegrees()+step*5);
+                savr::calib::ToggleReloadType();
             } else if (controlsSel >= firstStick && controlsSel < firstButton &&
                        (step || enter)) {
                 savr::locomotion::ToggleStickOption(controlsSel - firstStick);
@@ -1881,7 +1877,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             if (enter && controlsSel == tipsRow) menuPage = PG_CONTROLS_TIPS;
             if (enter && controlsSel == resetRow) {
                 savr::locomotion::ResetControls();
-                savr::calib::ResetReloadNodTuning();
+                savr::calib::SetReloadType(savr::arcadereload::TYPE_ARCADE);
             }
             if (enter && controlsSel == backRow) menuPage = PG_MAIN;
             if (back) menuPage = PG_MAIN;

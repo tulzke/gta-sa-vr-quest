@@ -140,26 +140,17 @@ int main(){
  using namespace savr::calib;
  {std::ofstream f("recoil-calib.ini");f<<"recoil_level 1\n";}
  Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==savr::recoil::kDefaultRecoilLevel);
- assert(savr::arcadereload::GetMode()==savr::arcadereload::DOWN_UP);
- assert(savr::arcadereload::GetSound()==savr::arcadereload::BOLT);
- assert(savr::arcadereload::NodDistanceCm()==21 && savr::arcadereload::NodAngleDegrees()==60);
- SetReloadNodDistance(14);SetReloadNodAngle(35);Init();
- assert(savr::arcadereload::NodDistanceCm()==14 && savr::arcadereload::NodAngleDegrees()==35);
- assert(RecoilLevel()==1 && savr::arcadereload::GetSound()==savr::arcadereload::BOLT);
- SetReloadNodDistance(-10);SetReloadNodAngle(500);Init();
- assert(savr::arcadereload::NodDistanceCm()==1 && savr::arcadereload::NodAngleDegrees()==75);
- SetReloadNodDistance(500);SetReloadNodAngle(-10);Init();
- assert(savr::arcadereload::NodDistanceCm()==60 && savr::arcadereload::NodAngleDegrees()==5);
- ResetReloadNodTuning();Init();assert(savr::arcadereload::NodDistanceCm()==21 && savr::arcadereload::NodAngleDegrees()==60);
- SetReloadSound(savr::arcadereload::MAGAZINE);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::MAGAZINE);
- CycleReloadSound(1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::SILENT);
- CycleReloadSound(1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::BOLT);
- CycleReloadSound(-1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::SILENT);
- SetReloadMode(savr::arcadereload::TWIST);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::TWIST);
- CycleReloadMode(1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::DOWN_FLICK);
- CycleReloadMode(1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::AUTOMATIC);
- CycleReloadMode(-1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::DOWN_FLICK);
- CycleReloadMode(-1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::TWIST);
+ assert(savr::arcadereload::GetType()==savr::arcadereload::TYPE_ARCADE);
+ {std::ofstream f("recoil-calib.ini",std::ios::app);f<<"arcade_reload_mode 0\narcade_reload_sound 2\narcade_reload_nod_cm 1\narcade_reload_nod_deg 5\n";}
+ Init();assert(savr::arcadereload::GetType()==savr::arcadereload::TYPE_ARCADE);
+ assert(savr::arcadereload::kNodDistanceMetres==.50f && savr::arcadereload::SoundEvent()==147);
+ SetReloadType(savr::arcadereload::TYPE_AUTOMATIC);Init();
+ assert(savr::arcadereload::GetType()==savr::arcadereload::TYPE_AUTOMATIC);
+ {std::ifstream f("recoil-calib.ini");std::string text((std::istreambuf_iterator<char>(f)),{});
+  assert(text.find("arcade_reload_")==std::string::npos && text.find("reload_type 0")!=std::string::npos);}
+ ToggleReloadType();Init();assert(savr::arcadereload::GetType()==savr::arcadereload::TYPE_ARCADE);
+ SetReloadType(-10);Init();assert(savr::arcadereload::GetType()==savr::arcadereload::TYPE_AUTOMATIC);
+ SetReloadType(500);Init();assert(savr::arcadereload::GetType()==savr::arcadereload::TYPE_ARCADE);
  SetPhysicalRecoilLevel(3);Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==3);
  CyclePhysicalRecoil(1);assert(PhysicalRecoilLevel()==0);
  Init();assert(PhysicalRecoilLevel()==0 && RecoilLevel()==1);

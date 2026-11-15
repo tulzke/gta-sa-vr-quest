@@ -7309,7 +7309,7 @@ void BuildControlsTipsMenu() {
         {"SAME SLOT SWAPS THE HELD WEAPON",        205, 170, 105, false},
         {"EMPTY HANDS RETURN CJ TO FISTS",         205, 170, 105, false},
         {"SIDEARMS: QUICK DOWN FLICK TO RELOAD",   205, 170, 105, false},
-        {"NOD AMPLITUDE: TUNE IN CONTROLS",       205, 170, 105, false},
+        {"RELOAD TYPE: CHOOSE IN CONTROLS",      205, 170, 105, false},
         {"SPAS/MP5/AK/M4: ROLL SIDEWAYS",          205, 170, 105, false},
         {"EMPTY SHOTGUN: PUMP BACK THEN FORWARD", 205, 170, 105, false},
         {"RELEASE TRIGGER BEFORE THE GESTURE",     205, 170, 105, false},
@@ -7404,7 +7404,7 @@ void BuildControlsMenu() {
     PanelText("CONTROLS", cx, 20, 5, 100, 225, 255);
     PanelTextFit("STICK UP/DOWN SELECT   L2/R2 CHANGE",
                  cx, 56, 2, 150, 185, 150);
-    constexpr int firstStick = 3;
+    constexpr int firstStick = 2;
     constexpr int firstButton = firstStick + locomotion::STICK_OPT_COUNT;
     constexpr int tipsRow = firstButton + locomotion::BIND_SRC_COUNT;
     constexpr int resetRow = tipsRow + 1;
@@ -7413,8 +7413,7 @@ void BuildControlsMenu() {
     char rows[rowCount][64]{};
     std::snprintf(rows[0], sizeof(rows[0]), "LAYOUT  < %s >",
                   locomotion::ControlsLayoutName());
-    std::snprintf(rows[1],sizeof(rows[1]),"NOD DISTANCE  < %d CM >",arcadereload::NodDistanceCm());
-    std::snprintf(rows[2],sizeof(rows[2]),"NOD ANGLE  < %d DEG >",arcadereload::NodAngleDegrees());
+    std::snprintf(rows[1],sizeof(rows[1]),"RELOAD  < %s >",arcadereload::TypeName());
     const char* stickLabels[locomotion::STICK_OPT_COUNT]={
         "SWAP MOVE / TURN STICKS", "INVERT MOVE X", "INVERT MOVE Y",
         "INVERT TURN X", "INVERT TURN Y"};
@@ -7441,8 +7440,7 @@ void BuildControlsMenu() {
         const int c = (i == sel) ? 255 : 200;
         PanelText(rows[i], cx, y, 2, c, c, (i == sel) ? 120 : c);
     }
-    PanelText(sel==1 || sel==2 ? "L2/R2 CHANGE   A RESET VALUE" :
-              "STICK SEL   L2/R2 CHANGE   A TOGGLE", cx, kPanelH - 22, 2, 150, 185, 150);
+    PanelText("STICK SEL   L2/R2 CHANGE   A TOGGLE", cx, kPanelH - 22, 2, 150, 185, 150);
 }
 
 void BuildMainMenu() {

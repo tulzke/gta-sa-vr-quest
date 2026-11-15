@@ -110,16 +110,9 @@ bool LaserEnabled();
 void SetLaserEnabled(bool enabled);   // persists immediately when changed
 void ToggleLaser();                   // persists immediately
 
-// Legacy fallback for unlisted weapons and persisted confirmation sound.
-// Fixed per-weapon gestures and sound have no menu selectors.
-void CycleReloadMode(int direction);  // wraps and persists immediately
-void SetReloadMode(int mode);         // persists immediately
-void CycleReloadSound(int direction);
-void SetReloadSound(int sound);       // persists immediately
-// Temporary downward-nod amplitude tuning, persisted in vr_calib.ini.
-void SetReloadNodDistance(int centimetres);
-void SetReloadNodAngle(int degrees);
-void ResetReloadNodTuning();
+// Product-level choice: automatic/native or arcade with fixed weapon gestures.
+void SetReloadType(int type);         // 0 automatic, 1 arcade; persists immediately
+void ToggleReloadType();
 
 // Controller recoil kick per shot. Level 0..3 (OFF/LOW/MEDIUM/HIGH).
 int RecoilLevel();

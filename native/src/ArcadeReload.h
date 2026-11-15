@@ -6,51 +6,32 @@
 
 namespace savr::arcadereload {
 
-// Keep saved values 0..2 stable; new profiles are appended.
-enum Mode { AUTOMATIC, DOWN_UP, TWIST, DOWN_FLICK, MODE_COUNT };
-// Per-weapon profile only; never a selectable/saved fallback mode.
-inline constexpr int PUMP=MODE_COUNT;
-inline std::atomic<int> mode{DOWN_UP};
-inline int GetMode() { return mode.load(std::memory_order_relaxed); }
-inline void SetMode(int value) { mode.store(std::clamp(value, 0, MODE_COUNT-1), std::memory_order_relaxed); }
-inline const char* ModeName() {
-    constexpr const char* names[]{"AUTOMATIC", "DOWN / UP", "SIDE ROLL", "DOWN FLICK"};
-    return names[GetMode()];
-}
+// Only the product-level choice is persisted. Gesture profiles are fixed.
+enum ReloadType { TYPE_AUTOMATIC, TYPE_ARCADE };
+enum Mode { AUTOMATIC, TWIST, DOWN_FLICK, PUMP };
+inline std::atomic<int> reloadType{TYPE_ARCADE};
+inline int GetType() { return reloadType.load(std::memory_order_relaxed); }
+inline void SetType(int value) { reloadType.store(std::clamp(value,0,1),std::memory_order_relaxed); }
+inline const char* TypeName() { return GetType()==TYPE_ARCADE?"ARCADE":"AUTOMATIC"; }
 inline int ModeForWeapon(int type) {
+    if (GetType()==TYPE_AUTOMATIC) return AUTOMATIC;
     switch(type) {
     case 25:
         return PUMP;
-    case 22: case 23: case 24: case 26: case 28: case 32:
+    case 22: case 23: case 24: case 26: case 28: case 32: case 33: case 34:
         return DOWN_FLICK;
     case 27: case 29: case 30: case 31:
         return TWIST;
     default:
-        return GetMode(); // Preserve the existing config for other weapons.
+        return AUTOMATIC;
     }
 }
 inline bool Manual(int type) { return ModeForWeapon(type)!=AUTOMATIC && type>=22 && type<=34; }
-// Temporary Quest tuning controls. Remove after the final amplitudes are chosen.
-inline constexpr int kDefaultNodCm=21,kDefaultNodDegrees=60;
-inline std::atomic<int> nodCm{kDefaultNodCm},nodDegrees{kDefaultNodDegrees};
-inline int NodDistanceCm() {return nodCm.load(std::memory_order_relaxed);}
-inline int NodAngleDegrees() {return nodDegrees.load(std::memory_order_relaxed);}
-inline void SetNodDistanceCm(int value) {nodCm.store(std::clamp(value,1,60),std::memory_order_relaxed);}
-inline void SetNodAngleDegrees(int value) {nodDegrees.store(std::clamp(value,5,75),std::memory_order_relaxed);}
-inline float NodDistanceMetres() {return NodDistanceCm()*.01f;}
-inline float NodAngleRadians() {return NodAngleDegrees()*.01745329252f;}
-
-enum Sound { BOLT, MAGAZINE, SILENT, SOUND_COUNT };
-inline std::atomic<int> sound{BOLT};
-inline int GetSound() { return sound.load(std::memory_order_relaxed); }
-inline void SetSound(int value) { sound.store(std::clamp(value,0,SOUND_COUNT-1),std::memory_order_relaxed); }
-inline const char* SoundName() {
-    constexpr const char* names[]{"BOLT CLACK", "MAG CLICK", "OFF"};
-    return names[GetSound()];
-}
-// Retail 2.11.311 ReportWeaponEvent, M4 (type 31): 147 -> sample 32,
-// 146 -> sample 31. Both are short one-shots from the existing GENRL bank.
-inline int SoundEvent() { return GetSound()==SILENT ? 0 : GetSound()==BOLT ? 147 : 146; }
+// Final values approved on Quest; no tuning or sound keys remain in the INI.
+inline constexpr float kNodDistanceMetres=.50f;
+inline constexpr float kNodAngleRadians=50.f*.01745329252f;
+// Retail 2.11.311 ReportWeaponEvent, M4 (type 31): 147 -> GENRL sample 32.
+inline constexpr int SoundEvent() { return 147; }
 
 // State 2 means empty/waiting in gesture modes. Only the completed gesture
 // refills the magazine; the native automatic mode keeps its original clock.
@@ -113,7 +94,7 @@ struct Gesture {
     int historyCount{},historyNext{};
     Sample previous{},start{};
     double previousTime{},startTime{},readyAt{};
-    int identity{-1},selected{-1},phase{},path{};
+    int identity{-1},selected{-1},phase{};
     std::uint64_t epoch{};
     bool valid{};
     void Reset() { *this={}; }
@@ -138,8 +119,8 @@ struct Gesture {
                              .20f*(from.sample.barrel.y-barrel.y);
             const float pitchDrop=std::asin(std::clamp(from.sample.barrel.y,-1.f,1.f))-
                                   std::asin(std::clamp(barrel.y,-1.f,1.f));
-            if ((drop>=NodDistanceMetres() && drop/seconds>=.40) ||
-                (pitchDrop>=NodAngleRadians() && pitchDrop/seconds>=1.5)) {
+            if ((drop>=kNodDistanceMetres && drop/seconds>=.40) ||
+                (pitchDrop>=kNodAngleRadians && pitchDrop/seconds>=1.5)) {
                 complete=true;break;
             }
         }
@@ -172,35 +153,19 @@ struct Gesture {
             return DownFlick(sample,now);
         }
         if (now<readyAt) return false;
-        const float vy=(sample.position.y-old.position.y)/dt;
-        const Vec oldBarrel=Rotate(Delta(sample.orientation,old.orientation),old.barrel);
-        const float pitchSpeed=(std::asin(std::clamp(oldBarrel.y,-1.f,1.f))-
-                                std::asin(std::clamp(old.barrel.y,-1.f,1.f)))/dt;
         const float rollSpeed=Twist(Delta(sample.orientation,old.orientation),old.barrel)/dt;
         if (!phase) {
-            path=selection==TWIST?2:-1;
-            if (selection==TWIST ? std::abs(rollSpeed)<2.2f : (vy>=-.65f && pitchSpeed>=-2.2f)) return false;
+            if (std::abs(rollSpeed)<2.2f) return false;
             start=old;startTime=now-dt;phase=1;
         }
-        if (now-startTime>.85 || (phase==1 && now-startTime>.35)) {
+        if (now-startTime>.35) {
             phase=0;readyAt=now+.12;return false;
         }
         const Vec barrel=Rotate(Delta(sample.orientation,start.orientation),start.barrel);
-        const float pitch=std::asin(std::clamp(barrel.y,-1.f,1.f))-
-                          std::asin(std::clamp(start.barrel.y,-1.f,1.f));
-        const float drop=start.position.y-sample.position.y;
         const float roll=std::abs(Twist(Delta(sample.orientation,start.orientation),start.barrel));
         // A twist must keep pointing approximately along its original axis.
-        if (path==2 && Dot(barrel,start.barrel)<.866f) { phase=0;readyAt=now+.12;return false; }
-        if (phase==1) {
-            if (path==2) {if (roll>=.785f) {phase=0;readyAt=now+.45;return true;}}
-            else if (drop>=.08f) { path=0;phase=2; }
-            else if (pitch<=-.52f) { path=1;phase=2; }
-            return false;
-        }
-        const bool returned=path==0 ? drop<=.025f && vy>.4f :
-                            path==1 ? std::abs(pitch)<.175f && pitchSpeed>1.f : roll<.21f;
-        if (!returned) return false;
+        if (Dot(barrel,start.barrel)<.866f) { phase=0;readyAt=now+.12;return false; }
+        if (roll<.785f) return false;
         phase=0;readyAt=now+.45;
         return true;
     }

@@ -1,6 +1,6 @@
 void ReloadHintRuntimeTests() {
     using namespace arcadereload;
-    ResetDirectTrigger();pairedweapon::Reset();g_reloadHints.Reset();SetMode(DOWN_FLICK);SetSound(BOLT);
+    ResetDirectTrigger();pairedweapon::Reset();g_reloadHints.Reset();SetType(TYPE_ARCADE);
     Setup(0,2,22,0,40,34,2000,0x800);Setup(1,4,29,0,90,30,1300);
     triggers[0]=triggers[1]=0;SetPose(0);SetPose(1);tick=20000;Update(false);
     tick=21499;Update(false);Check(!g_reloadHints.requests[0].visible,"production timer waits 1.5 seconds after empty magazine");
@@ -39,4 +39,7 @@ void ReloadHintRuntimeTests() {
               g_reloadHints.requests[0].mode==DOWN_FLICK,"both empty rifles request their own reload tutorial at 1500ms");
         Nod(0);Check(Field(6,8)==1 && !g_reloadHints.requests[0].visible,"rifle reload hides the tutorial immediately");
     }
+    SetType(TYPE_AUTOMATIC);Field(6,8)=0;g_reloadHints.Reset();Update(false);tick+=5000;Update(false);
+    Check(!g_reloadHints.requests[0].visible,"automatic reload has no gesture hint");
+    SetType(TYPE_ARCADE);
 }

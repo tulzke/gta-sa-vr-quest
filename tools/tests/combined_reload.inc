@@ -4,20 +4,21 @@ void SetPose(int hand,float y=0,float roll=0) {
 }
 void Frame() {tick+=10;Update(false);}
 void HoldStill() {for(int i=0;i<25;++i)Frame();}
-void Nod(int hand) {for(int i=1;i<=12;++i){SetPose(hand,-i*.03f);Frame();}}
+void Nod(int hand) {for(int i=1;i<=12;++i){SetPose(hand,-i*.05f);Frame();}}
 void Roll(int hand,bool back=false) {
     for(int i=1;i<=10;++i){SetPose(hand,0,(back?10-i:i)*.1f);Frame();}
 }
 int main(){
     using namespace arcadereload;
-    for(int saved:{AUTOMATIC,DOWN_UP,TWIST,DOWN_FLICK}) {
-        SetMode(saved);
-        for(int type:{22,23,24,26,28,32})Check(ModeForWeapon(type)==DOWN_FLICK,"sidearm always uses permissive downward nod");
-        for(int type:{27,29,30,31})Check(ModeForWeapon(type)==TWIST,"listed long gun always uses lateral roll");
-        Check(ModeForWeapon(25)==PUMP,"pump shotgun always requires a support-hand pump cycle");
-        for(int type:{33,34,38,35,41})Check(ModeForWeapon(type)==saved,"unlisted weapon retains configured mode");
-    }
-    SetMode(DOWN_FLICK);SetSound(BOLT);player[0x8dc]=7;
+    SetType(TYPE_AUTOMATIC);
+    for(int type:{22,23,24,25,26,27,28,29,30,31,32,33,34,35,38,41})
+        Check(ModeForWeapon(type)==AUTOMATIC && !Manual(type),"automatic selector disables every weapon gesture");
+    SetType(TYPE_ARCADE);
+    for(int type:{22,23,24,26,28,32,33,34})Check(ModeForWeapon(type)==DOWN_FLICK,"arcade sidearms and rifles use the final downward nod");
+    for(int type:{27,29,30,31})Check(ModeForWeapon(type)==TWIST,"arcade long guns use lateral roll");
+    Check(ModeForWeapon(25)==PUMP,"arcade shotgun requires the support-hand pump cycle");
+    for(int type:{38,35,41})Check(ModeForWeapon(type)==AUTOMATIC,"unsupported families retain their native cycle");
+    player[0x8dc]=7;
     Setup(0,2,22,1,40,34,2000,0x800);Setup(1,4,29,1,90,30,1300);
     SetPose(0);SetPose(1);triggers[0]=triggers[1]=1;Update(false);
     Check(shots[0]==1 && shots[1]==1,"both hands fire with separate physical rays in one frame");
@@ -70,15 +71,15 @@ int main(){
     Check(Field(7,4)==2 && Field(7,16)==tick+1200,"minigun retains its native reload timer");
     triggers[0]=0;tick=Field(7,16)+1;Update(false);
     Check(Field(7,8)==49 && Field(7,4)==0,"minigun still completes automatically");
-    SetMode(AUTOMATIC);Check(!Manual(33) && !Manual(34) && Manual(22) && Manual(31),"fallback auto affects only unlisted guns");
-    SetMode(DOWN_FLICK);Check(Manual(33) && Manual(34) && !Manual(38) && !Manual(35) && !Manual(41),"saved fallback and unsupported families remain intact");
+    SetType(TYPE_AUTOMATIC);Check(!Manual(33) && !Manual(34) && !Manual(22) && !Manual(31) && !Manual(25),"automatic selection includes sidearms, rifles and the pump shotgun");
+    SetType(TYPE_ARCADE);Check(Manual(33) && Manual(34) && !Manual(38) && !Manual(35) && !Manual(41),"fixed arcade assignments preserve unsupported native families");
 
-    // Configuration sound is independent of fixed weapon gesture assignment.
-    SetSound(MAGAZINE);Setup(0,2,22,1,20,34,2000,0x800);SetPose(0);HoldStill();
+    // The final bolt sound and short confirmation pulse no longer need tuning.
+    Setup(0,2,22,1,20,34,2000,0x800);SetPose(0);HoldStill();
     int sounds=reloadSounds[0];Nod(0);
-    Check(lastReloadEvent==146 && reloadSounds[0]==sounds+1,"saved magazine sound remains honored");
-    SetSound(SILENT);Field(2,8)=1;SetPose(0);HoldStill();sounds=reloadSounds[0];const int pulses=xr::haptics[0];Nod(0);
-    Check(Field(2,8)==17 && reloadSounds[0]==sounds && xr::haptics[0]==pulses+1,"silent config preserves instant reload and one haptic");
+    Check(lastReloadEvent==147 && reloadSounds[0]==sounds+1,"arcade reload always uses the approved bolt sound");
+    Field(2,8)=1;SetPose(0);HoldStill();sounds=reloadSounds[0];const int pulses=xr::haptics[0];Nod(0);
+    Check(Field(2,8)==17 && reloadSounds[0]==sounds+1 && xr::haptics[0]==pulses+1,"fixed feedback retains one sound and one readiness pulse");
     unsigned state=2,clip=0,deadline=tick+2000;
     Check(Reload(22,state,clip,3,deadline,tick,17) && state==0 && clip==3 && deadline==tick,"small reserve fills instantly without a future deadline");
     Check(!Reload(22,state,clip,3,deadline,tick,17),"no reserve produces no false reload");
@@ -90,7 +91,7 @@ int main(){
 
     // Pump-shotgun reload uses only an empty magazine and the support wrist.
     ResetDirectTrigger();pairedweapon::Reset();Setup(0,3,25,1,30,7,1200);held[1]=-1;
-    physicalweapon::supportHands[0]=1;SetSound(BOLT);SetPose(0);SetPose(1);
+    physicalweapon::supportHands[0]=1;SetPose(0);SetPose(1);
     xr::tracked[1].gripPos[2]=-.4f;triggers[0]=triggers[1]=0;Frame();
     sounds=reloadSounds[0];
     for(int i=1;i<=12;++i){xr::tracked[1].gripPos[2]=-.4f+i*.01f;Frame();}
@@ -114,5 +115,15 @@ int main(){
     for(int i=1;i<=12;++i){xr::tracked[1].gripPos[2]=-.4f+i*.01f;Frame();}
     Check(Field(3,8)==0 && reloadSounds[0]==sounds && g_pumpTravel[0]==0,"no reserve keeps the pump locked and silent");
     physicalweapon::supportHands[0]=-1;ResetDirectTrigger();
+    SetType(TYPE_AUTOMATIC);
+    for(int type:{22,25,29,33,34}) {
+        Setup(0,type==22?2:type==25?3:type==29?4:6,type,0,30,type==22?17:7,1200);
+        const int slot=held[0];Field(slot,4)=2;Field(slot,16)=tick+500;
+        physicalweapon::supportHands[0]=1;SetPose(0);SetPose(1);sounds=reloadSounds[0];
+        Frame();Check(Field(slot,8)==0 && g_pumpTravel[0]==0,"automatic reload waits for its native timer and never moves the pump");
+        tick+=501;Frame();
+        Check(Field(slot,8)>0 && reloadSounds[0]==sounds,"all supported families reload automatically without arcade feedback");
+    }
+    physicalweapon::supportHands[0]=-1;SetType(TYPE_ARCADE);ResetDirectTrigger();
     std::printf("PASS: %d production dual-fire checks\n",checks);
 }
