@@ -11,7 +11,7 @@ using Quat=arcadereload::Quat;
 inline constexpr unsigned kDelayMs=3000;
 inline constexpr unsigned kLoopMs=1600;
 inline constexpr float kOpacity=.20f;
-inline constexpr float kModelScale=1.02f;
+inline constexpr float kModelScale=1.05f;
 struct Request {
     bool visible{};
     int slot{-1},type{},mode{},hand{};

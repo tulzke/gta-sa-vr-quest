@@ -66,7 +66,7 @@ int main() {
     const Model emptyModel{};
     Check(ModelMatrix(left,emptyModel)==ModelMatrix(leftWeapon,emptyModel) && ModelMatrix(right,emptyModel)==ModelMatrix(rightWeapon,emptyModel),"hint starts at the live weapon pose before shell expansion");
     const auto rightMatrix=ModelMatrix(right,emptyModel);
-    Check(std::abs(std::sqrt(rightMatrix[0]*rightMatrix[0]+rightMatrix[1]*rightMatrix[1]+rightMatrix[2]*rightMatrix[2])-1.02f)<.0001f,"hint shell is two percent larger than the live weapon");
+    Check(std::abs(std::sqrt(rightMatrix[0]*rightMatrix[0]+rightMatrix[1]*rightMatrix[1]+rightMatrix[2]*rightMatrix[2])-1.05f)<.0001f,"hint shell is five percent larger than the live weapon");
     Check(Dot(right.barrel,Cross(right.top,right.side))<0,"live reflected handedness is retained");
     const auto rolled=BuildPose(rightWeapon,rightWrist,1,TWIST,800);
     const Vec before=Add(rightWeapon.position,Scale(rightWrist,-1)),after=Add(rolled.position,Scale(rightWrist,-1));
