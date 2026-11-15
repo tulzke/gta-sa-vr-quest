@@ -59,6 +59,10 @@ set(RADIO_KNOB_RGBA "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/knob.rg
 configure_file(src/RadioAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" @ONLY)
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" PROPERTY OBJECT_DEPENDS "${RADIO_BASE_MESH};${RADIO_KNOB_MESH};${RADIO_BASE_RGBA};${RADIO_KNOB_RGBA}")
 
+set(LIFT_LEVER_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/vehicle-lift-lever/lift-lever.mesh")
+configure_file(src/VehicleLiftLeverAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S" @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S" PROPERTY OBJECT_DEPENDS "${LIFT_LEVER_MESH}")
+
 set(WATCH_GLB "${CMAKE_CURRENT_SOURCE_DIR}/../assets/watches/watches.glb")
 set(WATCH_ATTRIBUTION "${CMAKE_CURRENT_SOURCE_DIR}/../assets/watches/ATTRIBUTION.md")
 file(READ "${WATCH_GLB}" WATCH_MAGIC LIMIT 4 HEX)
@@ -78,6 +82,7 @@ configure_file(src/HeartbeatAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAs
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S" PROPERTY OBJECT_DEPENDS "${HEARTBEAT_WAV};${HEARTBEAT_ATTRIBUTION}")
 
 add_library(savr SHARED
+    "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S"

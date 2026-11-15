@@ -9,6 +9,8 @@
 #include "HandAnimation.h"
 #include "HandSkeleton.h"
 #include "WatchModel.h"
+#include "VehicleLiftLeverModel.h"
+#include "VehicleLiftLeverHand.h"
 #include "WatchLayout.h"
 #include "WatchInteraction.h"
 #include "PdaDashboardPlacement.h"
@@ -6341,6 +6343,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     drivingWheel.trackedHandsEnabled = driving::ShouldUseTrackedHands() ||
         drivingWheel.ignitionGrabbed[0] || drivingWheel.ignitionGrabbed[1] ||
         drivingWheel.radioGrabbed[0] || drivingWheel.radioGrabbed[1] || debugPinchHands!=0;
+    drivingWheel.trackedHandsEnabled=drivingWheel.trackedHandsEnabled||drivingWheel.liftGrabbed[0]||drivingWheel.liftGrabbed[1];
     g_lastDashModelId.store(
         (drivingWheel.active || drivingWheel.dashAnchorValid)
             ? drivingWheel.modelId : -1,
@@ -7881,6 +7884,8 @@ void BuildDrivingMenu() {
                 break;
             case driving::MENU_MIRROR_RESET_POSE:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET MIRROR POSITION");break;
+            case driving::MENU_LIFT_RESET_POSE:
+                std::snprintf(rows[row],sizeof(rows[row]),"RESET LIFT LEVER POSE");break;
             case driving::MENU_PASSENGER_RESET:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET PASSENGER VIEW / REAR PAIR");break;
             case driving::MENU_REAR_MIRROR_FOV:
@@ -8046,14 +8051,14 @@ void BuildDrivingCalibrationMenu() {
     std::snprintf(text[wheelRows],sizeof(text[wheelRows]),
                   "EDIT GRIP   < %s >",hand==0?"LEFT":"RIGHT");
     for (int field=0;field<driving::CONTROL_FIELD_COUNT;++field) {
-        const float value=driving::GetControlCalibrationValue(hand,field);
+        const float value=driving::GetControlCalibrationValue(hand,field)/2.f;
         char* line=text[wheelRows+field+1];
         if (field>=driving::CONTROL_ROT_X)
             std::snprintf(line,88,"%s   < %+.1f DEG >",
-                driving::ControlCalibrationFieldName(field),value/2.0f);
+                driving::ControlCalibrationFieldName(field),value);
         else
             std::snprintf(line,88,"%s   < %+.1f CM >",
-                driving::ControlCalibrationFieldName(field),value/2.0f);
+                driving::ControlCalibrationFieldName(field),value);
     }
     std::snprintf(text[rows-1],sizeof(text[rows-1]),"BACK TO VEHICLE SETTINGS");
     const int top=94;
@@ -8994,7 +8999,16 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         bool basketballFlatPalm = false;
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
-        if (drivingWheel.radioGrabbed[hand]) {
+        const bool liftHand=drivingWheel.liftGrabbed[hand];
+        if(liftHand) {
+            const auto toXr=[](vehicledoors::Vec v){return XrVector3f{v.x,v.y,v.z};};
+            const auto vec=[](const float v[3]){return vehicledoors::Vec{v[0],v[1],v[2]};};
+            const vehicledoors::Basis lever{vec(drivingWheel.liftRight),vec(drivingWheel.liftForward),vec(drivingWheel.liftUp),vec(drivingWheel.liftCenter)};
+            const auto frame=liftlever::HandFrame(lever,drivingWheel.liftAngle,drivingWheel.liftGripX,hand);
+            right=toXr(frame.right);forward=toXr(frame.forward);up=toXr(frame.up);
+            pos=toXr(frame.position);
+            grip=1.f;trig=0.f;
+        } else if (drivingWheel.radioGrabbed[hand]) {
             const XrVector3f r{drivingWheel.radioRight[0],drivingWheel.radioRight[1],drivingWheel.radioRight[2]};
             const XrVector3f u{drivingWheel.radioUp[0],drivingWheel.radioUp[1],drivingWheel.radioUp[2]};
             const XrVector3f n{drivingWheel.radioNormal[0],drivingWheel.radioNormal[1],drivingWheel.radioNormal[2]};
@@ -9207,14 +9221,14 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         const bool debugPinch=(debugPinchHands&(1u<<hand))!=0;
         if (debugPinch) grip=trig=0.f;
         const bool pinch = debugPinch || (!hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
-            !steeringHand &&
+            !steeringHand && !liftHand &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand));
         const float pinchAmount = debugPinch ? 1.f : (pinch ? pinchAmounts[hand] : 0.0f);
         const float pinchWeight = pinchAmount * (1.0f - grip);
         const auto selected = handanimation::Select(grip,trig,{
             hp[hand].climbGrip,
             debugPinch || drivingWheel.radioGrabbed[hand] || drivingWheel.ignitionGrabbed[hand],
-            steeringHand, basketballFlatPalm,
+            steeringHand || liftHand, basketballFlatPalm,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand,
             (weaponHandMask & (1u<<hand))!=0,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand
@@ -11351,6 +11365,8 @@ void DrawRadioKnob(const float* mvp,const driving::WheelVisualState& w) {
     DrawDrivingBoxes(mvp,boxes,vc,indices,ic,.95f,.48f,.08f);
 }
 
+#include "VehicleLiftLeverRender.inl"
+
 void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
     if (!w.ignitionVisible) return;
     const XrVector3f c{w.ignitionCenter[0],w.ignitionCenter[1],w.ignitionCenter[2]};
@@ -12311,7 +12327,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // the closed hands are drawn over it at the exact animated rim sockets.
     if (trackedVisuals && drivingWheel.active)
         DrawImmersiveDrivingWheel(mvp, drivingWheel);
-    if (!scope.active) { DrawIgnition(mvp,drivingWheel); DrawRadioKnob(mvp,drivingWheel); }
+    if (!scope.active) { DrawIgnition(mvp,drivingWheel); DrawRadioKnob(mvp,drivingWheel); DrawLiftLever(mvp,drivingWheel); }
     // Never turn the optional highlight into a wallhack: if the shared game
     // depth cannot be copied this frame, omit it instead of drawing on top.
     if (usingGameDepth)

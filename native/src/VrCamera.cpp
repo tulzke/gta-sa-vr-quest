@@ -27,6 +27,7 @@
 #include "HolsterBody.h"
 #include "HudSettings.h"
 #include "Hydraulics.h"
+#include "VehicleLiftLever.h"
 #include "Jetpack.h"
 #include "Locomotion.h"
 #include "Log.h"
@@ -5328,6 +5329,7 @@ void OnUpdatePads() {
         bool hydroActive = false;
         float hydroX = 0.0f, hydroY = 0.0f;
         if (vehicle && bothGrips && !openChord &&
+            !liftlever::Supported(*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0x32)) &&
             flightAppearance != 3 && flightAppearance != 5) {
             // Handling flags are a 32-bit word at vehicle+0x4b8; bit16
             // HydraulicGeom, bit17 HydraulicInst, bit18 HydraulicNone (the

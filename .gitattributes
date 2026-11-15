@@ -5,6 +5,9 @@
 *.png -text
 *.rgba -text
 /assets/radio/*.blend -text
+/assets/vehicle-lift-lever/*.blend -text
+/assets/vehicle-lift-lever/*.glb -text
+/assets/vehicle-lift-lever/*.mesh -text
 /assets/watches/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/vrhands/skeletal/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/vrhands/source/*.blend filter=lfs diff=lfs merge=lfs -text

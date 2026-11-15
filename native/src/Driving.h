@@ -101,7 +101,7 @@ struct WheelVisualState {
     bool markerVisible[2]{};
     bool rimGrip[2]{};
     float rimAngle[2]{}; // angle in the rotating wheel frame
-    // 0 none, 1 ignition, 2 radio, 3 wheel, 4 door.
+    // 0 none, 1 ignition, 2 radio, 3 wheel, 4 door, 5 lift lever.
     int interactionTarget[2]{};
     int modelId{-1};
     float center[3]{};
@@ -129,6 +129,9 @@ struct WheelVisualState {
     int ignitionHint{};
     float ignitionCenter[3]{}, ignitionRight[3]{}, ignitionUp[3]{}, ignitionNormal[3]{};
     float ignitionAngle{};
+    bool liftVisible{},liftGrabbed[2]{};
+    float liftCenter[3]{},liftRight[3]{},liftForward[3]{},liftUp[3]{};
+    float liftAngle{},liftGripX{};
 };
 
 // Per-vehicle-type camera view for stereo driving. FIRST anchors the eyes at
@@ -177,7 +180,7 @@ enum MenuItem {
     , MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z,
     MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
-    MENU_MIRROR_RESET_POSE, MENU_PASSENGER_RESET
+    MENU_MIRROR_RESET_POSE, MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE
 };
 
 bool RearMirrorEnabled();
@@ -201,6 +204,8 @@ void SetExitMarkerCalibration(int model,int index,const float value[3]);
 bool GetIgnitionFrame(void* vehicle,bool bike,float out[12]);
 void SetIgnitionPose(int model,bool bike,const float pose[12]);
 void SetRadioPose(int model,const float pose[12]);
+void SetLiftPose(int model,const float pose[12]);
+void ResetLiftPose();
 float GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);
 

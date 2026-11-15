@@ -1,0 +1,9 @@
+    .section .rodata.savr_lift_lever,"a",@progbits
+    .balign 16
+    .global savr_lift_lever_mesh
+    .hidden savr_lift_lever_mesh
+savr_lift_lever_mesh:
+    .incbin "@LIFT_LEVER_MESH@"
+    .global savr_lift_lever_mesh_end
+    .hidden savr_lift_lever_mesh_end
+savr_lift_lever_mesh_end:

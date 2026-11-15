@@ -1,0 +1,120 @@
+{
+  "triangles": 1156,
+  "parts": [
+    {
+      "name": "MountingPlate",
+      "triangles": 44,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "MountScrew_1",
+      "triangles": 20,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "MountScrew_2",
+      "triangles": 20,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "MountScrew_3",
+      "triangles": 20,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "MountScrew_4",
+      "triangles": 20,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "GuideCheek_L",
+      "triangles": 284,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "GuideCheek_R",
+      "triangles": 284,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "RecessedRubberSeal",
+      "triangles": 76,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "FixedPivotAxle",
+      "triangles": 44,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "PivotCap_L",
+      "triangles": 36,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "PivotCap_R",
+      "triangles": 36,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "LeverShaft",
+      "triangles": 44,
+      "parent": "LiftPivot"
+    },
+    {
+      "name": "HorizontalGrip",
+      "triangles": 140,
+      "parent": "LiftPivot"
+    },
+    {
+      "name": "GuideFollowerPin",
+      "triangles": 28,
+      "parent": "LiftPivot"
+    },
+    {
+      "name": "FollowerCap_L",
+      "triangles": 28,
+      "parent": "LiftPivot"
+    },
+    {
+      "name": "FollowerCap_R",
+      "triangles": 28,
+      "parent": "LiftPivot"
+    },
+    {
+      "name": "NeutralIndex_L",
+      "triangles": 2,
+      "parent": "LiftFixed"
+    },
+    {
+      "name": "NeutralIndex_R",
+      "triangles": 2,
+      "parent": "LiftFixed"
+    }
+  ],
+  "units": "metres",
+  "blender_axes": {
+    "right": "+X",
+    "forward": "+Y",
+    "up": "+Z"
+  },
+  "pivot_blender_m": [
+    0,
+    0,
+    0.05
+  ],
+  "grip_anchor_from_pivot_m": [
+    0,
+    0,
+    0.18
+  ],
+  "rotation_axis_blender": "+X",
+  "rotation_axis_gltf": "+X",
+  "travel_deg": [
+    -25,
+    25
+  ],
+  "neutral_frame": 26,
+  "animation": "LiftTravel",
+  "verified": "manifold solids; grip anchor at -25/0/+25 degrees"
+}

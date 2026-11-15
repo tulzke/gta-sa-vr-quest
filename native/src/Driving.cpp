@@ -13,6 +13,7 @@
 #include "IgnitionState.h"
 #include "RadioKnobState.h"
 #include "CockpitSelection.h"
+#include "VehicleLiftLever.h"
 
 #include "Locomotion.h"
 
@@ -298,6 +299,8 @@ struct ModelCalibration {
     bool ignitionPoseLean{};
     float radioPose[12]{};
     bool radioPoseSet{};
+    float liftPose[12]{};
+    bool liftPoseSet{};
     int rearMirror[12]{0, 45, 110, 0, 0, 0, 0, -200, 100, 0, 0, 0};
     int acceleratorMode{BIKE_ACCEL_HOLD_TRIGGER};
 };
@@ -326,6 +329,12 @@ void* g_ignitionVehicle{};
 bool g_ignitionGripDown[2]{};
 bool g_ignitionPinchOwned[2]{};
 bool g_ignitionReverseGrip[2]{};
+liftlever::State g_liftLever;
+void* g_liftVehicle{};
+int g_liftModel{-1};
+std::atomic<int> g_liftAxis{0};
+std::atomic<void*> g_liftAxisVehicle{nullptr};
+double g_liftLastTime{};
 
 void PublishIgnitionPinch(const WheelVisualState& visual) {
     for (int hand=0; hand<2; ++hand) {
@@ -619,6 +628,9 @@ void Save() {
             if (calibration.radioPoseSet)
                 for (int field=0;field<12;++field)
                     std::fprintf(file,"RadioPose.%d.%d=%.9g\n",model,field,calibration.radioPose[field]);
+            if(calibration.liftPoseSet)
+                for(int field=0;field<12;++field)
+                    std::fprintf(file,"LiftPose.%d.%d=%.9g\n",model,field,calibration.liftPose[field]);
             if (calibration.ignitionPoseSet) {
                 for (int field=0;field<12;++field)
                     std::fprintf(file,"IgnitionPose.%d.%d=%.9g\n",model,field,calibration.ignitionPose[field]);
@@ -827,6 +839,12 @@ void Load() {
                     g_modelCalibration[model].ignitionPoseLean=value!=0; continue;
                 }
                 float poseValue{};
+                if(std::sscanf(line,"LiftPose.%d.%d=%f",&model,&axis,&poseValue)==3&&
+                   liftlever::Supported(model)&&axis>=0&&axis<12&&std::isfinite(poseValue)&&std::abs(poseValue)<=10.f){
+                    g_modelCalibration[model].liftPose[axis]=poseValue;
+                    if(axis==11)g_modelCalibration[model].liftPoseSet=true;
+                    continue;
+                }
                 if (std::sscanf(line,"RadioPose.%d.%d=%f",&model,&axis,&poseValue)==3 &&
                     model>=400 && model<=611 && axis>=0 && axis<12 && std::isfinite(poseValue)) {
                     g_modelCalibration[model].radioPose[axis]=poseValue;
@@ -1192,6 +1210,9 @@ void UpdateBicycleGestureLocked(const xr::HandPose poses[2]) {
 }
 
 void ClearInteractionLocked(bool preserveRadio=false) {
+    g_liftLever.Reset(); g_liftAxis.store(0,std::memory_order_release);
+    g_liftAxisVehicle.store(nullptr,std::memory_order_release);
+    g_liftLastTime=0;
     g_visual = WheelVisualState{};
     if (!preserveRadio) {
         g_radioKnob.Reset(); g_radioKnobHand=-1;
@@ -1901,6 +1922,82 @@ V3 CockpitFingerPoint(const xr::HandPose& hand,int index) {
     return origin+forward*.075f-up*.045f;
 }
 
+bool BuildLiftTracking(WheelVisualState& visual,void* vehicle) {
+    visual.liftVisible=false;
+    const int model=visual.modelId;
+    if(!vehicle||!liftlever::Supported(model)||*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0x32)!=model||ThirdPersonViewActive()||
+       !g.FindPlayerPed||!g.CVehicle_IsDriver||!g.CVehicle_IsDriver(vehicle,g.FindPlayerPed(-1)))return false;
+    V3 vr{},vf{},vu{},vp{};
+    if(!ReadEntityMatrix(vehicle,&vr,&vf,&vu,&vp))return false;
+    V3 local{},right=vr,forward=vf,up=vu;
+    float pose[12]{};bool custom=false;
+    {
+        std::lock_guard<std::mutex> lock(g_modelMutex);
+        const auto it=g_modelCalibration.find(model);
+        if(it!=g_modelCalibration.end()&&it->second.liftPoseSet){std::copy_n(it->second.liftPose,12,pose);custom=true;}
+    }
+    if(custom) {
+        local={pose[0],pose[1],pose[2]};
+        right=Normalized(vr*pose[3]+vf*pose[4]+vu*pose[5]);
+        forward=Normalized(vr*pose[6]+vf*pose[7]+vu*pose[8]);
+        up=Normalized(vr*pose[9]+vf*pose[10]+vu*pose[11]);
+        if(!std::isfinite(Length(local))||Length(local)>10||Dot(Cross(right,forward),up)<.95f)return false;
+    } else {
+        // The loaded vehicle's driver dummy is stable even while the player's
+        // root/seat camera is being animated. Same 2.11 layout as VehicleCabin.
+        if(!g.CModelInfo_ms_modelInfoPtrs)return false;
+        const auto* info=static_cast<const char*>(g.CModelInfo_ms_modelInfoPtrs[model]);
+        void* structure{};if(!info)return false;std::memcpy(&structure,info+0x90,sizeof(structure));
+        if(!structure)return false;
+        V3 seat{};std::memcpy(&seat,static_cast<const char*>(structure)+0x30,sizeof(seat));
+        if(!std::isfinite(Length(seat))||Length(seat)>10)return false;
+        const float side=model==486?.32f:(model==525?.28f:.25f);
+        local={-seat.x+side,seat.y+.15f,seat.z-.08f};
+    }
+    const V3 center=vp+vr*local.x+vf*local.y+vu*local.z;
+    V3 c{},r{},f{},u{};
+    if(!WorldPointToTracking(center,&c)||!WorldPointToTracking(center+right,&r)||
+       !WorldPointToTracking(center+forward,&f)||!WorldPointToTracking(center+up,&u))return false;
+    const V3 vectors[4]{c,Normalized(r-c),Normalized(f-c),Normalized(u-c)};
+    float* fields[4]{visual.liftCenter,visual.liftRight,visual.liftForward,visual.liftUp};
+    for(int i=0;i<4;++i){fields[i][0]=vectors[i].x;fields[i][1]=vectors[i].y;fields[i][2]=vectors[i].z;}
+    visual.liftVisible=true;return true;
+}
+
+liftlever::Point LiftHandPoint(const WheelVisualState& v,const xr::HandPose& hand) {
+    const V3 c{v.liftCenter[0],v.liftCenter[1],v.liftCenter[2]};
+    const V3 r{v.liftRight[0],v.liftRight[1],v.liftRight[2]},f{v.liftForward[0],v.liftForward[1],v.liftForward[2]},u{v.liftUp[0],v.liftUp[1],v.liftUp[2]};
+    const V3 p=V3{hand.gripPos[0],hand.gripPos[1],hand.gripPos[2]}-c-u*.05f;
+    return {Dot(p,r),Dot(p,f),Dot(p,u)};
+}
+
+void UpdateLiftLever(WheelVisualState& visual,void* vehicle,const xr::InputState& input,
+                     const xr::HandPose poses[2],unsigned occupied,bool preview=false) {
+    if(!BuildLiftTracking(visual,vehicle)) {
+        g_liftLever.Reset();g_liftAxis.store(0,std::memory_order_release);g_liftVehicle=nullptr;return;
+    }
+    if(g_liftVehicle!=vehicle||g_liftModel!=visual.modelId){g_liftVehicle=vehicle;g_liftModel=visual.modelId;g_liftLever.Reset();g_liftLastTime=0;}
+    const double now=MonotonicSeconds();
+    const float dt=g_liftLastTime>0?static_cast<float>(now-g_liftLastTime):0.f;
+    g_liftLastTime=now;
+    liftlever::Hand hands[2];
+    for(int h=0;h<2;++h)hands[h]={LiftHandPoint(visual,poses[h]),input.grip[h],poses[h].valid,(occupied&(1u<<h))==0};
+    const int previous=g_liftLever.owner;
+    const bool wasNeutral=g_liftLever.neutral;
+    const void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
+    const bool controls=pad&&*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(pad)+0x110)==0;
+    g_liftLever.Step(hands,dt,controls&&!preview&&visual.active&&ModeForAppearance(1)==MODE_IMMERSIVE&&GetVehicleDebugMode()==0);
+    const bool nearNeutral=std::abs(g_liftLever.angle)<liftlever::kDeadzone;
+    if(nearNeutral)g_liftLever.neutral=true;
+    else if(std::abs(g_liftLever.angle)>liftlever::kDeadzone+liftlever::kRad)g_liftLever.neutral=false;
+    if(g_liftLever.owner>=0&&previous!=g_liftLever.owner)xr::TriggerHaptic(g_liftLever.owner,.25f,0,25);
+    else if(g_liftLever.owner>=0&&!wasNeutral&&nearNeutral)xr::TriggerHaptic(g_liftLever.owner,.12f,0,15);
+    visual.liftAngle=g_liftLever.angle;visual.liftGripX=g_liftLever.gripX;
+    for(int h=0;h<2;++h)visual.liftGrabbed[h]=g_liftLever.owner==h;
+    g_liftAxisVehicle.store(vehicle,std::memory_order_release);
+    g_liftAxis.store(liftlever::RetailAxis(visual.modelId,g_liftLever.Output(),true),std::memory_order_release);
+}
+
 void UpdateIgnition(WheelVisualState& visual, void* vehicle,
                     const xr::InputState& input, const xr::HandPose poses[2],
                     unsigned occupied, bool preview=false) {
@@ -2146,14 +2243,16 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
     WheelVisualState geometry=visual;
     UpdateIgnition(geometry,vehicle,input,poses,occupied,true);
     UpdateRadioKnob(geometry,vehicle,input,poses,occupied,true,true);
+    BuildLiftTracking(geometry,vehicle);
     float doorDistance[2]{};
     vehicledoors::InteriorDistances(vehicle,poses,doorDistance);
-    unsigned keyBlocked=occupied, radioBlocked=occupied;
+    unsigned keyBlocked=occupied, radioBlocked=occupied,liftBlocked=occupied;
     for (int h=0;h<2;++h) {
         const unsigned bit=1u<<h;
-        if (g_ignitionRotation.owners&bit) { visual.interactionTarget[h]=1; radioBlocked|=bit; continue; }
-        if (g_radioKnobHand==h) { visual.interactionTarget[h]=2; keyBlocked|=bit; continue; }
-        if (g_grabbed[h] && wheelAvailable) { visual.interactionTarget[h]=3; continue; }
+        if (g_ignitionRotation.owners&bit) { visual.interactionTarget[h]=1; radioBlocked|=bit;liftBlocked|=bit; continue; }
+        if (g_radioKnobHand==h) { visual.interactionTarget[h]=2; keyBlocked|=bit;liftBlocked|=bit; continue; }
+        if (g_liftLever.owner==h) {visual.interactionTarget[h]=5;keyBlocked|=bit;radioBlocked|=bit;continue;}
+        if (g_grabbed[h] && wheelAvailable) { visual.interactionTarget[h]=3;liftBlocked|=bit; continue; }
         if (occupied&bit) continue;
         const V3 p{poses[h].gripPos[0],poses[h].gripPos[1],poses[h].gripPos[2]};
         if (!poses[h].valid || !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
@@ -2161,20 +2260,25 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
         const V3 radio{geometry.radioCenter[0],geometry.radioCenter[1],geometry.radioCenter[2]};
         const V3 wheel{visual.handlePosition[h][0],visual.handlePosition[h][1],visual.handlePosition[h][2]};
         const V3 fingers=CockpitFingerPoint(poses[h],h);
-        float d[5]{1e6f,geometry.ignitionVisible?Length(fingers-key):1e6f,
+        float d[6]{1e6f,geometry.ignitionVisible?Length(fingers-key):1e6f,
                    geometry.radioVisible && g_radioKnobHand<0?Length(fingers-radio):1e6f,
-                   wheelAvailable?Length(p-wheel):1e6f,doorDistance[h]};
+                   wheelAvailable?Length(p-wheel):1e6f,doorDistance[h],
+                   geometry.liftVisible&&g_liftLever.owner<0&&wheelAvailable?
+                       liftlever::Distance(LiftHandPoint(geometry,poses[h]),g_liftLever.angle):1e6f};
         if (d[1]>=.12f) d[1]=1e6f;
         if (d[2]>=.10f) d[2]=1e6f;
         if (d[3]>(visual.bike?.17f:.23f)) d[3]=1e6f;
+        if(d[5]>=.06f)d[5]=1e6f;
         const int best=SelectCockpitTarget(d,g_visual.interactionTarget[h]);
         visual.interactionTarget[h]=best;
         if (best!=1) keyBlocked|=bit;
         if (best!=2) radioBlocked|=bit;
+        if (best!=5) liftBlocked|=bit;
     }
     UpdateIgnition(visual,vehicle,input,poses,keyBlocked);
     for (int h=0;h<2;++h) if (visual.ignitionGrabbed[h]) radioBlocked|=1u<<h;
     UpdateRadioKnob(visual,vehicle,input,poses,radioBlocked);
+    UpdateLiftLever(visual,vehicle,input,poses,liftBlocked);
 }
 
 // Android SA 2.11 polls touch widgets inside these queries. Hook the queries,
@@ -2934,6 +3038,19 @@ bool VehicleRightStickActive() {
 int OnGetCarGunUpDown(void* pad, int ignoreDucking, void* vehicle,
                       float range, int useSecondary) {
     if (savr::beachdance::Active()) return savr::beachdance::AxisUpDown();
+    const int liftModel=ControlledVehicleModel();
+    if(liftlever::Supported(liftModel)&&!IsCraneControlActive()&&
+       (!vehicle||vehicle==GetControlledVehicle())&&(!pad||!g.CPad_GetPad||pad==g.CPad_GetPad(0))) {
+        if(!VrGameplayInputAllowed()||GetVehicleDebugMode()!=0||(pad&&*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(pad)+0x110)))return 0;
+        if(ModeForAppearance(1)==MODE_IMMERSIVE){
+            if(g_liftAxisVehicle.load(std::memory_order_acquire)!=GetControlledVehicle()||
+               g_activeVehicleModel.load(std::memory_order_acquire)!=liftModel)return 0;
+            return g_liftAxis.load(std::memory_order_acquire);
+        }
+        xr::InputState input{};xr::GetInput(input);
+        float mx{},my{},tx{},ty{};ReadMappedGameplaySticks(input,mx,my,tx,ty);
+        return liftlever::RetailAxis(liftModel,std::abs(ty)<.18f?0.f:ty);
+    }
     // Lowrider hydraulics: both grips held in a hydraulics-equipped car turn the
     // right stick into the suspension control. CAutomobile::HydraulicControl
     // reads exactly this accessor, so answering here bypasses the touch/input
@@ -3690,7 +3807,7 @@ constexpr int kDefaultBikeItems[] = {
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
-    MENU_PASSENGER_RESET,
+    MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3712,7 +3829,7 @@ constexpr int kImmersiveBikeItems[] = {
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
-    MENU_PASSENGER_RESET,
+    MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3785,12 +3902,19 @@ void MenuTableForType(int vehicleType, const int** items, int* count) {
 int GetMenuItemCount(int vehicleType) {
     const int* items=nullptr; int count=0;
     MenuTableForType(vehicleType,&items,&count);
-    return count;
+    int visible=0;
+    for(int i=0;i<count;++i)if(items[i]!=MENU_LIFT_RESET_POSE||liftlever::Supported(GetActiveVehicleModelId()))++visible;
+    return visible;
 }
 int GetMenuItemForRow(int vehicleType,int row) {
     const int* items=nullptr; int count=0;
     MenuTableForType(vehicleType,&items,&count);
-    return row>=0&&row<count?items[row]:MENU_BACK;
+    if(row<0)return MENU_BACK;
+    for(int i=0;i<count;++i){
+        if(items[i]==MENU_LIFT_RESET_POSE&&!liftlever::Supported(GetActiveVehicleModelId()))continue;
+        if(row--==0)return items[i];
+    }
+    return MENU_BACK;
 }
 
 int RearMirrorQuality() {EnsureInit();return g_rearMirrorQuality.load();}
@@ -3897,6 +4021,20 @@ void SetRadioPose(int model,const float pose[12]) {
     if (model<400||model>611) return;
     std::lock_guard<std::mutex> lock(g_modelMutex);
     auto& c=g_modelCalibration[model]; std::copy_n(pose,12,c.radioPose); c.radioPoseSet=true;
+}
+void SetLiftPose(int model,const float pose[12]) {
+    if(!liftlever::Supported(model)||!pose)return;
+    for(int i=0;i<12;++i)if(!std::isfinite(pose[i])||std::abs(pose[i])>10.f)return;
+    const V3 r{pose[3],pose[4],pose[5]},f{pose[6],pose[7],pose[8]},u{pose[9],pose[10],pose[11]};
+    if(std::abs(Length(r)-1.f)>.01f||std::abs(Length(f)-1.f)>.01f||std::abs(Length(u)-1.f)>.01f||
+       Dot(Cross(r,f),u)<.99f)return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    auto& c=g_modelCalibration[model];std::copy_n(pose,12,c.liftPose);c.liftPoseSet=true;
+}
+void ResetLiftPose() {
+    const int model=GetActiveVehicleModelId();if(!liftlever::Supported(model))return;
+    {std::lock_guard<std::mutex> lock(g_modelMutex);g_modelCalibration[model].liftPoseSet=false;}
+    Save();ResetInteraction();
 }
 float GetIgnitionCalibration(int field) {
     if (field<0||field>=6) return 0;
@@ -4533,6 +4671,7 @@ bool CabinVisualContext() {
 }
 
 void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
+    g_liftAxis.store(0,std::memory_order_release);
     auto input=rawInput;
     for(int hand=0;hand<2;++hand)if(xr::WatchConsumesTrigger(hand))input.triggers[hand]=0;
     static wheelreturn::Clock returnClock;
@@ -4727,6 +4866,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
                 if (preview) {
                     UpdateIgnition(anchor,activeVehicle,input,hands,occupied,true);
                     UpdateRadioKnob(anchor,activeVehicle,input,hands,occupied,true);
+                    UpdateLiftLever(anchor,activeVehicle,input,hands,occupied,true);
                 } else UpdateCockpitControls(anchor,activeVehicle,input,hands,occupied,false);
             }
             g_visual=anchor;
@@ -4785,6 +4925,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
             xr::HandPose hands[2]{}; xr::GetHandPoses(hands);
             UpdateIgnition(visual,activeVehicle,input,hands,0,true);
             UpdateRadioKnob(visual,activeVehicle,input,hands,0,true);
+            UpdateLiftLever(visual,activeVehicle,input,hands,0,true);
         }
         g_visual=visual;
         return;
@@ -4836,7 +4977,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
                          visual.handlePosition[hand][1],
                          visual.handlePosition[hand][2]};
         const float distance=poseValid[hand]?Length(positions[hand]-neutral):1000.0f;
-        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand];
+        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand] || visual.liftGrabbed[hand];
         if (g_grabbed[hand]&&(!poseValid[hand]||input.grip[hand]<=0.30f||
                               holdsWeapon)) {
             g_grabbed[hand]=false; g_angleValid[hand]=false;
@@ -5172,6 +5313,10 @@ void ResetTracking() { std::lock_guard<std::mutex> lock(g_stateMutex); ClearInte
 void RefreshVisualTracking() {
     std::lock_guard<std::mutex> lock(g_stateMutex);
     if (!CabinVisualContext()) { ClearInteractionLocked(); return; }
+    if(g_visual.liftVisible) {
+        void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+        if(!BuildLiftTracking(g_visual,vehicle)){g_liftLever.Reset();g_liftAxis.store(0,std::memory_order_release);}
+    }
     if (!g_visual.active||(!g_visual.bike&&g_visual.modelId!=532)) return;
     const WheelVisualState previous=g_visual;
     // Input runs before the camera publishes this frame's world-to-tracking

@@ -1509,6 +1509,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::ResetRearMirrorSurface();
             } else if (item==savr::driving::MENU_PASSENGER_RESET && enter) {
                 savr::driving::ResetPassengerView();
+            } else if(item==savr::driving::MENU_LIFT_RESET_POSE&&enter) {
+                savr::driving::ResetLiftPose();
             } else if (item==savr::driving::MENU_REAR_MIRROR_FOV && step) {
                 savr::driving::AdjustRearMirrorFov(step);
             } else if (item>=savr::driving::MENU_IGNITION_X &&
@@ -1568,8 +1570,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             const int wheelRows =
                 hasWheel?savr::driving::WHEEL_CAL_FIELD_COUNT:0;
             const int ROWS=wheelRows+savr::driving::CONTROL_FIELD_COUNT+2;
-            if (!savr::driving::IsControlCalibrationAvailable(
-                    drivingVehicleType)) {
+            if (!savr::driving::IsControlCalibrationAvailable(drivingVehicleType)) {
                 menuPage=PG_DRIVING;
                 drivingSel=0;
                 break;
@@ -1587,8 +1588,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             } else if (drivingCalibSel>wheelRows&&
                        drivingCalibSel<=wheelRows+
                            savr::driving::CONTROL_FIELD_COUNT&&step) {
-                savr::driving::AdjustControlCalibrationValue(
-                    drivingCalibHand,drivingCalibSel-wheelRows-1,step);
+                savr::driving::AdjustControlCalibrationValue(drivingCalibHand,drivingCalibSel-wheelRows-1,step);
             } else if (drivingCalibSel==ROWS-1&&enter) {
                 menuPage=PG_DRIVING;
             }

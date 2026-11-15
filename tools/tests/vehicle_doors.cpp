@@ -91,6 +91,9 @@ float GetWheelCalibrationValue(int) {return 0;}
 bool GetIgnitionFrame(void*,bool,float out[12]) { const float frame[12]{1,0,0,0,1,0,0,0,1,0,0,0}; std::copy_n(frame,12,out);return true; }
 void SetIgnitionPose(int,bool,const float*) {}
 void SetRadioPose(int,const float*) {}
+bool liftVisible{};int liftWrites{};
+float liftPose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};
+void SetLiftPose(int,const float* pose) {std::copy_n(pose,12,liftPose);++liftWrites;}
 int mirrorValues[12]{0,45,110,0,0,0,0,-200,100,0,0,0};
 void GetRearMirrorCalibration(int,int out[12]) {std::copy_n(mirrorValues,12,out);}
 void SetRearMirrorCalibration(int,const int values[12]) {std::copy_n(values,12,mirrorValues);}
@@ -112,7 +115,11 @@ bool GetWheelVisualState(WheelVisualState* out) {
             out->handlePosition[i][1]=.5f+bikeGrip[i][1];out->handlePosition[i][2]=.8f+bikeGrip[i][2];}
         return true;}
     out->dashAnchorValid=true;out->interactionTarget[0]=out->interactionTarget[1]=interactionTarget;out->modelId=400;out->radius=.2f;out->center[0]=-.4f;out->center[1]=.2f;out->center[2]=1.f;
-    out->right[0]=1;out->up[2]=1;out->normal[1]=1;return true;
+    out->right[0]=1;out->up[2]=1;out->normal[1]=1;
+    if(liftVisible){out->modelId=530;out->liftVisible=true;
+        std::copy_n(liftPose,3,out->liftCenter);std::copy_n(liftPose+3,3,out->liftRight);
+        std::copy_n(liftPose+6,3,out->liftForward);std::copy_n(liftPose+9,3,out->liftUp);}
+    return true;
 }
 }
 namespace vrcam {
@@ -175,6 +182,7 @@ bool FakeLos(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,
     *hit=wall?static_cast<void*>(pedMemory):vehicle;return true;
 }
 void Setup() {
+    driving::liftVisible=false;driving::liftWrites=0;
     for(auto& detent:g_openDetents)detent={};
     Reset();g_epoch=5;g_updated=Now()-.02;g_ready=true;
     std::memset(flags,0x80,sizeof(flags));flags[0]=3;
@@ -751,6 +759,20 @@ int main() {
         hands[h].trigger=1;Tick();CHECK(g_editKind==10);
         xr::pdaVisible=false;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0);
     }
+    for(int h:{0,1}){
+        Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+        driving::liftVisible=true;Write<std::uint16_t>(vehicle,0x32,530);
+        const float pose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};std::copy_n(pose,12,driving::liftPose);
+        hands[h].gripPos[0]=.6f;hands[h].gripPos[1]=.2f;hands[h].gripPos[2]=.88f;
+        Tick();hands[h].trigger=1;Tick();CHECK(g_editKind==11&&g_edit.hand==h&&ClaimedHands()==(1u<<h));
+        hands[h].gripPos[0]+=.06f;hands[h].gripPos[1]+=.04f;hands[h].gripPos[2]+=.03f;
+        hands[h].gripOri[2]=.258819f;hands[h].gripOri[3]=.965926f;Tick();
+        CHECK(driving::liftWrites>0&&driving::saves==0);
+        CHECK(std::abs(driving::liftPose[0]-.66f)<.001f&&std::abs(driving::liftPose[1]-.24f)<.001f&&std::abs(driving::liftPose[2]-.68f)<.001f);
+        CHECK(std::abs(driving::liftPose[3]-.866025f)<.001f&&std::abs(driving::liftPose[4]-.5f)<.001f);
+        hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&driving::saves==1);
+    }
+    std::puts("vehicle lift: both hands, rigid position/rotation edit, ownership and release save passed");
     std::puts("vehicle PDA: both hands, three-axis trigger drag, fixed angles, model placement, release save and visibility cancellation passed");
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

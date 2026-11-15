@@ -28,6 +28,8 @@ def function(name):
 
 PRELUDE = r"""
 #include "MissionComfort.h"
+#include "VehicleLiftLever.h"
+namespace liftlever=savr::liftlever;
 namespace missioncomfort=savr::missioncomfort;
 #include <algorithm>
 #include <atomic>
@@ -58,10 +60,15 @@ int appearance=0;
 bool allowed=true, immersive=false;
 int debugMode{};int GetVehicleDebugMode() {return debugMode;}
 void* FindVehicle(int, bool) { return seated; }
+void* FindPed(int) { return reinterpret_cast<void*>(1); }
+bool IsDriver(const void*,const void*) { return true; }
+bool EngineOn(const void*) { return true; }
 int Appearance(const void*) { return appearance; }
 void* activePad=nullptr;
 void* GetPad(int) { return activePad; }
 struct Symbols {
+    void* (*FindPlayerPed)(int)=FindPed;
+    bool (*CVehicle_IsDriver)(const void*,const void*)=IsDriver;
     void* (*CPad_GetPad)(int)=GetPad;
     void* CWorld_Players{};
     std::uint8_t* CWorld_PlayerInFocus{};
@@ -73,6 +80,8 @@ struct Symbols {
 namespace vrcam { bool IsStereoActive() { return allowed; } }
 namespace vrfire { bool scripted=false; bool IsScriptedWeaponCamera() { return scripted; } }
 std::atomic<bool> g_inputBlocked{false};
+std::atomic<int> g_liftAxis{0};
+std::atomic<void*> g_liftAxisVehicle{nullptr};
 bool HasPlayerVehicle() { return seated!=nullptr; }
 void EnsureInit() {}
 std::atomic<bool> g_planeInvertPitch{false};
@@ -278,6 +287,27 @@ int main() {
     Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==96,"forklift arm axis");
     xr::input.rightStick[1]=0.1f;
     Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==0,"forklift deadzone");
+    for(int model:{486,525,530,531}) {
+        *reinterpret_cast<std::uint16_t*>(vehicle+0x32)=model;
+        immersive=false;xr::input.rightStick[1]=.75f;
+        Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==(model==525||model==531?-96:96),"special vehicle stock axis sign");
+        immersive=true;g_liftAxis.store(0);
+        g_liftAxisVehicle.store(vehicle);g_activeVehicleModel.store(model);
+        Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==0,"immersive ignores drifting stick");
+        g_liftAxis.store(-57);
+        Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==-57,"physical lever reaches stock reader");
+        g_liftAxisVehicle.store(nullptr);
+        Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==0,"stale vehicle cannot inherit lift input");
+        g_liftAxisVehicle.store(vehicle);g_activeVehicleModel.store(400);
+        Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==0,"stale model cannot inherit lift input");g_activeVehicleModel.store(model);
+        *reinterpret_cast<std::uint16_t*>(pad+0x110)=1;
+        Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==0,"disabled stock controls stop lift");
+        *reinterpret_cast<std::uint16_t*>(pad+0x110)=0;
+        debugMode=1;
+        Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==0,"editor stops lift");debugMode=0;
+        allowed=false;Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==0,"VR input gate stops lift");allowed=true;
+    }
+    immersive=false;
     *reinterpret_cast<std::uint16_t*>(vehicle+0x32)=400;
     Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==73,"ordinary vehicle keeps retail axis");
     Check(OnGetCarGunFired(pad,1,1)==72,"ordinary vehicle keeps retail gun");
@@ -310,7 +340,7 @@ def main():
     vr=(ROOT/'native/src/VrCamera.cpp').read_text(encoding='utf8')
     main=(ROOT/'native/src/main.cpp').read_text(encoding='utf8')
     xr=(ROOT/'native/src/Xr.cpp').read_text(encoding='utf8')
-    assert 'const bool frontendBlocked = inGameplay || anyMenu || menuWasOpen;' in main
+    assert re.search(r'const bool frontendBlocked = inGameplay \|\| anyMenu \|\| menuWasOpen(?: \|\| [^;]+)?;',main)
     assert 'formalScene' not in main and 'skipHold' not in vr
     assert 'SetCutsceneSkipProgress' not in xr and 'HOLD A TO SKIP' not in xr
     assert 'if (!stereo || g.CPad_GetPad == nullptr || inputBlocked)' in vr
