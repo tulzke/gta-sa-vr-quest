@@ -27,13 +27,15 @@ int main() {
     tracker.Step(0,2,22,AUTOMATIC,true,6000,3);Check(!tracker.requests[0].visible,"automatic weapons have no gesture tutorial");
     Check(kOpacity==.20f,"requested opacity is twenty percent");
 
+    const Pose anchor{{0,1.2f,-.4f},{0,0,-1},{0,1,0},{1,0,0}};
     for(int mode:{DOWN_FLICK,TWIST,DOWN_UP})for(int fps:{36,72,90,120}) {
         Gesture gesture;int recognized=0;
-        const Pose base=BuildPose({}, {},1,false,mode,0,.5f);
+        const Pose base=BuildPose(anchor,anchor.position,1,mode,0);
         for(int i=0;i<fps*2;++i) {
             const double time=double(i)/fps;const unsigned ms=static_cast<unsigned>(time*1000);
-            const Pose pose=BuildPose({}, {},1,false,mode,ms,.5f);
+            const Pose pose=BuildPose(anchor,anchor.position,1,mode,ms);
             const Motion motion=Animation(mode,ms);
+            if (motion.visibility==0) {gesture.Reset();continue;}
             const Vec axis=mode==TWIST?base.barrel:base.side;
             const float angle=mode==TWIST?motion.roll:-motion.down;
             const float sine=std::sin(angle*.5f);
@@ -45,10 +47,10 @@ int main() {
     }
     for(int cm:{7,21,40,60})for(int degrees:{20,60}) {
         SetNodDistanceCm(cm);SetNodAngleDegrees(degrees);Gesture gesture;int recognized=0;
-        const Pose base=BuildPose({}, {},1,false,DOWN_FLICK,0,.5f);
+        const Pose base=BuildPose(anchor,anchor.position,1,DOWN_FLICK,0);
         for(int i=0;i<144;++i) {
             const double time=i/72.;const unsigned ms=static_cast<unsigned>(time*1000);
-            const auto pose=BuildPose({}, {},1,false,DOWN_FLICK,ms,.5f);
+            const auto pose=BuildPose(anchor,anchor.position,1,DOWN_FLICK,ms);
             const auto motion=Animation(DOWN_FLICK,ms);const float sine=std::sin(-motion.down*.5f);
             Sample sample{pose.position,pose.barrel,{base.side.x*sine,base.side.y*sine,base.side.z*sine,std::cos(motion.down*.5f)}};
             recognized+=gesture.Update(sample,time,1,DOWN_FLICK,1);
@@ -56,10 +58,26 @@ int main() {
         Check(recognized>=1,"tutorial adapts to temporary distance and angle tuning");
     }
     SetNodDistanceCm(kDefaultNodCm);SetNodAngleDegrees(kDefaultNodDegrees);
-    const auto left=BuildPose({0,1.7f,0},{},0,true,DOWN_FLICK,0,1.f);
-    const auto right=BuildPose({0,1.7f,0},{},1,true,TWIST,0,1.f);
-    Check(left.position.x<0 && right.position.x>0 && left.position.z<0,"two copies sit separately in front of the player");
-    Check(left.scale==.38f,"long weapons are fitted to the tutorial space");
+    const Pose leftWeapon{{-.25f,1.1f,-.4f},{1,0,0},{0,1,0},{0,0,-1}};
+    const Pose rightWeapon{{.20f,1.3f,-.5f},{0,0,-1},{0,1,0},{-1,0,0}};
+    const Vec leftWrist{-.20f,1.15f,-.3f},rightWrist{.17f,1.25f,-.35f};
+    const auto left=BuildPose(leftWeapon,leftWrist,0,DOWN_FLICK,0);
+    const auto right=BuildPose(rightWeapon,rightWrist,1,TWIST,0);
+    Check(ModelMatrix(left)==ModelMatrix(leftWeapon) && ModelMatrix(right)==ModelMatrix(rightWeapon),"hint starts at the exact live weapon position and calibrated orientation");
+    const auto rightMatrix=ModelMatrix(right);
+    Check(std::abs(rightMatrix[0]*rightMatrix[0]+rightMatrix[1]*rightMatrix[1]+rightMatrix[2]*rightMatrix[2]-1)<.001f,"real weapon size is preserved at one-to-one scale");
+    Check(Dot(right.barrel,Cross(right.top,right.side))<0,"live reflected handedness is retained");
+    const auto rolled=BuildPose(rightWeapon,rightWrist,1,TWIST,800);
+    const Vec before=Add(rightWeapon.position,Scale(rightWrist,-1)),after=Add(rolled.position,Scale(rightWrist,-1));
+    Check(std::abs(Dot(before,before)-Dot(after,after))<.001f,"calibrated model offset rotates around the real wrist pivot");
+    const Vec axis{0,1,0},delta{.4f,.2f,-.3f};const float turn=.7f;
+    Pose moved=rightWeapon;moved.position=Add(Rotated(moved.position,axis,turn),delta);
+    moved.barrel=Rotated(moved.barrel,axis,turn);moved.top=Rotated(moved.top,axis,turn);moved.side=Rotated(moved.side,axis,turn);
+    const auto movedRoll=BuildPose(moved,Add(Rotated(rightWrist,axis,turn),delta),1,TWIST,800);
+    const Vec expected=Add(Rotated(rolled.position,axis,turn),delta);
+    const Vec difference=Add(movedRoll.position,Scale(expected,-1));
+    Check(Dot(difference,difference)<.00001f && Dot(movedRoll.top,Rotated(rolled.top,axis,turn))>.999f,"moving and turning the hand carries the active animation with it");
+    Check(Animation(TWIST,1000).roll==Animation(TWIST,600).roll && Animation(TWIST,1400).visibility==0,"side tutorial holds its outward pose and hides the reset instead of returning");
 
     alignas(16) unsigned char clump[64]{},root[256]{},child[256]{},a[128]{},b[128]{},geometry[192]{},morph[64]{};
     float vertices[]{0,0,0, .4f,0,0, 0,.2f,0};unsigned short triangles[]{0,1,2,0};
@@ -76,9 +94,9 @@ int main() {
     Check(std::memcmp(saved.data(),child,sizeof(child))==0,"copying never changes source frame state");
     VisualFrame published;published.items[0]={mesh,left};auto baked=published;published={};mesh.reset();
     Check(baked.items[0].model && baked.items[0].model->vertices.size()==18,"stereo snapshot owns immutable model memory");
-    const auto matrix=ModelMatrix(*baked.items[0].model,left);
-    const Vec centered=ModelReader::Transform(matrix.data(),baked.items[0].model->center);
-    Check(std::abs(centered.x-left.position.x)<.001f && std::abs(centered.z-left.position.z)<.001f,"model bounds are centered on tutorial anchor");
+    const auto matrix=ModelMatrix(left);
+    const Vec origin=ModelReader::Transform(matrix.data(),{});
+    Check(std::abs(origin.x-leftWeapon.position.x)<.001f && std::abs(origin.z-leftWeapon.position.z)<.001f,"model uses the weapon origin without bounds recentering");
     b[2]=0;mesh=CopyModel(clump,Iterate);Check(mesh && mesh->vertices.size()==9,"hidden atomics are not shown");
     vertices[0]=std::nanf("");Check(!CopyModel(clump,Iterate),"invalid vertices are rejected");vertices[0]=0;
     Put<int>(geometry,0x1c,60001);Check(!CopyModel(clump,Iterate),"oversized geometry is rejected before reading");Put<int>(geometry,0x1c,3);

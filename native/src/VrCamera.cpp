@@ -2714,7 +2714,6 @@ void PublishReloadHintVisuals(void* ped,unsigned renderedHands) {
     xr::HandPose hands[2]{};float head[3]{},orientation[4]{};std::uint64_t epoch{};
     if (ped && physicalweapon::GetInteractionTrackingSnapshot(head,orientation,hands,&epoch)) {
         frame.epoch=epoch;
-        const bool both=requests[0].visible && requests[1].visible;
         for(int h=0;h<2;++h) {
             const auto& request=requests[h];const int slot=request.slot;
             if (!(renderedHands&(1u<<h)) || !request.visible || request.epoch!=epoch || slot<=0 || slot>=kWeaponSlotCount ||
@@ -2730,10 +2729,16 @@ void PublishReloadHintVisuals(void* ped,unsigned renderedHands) {
                     request.type,slot,model.mesh->vertices.size()/3,model.mesh->indices.size()/3);
             }
             if (!model.mesh) continue;
+            physicalweapon::TrackingPose weapon{};
+            if (!physicalweapon::GetHeldVisualPoseTracking(h,slot,&weapon)) continue;
+            const reloadhint::Pose anchor{{weapon.position[0],weapon.position[1],weapon.position[2]},
+                {weapon.right[0],weapon.right[1],weapon.right[2]},
+                {weapon.forward[0],weapon.forward[1],weapon.forward[2]},
+                {weapon.up[0],weapon.up[1],weapon.up[2]}};
+            const auto& wrist=hands[h].gripPos;
             frame.items[h].model=model.mesh;
-            frame.items[h].pose=reloadhint::BuildPose({head[0],head[1],head[2]},
-                {orientation[0],orientation[1],orientation[2],orientation[3]},h,both,
-                request.mode,request.phaseMs,model.mesh->extent);
+            frame.items[h].pose=reloadhint::BuildPose(anchor,{wrist[0],wrist[1],wrist[2]},h,request.mode,request.phaseMs);
+            frame.items[h].opacity=reloadhint::kOpacity*reloadhint::Animation(request.mode,request.phaseMs).visibility;
         }
     }
     xr::SetReloadHints(frame);

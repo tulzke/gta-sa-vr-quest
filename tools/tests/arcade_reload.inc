@@ -62,7 +62,7 @@ void ArcadeTests() {
         Check(GestureRun(TWIST,fps,2,1.f)==1,"right twist and return recognized once");
         Check(GestureRun(TWIST,fps,2,-1.f)==1,"left twist and return recognized once");
         Check(GestureRun(DOWN_UP,fps,0,.12f,.15f,.15f,false)==0,"lowering without return cannot reload");
-        Check(GestureRun(TWIST,fps,2,1.f,.15f,.15f,false)==0,"rolling without return cannot reload");
+        Check(GestureRun(TWIST,fps,2,1.f,.15f,.15f,false)==1,"outward roll reloads without any return");
         Check(GestureRun(DOWN_UP,fps,0,.12f,1.f,.5f)==0,"slow holster movement cannot reload");
         Check(GestureRun(TWIST,fps,2,1.f,1.f,.5f)==0,"slow inspection roll cannot reload");
         Check(GestureRun(DOWN_UP,fps,0,.02f)==0,"small tracking movement cannot reload");

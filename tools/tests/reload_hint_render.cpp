@@ -7,10 +7,11 @@ using GLuint=unsigned;using GLint=int;using GLsizei=int;using GLenum=unsigned;us
 enum {GL_BLEND=1,GL_CULL_FACE,GL_DEPTH_TEST,GL_CURRENT_PROGRAM,GL_ARRAY_BUFFER_BINDING,
 GL_ELEMENT_ARRAY_BUFFER_BINDING,GL_DEPTH_FUNC,GL_CULL_FACE_MODE,GL_DEPTH_WRITEMASK,GL_COLOR_WRITEMASK,
 GL_BLEND_SRC_RGB,GL_BLEND_DST_RGB,GL_BLEND_SRC_ALPHA,GL_BLEND_DST_ALPHA,GL_BLEND_EQUATION_RGB,GL_BLEND_EQUATION_ALPHA,
-GL_TRUE,GL_BACK,GL_LEQUAL,GL_ARRAY_BUFFER,GL_ELEMENT_ARRAY_BUFFER,GL_STATIC_DRAW,GL_FLOAT,GL_TRIANGLES,
+GL_TRUE,GL_BACK,GL_FRONT,GL_LEQUAL,GL_ARRAY_BUFFER,GL_ELEMENT_ARRAY_BUFFER,GL_STATIC_DRAW,GL_FLOAT,GL_TRIANGLES,
 GL_UNSIGNED_SHORT,GL_EQUAL,GL_FUNC_ADD,GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_DEPTH_BUFFER_BIT};
 constexpr int GL_FALSE=0;
 int checks{},draws{},uploads{},clears{};
+int frontCullDraws{};
 void Check(bool v,const char* m){++checks;if(!v){std::fprintf(stderr,"FAIL: %s\n",m);std::exit(1);}}
 std::map<unsigned,int> state;
 std::array<GLboolean,4> colorMask{1,1,1,1};std::array<float,4> color{};
@@ -37,12 +38,14 @@ void glEnableVertexAttribArray(int){}void glDisableVertexAttribArray(int){}
 void glVertexAttribPointer(int,int,int,int,std::size_t,const void*){}
 void glDrawElements(GLenum,int count,GLenum,const void*){
     ++draws;Check(count==3,"draw uses current weapon triangles");
+    if(state[GL_CULL_FACE_MODE]==GL_FRONT)++frontCullDraws;
     if(!colorMask[0])Check(state[GL_DEPTH_WRITEMASK] && !state[GL_BLEND] && state[GL_DEPTH_FUNC]==GL_LEQUAL,"depth-only pass precedes alpha color");
     else Check(!state[GL_DEPTH_WRITEMASK] && state[GL_BLEND] && state[GL_DEPTH_FUNC]==GL_EQUAL &&
-               color==std::array<float,4>{1,1,0,.2f},"nearest weapon surface is flat yellow at exactly twenty percent");
+               color[0]==1 && color[1]==1 && color[2]==0 && color[3]>0 && color[3]<=.2f,"nearest weapon surface is flat yellow with at most twenty percent opacity");
 }
 void MatMul(float* out,const float* a,const float* b){for(int c=0;c<4;++c)for(int r=0;r<4;++r){out[c*4+r]=0;for(int k=0;k<4;++k)out[c*4+r]+=a[k*4+r]*b[c*4+k];}}
 namespace reloadhint=savr::reloadhint;
+namespace arcadereload=savr::arcadereload;
 #include "ReloadHintRender.inl"
 int main(){
     state={{GL_BLEND,0},{GL_CULL_FACE,0},{GL_DEPTH_TEST,1},{GL_CURRENT_PROGRAM,3},
@@ -60,6 +63,11 @@ int main(){
     DrawReloadHintsForEye(identity.data(),frame,false);Check(uploads==2 && draws==4,"second eye reuses immutable uploaded geometry");
     frame.items[1].model=model;DrawReloadHintsForEye(identity.data(),frame,true);
     Check(draws==8 && clears==1,"two hints share a nearest-surface pass even with scoped view");
-    frame={};DrawReloadHintsForEye(identity.data(),frame,false);Check(draws==8,"empty snapshot draws no stale hint");
+    frame.items[1].pose.side={0,0,-1};frame.items[1].opacity=.10f;
+    DrawReloadHintsForEye(identity.data(),frame,false);
+    Check(draws==12 && frontCullDraws==2,"reflected live weapon pose uses the same front culling as the real weapon");
+    frame.items[0].opacity=frame.items[1].opacity=0;
+    DrawReloadHintsForEye(identity.data(),frame,false);Check(draws==12,"invisible reset phase draws neither color nor depth");
+    frame={};DrawReloadHintsForEye(identity.data(),frame,false);Check(draws==12,"empty snapshot draws no stale hint");
     std::printf("PASS: %d translucent hint renderer checks\n",checks);
 }

@@ -12,7 +12,7 @@ inline std::atomic<int> mode{DOWN_UP};
 inline int GetMode() { return mode.load(std::memory_order_relaxed); }
 inline void SetMode(int value) { mode.store(std::clamp(value, 0, MODE_COUNT-1), std::memory_order_relaxed); }
 inline const char* ModeName() {
-    constexpr const char* names[]{"AUTOMATIC", "DOWN / UP", "TWIST / RETURN", "DOWN FLICK"};
+    constexpr const char* names[]{"AUTOMATIC", "DOWN / UP", "SIDE ROLL", "DOWN FLICK"};
     return names[GetMode()];
 }
 inline int ModeForWeapon(int type) {
@@ -189,7 +189,7 @@ struct Gesture {
         // A twist must keep pointing approximately along its original axis.
         if (path==2 && Dot(barrel,start.barrel)<.866f) { phase=0;readyAt=now+.12;return false; }
         if (phase==1) {
-            if (path==2) { if (roll>=.785f) phase=2; }
+            if (path==2) {if (roll>=.785f) {phase=0;readyAt=now+.45;return true;}}
             else if (drop>=.08f) { path=0;phase=2; }
             else if (pitch<=-.52f) { path=1;phase=2; }
             return false;

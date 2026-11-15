@@ -7309,7 +7309,7 @@ void BuildControlsTipsMenu() {
         {"EMPTY HANDS RETURN CJ TO FISTS",         205, 170, 105, false},
         {"SIDEARMS: QUICK DOWN FLICK TO RELOAD",   205, 170, 105, false},
         {"NOD AMPLITUDE: TUNE IN CONTROLS",       205, 170, 105, false},
-        {"SPAS/MP5/AK/M4: ROLL 45 DEG AND BACK",   205, 170, 105, false},
+        {"SPAS/MP5/AK/M4: ROLL SIDEWAYS",          205, 170, 105, false},
         {"RELEASE TRIGGER BEFORE THE GESTURE",     205, 170, 105, false},
         {"GESTURE COMPLETE = INSTANT RELOAD",     205, 170, 105, false},
 

@@ -38,21 +38,23 @@ struct Model {
     Vec center{};
     float extent{};
 };
-struct Pose { Vec position{},barrel{1,0,0},top{0,1,0},side{0,0,1};float scale{1}; };
-struct Visual { std::shared_ptr<const Model> model;Pose pose{}; };
+struct Pose { Vec position{},barrel{1,0,0},top{0,1,0},side{0,0,1}; };
+struct Visual { std::shared_ptr<const Model> model;Pose pose{};float opacity{kOpacity}; };
 struct VisualFrame {
     std::array<Visual,2> items{};
     std::uint64_t epoch{};
-    bool Visible() const { return bool(items[0].model) || bool(items[1].model); }
+    bool Visible() const { return (items[0].model && items[0].opacity>0) || (items[1].model && items[1].opacity>0); }
 };
 inline float Smooth(float x) { x=std::clamp(x,0.f,1.f);return x*x*(3-2*x); }
-struct Motion { float down{},roll{}; };
+struct Motion { float down{},roll{},visibility{1}; };
 inline Motion Animation(int mode,unsigned phaseMs) {
     const float t=(phaseMs%kLoopMs)*.001f;
     if (mode==arcadereload::TWIST) {
-        const float amount=t<.25f?0:t<.48f?Smooth((t-.25f)/.23f):
-                           t<.65f?1:t<.88f?1-Smooth((t-.65f)/.23f):0;
-        return {0,.98f*amount};
+        const float amount=t<.25f?0:t<.48f?Smooth((t-.25f)/.23f):1;
+        // Show only the outward gesture. Reset to the hand pose while hidden,
+        // rather than teaching an obsolete reverse movement.
+        const float visibility=std::min(Smooth(t/.12f),1-Smooth((t-1.15f)/.20f));
+        return {0,.98f*amount,visibility};
     }
     // The fast downward stroke is the gesture; a slower reset makes the loop
     // readable without teaching an obligatory upward return for DOWN_FLICK.
@@ -65,32 +67,38 @@ inline Vec Rotated(Vec v,Vec axis,float angle) {
     const float s=std::sin(angle*.5f);
     return arcadereload::Rotate({axis.x*s,axis.y*s,axis.z*s,std::cos(angle*.5f)},v);
 }
-inline Pose BuildPose(Vec head,Quat orientation,int hand,bool both,int mode,unsigned phaseMs,float extent) {
+inline Vec Unit(Vec v,Vec fallback) {
+    const float length=std::sqrt(arcadereload::Dot(v,v));
+    return std::isfinite(length) && length>.0001f?arcadereload::Scale(v,1/length):fallback;
+}
+inline Pose BuildPose(const Pose& weapon,Vec wrist,int hand,int mode,unsigned phaseMs) {
     using namespace arcadereload;
-    const Vec right=Rotate(orientation,{1,0,0}),up=Rotate(orientation,{0,1,0}),forward=Rotate(orientation,{0,0,-1});
     const float sign=hand==0?-1.f:1.f;
-    Pose pose;
-    pose.position=Add(Add(head,Scale(forward,.80f)),Add(Scale(up,-.13f),Scale(right,both?sign*.25f:0.f)));
-    pose.barrel=Add(Scale(forward,.82f),Scale(right,sign*.5723635f));
-    pose.top=up;pose.side=Cross(pose.barrel,pose.top);
-    pose.scale=extent>.001f?std::min(1.f,(both?.38f:.50f)/extent):1.f;
+    Pose pose=weapon;
     const Motion motion=Animation(mode,phaseMs);
-    pose.barrel=Rotated(pose.barrel,pose.side,-motion.down);
-    pose.top=Rotated(pose.top,pose.side,-motion.down);
+    if (motion.down==0 && motion.roll==0) return pose;
+    const Vec up{0,1,0};
+    const Vec barrel=Unit(weapon.barrel,{0,0,-1});
+    const Vec nodAxis=Unit(Cross(barrel,up),Unit(weapon.side,{1,0,0}));
+    const float down=std::min(motion.down,std::max(0.f,std::asin(std::clamp(barrel.y,-1.f,1.f))+1.540796327f));
+    const auto rotate=[&](Vec axis,float angle) {
+        pose.position=Add(wrist,Rotated(Add(pose.position,Scale(wrist,-1)),axis,angle));
+        pose.barrel=Rotated(pose.barrel,axis,angle);
+        pose.top=Rotated(pose.top,axis,angle);
+        pose.side=Rotated(pose.side,axis,angle);
+    };
+    rotate(nodAxis,-down);
     if (mode==DOWN_FLICK) {
-        // Demonstrate the configured distance, with margin, while keeping the
-        // larger stroke centered in view. The angular alternative stays optional.
-        const float stroke=std::max(.03f,NodDistanceMetres()*1.25f-.20f*std::sin(.58f));
-        pose.position=Add(pose.position,Scale(up,(stroke-.174f)*.5f-stroke*(motion.down/.58f)));
+        const float peakDown=std::min(.58f,std::max(0.f,std::asin(std::clamp(barrel.y,-1.f,1.f))+1.540796327f));
+        const float tipDrop=.20f*(barrel.y-Rotated(barrel,nodAxis,-peakDown).y);
+        const float stroke=std::max(.03f,NodDistanceMetres()*1.25f-tipDrop);
+        pose.position=Add(pose.position,Scale(up,-stroke*(motion.down/.58f)));
     } else pose.position=Add(pose.position,Scale(up,-motion.down*.10f));
-    pose.top=Rotated(pose.top,pose.barrel,sign*motion.roll);
-    pose.side=Rotated(pose.side,pose.barrel,sign*motion.roll);
+    rotate(barrel,sign*motion.roll);
     return pose;
 }
-inline std::array<float,16> ModelMatrix(const Model& model,const Pose& pose) {
-    using namespace arcadereload;
-    const Vec x=Scale(pose.barrel,pose.scale),y=Scale(pose.top,pose.scale),z=Scale(pose.side,pose.scale);
-    const Vec p=Add(pose.position,Scale(Add(Add(Scale(x,model.center.x),Scale(y,model.center.y)),Scale(z,model.center.z)),-1));
+inline std::array<float,16> ModelMatrix(const Pose& pose) {
+    const Vec x=pose.barrel,y=pose.top,z=pose.side,p=pose.position;
     return {x.x,x.y,x.z,0,y.x,y.y,y.z,0,z.x,z.y,z.z,0,p.x,p.y,p.z,1};
 }
 } // namespace savr::reloadhint

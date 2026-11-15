@@ -24,7 +24,7 @@ void DrawReloadHintsForEye(const float* viewProjection,const reloadhint::VisualF
     if (clearDepth) glClear(GL_DEPTH_BUFFER_BIT); // scope pixels have a different projection
     std::array<float,16> matrices[2];bool ready[2]{};
     for(int h=0;h<2;++h) {
-        const auto& visual=frame.items[h];if (!visual.model) continue;
+        const auto& visual=frame.items[h];if (!visual.model || visual.opacity<=0) continue;
         auto& gpu=g_reloadHintGpu[h];
         if (!gpu.vertices || !glIsBuffer(gpu.vertices)) {
             glGenBuffers(1,&gpu.vertices);glGenBuffers(1,&gpu.indices);gpu.uploaded.reset();
@@ -36,11 +36,15 @@ void DrawReloadHintsForEye(const float* viewProjection,const reloadhint::VisualF
             glBufferData(GL_ELEMENT_ARRAY_BUFFER,mesh.indices.size()*sizeof(unsigned short),mesh.indices.data(),GL_STATIC_DRAW);
             gpu.uploaded=visual.model;
         }
-        const auto model=reloadhint::ModelMatrix(*visual.model,visual.pose);
+        const auto model=reloadhint::ModelMatrix(visual.pose);
         MatMul(matrices[h].data(),viewProjection,model.data());ready[h]=true;
     }
     const auto draw=[&] {
         for(int h=0;h<2;++h)if(ready[h]) {
+            const auto& pose=frame.items[h].pose;
+            const float determinant=arcadereload::Dot(pose.barrel,arcadereload::Cross(pose.top,pose.side));
+            glCullFace(determinant<0?GL_FRONT:GL_BACK);
+            glUniform4f(g_markerColLoc,1.f,1.f,0.f,frame.items[h].opacity);
             glUniformMatrix4fv(g_markerMvpLoc,1,GL_FALSE,matrices[h].data());
             glBindBuffer(GL_ARRAY_BUFFER,g_reloadHintGpu[h].vertices);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,g_reloadHintGpu[h].indices);
@@ -55,7 +59,7 @@ void DrawReloadHintsForEye(const float* viewProjection,const reloadhint::VisualF
     glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);glDepthMask(GL_FALSE);glDepthFunc(GL_EQUAL);
     glEnable(GL_BLEND);glBlendEquationSeparate(GL_FUNC_ADD,GL_FUNC_ADD);
     glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
-    glUniform4f(g_markerColLoc,1.f,1.f,0.f,reloadhint::kOpacity);draw();
+    draw();
     glColorMask(oldColorMask[0],oldColorMask[1],oldColorMask[2],oldColorMask[3]);
     glDepthMask(oldDepthMask);glDepthFunc(oldDepthFunc);glCullFace(oldCullMode);
     if(oldBlend)glEnable(GL_BLEND);else glDisable(GL_BLEND);

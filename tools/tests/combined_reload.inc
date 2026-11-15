@@ -13,7 +13,7 @@ int main(){
     for(int saved:{AUTOMATIC,DOWN_UP,TWIST,DOWN_FLICK}) {
         SetMode(saved);
         for(int type:{22,23,24,26,28,32})Check(ModeForWeapon(type)==DOWN_FLICK,"sidearm always uses permissive downward nod");
-        for(int type:{27,29,30,31})Check(ModeForWeapon(type)==TWIST,"listed long gun always uses lateral roll and return");
+        for(int type:{27,29,30,31})Check(ModeForWeapon(type)==TWIST,"listed long gun always uses lateral roll");
         for(int type:{25,33,34,38,35,41})Check(ModeForWeapon(type)==saved,"unlisted weapon retains configured mode");
     }
     SetMode(DOWN_FLICK);SetSound(BOLT);player[0x8dc]=7;
@@ -32,9 +32,10 @@ int main(){
     Nod(1);
     Check(Field(4,8)==0 && reloadSounds[1]==0,"long gun cannot be reloaded by the sidearm nod");
     SetPose(1);HoldStill();Roll(1);
-    Check(Field(4,8)==0,"lateral roll alone waits for its return");
+    Check(Field(4,8)==30 && Field(4,4)==0,"lateral roll alone instantly reloads before returning");
+    const int rollSounds=reloadSounds[1],rollPulses=xr::haptics[1];
     Roll(1,true);
-    Check(Field(4,8)==30 && Field(4,4)==0,"lateral roll and return instantly reload the long gun");
+    Check(Field(4,8)==30 && reloadSounds[1]==rollSounds && xr::haptics[1]==rollPulses,"return is optional and creates no duplicate confirmation");
     Check(Field(2,12)==39 && Field(4,12)==89,"reload neither discards nor duplicates total ammo");
     int a=shots[0],b=shots[1];triggers[0]=triggers[1]=1;Frame();
     Check(shots[0]==a+1 && shots[1]==b+1,"both guns shoot immediately after their own reload gestures");
