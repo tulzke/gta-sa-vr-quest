@@ -3,7 +3,7 @@
 #include <cmath>
 
 namespace savr::watchhud {
-struct Readout { int time=-1,money=-1,wanted=0;float health=-1,armour=-1; };
+struct Readout { int time=-1,money=-1,wanted=0;float health=-1,armour=-1;bool mapVisible=true; };
 // Shared by the producer's blip placement and the consumer's face shader.
 constexpr float kMapRadius=.385f, kMapTop=-.28f, kMapBottom=.185f;
 constexpr float kTextureScale=.8f, kRasterSize=800.f;

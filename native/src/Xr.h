@@ -267,6 +267,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           const unsigned int* watchTex,
                           const unsigned int* projectionTex,
                           float pdaHeading,
+                          bool mapVisible,
                           const float* nearZ, const float* farZ,
                           int seq, int width, int height);
 

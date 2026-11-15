@@ -65,3 +65,9 @@ if len(sys.argv)>1:
                                 (0x7959b0,0x5286000b)]: # full texture state 3
         assert struct.unpack_from('<I',retail,address)[0]==instruction,hex(address)
     print('PASS retail thumbnail/requested -> visible -> full streaming states')
+    for address,instruction in [(0x496a40,0xb9400108),(0x496a48,0x1a9f17e0),
+                                (0x5185e8,0x39412c08), # stock player area byte +0x4b
+                                (0x796358,0x9102e2b8), # visible queue +0xb8
+                                (0x796394,0x71000a7f)]: # pump tier selection
+        assert struct.unpack_from('<I',retail,address)[0]==instruction,hex(address)
+    print('PASS retail outside-area ABI, radar interior gate and priority queue layout')

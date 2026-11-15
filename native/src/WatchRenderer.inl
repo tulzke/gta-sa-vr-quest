@@ -147,7 +147,7 @@ float WatchFaceRadius(){
 }
 void UpdateWatchFrame(const HandPose hp[2],const TwoHandVisualState& twoHand,
                       const driving::WheelVisualState& wheel,const BallHandLock& ball,unsigned weaponHands,
-                      const float pinchAmounts[2],bool trackingValid,std::uint64_t epoch,bool scoped) {
+                      const float pinchAmounts[2],bool trackingValid,std::uint64_t epoch,bool scoped,bool mapVisible) {
     static std::uint64_t previousTime=0;
     const auto now=MonotonicNowNs();const float dt=previousTime?float(now-previousTime)*1e-9f:0;previousTime=now;
     g_watchEffectTime=float((now/1000000)%100000)*.001f;
@@ -166,7 +166,7 @@ void UpdateWatchFrame(const HandPose hp[2],const TwoHandVisualState& twoHand,
     const auto normal=vnorm(WatchVector(m,WatchNative(g_watchModel.normal)));
     const float scale=std::sqrt(vdot(WatchVector(m,{1,0,0}),WatchVector(m,{1,0,0})));
     const float radius=WatchFaceRadius()*scale;
-    const bool available=g_watchFrameValid&&!calibrating&&hp[other].valid&&g_skeletalHands[other].valid&&
+    const bool available=mapVisible&&g_watchFrameValid&&!calibrating&&hp[other].valid&&g_skeletalHands[other].valid&&
         !(weaponHands&(1u<<other))&&!(TwoHandStateUsable(twoHand)&&other==twoHand.supportHand)&&
         !hp[other].climbGrip&&!hp[other].ledgeGrip&&!ball.locked[other]&&!wheel.grabbed[other]&&
         !wheel.radioGrabbed[other]&&!wheel.ignitionGrabbed[other]&&pinchAmounts[other]<=0&&hp[other].grip<.35f;
@@ -193,7 +193,7 @@ void UpdateWatchFrame(const HandPose hp[2],const TwoHandVisualState& twoHand,
     if(ended)hud::SetWatchMapZoom(hud::WatchMapZoom(),true);
     // A scale drag is still this UI's valid pointing hand, not tracking/context
     // loss. The two contact planes are 20 cm apart, so hits cannot overlap.
-    g_watchProjection.Update(g_watchFrameValid&&!calibrating,epoch,wrist,available,
+    g_watchProjection.Update(mapVisible&&g_watchFrameValid&&!calibrating,epoch,wrist,available,
         hp[other].trigger,radial,depth,radius,dt);
     g_watchProjectionNeeded.store(g_watchProjection.Needed(),std::memory_order_relaxed);
     // Reserve only this free hand's trigger near the dial. Keep the reservation
@@ -210,6 +210,7 @@ void UpdateWatchFrame(const HandPose hp[2],const TwoHandVisualState& twoHand,
 void DrawWatchForEye(const float* mvp,unsigned int mapTexture,unsigned int projectionTexture,float heading,
                      const watchhud::Readout& readout) {
     if(!g_watchFrameValid)return;
+    if(!readout.mapVisible){mapTexture=0;projectionTexture=0;}
     WatchGlBindings bindings;
     const auto& model=g_watchFrameModel;
     const auto centre=WatchNative(g_watchModel.centre);

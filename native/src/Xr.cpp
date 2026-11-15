@@ -6246,6 +6246,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           const unsigned int* watchTex,
                           const unsigned int* projectionTex,
                           float pdaHeading,
+                          bool mapVisible,
                           const float* nearZ, const float* farZ,
                           int seq, int width, int height) {
     // `tex` points at a [kStereoSets][2] row-major table of GL texture ids. The
@@ -6331,7 +6332,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         g_stereoRenderPose[ws]      = g_renderHeadPose;
         g_stereoWatchReadout[ws]={g_watchTime.load(std::memory_order_relaxed),
             g_watchMoney.load(std::memory_order_relaxed),g_watchWanted.load(std::memory_order_relaxed),
-            g_watchHealth.load(std::memory_order_relaxed),g_watchArmour.load(std::memory_order_relaxed)};
+            g_watchHealth.load(std::memory_order_relaxed),g_watchArmour.load(std::memory_order_relaxed),mapVisible};
         g_stereoRenderPoseValid[ws] = g_renderHeadPoseValid;
         g_stereoHandPose[ws][0] = g_renderedHandPoseValid
             ? g_renderedHandPose[0] : g_handPose[0];
@@ -9942,7 +9943,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                           reinterpret_cast<void*>(3 * sizeof(float)));
 
     const int panelElements[3] = {hud::RADAR, hud::HEALTH, hud::WATCH};
-    if (drivingWheel.active || drivingWheel.dashAnchorValid) {
+    if (watchData.mapVisible&&(drivingWheel.active || drivingWheel.dashAnchorValid)) {
         // Dashboard: one shared anchor at the wheel/handlebar centre, facing
         // the driver, in BOTH driving modes (the geometry frame is published
         // even when the immersive wheel interaction is off).
@@ -12617,7 +12618,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         BuildWeaponMesh(bakedHands);   // (weapon-mesh path; dead until Approach-B geometry exists)
     }
     UpdateWatchFrame(bakedHands,bakedTwoHand,drivingWheel,ballHandLock,bakedWeaponHandMask,
-                     bakedPinchAmounts,watchTrackingValid,watchEpoch,bakedScope.active);
+                     bakedPinchAmounts,watchTrackingValid,watchEpoch,bakedScope.active,bakedWatch.mapVisible);
     BulletTracer liveTracers[kMaxBulletTracers]{};
     const int liveTracerCount = SnapshotBulletTracers(liveTracers);
     ObjectiveMarkerVisual liveObjectiveMarkers[kMaxObjectiveMarkers]{};

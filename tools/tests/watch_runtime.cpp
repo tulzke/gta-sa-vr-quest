@@ -194,6 +194,32 @@ int main(){
         texture.fill(0);CHECK(!radarmap::MarkVisibleTexture(texture.data(),promote));
         CHECK(calls==1); // no duplicate queue inserts and no reload of full textures
     }
+    {
+        std::array<unsigned char,8> texture{};std::array<unsigned char,64> raster{};
+        std::array<unsigned char,31> entry{};std::array<unsigned char,0xc8> db{};
+        void* rp=raster.data();void* ep=entry.data();unsigned queue[2]={7,42};unsigned* qp=queue;
+        unsigned count=2,stored=100,pumps=0;std::uint16_t flags=0x2000;
+        std::memcpy(texture.data(),&rp,8);std::memcpy(raster.data()+0x38,&ep,8);
+        std::memcpy(entry.data()+0xc,&flags,2);std::memcpy(db.data()+0xbc,&count,4);std::memcpy(db.data()+0xc0,&qp,8);
+        const auto database=[&](void* e,unsigned* id)->void*{CHECK(e==ep);*id=42;return db.data();};
+        const auto pump=[&](void* self,unsigned budget,unsigned tier){
+            CHECK(self==db.data()&&budget==0&&tier==1&&queue[0]==42);++pumps;
+            queue[0]=queue[1];count=1;std::memcpy(db.data()+0xbc,&count,4);
+            flags=0x3000;std::memcpy(entry.data()+0xc,&flags,2);return 65536u;
+        };
+        CHECK(radarmap::LoadVisibleFirst(texture.data(),database,pump,&stored)==65536);
+        CHECK(stored==65636&&queue[0]==7&&pumps==1);
+        CHECK(radarmap::LoadVisibleFirst(texture.data(),database,pump,&stored)==0&&pumps==1);
+        flags=0x2000;std::memcpy(entry.data()+0xc,&flags,2); // no longer in queue: leave world entries untouched
+        CHECK(radarmap::LoadVisibleFirst(texture.data(),database,pump,&stored)==0&&pumps==1);
+        CHECK(radarmap::OutdoorMap(true,0));
+        CHECK(!radarmap::OutdoorMap(false,0)&&!radarmap::OutdoorMap(true,1)&&!radarmap::OutdoorMap(true,13));
+        watchhud::Projection projection;
+        projection.Reset(1,0);projection.open=true;projection.progress=1;
+        CHECK(!projection.Update(false,1,0,true,1,0,.005f,.023f,.02f)&&!projection.Needed());
+        CHECK(!projection.Update(true,1,0,true,1,0,.005f,.023f,.02f)); // indoor exit cannot queue a held click
+    }
+    std::puts("PASS map-only priority transaction, queue ownership, texel accounting and interior projection reset");
     std::puts("PASS visible-texture promotion from thumbnail queue; packed retail entry; full/pending/null cases");
     std::puts("PASS retained far-tile streaming across 100 stock unload/reacquire cycles; shared map passes and balanced releases");
     std::puts("PASS complete wide-zoom tile coverage, all world edges/corners and retail sea background");

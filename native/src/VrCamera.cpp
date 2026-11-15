@@ -20535,6 +20535,55 @@ bool PrepareMapRasterRing(void* (&rasters)[kEyeSets]) {
 radarmap::TextureLeases g_mapTextureLeases;
 using ReleaseMapTextureFn=int(*)(void*);
 ReleaseMapTextureFn g_releaseMapTexture=nullptr;
+unsigned g_mapPriorityTexels=0;
+bool OutdoorRadarVisible(){
+    static void* handle=dlopen("libGame.so",RTLD_NOLOAD|RTLD_NOW);
+    static auto outside=handle?reinterpret_cast<bool(*)()>(dlsym(handle,"_ZN5CGame25CanSeeOutSideFromCurrAreaEv")):nullptr;
+    static auto scriptHide=handle?static_cast<const bool*>(dlsym(handle,"_ZN4CHud23bScriptDontDisplayRadarE")):nullptr;
+    if(reinterpret_cast<std::uintptr_t>(outside)!=g.LoadBase+0x496a38u||
+       reinterpret_cast<std::uintptr_t>(scriptHide)!=g.LoadBase+0xa65e5cu||!g.FindPlayerPed)return false;
+    const auto* ped=static_cast<const unsigned char*>(g.FindPlayerPed(-1));
+    return ped&&!*scriptHide&&radarmap::OutdoorMap(outside(),ped[0x4b]);
+}
+template<class BeforeLoad> void WarmRadarTextures(float zoom,BeforeLoad beforeLoad){
+    static void* handle=dlopen("libGame.so",RTLD_NOLOAD|RTLD_NOW);
+    if(!handle||!g.FindPlayerPed||!g.FindPlayerPed(-1)||!g.FindPlayerCoors)return;
+    static auto request=reinterpret_cast<void(*)(int,int)>(dlsym(handle,"_ZN6CRadar17RequestMapSectionEii"));
+    static auto textures=static_cast<void**>(dlsym(handle,"gRadarTextures"));
+    static auto mark=reinterpret_cast<void(*)(void*)>(dlsym(handle,"_ZN22TextureDatabaseRuntime21RenderingTextureEntryEP20TextureDatabaseEntry"));
+    static auto database=reinterpret_cast<void*(*)(void*,unsigned*)>(dlsym(handle,"_ZN22TextureDatabaseRuntime14GetDatabaseForEP20TextureDatabaseEntryPj"));
+    static auto pump=reinterpret_cast<unsigned(*)(void*,unsigned,unsigned)>(dlsym(handle,"_ZN22TextureDatabaseRuntime22UpdateTextureStreamingEjj"));
+    static auto stored=static_cast<unsigned*>(dlsym(handle,"_ZN22TextureDatabaseRuntime12storedTexelsE"));
+    if(!g_releaseMapTexture)g_releaseMapTexture=reinterpret_cast<ReleaseMapTextureFn>(dlsym(handle,"_Z16RwTextureDestroyP9RwTexture"));
+    if(reinterpret_cast<std::uintptr_t>(request)!=g.LoadBase+0x51d810u||
+       reinterpret_cast<std::uintptr_t>(textures)!=g.LoadBase+0xa660a8u||
+       reinterpret_cast<std::uintptr_t>(mark)!=g.LoadBase+0x796cd0u||
+       reinterpret_cast<std::uintptr_t>(database)!=g.LoadBase+0x796c48u||
+       reinterpret_cast<std::uintptr_t>(pump)!=g.LoadBase+0x796318u||
+       reinterpret_cast<std::uintptr_t>(stored)!=g.LoadBase+0xd13d60u||
+       reinterpret_cast<std::uintptr_t>(g_releaseMapTexture)!=g.LoadBase+0x76c974u)return;
+    const auto player=g.FindPlayerCoors(-1);void* pending=nullptr;unsigned queued=0,full=0;
+    radarmap::VisibleTiles(player.x,player.y,zoom,[&](int x,int y,radarmap::Rect){
+        request(x,y);void* texture=textures[y*12+x];
+        g_mapTextureLeases.Keep(y*12+x,texture,[](void* p){++*reinterpret_cast<int*>(static_cast<char*>(p)+0x64);},
+            [](void* p){g_releaseMapTexture(p);});
+        radarmap::MarkVisibleTexture(texture,mark);
+        const auto state=radarmap::StreamState(radarmap::TextureEntry(texture));
+        if(state==2){++queued;if(!pending)pending=texture;}else if(state==3)++full;
+    });
+    if(pending){
+        // Outside camera recording; preserve the retail one-entry upload/drain
+        // transaction and account texels exactly once, without the world's
+        // feedback credit delaying a visible map section for multiple seconds.
+        beforeLoad();g_mapPriorityTexels=radarmap::LoadVisibleFirst(pending,database,pump,stored);
+    }
+    static double reportTime=-10000;static bool previouslyPending=false;
+    const auto now=NowMs();
+    if((pending!=nullptr)!=previouslyPending||(pending&&now-reportTime>2000)){
+        __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,"[watch.map.prefetch] queued=%u full=%u fastTexels=%u",queued,full,g_mapPriorityTexels);
+        previouslyPending=pending!=nullptr;reportTime=now;
+    }
+}
 
 // CRadar's menu-map path draws the same texture database tiles as the HUD.
 // Coordinates follow the retail CRect HFA ABI: left, bottom, right, top.
@@ -20589,8 +20638,8 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
         static double lastReport=-10000;static unsigned previousFull=~0u;
         const auto now=NowMs();
         if(now-lastReport>2000&&(promoted||states[1]||states[2]||previousFull!=states[3])){
-            __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,"[watch.map] zoom=%.2f requested=%u queued=%u full=%u deleting=%u promoted=%u missing=%u",
-                 zoom,states[1],states[2],states[3],states[4]+states[5],promoted,states[0]);
+            __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,"[watch.map] zoom=%.2f requested=%u queued=%u full=%u deleting=%u promoted=%u missing=%u fastTexels=%u",
+                 zoom,states[1],states[2],states[3],states[4]+states[5],promoted,states[0],g_mapPriorityTexels);
             lastReport=now;previousFull=states[3];
         }
     }
@@ -21416,8 +21465,10 @@ void OnRenderScene(bool underwater) {
     // the steady already-materialised HUD ring remains overlap-safe.
     if (hudNeeded && !g_hudRaster[0]) closeEnginePreFinish();
     const bool hudReady=hudNeeded&&PrepareHudRasterRing();
-    const bool mapNeeded=hudNeeded && (hud::ShouldRenderWristHud() || xr::HudCalibrationActive());
+    const bool outdoorMap=OutdoorRadarVisible();
+    const bool mapNeeded=outdoorMap&&hudNeeded && (hud::ShouldRenderWristHud() || xr::HudCalibrationActive());
     g_mapTextureLeases.Begin();
+    g_mapPriorityTexels=0;
     const bool pdaNeeded=mapNeeded && ((g.FindPlayerVehicle&&g.FindPlayerVehicle(-1,false))||xr::HudCalibrationActive());
     const bool watchNeeded=mapNeeded && (hud::GetElementSettings(hud::WATCH).enabled||xr::HudCalibrationActive());
     if (pdaNeeded && !g_pdaRaster[0]) closeEnginePreFinish();
@@ -21430,6 +21481,9 @@ void OnRenderScene(bool underwater) {
     const bool projectionReady=projectionNeeded&&PrepareMapRasterRing(g_watchProjectionRaster);
     if(projectionReady)for(int i=0;i<kEyeSets;++i)projectionTex[i]=EyeRasterTexId(g_watchProjectionRaster[i]);
     if (pdaReady) for (int i=0;i<kEyeSets;++i) pdaTex[i]=EyeRasterTexId(g_pdaRaster[i]);
+    // The widest projection footprint doubles as a bounded prefetch margin.
+    // Keep it warm while the watch is worn, before a projection is opened.
+    if(watchNeeded||pdaNeeded)WarmRadarTextures(watchNeeded?watchhud::kZoomMin:1.f,closeEnginePreFinish);
     const auto radialMenu = xr::GetRadialHolsterMenu();
     if (radialMenu.Visible() && !g_radialIconRaster[0]) closeEnginePreFinish();
     const bool radialReady = radialMenu.Visible() && PrepareRadialIconRasters();
@@ -22311,6 +22365,7 @@ void OnRenderScene(bool underwater) {
     if(g_releaseMapTexture)g_mapTextureLeases.Finish([](void* texture){g_releaseMapTexture(texture);});
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex, watchTex, projectionTex,
                              std::isfinite(pdaHeading) ? pdaHeading : 0.0f,
+                             outdoorMap,
                              renderedNear, renderedFar,
                              g_recordCounter, g_eyeRasterW, g_eyeRasterH);
     xr::NotifyGameFrame();                                    // for the on-screen FPS readout

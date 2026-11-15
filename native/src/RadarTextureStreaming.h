@@ -22,4 +22,21 @@ template<class Mark> bool MarkVisibleTexture(void* texture,Mark mark){
     if(StreamState(entry)!=1)return false;
     mark(entry);return true;
 }
+// Reorder the engine-owned visible queue, then let its normal one-texture
+// transaction remove/load the entry. Never call LoadFullTexture behind a queue.
+template<class GetDatabase,class Pump> unsigned LoadVisibleFirst(void* texture,GetDatabase database,Pump pump,unsigned* storedTexels){
+    auto* entry=TextureEntry(texture);if(StreamState(entry)!=2||!storedTexels)return 0;
+    unsigned index=0;auto* db=static_cast<char*>(database(entry,&index));if(!db)return 0;
+    unsigned count=0;unsigned* queue=nullptr;
+    std::memcpy(&count,db+0xbc,4);std::memcpy(&queue,db+0xc0,sizeof(queue));
+    if(!queue)return 0;
+    for(unsigned i=0;i<count;++i)if(queue[i]==index){
+        const auto first=queue[0];queue[0]=index;queue[i]=first;
+        const auto loaded=pump(db,0u,1u); // zero texel budget completes one entry
+        *storedTexels+=loaded; // same accounting as UpdateStreaming
+        return loaded;
+    }
+    return 0;
+}
+inline bool OutdoorMap(bool outside,unsigned playerArea){return outside&&playerArea==0;}
 }
