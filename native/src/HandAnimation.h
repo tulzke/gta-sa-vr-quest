@@ -24,6 +24,7 @@ inline float Unit(float value) {
 struct Selection {
     Gesture first{Gesture::Grip}, second{Gesture::Grip};
     float progress{}, blend{};
+    float openPalmBlend{};
 };
 inline Selection FreeHand(float grip, float trigger) {
     grip=Unit(grip);trigger=Unit(trigger);
@@ -53,6 +54,7 @@ inline bool PistolStyleSupport(int weaponType) {
 struct Context {
     bool climb{}, pinchGrab{}, steering{}, ball{}, support{}, holdsWeapon{};
     int weaponType{};
+    float horn{}; // time-based OpenPalm override for a free cockpit hand
 };
 inline Selection Select(float grip, float trigger, const Context& context) {
     const auto fixed=[](Gesture gesture,float progress=1.f) {
@@ -78,7 +80,10 @@ inline Selection Select(float grip, float trigger, const Context& context) {
         if (Firearm(context.weaponType)) return fixed(Gesture::GripPistolShoot,trigger);
         return fixed(Gesture::Grip);
     }
-    return FreeHand(grip,trigger);
+    if (context.horn>=1.f) return fixed(Gesture::OpenPalm);
+    auto free=FreeHand(grip,trigger);
+    free.openPalmBlend=Unit(context.horn);
+    return free;
 }
 
 } // namespace savr::handanimation

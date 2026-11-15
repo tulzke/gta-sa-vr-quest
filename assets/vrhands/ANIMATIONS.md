@@ -14,6 +14,7 @@ GLB, исходник и `BigHandsAlbedo.png` хранятся через Git LF
 | Свободная рука | Grip / Point / Fist, непрерывная поверхность grip/trigger |
 | Зажим предмета, радио, зажигание | Pinch |
 | Руль | Grip по аналоговому grip |
+| Сигнал автомобиля | Плавный переход в OpenPalm, независимо от grip/trigger |
 | Лазание | Grip, закрытая поза |
 | Мяч | OpenPalm |
 | Обычный пистолетный хват | GripPistolShoot по trigger |

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "VehicleHornVisual.h"
 
 namespace savr::xr {
 struct InputState;
@@ -98,6 +99,7 @@ struct WheelVisualState {
     // DEFAULT driving uses the seated game body; IMMERSIVE owns tracked hands.
     bool trackedHandsEnabled{true};
     bool grabbed[2]{};
+    vehiclehorn::Visual horn[2]{};
     bool markerVisible[2]{};
     bool rimGrip[2]{};
     float rimAngle[2]{}; // angle in the rotating wheel frame

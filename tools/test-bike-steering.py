@@ -232,6 +232,7 @@ def lifecycle():
 #include "Driving.h"
 #include "BikeSteering.h"
 #include "IgnitionState.h"
+#include "VehicleHorn.h"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -239,6 +240,7 @@ namespace savr::driving {
 struct V3 {float x{},y{},z{};};
 namespace xr {struct HandPose{};void GetHandPoses(HandPose*){}}
 std::atomic<bool> g_hornPressed{false};
+vehiclehorn::State g_hornState;double g_hornLastTime{};
 std::atomic<int> g_bicycleMode{BICYCLE_MOTION};
 WheelVisualState g_visual;
 void* g_grabVehicle{};

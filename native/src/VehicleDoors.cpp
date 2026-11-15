@@ -557,7 +557,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     driving::WheelVisualState cabin{};
     if (seated) {
         driving::GetWheelVisualState(&cabin);
-        for (int h=0;h<2;++h) if (cabin.grabbed[h] || cabin.ignitionGrabbed[h] || cabin.radioGrabbed[h] || cabin.liftGrabbed[h]) occupied|=1u<<h;
+        for (int h=0;h<2;++h) if (cabin.grabbed[h] || cabin.ignitionGrabbed[h] || cabin.radioGrabbed[h] || cabin.liftGrabbed[h] || cabin.horn[h].attached) occupied|=1u<<h;
     }
     for (int h=0;h<2;++h) if (physicalweapon::IsSupportHand(h)) occupied|=1u<<h;
     Vec world[2]{};bool valid[2]{};

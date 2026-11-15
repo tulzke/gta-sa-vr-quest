@@ -25,6 +25,7 @@
 #include "AnimatedTextures.h"
 #include "Cheats.h"
 #include "Driving.h"
+#include "VehicleHorn.h"
 #include "RadioHandAttachment.h"
 #include "VehicleTestArea.h"
 #include "VehicleClimbGeometry.h"
@@ -8985,7 +8986,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         const XrVector3f gFwd   = vnorm(QuatRotate(gq, {0, 0, -1}));
         const XrVector3f aimFwd = vnorm(QuatRotate(aq, {0, 0, -1}));
         const float sign = (1 - hand) == 0 ? 1.0f : -1.0f;
-        XrVector3f forward = (vdot(aimFwd, aimFwd) > 0.1f) ? aimFwd : gUp;
+        XrVector3f forward = (hp[hand].aimValid && vdot(aimFwd, aimFwd) > 0.1f) ? aimFwd : gUp;
         forward = vnorm(forward);
         XrVector3f up = vscale(gRight, sign);
         up = vsub(up, vscale(forward, vdot(up, forward)));
@@ -9000,6 +9001,24 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
         const bool liftHand=drivingWheel.liftGrabbed[hand];
+        const bool hornHand=drivingWheel.active&&drivingWheel.horn[hand].weight>0.f&&
+            !hp[hand].climbGrip&&!liftHand&&!steeringHand&&
+            !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
+            !(weaponHandMask&(1u<<hand))&&!ballLock.locked[hand]&&!TwoHandStateUsable(twoHand)&&
+            !(debugPinchHands&(1u<<hand));
+        const float hornWeight=hornHand?drivingWheel.horn[hand].weight:0.f;
+        if(hornHand) {
+            const vehiclehorn::Pose tracked{{pos.x,pos.y,pos.z},{right.x,right.y,right.z},
+                {up.x,up.y,up.z},{forward.x,forward.y,forward.z},true};
+            const auto pinned=vehiclehorn::AttachedPose(vehiclehorn::WheelFrame(drivingWheel),drivingWheel.horn[hand]);
+            if(pinned.valid){
+                const auto blended=vehiclehorn::BlendPose(tracked,pinned,hornWeight);
+                pos={blended.position.x,blended.position.y,blended.position.z};
+                right={blended.right.x,blended.right.y,blended.right.z};
+                up={blended.up.x,blended.up.y,blended.up.z};
+                forward={blended.forward.x,blended.forward.y,blended.forward.z};
+            }
+        }
         if(liftHand) {
             const auto toXr=[](vehicledoors::Vec v){return XrVector3f{v.x,v.y,v.z};};
             const auto vec=[](const float v[3]){return vehicledoors::Vec{v[0],v[1],v[2]};};
@@ -9221,7 +9240,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         const bool debugPinch=(debugPinchHands&(1u<<hand))!=0;
         if (debugPinch) grip=trig=0.f;
         const bool pinch = debugPinch || (!hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
-            !steeringHand && !liftHand &&
+            !steeringHand && !liftHand && !hornHand &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand));
         const float pinchAmount = debugPinch ? 1.f : (pinch ? pinchAmounts[hand] : 0.0f);
         const float pinchWeight = pinchAmount * (1.0f - grip);
@@ -9232,7 +9251,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand,
             (weaponHandMask & (1u<<hand))!=0,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand
-                ? twoHand.weaponType : weaponTypes[hand]});
+                ? twoHand.weaponType : weaponTypes[hand],hornWeight});
         auto& frame=g_skeletalHands[hand];
         g_handSkeleton.Evaluate(selected,pinchAmount,pinchWeight,frame.palette);
         const auto model=[](XrVector3f p,XrVector3f f,XrVector3f r,XrVector3f u) {

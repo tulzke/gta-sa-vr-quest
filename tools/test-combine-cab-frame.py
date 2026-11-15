@@ -1,5 +1,6 @@
 """Exercise production camera post-processing and late wheel reprojection on slopes."""
 from pathlib import Path
+import os
 import subprocess
 import sys
 
@@ -42,6 +43,7 @@ assert publish < origin < cam.index('if(g_vrBaseValid)driving::RefreshVisualTrac
 
 code = r'''
 #include "Driving.h"
+#include "VehicleHorn.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -172,6 +174,7 @@ int main(){
   g_visual={};g_visual.active=true;g_visual.modelId=532;
   g_visual.grabbed[0]=true;g_visual.markerVisible[1]=true;
   g_visual.physicalAngle=.25f;g_visual.steering=-.4f;
+  g_visual.horn[1]={true,true,1.f,{.02f,-.01f,.004f},{0,1,0}};
   for(int f=0;f<240;++f){
    ++frames;clockMs+=13.89;
    if(f%40==0){float a=.15f*f;g_origin={{.2f,1.6f,-.3f},{0,std::sin(a/2),0,std::cos(a/2)}};}
@@ -183,6 +186,11 @@ int main(){
    CHECK(Near(base.pos,World(eye+cal+V3{0,.12f,0})));
    g_vrBase=base;
    RefreshVisualTracking();
+   CHECK(g_visual.horn[1].attached&&g_visual.horn[1].pressed&&g_visual.horn[1].weight==1.f);
+   const auto hornFrame=savr::vehiclehorn::WheelFrame(g_visual);
+   const auto palm=savr::vehiclehorn::PalmPoint(savr::vehiclehorn::AttachedPose(hornFrame,g_visual.horn[1]));
+   const auto localPalm=hornFrame.Local(palm);
+   CHECK(std::abs(localPalm.x-.02f)<.0001f&&std::abs(localPalm.y+.01f)<.0001f&&std::abs(localPalm.z-.004f)<.0001f);
    // CAutomobile::PreRender applies chassis self-level rotation after camera update.
    nativeCabRoll=.95f*nativeCabRoll+.05f*std::asin(vr.z);
    OnComponentRotation(entity,chassis,1,nativeCabRoll,true);
@@ -235,7 +243,10 @@ int main(){
 }
 '''
 (O / 'test.cpp').write_text(code, encoding='utf8')
-vc = Path(r'C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvars64.bat')
+where = Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
+base = subprocess.check_output([str(where), '-latest', '-products', '*', '-requires',
+    'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()
+vc = Path(base) / 'VC/Auxiliary/Build/vcvars64.bat'
 cmd = O / 'run.cmd'
 cmd.write_text(f'@echo off\ncall "{vc}" >nul\ncl /nologo /std:c++20 /EHsc /W3 /I"{R / "native/src"}" "{O / "test.cpp"}" /Fe:"{O / "test.exe"}" /Fo:"{O / "test.obj"}"\nif errorlevel 1 exit /b 1\n"{O / "test.exe"}"\n', encoding='utf8')
 p = subprocess.run(['cmd', '/c', str(cmd)], cwd=O, capture_output=True, text=True, encoding='utf8', errors='replace')

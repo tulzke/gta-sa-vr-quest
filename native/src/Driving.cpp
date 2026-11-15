@@ -14,6 +14,7 @@
 #include "RadioKnobState.h"
 #include "CockpitSelection.h"
 #include "VehicleLiftLever.h"
+#include "VehicleHorn.h"
 
 #include "Locomotion.h"
 
@@ -141,11 +142,11 @@ std::atomic<int> g_yokeSensitivity{100}; // percent, 25..200
 // sockets to grab and calibrate — MOTION shows nothing on the bars at all,
 // which read as "the grips are missing". MOTION stays selectable in the menu.
 std::atomic<int> g_bicycleMode{BICYCLE_HANDLEBAR_TRIGGER};
-// Palm pressed onto the wheel HUB (centre) sounds the horn. Strictly the hub:
-// an open hand inside 45% of the wheel radius (9 cm cap) AND within 5 cm of
-// the wheel plane. Hands gripping the rim or holding a weapon never qualify,
-// so ordinary steering cannot honk by accident.
+// Cars use a sticky OpenPalm contact on the hub; other wheel vehicles retain
+// their existing proximity horn. Gameplay publication never uses render poses.
 std::atomic<bool> g_hornPressed{false};
+vehiclehorn::State g_hornState{};
+double g_hornLastTime{};
 // Camera view per vehicle type. The Rhino tank ignores the setting and always
 // uses the chase view — its hull has no usable cockpit line of sight.
 std::atomic<int> g_carView{VIEW_FIRST_PERSON};
@@ -1017,6 +1018,7 @@ void EnsureInit() { std::call_once(g_initOnce, Load); }
 
 void ClearGrabStateLocked() {
     g_hornPressed.store(false,std::memory_order_release);
+    g_hornState.Reset();g_hornLastTime=0;
     g_rimOwnershipMask=0;
     for (int hand=0; hand<2; ++hand) {
         g_grabbed[hand]=false; g_gripDown[hand]=false;
@@ -4950,6 +4952,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     const unsigned int weaponHands = physicalweapon::HeldHandMaskRelaxed() | vehicledoors::ClaimedHands();
     unsigned ignitionOccupied=weaponHands;
     for (int h=0;h<2;++h) if (g_grabbed[h]) ignitionOccupied|=1u<<h;
+    ignitionOccupied|=g_hornState.Claimed();
     const bool circular=!visual.bike&&!visual.yoke;
     const float previousWheelAngle=(g_visual.active&&g_visual.bike==visual.bike)?g_visual.physicalAngle:0.0f;
     visual.physicalAngle=previousWheelAngle;
@@ -4977,7 +4980,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
                          visual.handlePosition[hand][1],
                          visual.handlePosition[hand][2]};
         const float distance=poseValid[hand]?Length(positions[hand]-neutral):1000.0f;
-        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand] || visual.liftGrabbed[hand];
+        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand] || visual.liftGrabbed[hand] || g_hornState.hands[hand].visual.attached;
         if (g_grabbed[hand]&&(!poseValid[hand]||input.grip[hand]<=0.30f||
                               holdsWeapon)) {
             g_grabbed[hand]=false; g_angleValid[hand]=false;
@@ -4994,7 +4997,22 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     }
     {
         bool hornPressed=false;
-        if (!visual.bike) {
+        if (activeType==VEHICLE_CAR) {
+            const double now=MonotonicSeconds();
+            const float dt=g_hornLastTime>0?static_cast<float>(now-g_hornLastTime):0.f;
+            g_hornLastTime=now;
+            const auto frame=vehiclehorn::WheelFrame(visual);
+            for (int hand=0;hand<2;++hand) {
+                const bool available=!(weaponHands&(1u<<hand))&&!g_grabbed[hand]&&
+                    !visual.ignitionGrabbed[hand]&&!visual.radioGrabbed[hand]&&!visual.liftGrabbed[hand];
+                auto& contact=g_hornState.hands[hand];
+                contact.Step(frame,poses[hand],hand,available,input.grip[hand],dt);
+                visual.horn[hand]=contact.visual;
+                if (contact.visual.attached) visual.interactionTarget[hand]=0;
+                if (contact.justPressed) xr::TriggerHaptic(hand,.25f,0.f,25.f);
+            }
+            hornPressed=g_hornState.Pressed();
+        } else if (!visual.bike) {
             const V3 hornNormal{visual.normal[0],visual.normal[1],
                                 visual.normal[2]};
             const float hubRadius=std::min(0.45f*visual.radius,0.09f);

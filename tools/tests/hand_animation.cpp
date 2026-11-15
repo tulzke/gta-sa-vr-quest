@@ -62,5 +62,14 @@ int main() {
     assert(Select(1,1,context).first==Gesture::Pinch);
     context.climb=true;
     assert(Select(1,1,context).first==Gesture::Grip);
+    context={};context.horn=1.f;
+    assert(Select(1,1,context).first==Gesture::OpenPalm);
+    context.horn=.4f;
+    assert(Near(Select(1,1,context).openPalmBlend,.4f));
+    context.holdsWeapon=true;context.weaponType=22;
+    assert(Select(1,1,context).first==Gesture::GripPistolShoot);
+    assert(Select(1,1,context).openPalmBlend==0);
+    context.climb=true;
+    assert(Select(1,1,context).first==Gesture::Grip);
     std::puts("PASS gesture selection: analog grip/trigger and interaction priorities");
 }
