@@ -4440,7 +4440,9 @@ bool CabinVisualContext() {
     return true;
 }
 
-void UpdateInput(const xr::InputState& input,bool gameplay,bool blocked) {
+void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
+    auto input=rawInput;
+    for(int hand=0;hand<2;++hand)if(xr::WatchConsumesTrigger(hand))input.triggers[hand]=0;
     static wheelreturn::Clock returnClock;
     const float wheelReturnDt=g.CTimer_m_snTimeInMilliseconds?
         returnClock.Step(*g.CTimer_m_snTimeInMilliseconds):0.0f;

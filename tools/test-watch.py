@@ -11,6 +11,7 @@ with tempfile.TemporaryDirectory(prefix='savr-watch-') as tmp:
     out=Path(tmp)
     source=out/'watch.cpp'
     header='#define WATCH_FILE "'+(ROOT/'assets/watches/watches.glb').as_posix()+'"\n'
+    header+='#define HAND_FILE "'+(ROOT/'assets/vrhands/skeletal/hands.glb').as_posix()+'"\n'
     source.write_text(header+(ROOT/'tools/tests/watch_runtime.cpp').read_text(),encoding='utf-8')
     helpers['compile_run'](source,'watch',out)
     settings=(ROOT/'native/src/HudSettings.cpp').read_text(encoding='utf-8')

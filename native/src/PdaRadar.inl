@@ -1,6 +1,6 @@
 // Game-thread PDA overlay. Reads radar data without changing frontend/HUD state.
 // Retail ARM64 trace layout: 250 entries, 48 bytes each; see task 33 ABI notes.
-void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float heading, bool watch) {
+void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float heading, bool watch, bool projection) {
     struct Rect { float left,bottom,right,top; };
     using Quad = void (*)(void*,float,float,float,float,float,float,float,float,const void*);
     using PoolLookup = void* (*)(int);
@@ -22,7 +22,8 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
     if (!quad || !sprites || !traces || !rect || !g.CSprite2d_Draw ||
         reinterpret_cast<std::uintptr_t>(traces)!=g.LoadBase+0xa66740u ||
         reinterpret_cast<std::uintptr_t>(quad)!=g.LoadBase+0x5f7ef4u) return;
-    constexpr float pixelsPerMetre=400.0f/300.0f;
+    const float pixelsPerMetre=400.0f/300.0f*(projection?watchhud::kProjectionZoom:1.f);
+    const float iconScale=watch?watchhud::kIconScale:1.f;
     const float c=std::cos(heading), s=std::sin(heading);
     const bool missionActive=onMission && onMission();
     const bool zoomActive=radarZoom && *radarZoom!=0;
@@ -34,7 +35,9 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
         const float sx=dx*pixelsPerMetre, sy=-dy*pixelsPerMetre;
         float vx=c*sx-s*sy, vy=s*sx+c*sy;
         float opacity=1.0f;
-        if(watch) {
+        if(projection) {
+            opacity=watchhud::ProjectedBlip(vx,vy,pin);
+        } else if(watch) {
             if(pin)watchhud::Pin(vx,vy);
             else opacity=watchhud::LocalOpacity(vx,vy);
         } else if (pin) {
@@ -51,6 +54,7 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
     };
     auto icon=[&](int id,float x,float y,float angle,float radius,float opacity=1.0f) {
         if (id<0 || id>=64 || !*reinterpret_cast<void**>(sprites+id*8)) return;
+        radius*=iconScale;
         const float ca=std::cos(angle), sa=std::sin(angle);
         auto corner=[&](float a,float b) { return std::pair<float,float>{x+ca*a+sa*b,y-sa*a+ca*b}; };
         const auto tl=corner(-radius,-radius), tr=corner(radius,-radius),
@@ -94,7 +98,8 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
             unsigned char rgba[4];
             rgba[0]=color>>24;rgba[1]=color>>16;rgba[2]=color>>8;rgba[3]=255;
             const unsigned char black[4]={0,0,0,255};
-            const Rect border{x-16,y+16,x+16,y-16}, core{x-10,y+10,x+10,y-10};
+            const float outer=16*iconScale,inner=10*iconScale;
+            const Rect border{x-outer,y+outer,x+outer,y-outer}, core{x-inner,y+inner,x+inner,y-inner};
             rect(&border,black); rect(&core,rgba);
         }
     }

@@ -10,6 +10,7 @@
 #include "HandSkeleton.h"
 #include "WatchModel.h"
 #include "WatchLayout.h"
+#include "WatchInteraction.h"
 #include "WatchShaders.h"
 #include "ReloadHintHand.h"
 #include "VehicleDoors.h"
@@ -285,6 +286,7 @@ std::atomic<unsigned int> g_eyeFoveationAttemptedTex[kStereoSets][2] = {};
 std::atomic<unsigned int> g_stereoHudTex[kStereoSets] = {};
 std::atomic<unsigned int> g_stereoPdaTex[kStereoSets] = {};
 std::atomic<unsigned int> g_stereoWatchTex[kStereoSets] = {};
+std::atomic<unsigned int> g_stereoWatchProjectionTex[kStereoSets] = {};
 watchhud::Readout g_stereoWatchReadout[kStereoSets]{};
 std::atomic<float> g_stereoPdaHeading[kStereoSets] = {};
 std::atomic<float>        g_stereoEyeNear[kStereoSets][2] = {};
@@ -5616,6 +5618,7 @@ void ResetStereoEyeTextures() {
         g_stereoHudTex[set].store(0, std::memory_order_relaxed);
         g_stereoPdaTex[set].store(0, std::memory_order_relaxed);
         g_stereoWatchTex[set].store(0, std::memory_order_relaxed);
+        g_stereoWatchProjectionTex[set].store(0, std::memory_order_relaxed);
         g_stereoUnderWaterness[set].store(0.0f, std::memory_order_relaxed);
         g_stereoWaterDepth[set].store(0.0f, std::memory_order_relaxed);
         clearMobileColor[set] = true;
@@ -6241,6 +6244,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           const unsigned int* hudTex,
                           const unsigned int* pdaTex,
                           const unsigned int* watchTex,
+                          const unsigned int* projectionTex,
                           float pdaHeading,
                           const float* nearZ, const float* farZ,
                           int seq, int width, int height) {
@@ -6276,6 +6280,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                               std::memory_order_relaxed);
     g_stereoPdaTex[ws].store(pdaTex ? pdaTex[ws] : 0, std::memory_order_relaxed);
     g_stereoWatchTex[ws].store(watchTex ? watchTex[ws] : 0, std::memory_order_relaxed);
+    g_stereoWatchProjectionTex[ws].store(projectionTex ? projectionTex[ws] : 0, std::memory_order_relaxed);
     g_stereoPdaHeading[ws].store(pdaHeading, std::memory_order_relaxed);
     g_stereoEyeNear[ws][0].store(nearZ ? nearZ[0] : 0.05f, std::memory_order_relaxed);
     g_stereoEyeNear[ws][1].store(nearZ ? nearZ[1] : 0.05f, std::memory_order_relaxed);
@@ -9912,7 +9917,7 @@ constexpr float kDashPanelUpMetres = 0.12f;
 void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            const TwoHandVisualState& twoHand,
                            const driving::WheelVisualState& drivingWheel,
-                           unsigned int hudTex, unsigned int pdaTex, unsigned int watchTex, float pdaHeading, const XrPosef& rp,
+                           unsigned int hudTex, unsigned int pdaTex, unsigned int watchTex, unsigned int projectionTex, float pdaHeading, const XrPosef& rp,
                            unsigned int weaponHandMask,const watchhud::Readout& watchData) {
     const bool calibrating = g_hudActive.load(std::memory_order_relaxed);
     if (!hudTex || (!hud::ShouldRenderWristHud() && !calibrating)) return;
@@ -9975,7 +9980,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            kDashGazeRange, pdaTex, pdaHeading);
         }
     }
-    DrawWatchForEye(mvp,rp,watchTex,pdaHeading,weaponHandMask,twoHand,calibrating,watchData);
+    DrawWatchForEye(mvp,rp,watchTex,projectionTex,pdaHeading,calibrating,watchData);
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glDepthMask(GL_TRUE);
@@ -12120,7 +12125,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const vehicledoors::MarkerFrame& bakedNpcGrabs,
                      const vehicledoors::MarkerFrame& bakedTestArea,
                      const radialholster::Frames& bakedRadials,
-                     unsigned int hudSourceTex, unsigned int pdaSourceTex, unsigned int watchSourceTex, float pdaHeading,
+                     unsigned int hudSourceTex, unsigned int pdaSourceTex, unsigned int watchSourceTex, unsigned int projectionSourceTex, float pdaHeading,
                      const int handTypes[2], const holstermarker::Frame& ammoHolsters,
                      const WeaponAmmoPose ammoPoses[2],
                      const reloadhint::VisualFrame& reloadHints,const watchhud::Readout& watchData) {
@@ -12339,7 +12344,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // depth pass (arm/weapon occlude the panel).
     if (wristWanted)
         DrawWristPanelsForEye(mvp, bakedHands, bakedTwoHand, drivingWheel,
-                              hudSourceTex, pdaSourceTex, watchSourceTex, pdaHeading, rp, weaponHandMask,watchData);
+                              hudSourceTex, pdaSourceTex, watchSourceTex, projectionSourceTex, pdaHeading, rp, weaponHandMask,watchData);
 
     if (showReloadHints) {
         float hintProjection[16],hintMvp[16];
@@ -12554,10 +12559,12 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     int bakedHandWeaponTypes[2]{};
     unsigned bakedDebugPinchHands{};
     bool haveRenderPose = false;
+    bool watchTrackingValid=false;std::uint64_t watchEpoch=0;
     {
         std::lock_guard<std::mutex> lock(g_headPoseMutex);
         haveRenderPose = g_stereoRenderPoseValid[set];
         bakedWatch=g_stereoWatchReadout[set];
+        watchTrackingValid=g_headPoseValid;watchEpoch=g_trackingRecovery.epoch;
         rp             = g_stereoRenderPose[set];
         bakedHands[0]  = g_stereoHandPose[set][0];   // pose the weapon was baked with
         bakedHands[1]  = g_stereoHandPose[set][1];
@@ -12609,6 +12616,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
                         ballHandLock, bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes, bakedDebugPinchHands); // same ring pose + cockpit/support correction
         BuildWeaponMesh(bakedHands);   // (weapon-mesh path; dead until Approach-B geometry exists)
     }
+    UpdateWatchFrame(bakedHands,bakedTwoHand,drivingWheel,ballHandLock,bakedWeaponHandMask,
+                     bakedPinchAmounts,watchTrackingValid,watchEpoch,bakedScope.active);
     BulletTracer liveTracers[kMaxBulletTracers]{};
     const int liveTracerCount = SnapshotBulletTracers(liveTracers);
     ObjectiveMarkerVisual liveObjectiveMarkers[kMaxObjectiveMarkers]{};
@@ -12747,7 +12756,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoWatchTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set], bakedReloadHints,bakedWatch);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoWatchTex[set].load(std::memory_order_relaxed), g_stereoWatchProjectionTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set], bakedReloadHints,bakedWatch);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

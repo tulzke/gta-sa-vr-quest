@@ -98,6 +98,11 @@ bool Parse(Library& out,cgltf_data* d) {
         const int node=static_cast<int>(skin.joints[i]-d->nodes);
         if(std::find(out.joints.begin(),out.joints.end(),node)!=out.joints.end())return fail("Duplicate joint");
         out.joints.push_back(node);Mat m{};
+        if(skin.joints[i]->name&&!std::strcmp(skin.joints[i]->name,"Index_Tip_Right")) {
+            out.indexTipJoint=static_cast<int>(i);
+            Mat world{};cgltf_node_transform_world(skin.joints[i],world.data());
+            out.indexTipBind={world[12],world[13],world[14]};
+        }
         if(!Read(skin.inverse_bind_matrices,i,m.data(),16) || std::abs(m[3])+std::abs(m[7])+std::abs(m[11])+std::abs(m[15]-1)>.001f)
             return fail("Invalid inverse bind matrix");
         out.inverseBind.push_back(m);
@@ -270,6 +275,12 @@ void Library::Evaluate(const handanimation::Selection& selection,float pinchProg
     Blend(a,b,selection.blend,pose);
     if(pinchWeight>0) {Sample(handanimation::Gesture::Pinch,pinchProgress,a);Blend(pose,a,pinchWeight,pose);}
     Matrices(pose,out);
+}
+bool Library::IndexTip(const Palette& palette,Vec& out) const {
+    if(indexTipJoint<0||indexTipJoint>=static_cast<int>(joints.size()))return false;
+    const auto& m=palette[indexTipJoint];const auto& p=indexTipBind;
+    for(int i=0;i<3;++i)out[i]=m[i]*p[0]+m[4+i]*p[1]+m[8+i]*p[2]+m[12+i];
+    return true;
 }
 std::size_t Library::ResidentBytes() const {
     std::size_t bytes=sizeof(*this)+vertices.capacity()*sizeof(Vertex)+indices.capacity()*sizeof(std::uint16_t)+

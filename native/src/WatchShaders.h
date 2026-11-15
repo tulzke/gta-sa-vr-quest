@@ -16,7 +16,7 @@ inline constexpr const char* kFragmentShader=R"GLSL(#version 300 es
 precision highp float;precision highp int;
 in vec2 vUV;in vec3 vNormal;
 uniform sampler2D uColor,uMetal,uMap;
-uniform bool uDisplay,uHasColor,uHasMetal,uHasMap,uMirrorFace;
+uniform bool uDisplay,uHasColor,uHasMetal,uHasMap,uMirrorFace,uProjection;
 uniform vec4 uColorFactor,uWatch;
 uniform vec2 uMaterial;
 uniform float uOpacity,uHeading;
@@ -46,7 +46,16 @@ void main(){
         o=vec4(pow(max(col,vec3(0)),vec3(1.0/2.2)),uOpacity);return;
     }
     vec2 faceUV=vec2(uMirrorFace?1.0-vUV.x:vUV.x,vUV.y);
+    // The authored display UV axes point opposite to the wrist's reading
+    // direction. Turn the interface, preserving the fitted physical model.
+    faceUV=1.0-faceUV;
     vec2 p=faceUV-.5;float r=length(p);
+    if(uProjection){
+        if(r>.5||!uHasMap)discard;
+        float c=cos(uHeading),s=sin(uHeading);vec2 q=p*MAP_SCALE;
+        o=vec4(texture(uMap,vec2(.5)+vec2(c*q.x+s*q.y,-s*q.x+c*q.y)).rgb,uOpacity);
+        return;
+    }
     vec3 col=vec3(.024,.033,.03);
     // The same limits are supplied by WatchLayout.h to avoid a hidden band
     // containing a mission target beyond either straight map edge.
@@ -62,8 +71,8 @@ void main(){
         if(value>=0.0&&angle<=clamp(value,0.0,1.0)*3.14159265)
             col=p.x<0.0?vec3(.88,.12,.19):vec3(.65,.68,.66);
     }
-    vec2 h=(p-vec2(-.095,-.45))/.020;
-    vec2 a=(p-vec2(.095,-.45))/.020;
+    vec2 h=(p-vec2(-.155,-.415))/.040;
+    vec2 a=(p-vec2(.155,-.415))/.040;
     if(abs(h.x)<1.0&&abs(h.y)<1.0)col=mix(vec3(.88,.12,.19),vec3(.035),heart(h));
     if(abs(a.x)<1.0&&abs(a.y)<1.0)col=mix(vec3(.65,.68,.66),vec3(.035),shield(a));
     vec2 t=vec2((faceUV.x-.33)*(5.0/.34),(faceUV.y-.12)/.085);
@@ -72,10 +81,12 @@ void main(){
         if(ti==0)g=hour/10;if(ti==1)g=hour%10;if(ti==2)g=11;if(ti==3)g=minute/10;if(ti==4)g=minute%10;}
     if(t.x>=0.0&&ti<5)col=mix(col,vec3(.94),glyph(vec2(fract(t.x),t.y),g));
     if(uWanted>0)for(int i=0;i<6;++i){
-        vec2 q=p-vec2(-.205+.082*float(i),.225);
-        float theta=atan(q.x,-q.y);
-        float wave=abs(fract((theta+3.14159265)/6.2831853*5.0)*2.0-1.0);
-        float bound=mix(.012,.027,wave);
+        vec2 q=p-vec2(-.275+.110*float(i),.240);
+        // Intersect the radial ray with an outer-to-inner straight edge of
+        // a five-point star (linear radius interpolation curves the edges).
+        float theta=abs(mod(atan(q.x,-q.y)+.62831853,1.25663706)-.62831853);
+        float bound=(.054*.024*.58778525)/
+            (.024*.58778525*cos(theta)+(.054-.024*.80901699)*sin(theta));
         float star=1.0-smoothstep(bound-.001,bound+.001,length(q));
         col=mix(col,i<uWanted?vec3(1,.8,.25):vec3(.18),star);
     }

@@ -1,6 +1,7 @@
 #include "VehicleEntry.h"
 #include "PdaBlipVisibility.h"
 #include "WatchLayout.h"
+#include "WatchInteraction.h"
 #include "PlayerLife.h"
 #include "MissionHud.h"
 #include "Tbone.h"
@@ -18236,6 +18237,7 @@ void* g_retiredEyeRaster[kEyeSets][2] = {};
 void* g_hudRaster[kEyeSets] = {};
 void* g_pdaRaster[kEyeSets] = {};
 void* g_watchRaster[kEyeSets] = {};
+void* g_watchProjectionRaster[kEyeSets] = {};
 void* g_radialIconRaster[kEyeSets] = {};
 void* g_radialWeaponIcons[64] = {};
 int   g_recordCounter = 0;                    // monotonic; set = counter % kEyeSets
@@ -20529,7 +20531,7 @@ bool PrepareMapRasterRing(void* (&rasters)[kEyeSets]) {
 
 // CRadar's menu-map path draws the same texture database tiles as the HUD.
 // Coordinates follow the retail CRect HFA ABI: left, bottom, right, top.
-void RenderPdaMap(float heading,bool watch=false) {
+void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
     struct Rect { float left, bottom, right, top; };
     using DrawTile = void (*)(int,int,Rect,float);
     if (!g.LoadBase || !g.FindPlayerPed || !g.FindPlayerPed(-1) || !g.FindPlayerCoors) return;
@@ -20540,7 +20542,7 @@ void RenderPdaMap(float heading,bool watch=false) {
     const auto player = g.FindPlayerCoors(-1);
     if (!std::isfinite(player.x) || !std::isfinite(player.y)) return;
     // Height covers 300 world units, width 480: equal metres per pixel.
-    constexpr float scale = 400.0f / 300.0f;
+    const float scale = 400.0f / 300.0f * (projection?watchhud::kProjectionZoom:1.f);
     if (g.RwRenderStateSet) {
         g.RwRenderStateSet(6,reinterpret_cast<void*>(0));
         g.RwRenderStateSet(8,reinterpret_cast<void*>(0));
@@ -20559,7 +20561,7 @@ void RenderPdaMap(float heading,bool watch=false) {
         draw(x,y,{left-overlap,top+size+overlap,left+size+overlap,top-overlap},1.0f);
     }
 
-    DrawPdaRadarOverlay(handle,player,heading,watch);
+    DrawPdaRadarOverlay(handle,player,heading,watch,projection);
 }
 
 bool PrepareRadialIconRasters() {
@@ -21346,7 +21348,7 @@ void OnRenderScene(bool underwater) {
     unsigned int depth[kEyeSets][2];
     unsigned int hudTex[kEyeSets]{};
     unsigned int pdaTex[kEyeSets]{};
-    unsigned int watchTex[kEyeSets]{};
+    unsigned int watchTex[kEyeSets]{},projectionTex[kEyeSets]{};
     for (int s = 0; s < kEyeSets; ++s)
         for (int e = 0; e < 2; ++e) {
             tex[s][e] = EyeRasterTexId(g_eyeRaster[s][e]);
@@ -21388,6 +21390,10 @@ void OnRenderScene(bool underwater) {
     if(watchNeeded&&!g_watchRaster[0])closeEnginePreFinish();
     const bool watchReady=watchNeeded&&PrepareMapRasterRing(g_watchRaster);
     if(watchReady)for(int i=0;i<kEyeSets;++i)watchTex[i]=EyeRasterTexId(g_watchRaster[i]);
+    const bool projectionNeeded=watchNeeded&&xr::WatchProjectionNeeded();
+    if(projectionNeeded&&!g_watchProjectionRaster[0])closeEnginePreFinish();
+    const bool projectionReady=projectionNeeded&&PrepareMapRasterRing(g_watchProjectionRaster);
+    if(projectionReady)for(int i=0;i<kEyeSets;++i)projectionTex[i]=EyeRasterTexId(g_watchProjectionRaster[i]);
     if (pdaReady) for (int i=0;i<kEyeSets;++i) pdaTex[i]=EyeRasterTexId(g_pdaRaster[i]);
     const auto radialMenu = xr::GetRadialHolsterMenu();
     if (radialMenu.Visible() && !g_radialIconRaster[0]) closeEnginePreFinish();
@@ -22202,16 +22208,16 @@ void OnRenderScene(bool underwater) {
                 LOGI("[hud] stock HUD recorded for in-eye alpha composite");
             }
         }
-        for(int map=0;map<2;++map) if(map==0?pdaReady:watchReady) {
+        for(int map=0;map<3;++map) if(map==0?pdaReady:map==1?watchReady:projectionReady) {
             screenDimensions.Set(800,800);
-            *reinterpret_cast<void**>(scc+0x80)=map==0?g_pdaRaster[set]:g_watchRaster[set];
+            *reinterpret_cast<void**>(scc+0x80)=map==0?g_pdaRaster[set]:map==1?g_watchRaster[set]:g_watchProjectionRaster[set];
             WriteCam(camU,base);
             if (g.CCamera_CalculateDerivedValues) g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
             g_origCopy(g.TheCamera,false);
             unsigned char background[4]={12,26,38,255};
             if (g.RwCameraClear) g.RwCameraClear(sc,background,1|2|4);
             g.RwCameraBeginUpdate(sc);
-            RenderPdaMap(std::atan2(-base.forward.x,base.forward.y),map==1);
+            RenderPdaMap(std::atan2(-base.forward.x,base.forward.y),map==1,map==2);
             g.RwCameraEndUpdate(sc);
         }
         if (radialReady) {
@@ -22267,7 +22273,7 @@ void OnRenderScene(bool underwater) {
     // `base` is the actual head-tracked game camera used for this stereo pair.
     // Its horizontal forward vector includes both body and physical head yaw.
     const float pdaHeading = std::atan2(-base.forward.x, base.forward.y);
-    xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex, watchTex,
+    xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex, watchTex, projectionTex,
                              std::isfinite(pdaHeading) ? pdaHeading : 0.0f,
                              renderedNear, renderedFar,
                              g_recordCounter, g_eyeRasterW, g_eyeRasterH);

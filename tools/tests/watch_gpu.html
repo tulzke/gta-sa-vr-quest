@@ -9,7 +9,9 @@ try {
  const program=gl.createProgram();gl.attachShader(program,shader(gl.VERTEX_SHADER,vertexSource));gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fragmentSource));gl.linkProgram(program);
  if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));gl.useProgram(program);
  const location=n=>gl.getUniformLocation(program,n),identity=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
- const vertices=[];for(let i=0;i<uvs.length/2;i++)vertices.push(uvs[i*2]*2-1,0,uvs[i*2+1]*2-1,0,1,0,uvs[i*2],uvs[i*2+1]);
+ // Inspect the dial from the authored wrist reading direction: UV0 itself
+ // is upside down here. This catches a missing interface-only half-turn.
+ const vertices=[];for(let i=0;i<uvs.length/2;i++)vertices.push(1-uvs[i*2]*2,0,1-uvs[i*2+1]*2,0,1,0,uvs[i*2],uvs[i*2+1]);
  const vao=gl.createVertexArray();gl.bindVertexArray(vao);const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW);
  for(let i=0;i<3;i++)gl.enableVertexAttribArray(i);gl.vertexAttribPointer(0,3,gl.FLOAT,false,32,0);gl.vertexAttribPointer(1,3,gl.FLOAT,false,32,12);gl.vertexAttribPointer(2,2,gl.FLOAT,false,32,24);
  const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
@@ -29,7 +31,7 @@ try {
   const s=states[i];gl.viewport((i%3)*350+5,380-Math.floor(i/3)*360,340,340);
   gl.uniform4f(location('uWatch'),14,28,s[0],s[1]);gl.uniform1i(location('uMoney'),s[3]);gl.uniform1i(location('uWanted'),s[2]);gl.uniform1f(location('uHeading'),s[4]);gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);
   if(i===0){
-   const health=pixel(.04,.5),armor=pixel(.96,.5),map=pixel(.48,.4),above=pixel(.48,.215),below=pixel(.48,.70);
+   const health=pixel(.04,.5),armor=pixel(.96,.5),map=pixel(.48,.4),above=pixel(.48,.215),below=pixel(.5,.69);
    if(!(health[0]>health[1]*2))throw Error('Health arc missing '+health);
    if(!(armor[0]>100&&Math.abs(armor[0]-armor[1])<20))throw Error('Grey armour arc missing '+armor);
    if(!(map[1]>map[0]))throw Error('Map missing '+map);
@@ -50,8 +52,20 @@ try {
  // The authored dial polygon is not perfectly symmetric at its edge.
  if(differences>standard.length*.015)throw Error('Reflected hand mirrored the face: '+differences);
  drawPair(false);
+ // The projection has only a circular map, including the old top/bottom
+ // readout bands, with exact 50% opacity. It blends against the world.
+ gl.viewport(705,20,340,340);gl.uniform1i(location('uProjection'),1);gl.uniform1f(location('uOpacity'),.5);
+ gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);
+ const projected=new Uint8Array(4);gl.readPixels(875,292,1,1,gl.RGBA,gl.UNSIGNED_BYTE,projected);
+ if(!(projected[1]>projected[0]&&Math.abs(projected[3]-128)<=1))throw Error('Projection map/alpha '+projected);
+ const background=[.125,.157,.196];
+ gl.enable(gl.SCISSOR_TEST);gl.scissor(705,20,340,340);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.SCISSOR_TEST);
+ gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+ gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);gl.disable(gl.BLEND);
+ const blended=new Uint8Array(4);gl.readPixels(875,292,1,1,gl.RGBA,gl.UNSIGNED_BYTE,blended);
+ for(let i=0;i<3;i++)if(Math.abs(blended[i]-(projected[i]*.5+background[i]*255*.5))>2)throw Error('Projection blend '+blended);
  if(gl.getError()!==gl.NO_ERROR)throw Error('GL error');
- result.textContent='PASS GPU: actual GLB dial; six HUD states; clipped map; red health / grey armour; reflected-hand readability';
+ result.textContent='PASS GPU: actual GLB dial; six HUD states; clipped map; red health / grey armour; reflected-hand readability; circular projection at 50% opacity';
  document.title='PASS WATCH';
 } catch(error){result.textContent='FAIL '+error.stack;document.title='FAIL WATCH';}
 </script>

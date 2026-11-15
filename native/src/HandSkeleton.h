@@ -34,6 +34,8 @@ struct Library {
     std::vector<Node> nodes;
     std::vector<int> order, joints;
     std::vector<Mat> inverseBind;
+    int indexTipJoint=-1;
+    Vec indexTipBind{};
     std::vector<unsigned char> albedoPng; // released after the one-time GPU upload
     std::array<Clip,handanimation::kNames.size()> clips;
     std::string error;
@@ -43,6 +45,7 @@ struct Library {
     void Blend(const Pose& a,const Pose& b,float weight,Pose& out) const;
     void Matrices(const Pose& pose,Palette& out) const;
     void Evaluate(const handanimation::Selection& selection,float pinchProgress,float pinchWeight,Palette& out) const;
+    bool IndexTip(const Palette& palette,Vec& out) const;
     std::size_t ResidentBytes() const;
 };
 } // namespace savr::handskeleton

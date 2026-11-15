@@ -2141,8 +2141,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         // On foot, whichever physical hand owns the selected gun drives the game's
         // single fire axis. An empty/dropped hand publishes zero. Vehicle controls
         // retain their original left/right trigger mapping.
-        const float gameLT = driving && !savr::catalyst::Active() ? in.triggers[0] : 0.0f;
-        const float gameRT = savr::catalyst::Active() ? 0.0f : driving ? in.triggers[1]
+        const float gameLT = driving && !savr::catalyst::Active() && !xr::WatchConsumesTrigger(0) ? in.triggers[0] : 0.0f;
+        const float gameRT = savr::catalyst::Active() ? 0.0f : driving ? (xr::WatchConsumesTrigger(1)?0.f:in.triggers[1])
                                      : savr::physicalweapon::FireTrigger();
         float gameMoveX=0.0f, gameMoveY=0.0f;
         float gameTurnX=0.0f, gameTurnY=0.0f;
