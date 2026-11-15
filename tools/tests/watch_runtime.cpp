@@ -6,6 +6,7 @@
 #include "WatchInteraction.h"
 #include "RadarMapLayout.h"
 #include "RadarTextureLeases.h"
+#include "RadarTextureStreaming.h"
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -173,6 +174,27 @@ int main(){
         leases.Keep(-1,&far,retain,release);leases.Keep(144,&far,retain,release);
         leases.Keep(1,nullptr,retain,release);CHECK(far.retains==1);
     }
+    {
+        std::array<unsigned char,8> texture{};
+        std::array<unsigned char,64> raster{};
+        std::array<unsigned char,31> entry{}; // retail packed TextureDatabaseEntry
+        void* rasterPointer=raster.data();void* entryPointer=entry.data();
+        std::memcpy(texture.data(),&rasterPointer,sizeof(rasterPointer));
+        std::memcpy(raster.data()+0x38,&entryPointer,sizeof(entryPointer));
+        std::uint16_t flags=0x1123;std::memcpy(entry.data()+0xc,&flags,2);
+        int calls=0;
+        const auto promote=[&](void* raw){CHECK(raw==entry.data());++calls;
+            flags=0x2123;std::memcpy(entry.data()+0xc,&flags,2);};
+        CHECK(radarmap::MarkVisibleTexture(texture.data(),promote)&&calls==1);
+        CHECK(radarmap::StreamState(entry.data())==2);
+        CHECK(!radarmap::MarkVisibleTexture(texture.data(),promote)&&calls==1);
+        flags=0x3123;std::memcpy(entry.data()+0xc,&flags,2);
+        CHECK(!radarmap::MarkVisibleTexture(texture.data(),promote));
+        CHECK(!radarmap::MarkVisibleTexture(nullptr,promote));
+        texture.fill(0);CHECK(!radarmap::MarkVisibleTexture(texture.data(),promote));
+        CHECK(calls==1); // no duplicate queue inserts and no reload of full textures
+    }
+    std::puts("PASS visible-texture promotion from thumbnail queue; packed retail entry; full/pending/null cases");
     std::puts("PASS retained far-tile streaming across 100 stock unload/reacquire cycles; shared map passes and balanced releases");
     std::puts("PASS complete wide-zoom tile coverage, all world edges/corners and retail sea background");
     std::puts("PASS watch GLB, hand-relative fit, current-max vitals, clipped-edge mission markers");

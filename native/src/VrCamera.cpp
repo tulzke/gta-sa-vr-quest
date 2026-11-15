@@ -4,6 +4,7 @@
 #include "WatchInteraction.h"
 #include "RadarMapLayout.h"
 #include "RadarTextureLeases.h"
+#include "RadarTextureStreaming.h"
 #include "PlayerLife.h"
 #include "MissionHud.h"
 #include "Tbone.h"
@@ -20540,17 +20541,20 @@ ReleaseMapTextureFn g_releaseMapTexture=nullptr;
 void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
     using DrawTile = void (*)(int,int,radarmap::Rect,float);
     using RequestTile = void (*)(int,int);
+    using MarkTexture = void (*)(void*);
     if (!g.LoadBase || !g.FindPlayerPed || !g.FindPlayerPed(-1) || !g.FindPlayerCoors) return;
     static void* handle = dlopen("libGame.so", RTLD_NOLOAD | RTLD_NOW);
     if (!handle) return;
     static auto draw = reinterpret_cast<DrawTile>(dlsym(handle, "_ZN6CRadar19DrawRadarSectionMapEii5CRectf"));
     static auto request = reinterpret_cast<RequestTile>(dlsym(handle,"_ZN6CRadar17RequestMapSectionEii"));
     static auto textures=reinterpret_cast<void**>(dlsym(handle,"gRadarTextures"));
+    static auto markRendered=reinterpret_cast<MarkTexture>(dlsym(handle,"_ZN22TextureDatabaseRuntime21RenderingTextureEntryEP20TextureDatabaseEntry"));
     if(!g_releaseMapTexture)g_releaseMapTexture=reinterpret_cast<ReleaseMapTextureFn>(dlsym(handle,"_Z16RwTextureDestroyP9RwTexture"));
     if (!draw || !request || reinterpret_cast<std::uintptr_t>(draw) != g.LoadBase + 0x51e360u ||
         reinterpret_cast<std::uintptr_t>(request)!=g.LoadBase+0x51d810u ||
         reinterpret_cast<std::uintptr_t>(textures)!=g.LoadBase+0xa660a8u ||
-        reinterpret_cast<std::uintptr_t>(g_releaseMapTexture)!=g.LoadBase+0x76c974u) return;
+        reinterpret_cast<std::uintptr_t>(g_releaseMapTexture)!=g.LoadBase+0x76c974u ||
+        reinterpret_cast<std::uintptr_t>(markRendered)!=g.LoadBase+0x796cd0u) return;
     const auto player = g.FindPlayerCoors(-1);
     if (!std::isfinite(player.x) || !std::isfinite(player.y)) return;
     const float zoom=projection?hud::WatchMapZoom():1.f;
@@ -20563,6 +20567,7 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
         g.RwRenderStateSet(14,reinterpret_cast<void*>(0));
         g.RwRenderStateSet(20,reinterpret_cast<void*>(1));
     }
+    unsigned states[6]{},promoted=0;
     radarmap::VisibleTiles(player.x,player.y,zoom,[&](int x,int y,radarmap::Rect rect){
         // DrawRadarSectionMap silently skips missing textures. The stock HUD
         // only retains a 3x3 neighbourhood, smaller than the projection at .25x.
@@ -20573,8 +20578,22 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
             // Same ARM64 RwTexture::refCount used by RequestMapSection.
             auto* refs=reinterpret_cast<int*>(static_cast<char*>(texture)+0x64);++*refs;
         },[](void* texture){g_releaseMapTexture(texture);});
+        // This offscreen Im2D pass binds rasters directly; explicitly report
+        // their DB entries as rendered instead of relying on the world pass.
+        promoted+=radarmap::MarkVisibleTexture(textures[y*12+x],markRendered);
+        const auto state=radarmap::StreamState(radarmap::TextureEntry(textures[y*12+x]));
+        if(state<6)++states[state];
         draw(x,y,rect,1.0f);
     });
+    if(projection){
+        static double lastReport=-10000;static unsigned previousFull=~0u;
+        const auto now=NowMs();
+        if(now-lastReport>2000&&(promoted||states[1]||states[2]||previousFull!=states[3])){
+            LOGI("[watch.map] zoom=%.2f requested=%u queued=%u full=%u deleting=%u promoted=%u missing=%u",
+                 zoom,states[1],states[2],states[3],states[4]+states[5],promoted,states[0]);
+            lastReport=now;previousFull=states[3];
+        }
+    }
 
     DrawPdaRadarOverlay(handle,player,heading,watch,projection,zoom);
 }

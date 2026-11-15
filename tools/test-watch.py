@@ -57,3 +57,11 @@ if len(sys.argv)>1:
                                 (0x51d880,0xb9406408),(0x51d884,0x11000508)]:
         assert struct.unpack_from('<I',retail,address)[0]==instruction,hex(address)
     print('PASS retail RwTexture reference lifetime / cancellation fingerprints')
+    for address,instruction in [(0x76c9a8,0xf9401d00), # raster -> DB entry at +0x38
+                                (0x796d48,0x79401809), # entry flags +0xc
+                                (0x796d50,0x7140055f), # queued/unrendered state 1
+                                (0x796d58,0x5284000a), # rendered queue state 2
+                                (0x795c14,0x5282000a), # initial request state 1
+                                (0x7959b0,0x5286000b)]: # full texture state 3
+        assert struct.unpack_from('<I',retail,address)[0]==instruction,hex(address)
+    print('PASS retail thumbnail/requested -> visible -> full streaming states')
