@@ -37,8 +37,8 @@ int main(){
         const float angle=degrees*.01745329252f;
         float x=10000*std::sin(angle),y=10000*std::cos(angle);
         watchhud::Pin(x,y);
-        // All corners of an icon's enclosing circle must stay in view.
-        const float margin=48.f*1.414214f;
+        // Visible sprite radius stays inside the tighter map inset.
+        const float margin=48.f;
         CHECK(std::hypot(x,y)+margin<=watchhud::kMapRadius*watchhud::kMapPixels+.001f);
         CHECK(y-margin>=watchhud::kMapTop*watchhud::kMapPixels-.001f);
         CHECK(y+margin<=watchhud::kMapBottom*watchhud::kMapPixels+.001f);
@@ -65,7 +65,7 @@ int main(){
         CHECK(step(0)==false&&step(1)&&!p.open);
         for(int i=0;i<30;++i)CHECK(!step(1));
         CHECK(!p.Needed()&&p.Amount()==0);
-        CHECK(!step(1,.10f));CHECK(step(1)&&p.open); // leave + re-touch while pinching
+        CHECK(!step(1,.10f));CHECK(step(1)&&p.open); // leave + re-touch with trigger held
         CHECK(!step(1,0,.005f,false));CHECK(!step(1)); // unavailable hand cannot queue a press
         CHECK(!step(0));CHECK(step(1)&&!p.open);
         CHECK(!step(1,0,.005f,true,false)&&!p.Needed());
@@ -74,11 +74,25 @@ int main(){
         CHECK(!step(0,0,.005f,true,true,2,1)&&!p.Needed()); // changed wrist
     }
     {
+        watchhud::ZoomSlider slider;
+        CHECK(!slider.Update(true,1,0,0,0,1)&&!slider.dragging);
+        CHECK(!slider.Update(true,0,0,0,0,1));
+        CHECK(!slider.Update(true,1,.10f,0,0,1)&&!slider.dragging);
+        CHECK(!slider.Update(true,1,0,0,0,1)&&slider.dragging);
+        CHECK(std::abs(slider.zoom-1.25f)<.001f);
+        slider.Update(true,1,0,.1f,0,slider.zoom);CHECK(slider.zoom==2);
+        slider.Update(true,1,0,-.1f,0,slider.zoom);CHECK(slider.zoom==.5f);
+        CHECK(slider.Update(true,0,0,0,0,slider.zoom)&&!slider.dragging);
+        slider.Update(true,1,0,0,0,1);CHECK(slider.dragging);
+        CHECK(slider.Update(false,1,0,0,0,slider.zoom)&&!slider.dragging);
+        CHECK(!slider.Update(true,1,0,0,0,1)&&!slider.dragging);
+    }
+    {
         handskeleton::Library hand;CHECK(hand.Load(HAND_FILE)&&hand.indexTipJoint>=0);
         handskeleton::Vec first{},last{};
         for(float progress:{0.f,.25f,.5f,.75f,1.f}){
             handskeleton::Pose pose{};handskeleton::Palette palette{};
-            hand.Sample(handanimation::Gesture::Pinch,progress,pose);hand.Matrices(pose,palette);
+            hand.Sample(handanimation::Gesture::Point,progress,pose);hand.Matrices(pose,palette);
             handskeleton::Vec tip{};CHECK(hand.IndexTip(palette,tip));
             std::array<handskeleton::Mat,handskeleton::kMaxNodes> world{};
             for(int node:hand.order){const auto local=hand.nodes[node].fixedMatrix?hand.nodes[node].matrix:handskeleton::Matrix(pose[node]);

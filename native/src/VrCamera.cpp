@@ -20542,7 +20542,8 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
     const auto player = g.FindPlayerCoors(-1);
     if (!std::isfinite(player.x) || !std::isfinite(player.y)) return;
     // Height covers 300 world units, width 480: equal metres per pixel.
-    const float scale = 400.0f / 300.0f * (projection?watchhud::kProjectionZoom:1.f);
+    const float zoom=projection?hud::WatchMapZoom():1.f;
+    const float scale = 400.0f / 300.0f * zoom;
     if (g.RwRenderStateSet) {
         g.RwRenderStateSet(6,reinterpret_cast<void*>(0));
         g.RwRenderStateSet(8,reinterpret_cast<void*>(0));
@@ -20561,7 +20562,7 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
         draw(x,y,{left-overlap,top+size+overlap,left+size+overlap,top-overlap},1.0f);
     }
 
-    DrawPdaRadarOverlay(handle,player,heading,watch,projection);
+    DrawPdaRadarOverlay(handle,player,heading,watch,projection,zoom);
 }
 
 bool PrepareRadialIconRasters() {

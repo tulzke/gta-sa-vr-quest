@@ -21,6 +21,8 @@ uniform vec4 uColorFactor,uWatch;
 uniform vec2 uMaterial;
 uniform float uOpacity,uHeading;
 uniform int uMoney,uWanted;
+uniform int uEffect;
+uniform float uTime;
 out vec4 o;
 float glyph(vec2 p,int n){
     const int rows[84]=int[84](
@@ -35,6 +37,15 @@ float glyph(vec2 p,int n){
 float heart(vec2 q){q.y=-q.y;float a=dot(q,q)-.8;return step(a*a*a-q.x*q.x*q.y*q.y*q.y,0.0);}
 float shield(vec2 q){float d=max(abs(q.x)-.72,max(-q.y-.8,q.y-.95));d=max(d,abs(q.x)+.75*q.y-.83);return 1.0-step(0.0,d);}
 void main(){
+    if(uEffect>0){
+        if(uEffect==1){
+            float meridian=smoothstep(.975,.999,cos(vUV.x*62.831853));
+            float pulse=pow(.5+.5*cos((vUV.y-uTime*.32)*18.849556),48.0);
+            float fade=sin(clamp(vUV.y,0.0,1.0)*3.14159265);
+            o=vec4(.18,.78,1.0,uOpacity*(.018+.13*meridian+.38*pulse)*fade);
+        }else o=vec4(mix(vec3(.55,.62,.65),vec3(.18,.78,1.0),vUV.x),uOpacity);
+        return;
+    }
     if(!uDisplay){
         vec3 base=uColorFactor.rgb*(uHasColor?pow(texture(uColor,vUV).rgb,vec3(2.2)):vec3(1));
         vec3 packed=uHasMetal?texture(uMetal,vUV).rgb:vec3(1);

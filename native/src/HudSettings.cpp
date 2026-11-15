@@ -26,6 +26,8 @@ std::atomic<int>  g_objectiveMarkerMode{OBJECTIVE_ORIGINAL};
 std::atomic<int> g_pdaHand{1}, g_watchHand{0};
 std::atomic<bool> g_pdaPortrait{false};
 std::atomic<bool> g_watchInside{false};
+std::atomic<int> g_watchZoomPercent{100};
+std::atomic<bool> g_watchZoomSave{false};
 std::once_flag    g_initOnce;
 std::mutex        g_saveMutex;
 
@@ -205,6 +207,8 @@ void Load() {
                 g_watchHand.store(value == 1);
             else if (std::sscanf(line, "WatchInside=%d", &value) == 1)
                 g_watchInside.store(value != 0);
+            else if (std::sscanf(line, "WatchMapZoomPercent=%d", &value) == 1)
+                g_watchZoomPercent.store(std::clamp(value,50,200));
             else if (std::sscanf(line, "PdaPortrait=%d", &value) == 1)
                 g_pdaPortrait.store(value != 0);
             else {
@@ -309,6 +313,7 @@ void Save() {
         std::fprintf(file, "PdaHand=%d\nWatchHand=%d\nPdaPortrait=%d\n",
                      g_pdaHand.load(), g_watchHand.load(), int(g_pdaPortrait.load()));
         std::fprintf(file,"WatchInside=%d\n",int(g_watchInside.load()));
+        std::fprintf(file,"WatchMapZoomPercent=%d\n",g_watchZoomPercent.load());
         for (int element = 0; element < ELEMENT_COUNT; ++element) {
             for (int field = 0; field < ELEMENT_FIELD_COUNT; ++field)
                 std::fprintf(file, "Hud.%s.%s=%d\n",
@@ -395,6 +400,13 @@ void ToggleDeviceHand(int element) {
 }
 bool PdaPortrait() { EnsureLoaded(); return g_pdaPortrait.load(); }
 bool WatchInside() { EnsureLoaded(); return g_watchInside.load(); }
+float WatchMapZoom(){EnsureLoaded();return g_watchZoomPercent.load()*.01f;}
+void SetWatchMapZoom(float zoom,bool persist){
+    EnsureLoaded();
+    if(std::isfinite(zoom))g_watchZoomPercent.store(static_cast<int>(std::round(std::clamp(zoom,.5f,2.f)*100.f)));
+    if(persist)g_watchZoomSave.store(true,std::memory_order_release);
+}
+void FlushWatchSettings(){if(g_watchZoomSave.exchange(false,std::memory_order_acq_rel))Save();}
 void ToggleWatchInside() { EnsureLoaded();g_watchInside.store(!g_watchInside.load());Save(); }
 void TogglePdaPortrait() { EnsureLoaded(); g_pdaPortrait.store(!g_pdaPortrait.load()); Save(); }
 

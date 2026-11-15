@@ -14,8 +14,9 @@ inline float Fraction(float value,float maximum) {
         ? std::clamp(value/maximum,0.f,1.f) : -1.f;
 }
 inline void Pin(float& x,float& y,float iconRadius=kMapIconRadius) {
-    // Include the rotated icon's corners in the inset, not only its centre.
-    const float inset=iconRadius*1.414214f;
+    // Transparent corners of stock sprites do not need the old enclosing
+    // circle's padding. Keep the visible glyph close to the straight cuts.
+    const float inset=iconRadius;
     const float radius=kMapRadius*kMapPixels-inset;
     const float top=kMapTop*kMapPixels+inset;
     const float bottom=kMapBottom*kMapPixels-inset;

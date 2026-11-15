@@ -64,8 +64,26 @@ try {
  gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);gl.disable(gl.BLEND);
  const blended=new Uint8Array(4);gl.readPixels(875,292,1,1,gl.RGBA,gl.UNSIGNED_BYTE,blended);
  for(let i=0;i<3;i++)if(Math.abs(blended[i]-(projected[i]*.5+background[i]*255*.5))>2)throw Error('Projection blend '+blended);
+ // Exercise the production cone shader at two times on a perspective-like
+ // side view. Narrow moving bands must change pixels and stay translucent.
+ const cone=[];
+ function conePoint(u,top){const a=u*Math.PI*2,r=top?.72:.14;return [r*Math.cos(a),r*Math.sin(a),top?-.48:.72,0,1,0,u,top?1:0];}
+ for(let i=0;i<64;i++){const a=i/64,b=(i+1)/64;cone.push(...conePoint(a,false),...conePoint(b,false),...conePoint(b,true),...conePoint(a,false),...conePoint(b,true),...conePoint(a,true));}
+ gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(cone),gl.STATIC_DRAW);
+ const projection=identity.slice();projection[9]=.4;
+ gl.uniformMatrix4fv(location('uMVP'),false,projection);gl.uniform1i(location('uEffect'),1);gl.uniform1f(location('uOpacity'),1);
+ function effect(time,blend){
+  gl.enable(gl.SCISSOR_TEST);gl.scissor(705,20,340,340);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.SCISSOR_TEST);
+  if(blend)gl.enable(gl.BLEND);
+  gl.uniform1f(location('uTime'),time);gl.drawArrays(gl.TRIANGLES,0,cone.length/8);gl.disable(gl.BLEND);
+  const pixels=new Uint8Array(340*340*4);gl.readPixels(705,20,340,340,gl.RGBA,gl.UNSIGNED_BYTE,pixels);return pixels;
+ }
+ const t0=effect(0,false),t1=effect(.4,false);let moving=0,translucent=0;
+ for(let i=0;i<t0.length;i+=4){if(t0[i+3]>0&&t0[i+3]<160)translucent++;if(Math.abs(t0[i+3]-t1[i+3])>8)moving++;}
+ if(translucent<5000||moving<1000)throw Error('Cone animation missing '+translucent+'/'+moving);
+ effect(.4,true);
  if(gl.getError()!==gl.NO_ERROR)throw Error('GL error');
- result.textContent='PASS GPU: actual GLB dial; six HUD states; clipped map; red health / grey armour; reflected-hand readability; circular projection at 50% opacity';
+ result.textContent='PASS GPU: GLB dial; clipped map; vitals; reflected-hand readability; map alpha 50%; translucent animated cone';
  document.title='PASS WATCH';
 } catch(error){result.textContent='FAIL '+error.stack;document.title='FAIL WATCH';}
 </script>

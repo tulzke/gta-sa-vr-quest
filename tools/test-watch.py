@@ -20,12 +20,16 @@ with tempfile.TemporaryDirectory(prefix='savr-watch-') as tmp:
     settings='#define _CRT_SECURE_NO_WARNINGS\n#include <fstream>\n#include <iterator>\n#include <cassert>\n'+settings+r'''
 int main(){
     using namespace savr::hud;
-    {std::ofstream file("watch-settings.ini");file<<"WatchHand=1\nWatchInside=1\nHud.Watch.WristRollDeg=35\n";}
+    {std::ofstream file("watch-settings.ini");file<<"WatchHand=1\nWatchInside=1\nWatchMapZoomPercent=75\nHud.Watch.WristRollDeg=35\n";}
     Init();assert(DeviceHand(WATCH)==1&&WatchInside());
+    assert(WatchMapZoom()==.75f);
+    SetWatchMapZoom(1.4f,true);FlushWatchSettings();
+    assert(std::abs(WatchMapZoom()-1.4f)<.001f);
     assert(GetWristSettings(WATCH,WRIST_SLOT_HAND,-1).rollDeg==35);
     ToggleDeviceHand(WATCH);ToggleWatchInside();
     assert(DeviceHand(WATCH)==0&&!WatchInside());
     std::ifstream file("watch-settings.ini");std::string text((std::istreambuf_iterator<char>(file)),{});
+    assert(text.find("WatchMapZoomPercent=140")!=text.npos);
     assert(text.find("WatchHand=0")!=text.npos&&text.find("WatchInside=0")!=text.npos);
     assert(text.find("Hud.Watch.WristRollDeg=35")!=text.npos);
     std::puts("PASS watch hand, side and rotation settings load/save");

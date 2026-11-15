@@ -9,10 +9,12 @@ std::vector<WatchGpuMesh> g_watchMeshes;
 std::vector<GLuint> g_watchImages;
 GLuint g_watchProgram=0;
 bool g_watchTried=false;
-enum WatchUniform { WATCH_MVP,WATCH_MODEL,WATCH_OPACITY,WATCH_HEADING,WATCH_WATCH,WATCH_MONEY,WATCH_WANTED,WATCH_COLOR,WATCH_METAL,WATCH_MAP,WATCH_HASMAP,WATCH_HASCOLOR,WATCH_HASMETAL,WATCH_COLORFACTOR,WATCH_MATERIAL,WATCH_DISPLAY,WATCH_MIRRORFACE,WATCH_PROJECTION,WATCH_UNIFORM_COUNT };
+enum WatchUniform { WATCH_MVP,WATCH_MODEL,WATCH_OPACITY,WATCH_HEADING,WATCH_WATCH,WATCH_MONEY,WATCH_WANTED,WATCH_COLOR,WATCH_METAL,WATCH_MAP,WATCH_HASMAP,WATCH_HASCOLOR,WATCH_HASMETAL,WATCH_COLORFACTOR,WATCH_MATERIAL,WATCH_DISPLAY,WATCH_MIRRORFACE,WATCH_PROJECTION,WATCH_EFFECT,WATCH_TIME,WATCH_UNIFORM_COUNT };
 GLint g_watchUniforms[WATCH_UNIFORM_COUNT]{};
-const char* const kWatchUniformNames[WATCH_UNIFORM_COUNT]={"uMVP","uModel","uOpacity","uHeading","uWatch","uMoney","uWanted","uColor","uMetal","uMap","uHasMap","uHasColor","uHasMetal","uColorFactor","uMaterial","uDisplay","uMirrorFace","uProjection"};
+const char* const kWatchUniformNames[WATCH_UNIFORM_COUNT]={"uMVP","uModel","uOpacity","uHeading","uWatch","uMoney","uWanted","uColor","uMetal","uMap","uHasMap","uHasColor","uHasMetal","uColorFactor","uMaterial","uDisplay","uMirrorFace","uProjection","uEffect","uTime"};
 watchhud::Projection g_watchProjection;
+watchhud::ZoomSlider g_watchZoomSlider;
+float g_watchEffectTime=0;
 handskeleton::Mat g_watchFrameModel{};
 bool g_watchFrameValid=false;
 std::atomic<bool> g_watchProjectionNeeded{false};
@@ -27,6 +29,11 @@ XrVector3f WatchPoint(const handskeleton::Mat& m,XrVector3f p){
     return {m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12],m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13],m[2]*p.x+m[6]*p.y+m[10]*p.z+m[14]};
 }
 XrVector3f WatchVector(const handskeleton::Mat& m,XrVector3f p){return vsub(WatchPoint(m,p),WatchPoint(m,{0,0,0}));}
+void WatchReadingAxes(const handskeleton::Mat& m,XrVector3f& right,XrVector3f& up){
+    const XrVector3f x{m[0],m[1],m[2]},y{m[4],m[5],m[6]},z{m[8],m[9],m[10]};
+    right=vscale(vnorm(WatchVector(m,WatchNative(g_watchModel.right))),vdot(vcross(x,y),z)<0?1.f:-1.f);
+    up=vscale(vnorm(WatchVector(m,WatchNative(g_watchModel.up))),-1.f);
+}
 
 struct WatchGlBindings {
     GLint program{},vao{},vbo{},active{},textures[3]{},samplers[3]{};
@@ -143,6 +150,7 @@ void UpdateWatchFrame(const HandPose hp[2],const TwoHandVisualState& twoHand,
                       const float pinchAmounts[2],bool trackingValid,std::uint64_t epoch,bool scoped) {
     static std::uint64_t previousTime=0;
     const auto now=MonotonicNowNs();const float dt=previousTime?float(now-previousTime)*1e-9f:0;previousTime=now;
+    g_watchEffectTime=float((now/1000000)%100000)*.001f;
     const int wrist=hud::DeviceHand(hud::WATCH),other=1-wrist;
     const bool calibrating=g_hudActive.load(std::memory_order_relaxed);
     g_watchFrameValid=false;
@@ -162,34 +170,41 @@ void UpdateWatchFrame(const HandPose hp[2],const TwoHandVisualState& twoHand,
         !(weaponHands&(1u<<other))&&!(TwoHandStateUsable(twoHand)&&other==twoHand.supportHand)&&
         !hp[other].climbGrip&&!hp[other].ledgeGrip&&!ball.locked[other]&&!wheel.grabbed[other]&&
         !wheel.radioGrabbed[other]&&!wheel.ignitionGrabbed[other]&&pinchAmounts[other]<=0&&hp[other].grip<.35f;
-    float radial=1,depth=1;
+    float radial=1,depth=1;XrVector3f tipWorld{};
     if(available){
         auto& frame=g_skeletalHands[other];
-        const XrVector3f grip{hp[other].gripPos[0],hp[other].gripPos[1],hp[other].gripPos[2]};
-        const auto delta=vsub(grip,centre);
-        const float proximity=std::clamp((.18f-std::sqrt(vdot(delta,delta)))/.06f,0.f,1.f);
-        // Contextual pinch uses the same authored animation as physical knobs.
-        // Collision below uses its actual index-tip bone, never the controller
-        // origin, thumb or the midpoint of the pinch.
-        if(proximity>0)g_handSkeleton.Evaluate(handanimation::FreeHand(hp[other].grip,hp[other].trigger),
-            hp[other].trigger,proximity*(1.f-hp[other].grip),frame.palette);
+        // FreeHand already selects the authored Point clip with trigger down.
+        // Preserve that extended index finger; no contextual pinch override.
         handskeleton::Vec tip{};
         if(g_handSkeleton.IndexTip(frame.palette,tip)){
-            const auto relative=vsub(WatchPoint(frame.model,WatchNative(tip)),centre);
+            tipWorld=WatchPoint(frame.model,WatchNative(tip));
+            const auto relative=vsub(tipWorld,centre);
             radial=std::hypot(vdot(relative,right),vdot(relative,up));depth=vdot(relative,normal);
         }
     }
-    g_watchProjection.Update(g_watchFrameValid&&!calibrating,epoch,wrist,available,
+    XrVector3f readingRight{},readingUp{};WatchReadingAxes(m,readingRight,readingUp);
+    const auto sliderCentre=vadd(centre,vadd(vscale(normal,watchhud::kProjectionHeight),vscale(readingRight,watchhud::kSliderAcross)));
+    const auto sliderTip=vsub(tipWorld,sliderCentre);
+    const bool sliderEnabled=available&&g_watchProjection.open&&g_watchProjection.Amount()>.98f&&
+        g_watchProjection.epoch==epoch&&g_watchProjection.wrist==wrist;
+    const bool ended=g_watchZoomSlider.Update(sliderEnabled,hp[other].trigger,
+        vdot(sliderTip,readingRight),vdot(sliderTip,readingUp),vdot(sliderTip,normal),hud::WatchMapZoom());
+    if(g_watchZoomSlider.dragging)hud::SetWatchMapZoom(g_watchZoomSlider.zoom,false);
+    if(ended)hud::SetWatchMapZoom(hud::WatchMapZoom(),true);
+    g_watchProjection.Update(g_watchFrameValid&&!calibrating,epoch,wrist,available&&!g_watchZoomSlider.dragging,
         hp[other].trigger,radial,depth,radius,dt);
     g_watchProjectionNeeded.store(g_watchProjection.Needed(),std::memory_order_relaxed);
     // Reserve only this free hand's trigger near the dial. Keep the reservation
     // until release, so tapping a watch cannot also accelerate/brake a vehicle.
-    const bool near=radial<=radius+.025f&&depth>=-.03f&&depth<=.05f;
+    const bool near=(radial<=radius+.025f&&depth>=-.03f&&depth<=.05f)||
+        (sliderEnabled&&std::abs(vdot(sliderTip,readingRight))<.03f&&
+         std::abs(vdot(sliderTip,readingUp))<.065f&&std::abs(vdot(sliderTip,normal))<.04f)||g_watchZoomSlider.dragging;
     const bool claimed=available&&(near||(hp[other].trigger>=.30f&&
         now<g_watchTriggerUntil[other].load(std::memory_order_relaxed)));
     g_watchTriggerUntil[wrist].store(0,std::memory_order_relaxed);
     g_watchTriggerUntil[other].store(claimed?now+150000000:0,std::memory_order_relaxed);
 }
+#include "WatchEffects.inl"
 void DrawWatchForEye(const float* mvp,const XrPosef& rp,unsigned int mapTexture,unsigned int projectionTexture,float heading,
                      bool calibrating,const watchhud::Readout& readout) {
     if(!g_watchFrameValid)return;
@@ -202,6 +217,7 @@ void DrawWatchForEye(const float* mvp,const XrPosef& rp,unsigned int mapTexture,
     const XrVector3f x{model[0],model[1],model[2]},y{model[4],model[5],model[6]},z{model[8],model[9],model[10]};
     glUniform1i(g_watchUniforms[WATCH_MIRRORFACE],vdot(vcross(x,y),z)<0);
     glUniform1i(g_watchUniforms[WATCH_PROJECTION],0);
+    glUniform1i(g_watchUniforms[WATCH_EFFECT],0);
     glUniform1f(g_watchUniforms[WATCH_OPACITY],opacity);glUniform1f(g_watchUniforms[WATCH_HEADING],heading);
     const int time=readout.time;
     glUniform4f(g_watchUniforms[WATCH_WATCH],time<0?-1.f:float(time/60),time<0?-1.f:float(time%60),
@@ -223,6 +239,7 @@ void DrawWatchForEye(const float* mvp,const XrPosef& rp,unsigned int mapTexture,
     }
     const float amount=g_watchProjection.Amount();
     if(amount>0&&projectionTexture){
+        DrawWatchEffect(model,amount,false);
         auto projection=model;
         const float scale=std::sqrt(vdot(x,x));
         const float enlargement=1.f+amount*(watchhud::kProjectionDiameter/(2.f*WatchFaceRadius()*scale)-1.f);
@@ -232,6 +249,7 @@ void DrawWatchForEye(const float* mvp,const XrPosef& rp,unsigned int mapTexture,
         const auto offset=vsub(target,WatchVector(projection,centre));
         projection[12]=offset.x;projection[13]=offset.y;projection[14]=offset.z;
         glUniformMatrix4fv(g_watchUniforms[WATCH_MODEL],1,GL_FALSE,projection.data());
+        glUniform1i(g_watchUniforms[WATCH_EFFECT],0);
         glUniform1i(g_watchUniforms[WATCH_PROJECTION],1);
         glUniform1f(g_watchUniforms[WATCH_OPACITY],.5f*amount);
         glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,projectionTexture);
@@ -243,6 +261,7 @@ void DrawWatchForEye(const float* mvp,const XrPosef& rp,unsigned int mapTexture,
             glUniform1i(g_watchUniforms[WATCH_DISPLAY],1);
             glBindVertexArray(mesh.vao);glDrawElements(GL_TRIANGLES,mesh.count,GL_UNSIGNED_SHORT,nullptr);
         }
+        DrawWatchEffect(model,amount,true);
         glDepthMask(GL_TRUE);
     }
 }

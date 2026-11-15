@@ -2026,6 +2026,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
 
     // World feedback follows gameplay, not weapon/hand interaction ownership.
     savr::wantedfeedback::Update(inGameplay && !anyMenu);
+    savr::hud::FlushWatchSettings();
 
     // The left stick drives the menu, not the player, while a menu is up.
     vrcam::SetInputBlocked(anyMenu);

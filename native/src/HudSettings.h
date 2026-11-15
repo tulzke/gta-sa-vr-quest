@@ -127,6 +127,9 @@ void ToggleDeviceHand(int element);
 bool PdaPortrait();
 void TogglePdaPortrait();
 bool WatchInside();
+float WatchMapZoom();
+void SetWatchMapZoom(float zoom,bool persist);
+void FlushWatchSettings(); // game-thread disk write after a scale drag
 void ToggleWatchInside();
 
 // Single predicate for the renderer.  Keeping the master switch separate from

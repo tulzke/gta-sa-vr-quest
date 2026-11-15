@@ -4,7 +4,25 @@
 #include <cstdint>
 
 namespace savr::watchhud {
-constexpr float kProjectionHeight=.20f, kProjectionDiameter=.20f, kProjectionZoom=2.f;
+constexpr float kProjectionHeight=.20f, kProjectionDiameter=.20f;
+constexpr float kZoomMin=.5f,kZoomMax=2.f;
+constexpr float kSliderAcross=.125f,kSliderHalfHeight=.045f;
+struct ZoomSlider {
+    bool dragging=false,requireRelease=true;
+    float zoom=1.f;
+    // x/y/z are relative to the scale rail in the projection's reading basis.
+    bool Update(bool enabled,float trigger,float x,float y,float z,float current) {
+        bool ended=false;
+        if(!enabled||trigger<.30f){ended=dragging;dragging=false;requireRelease=!enabled;}
+        if(enabled&&!requireRelease&&trigger>=.65f&& !dragging &&
+           std::abs(x)<.018f&&std::abs(y)<=kSliderHalfHeight+.012f&&std::abs(z)<.020f)dragging=true;
+        if(dragging){
+            if(std::abs(x)>.065f||std::abs(z)>.065f){dragging=false;requireRelease=true;ended=true;}
+            else zoom=kZoomMin+(kZoomMax-kZoomMin)*std::clamp((y+kSliderHalfHeight)/(2*kSliderHalfHeight),0.f,1.f);
+        }else zoom=current;
+        return ended;
+    }
+};
 // Updated once before the stereo eye loop. Contact coordinates are measured
 // from the calibrated dial, with z pointing out of its visible surface.
 struct Projection {
