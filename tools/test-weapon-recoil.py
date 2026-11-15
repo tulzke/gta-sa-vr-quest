@@ -147,7 +147,9 @@ int main(){
  CycleReloadSound(1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::BOLT);
  CycleReloadSound(-1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::SILENT);
  SetReloadMode(savr::arcadereload::TWIST);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::TWIST);
+ CycleReloadMode(1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::DOWN_FLICK);
  CycleReloadMode(1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::AUTOMATIC);
+ CycleReloadMode(-1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::DOWN_FLICK);
  CycleReloadMode(-1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::TWIST);
  SetPhysicalRecoilLevel(3);Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==3);
  CyclePhysicalRecoil(1);assert(PhysicalRecoilLevel()==0);

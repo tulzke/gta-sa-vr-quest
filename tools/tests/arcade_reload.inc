@@ -27,6 +27,32 @@ int GestureRun(int mode,int fps,int path,float amplitude,float outDuration=.15f,
     }
     return count;
 }
+arcadereload::Quat Compose(arcadereload::Quat a,arcadereload::Quat b) {
+    return arcadereload::Delta(a,{-b.x,-b.y,-b.z,b.w});
+}
+int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0) {
+    using namespace arcadereload;
+    Gesture gesture;int count=0;
+    for(int i=0;i<fps*2;++i) {
+        const double t=double(i)/fps;
+        const float p=std::clamp(float((t-.02)/duration),0.f,1.f);
+        Sample s;
+        float pitch=(kind==2 || kind==3 || kind==5)?0:-.65f*p;
+        if(kind==4)pitch=-pitch;
+        const float yaw=1.1f+(kind==1 || kind==2 ? 1.2f*p : 0);
+        const float roll=startRoll+(kind==1 || kind==3 ? 1.4f*p : 0);
+        s.orientation=Compose(Compose({0,std::sin(yaw*.5f),0,std::cos(yaw*.5f)},
+                                     {std::sin(pitch*.5f),0,0,std::cos(pitch*.5f)}),
+                                     {0,0,std::sin(roll*.5f),std::cos(roll*.5f)});
+        s.barrel=Rotate(s.orientation,{0,0,-1});
+        if(kind==1 || kind==5) {
+            s.position={.18f*std::sin(p*1.2f),-.16f*std::sin(p*1.1f),.20f*(1-std::cos(p*1.2f))};
+        }
+        if(kind==2)s.position={.20f*std::sin(p),0,.20f*(1-std::cos(p))};
+        count+=gesture.Update(s,t,kind+1,DOWN_FLICK,1);
+    }
+    return count;
+}
 void ArcadeTests() {
     using namespace arcadereload;
     for(int fps:{36,72,90,120}) {
@@ -43,7 +69,22 @@ void ArcadeTests() {
         Check(GestureRun(TWIST,fps,2,.2f)==0,"small aim roll cannot reload");
         Check(GestureRun(TWIST,fps,1,-.7f)==0,"pitch cannot masquerade as barrel twist");
         Check(GestureRun(AUTOMATIC,fps,0,.12f)==0,"automatic mode ignores gestures");
+        Check(FlickRun(fps,0)==1,"downward wrist nod reloads without a return or long arming delay");
+        Check(FlickRun(fps,1)==1,"downward arc with simultaneous yaw and roll reloads once");
+        Check(FlickRun(fps,1,.18f,1.1f)==1,"rolled starting grip and curved motion remain valid");
+        Check(FlickRun(fps,5)==1,"curved downward arm movement works without wrist rotation");
+        Check(FlickRun(fps,0,1.2f)==0,"slow wrist lowering cannot trigger downward flick");
+        Check(FlickRun(fps,1,1.2f)==0,"slow curved holstering with rotations cannot trigger flick");
+        Check(FlickRun(fps,2)==0,"sideways arc and yaw alone do not count as downward flick");
+        Check(FlickRun(fps,3)==0,"barrel roll alone does not count as downward flick");
+        Check(FlickRun(fps,4)==0,"upward nod does not count as downward flick");
+        Check(GestureRun(DOWN_FLICK,fps,0,.012f)==0,"tracking jitter cannot trigger downward flick");
     }
+    Gesture jump;Sample jumping;
+    jump.Update(jumping,0,1,DOWN_FLICK,1);jump.Update(jumping,.06,1,DOWN_FLICK,1);
+    jumping.position.y=-1;
+    Check(!jump.Update(jumping,.07,1,DOWN_FLICK,1),"position discontinuity is rejected as a downward flick");
+    Check(!jump.Update(jumping,.13,1,DOWN_FLICK,1),"no stale history survives the tracking jump");
     Gesture interrupted;
     Sample s;
     interrupted.Update(s,1.,10,DOWN_UP,1);interrupted.Update(s,1.1,10,DOWN_UP,1);
@@ -123,6 +164,14 @@ void ArcadeTests() {
     for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
     Check(::Field(2,8)==17 && ::Field(2,4)==0,"silent mode still instantly reloads");
     Check(reloadSounds[0]==mutedSounds && xr::haptics[0]==mutedPulses+1,"silent mode keeps haptics and suppresses sound");
+    Check(xr::hapticAmplitude[0]>=.6f && xr::hapticDuration[0]>=45 && xr::hapticDuration[0]<=65,
+          "reload confirmation is a distinct short pulse independent of recoil setting");
+    SetMode(DOWN_FLICK);::Field(2,8)=1;::Field(2,4)=0;Pose(0,0);
+    for(int i=0;i<6;++i)frame();
+    const int nodPulses=xr::haptics[0];
+    for(int i=1;i<=12;++i){Pose(0,0,0,-i*.05f);frame();}
+    Check(::Field(2,8)==17 && ::Field(2,4)==0,"down-only nod instantly reloads in the production firing loop");
+    Check(xr::haptics[0]==nodPulses+1,"down-only nod gives exactly one short haptic confirmation");
     unsigned state=2,clip=0,deadline=tick+2000;
     Check(Reload(22,state,clip,3,deadline,tick,17) && clip==3 && state==0 && deadline==tick,
           "small reserve instantly fills only available rounds");

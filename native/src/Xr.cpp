@@ -7301,6 +7301,7 @@ void BuildControlsTipsMenu() {
         {"EMPTY HANDS RETURN CJ TO FISTS",         205, 170, 105, false},
         {"RELOAD: CHOOSE A GESTURE IN CONTROLS",   205, 170, 105, false},
         {"DOWN/UP: QUICK DIP AND RETURN",          205, 170, 105, false},
+        {"DOWN FLICK: QUICK DIP, NO RETURN",       205, 170, 105, false},
         {"TWIST: ROLL GUN 45 DEG AND BACK",        205, 170, 105, false},
         {"RELEASE TRIGGER BEFORE THE GESTURE",     205, 170, 105, false},
         {"GESTURE COMPLETE = INSTANT RELOAD",     205, 170, 105, false},

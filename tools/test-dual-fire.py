@@ -98,8 +98,9 @@ struct InputState {bool b=false;float triggers[2]{};};
 void GetInput(InputState& in){in.triggers[0]=::triggers[0];in.triggers[1]=::triggers[1];}
 struct HandPose {bool valid=true,aimValid=true;float gripPos[3]{},gripOri[4]{0,0,0,1};};
 HandPose tracked[2];bool focused=true,tracking=true;std::uint64_t epoch=1;int haptics[2]{};
+float hapticAmplitude[2]{},hapticDuration[2]{};
 bool IsSessionFocused(){return focused;}
-void TriggerHaptic(int hand,float,float,float){++haptics[hand];}
+void TriggerHaptic(int hand,float amplitude,float,float duration){++haptics[hand];hapticAmplitude[hand]=amplitude;hapticDuration[hand]=duration;}
 }
 namespace physicalweapon {
 struct TrackingPose {float right[3]{0,0,-1};};

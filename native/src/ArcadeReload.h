@@ -6,12 +6,13 @@
 
 namespace savr::arcadereload {
 
-enum Mode { AUTOMATIC, DOWN_UP, TWIST, MODE_COUNT };
+// Keep saved values 0..2 stable; new profiles are appended.
+enum Mode { AUTOMATIC, DOWN_UP, TWIST, DOWN_FLICK, MODE_COUNT };
 inline std::atomic<int> mode{DOWN_UP};
 inline int GetMode() { return mode.load(std::memory_order_relaxed); }
 inline void SetMode(int value) { mode.store(std::clamp(value, 0, MODE_COUNT-1), std::memory_order_relaxed); }
 inline const char* ModeName() {
-    constexpr const char* names[]{"AUTOMATIC", "DOWN / UP", "TWIST / RETURN"};
+    constexpr const char* names[]{"AUTOMATIC", "DOWN / UP", "TWIST / RETURN", "DOWN FLICK"};
     return names[GetMode()];
 }
 inline bool Manual(int type) { return GetMode()!=AUTOMATIC && type>=22 && type<=34; }
@@ -82,25 +83,71 @@ inline bool Normalize(Sample& s) {
 }
 
 // Raw tracked wrists drive recognition; rendered recoil/hand animations never
-// count as gestures. The calibrated barrel only supplies the twist axis.
+// count as gestures. The calibrated barrel supplies the twist axis and nod tip.
 struct Gesture {
+    struct TimedSample { Sample sample{}; double time{}; };
+    TimedSample history[48]{};
+    int historyCount{},historyNext{};
     Sample previous{},start{};
     double previousTime{},startTime{},readyAt{};
     int identity{-1},selected{-1},phase{},path{};
     std::uint64_t epoch{};
     bool valid{};
     void Reset() { *this={}; }
+    void Remember(Sample sample,double now) {
+        history[historyNext]={sample,now};
+        historyNext=(historyNext+1)%48;
+        historyCount=std::min(historyCount+1,48);
+    }
+    bool DownFlick(Sample sample,double now) {
+        if (now<readyAt) { historyCount=historyNext=0; return false; }
+        bool complete=false;
+        for(int i=0;i<historyCount;++i) {
+            const auto& from=history[i];
+            const double seconds=now-from.time;
+            if (seconds<.05 || seconds>.32) continue;
+            // Follow a point 20cm along the calibrated barrel. Rotation about
+            // the wrist/elbow can lower this point along an arc without a
+            // straight vertical hand stroke. Yaw/roll and sideways travel are
+            // deliberately unrestricted; only downward progress matters.
+            const Vec barrel=Rotate(Delta(sample.orientation,from.sample.orientation),from.sample.barrel);
+            const float drop=from.sample.position.y-sample.position.y+
+                             .20f*(from.sample.barrel.y-barrel.y);
+            const float pitchDrop=std::asin(std::clamp(from.sample.barrel.y,-1.f,1.f))-
+                                  std::asin(std::clamp(barrel.y,-1.f,1.f));
+            if ((drop>=.07f && drop/seconds>=.40) ||
+                (pitchDrop>=.35f && pitchDrop/seconds>=1.5)) {
+                complete=true;break;
+            }
+        }
+        if (complete) {
+            historyCount=historyNext=0;readyAt=now+.45;return true;
+        }
+        Remember(sample,now);
+        return false;
+    }
     bool Update(Sample sample,double now,int key,int selection,std::uint64_t trackingEpoch) {
         if (selection==AUTOMATIC || !std::isfinite(now) || !Normalize(sample)) { Reset(); return false; }
         if (!valid || identity!=key || selected!=selection || epoch!=trackingEpoch ||
             now<previousTime || now-previousTime>.12) {
             Reset(); valid=true; identity=key; selected=selection; epoch=trackingEpoch;
-            previous=sample;previousTime=now;readyAt=now+.15;return false;
+            previous=sample;previousTime=now;readyAt=now+(selection==DOWN_FLICK?0:.15);
+            if (selection==DOWN_FLICK) Remember(sample,now);
+            return false;
         }
         const float dt=static_cast<float>(now-previousTime);
         if (dt<=0) return false;
         const Sample old=previous;
         previous=sample;previousTime=now;
+        if (selection==DOWN_FLICK) {
+            const Vec jump{sample.position.x-old.position.x,sample.position.y-old.position.y,
+                           sample.position.z-old.position.z};
+            const auto& a=sample.orientation;const auto& b=old.orientation;
+            if (Dot(jump,jump)>.16f || std::abs(a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w)<.5f) {
+                historyCount=historyNext=0;Remember(sample,now);return false;
+            }
+            return DownFlick(sample,now);
+        }
         if (now<readyAt) return false;
         const float vy=(sample.position.y-old.position.y)/dt;
         const Vec oldBarrel=Rotate(Delta(sample.orientation,old.orientation),old.barrel);
