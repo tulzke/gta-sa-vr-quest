@@ -20589,7 +20589,7 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
         static double lastReport=-10000;static unsigned previousFull=~0u;
         const auto now=NowMs();
         if(now-lastReport>2000&&(promoted||states[1]||states[2]||previousFull!=states[3])){
-            LOGI("[watch.map] zoom=%.2f requested=%u queued=%u full=%u deleting=%u promoted=%u missing=%u",
+            __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,"[watch.map] zoom=%.2f requested=%u queued=%u full=%u deleting=%u promoted=%u missing=%u",
                  zoom,states[1],states[2],states[3],states[4]+states[5],promoted,states[0]);
             lastReport=now;previousFull=states[3];
         }
