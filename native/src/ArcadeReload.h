@@ -126,20 +126,29 @@ struct Gesture {
             const double interval=flickSpeedTime ? now-flickSpeedTime : seconds;
             const float acceleration=(speed-flickSpeed)/static_cast<float>(interval);
             flickSpeed=speed;flickSpeedTime=now;
-            if (!phase && speed>=3.4f && acceleration>=18.f) {
+            if (!phase && speed>=2.2f && acceleration>=8.f) {
                 start=recent->sample;startTime=recent->time;
+                // Count the beginning of a naturally accelerating nod too.
+                // Starting the angle at the speed threshold discarded most
+                // of a small wrist flick before it reached peak speed.
+                double lead=seconds;
+                for(int i=0;i<historyCount;++i) {
+                    const double age=now-history[i].time;
+                    if (age<=.14 && age>lead) { start=history[i].sample;lead=age; }
+                }
                 peakSpeed=speed;brakeSince=0;phase=1;
             }
             if (phase) {
                 peakSpeed=std::max(peakSpeed,speed);
                 const float angle=PitchDrop(start,sample);
                 // A long aiming/holstering sweep is not a short wrist snap.
-                if (now-startTime>.26 || angle>.95f || angle<-.08f) {
+                if (now-startTime>.42 || angle>1.25f || angle<-.12f) {
                     phase=0;brakeSince=0;readyAt=now+.15;
-                } else if (angle>=.28f && std::abs(speed)<=std::min(.9f,peakSpeed*.25f)) {
-                    // Confirm the brake for 20ms. No upward return is required.
+                } else if (angle>=.20f && std::abs(speed)<=std::min(1.5f,peakSpeed*.55f)) {
+                    // A clear slowdown is enough; no perfectly still wrist or
+                    // upward return. Brief confirmation rejects a noisy frame.
                     if (!brakeSince) brakeSince=now;
-                    if (now-brakeSince>=.02) {
+                    if (now-brakeSince>=.012) {
                         ClearFlick();readyAt=now+.45;return true;
                     }
                 } else brakeSince=0;

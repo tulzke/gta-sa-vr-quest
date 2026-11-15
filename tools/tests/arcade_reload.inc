@@ -36,9 +36,11 @@ int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0,
     Gesture gesture;int count=0;
     for(int i=0;i<fps*2;++i) {
         const double t=double(i)/fps;
-        const float p=std::clamp(float((t-.02)/duration),0.f,1.f);
+        const float linear=std::clamp(float((t-.02)/duration),0.f,1.f);
+        const float p=kind==6 || kind==7 ? .5f*(1-std::cos(3.141592654f*linear)) : linear;
         Sample s;
         float pitch=(kind==2 || kind==3 || kind==5)?0:-amplitude*p;
+        if(kind==7)pitch-=.8f*std::max(0.f,float(t-.02));
         if(kind==4)pitch=-pitch;
         const float yaw=1.1f+(kind==1 || kind==2 ? 1.2f*p : 0);
         const float roll=startRoll+(kind==1 || kind==3 ? 1.4f*p : 0);
@@ -78,6 +80,13 @@ void ArcadeTests() {
         Check(eventTime>=.20 && eventTime<=.30,"reload waits for the brake and confirms promptly after it");
         Check(FlickRun(fps,1)==1,"downward arc with simultaneous yaw and roll reloads once");
         Check(FlickRun(fps,1,.18f,1.1f)==1,"rolled starting grip and curved motion remain valid");
+        Check(FlickRun(fps,0,.28f)==1,"comfortable longer wrist nod is accepted");
+        Check(FlickRun(fps,1,.28f,1.1f)==1,"comfortable curved nod with extra rotations is accepted");
+        Check(FlickRun(fps,6,.20f,0,.32f)==1,"small smoothly accelerating nod counts its full motion");
+        Check(FlickRun(fps,6,.18f,0,.28f)==1,"short small natural nod is accepted without a hard snap");
+        Check(FlickRun(fps,7,.22f,0,.38f)==1,"clear braking with residual wrist movement does not require a full stop");
+        Check(FlickRun(fps,6,.65f)==0,"smooth ordinary lowering remains below intentional nod speed");
+        Check(FlickRun(fps,0,.03f,0,.10f)==0,"a tiny fast twitch cannot reload");
         Check(FlickRun(fps,5)==0,"fast curved arm lowering without wrist rotation cannot reload");
         Check(FlickRun(fps,0,.4f)==0,"ordinary gun lowering at the former trigger speed cannot reload");
         Check(FlickRun(fps,1,.4f)==0,"ordinary lowering with arc, yaw and roll cannot reload");
