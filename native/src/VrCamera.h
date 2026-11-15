@@ -78,6 +78,8 @@ void UpdateHolsterBodyTracking(const float headPosition[3], const float headOrie
 // hidden sight must not make bullets fall back to camera aim.
 bool GetWeaponFireRay(int hand, int weaponType,
                       float originOut[3], float directionOut[3]);
+// Reject an interaction snapshot until the camera base uses that tracking epoch.
+bool IsWeaponTrackingCurrent(std::uint64_t epoch);
 // Same calibrated, two-hand-steered optic frame as the world-space lens.
 bool GetWeaponOpticRay(int hand, int weaponType,
                        float originOut[3], float directionOut[3]);

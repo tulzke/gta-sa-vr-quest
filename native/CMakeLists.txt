@@ -127,6 +127,7 @@ add_library(savr SHARED
     src/LoadingTrace.cpp
     src/Holster.cpp
     src/NpcGrab.cpp
+    src/NpcAim.cpp
     src/Melee.cpp
     src/Combat.cpp
     src/VitalsFeedback.cpp

@@ -45,6 +45,7 @@
 #include "PhysicalWeapon.h"
 #include "PairedWeapons.h"
 #include "ScopeAim.h"
+#include "NpcAim.h"
 #include "Symbols.h"
 #include "Throwable.h"
 #include "VrCamera.h"
@@ -2057,6 +2058,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         savr::combat::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::recoil::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::scopeaim::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
+        savr::npcaim::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::vrfire::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
         savr::recoil::FinishShots();
         savr::throwable::Update(weaponInteractionsBlocked || driving::GetVehicleDebugMode()!=0);
@@ -2706,6 +2708,7 @@ void* WaitForGameLibrary(void*) {
     savr::boatentry::Install(handle);
     savr::vehicledoors::Install(handle);
     savr::npcgrab::Install(handle);
+    savr::npcaim::Install(handle);
     savr::combat::Install(handle);
     savr::melee::Install(handle);
     savr::testarea::Install(handle);

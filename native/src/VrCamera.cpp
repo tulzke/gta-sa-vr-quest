@@ -30358,6 +30358,11 @@ bool GetWeaponFireRay(int hand, int weaponType,
     return GetWeaponFireSegment(hand, weaponType, originOut, directionOut, nullptr);
 }
 
+bool IsWeaponTrackingCurrent(std::uint64_t epoch) {
+    return g_stereoActive.load(std::memory_order_relaxed) && g_vrBaseValid &&
+        g_origin.valid && epoch == g_cameraTrackingEpoch;
+}
+
 bool GetWeaponOpticRay(int hand,int type,float origin[3],float direction[3]) {
     if(hand<0 || hand>1 || !origin || !direction || !g_stereoActive.load(std::memory_order_relaxed)) return false;
     xr::HandPose hands[2]{};
