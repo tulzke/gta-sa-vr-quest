@@ -3810,21 +3810,23 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                 // head point while the vehicle continues moving.  That made the
                 // VR camera (and perceived audio listener) stay behind, looking
                 // exactly like a frozen game even though GameThread/XR were live.
-                // Capture the seated head once in VEHICLE-LOCAL coordinates and
-                // rebuild its world position from the authoritative vehicle matrix
-                // on every camera update.  This preserves the PC mod's head anchor
-                // without depending on Android's animation evaluation order.
+                // Cars/bikes use loaded seat geometry instead of animated heads.
+                // Other cabins retain their vehicle-local bone fallback, rebuilt
+                // from the authoritative vehicle matrix on every camera update.
+                // A tracking recenter never invalidates this seated geometry.
                 static void* cachedSeatVehicle = nullptr;
                 static V3 cachedSeatLocal{};
                 static tracking::SeatLatch seatLatch;
+                static tracking::SeatTransition seatTransition;
                 bool& cachedSeatLocalValid=seatLatch.valid;
-                static int cachedPassengerSeat=-2;
                 const int passengerSeat=vehicleentry::SeatIndex(vehicle,ped);
                 const bool seatedPassenger=passengerSeat>=0;
-                if(passengerSeat!=cachedPassengerSeat) seatLatch.vehicle=nullptr;
-                cachedPassengerSeat=passengerSeat;
+                const int seatModel=vehicle?*reinterpret_cast<const std::uint16_t*>(
+                    static_cast<const char*>(vehicle)+0x32):-1;
+                seatTransition.Update(vehiclecabin::SeatKey(g,
+                    enteringVehicle?nullptr:vehicle,ped,seatModel,passengerSeat));
                 const bool resetSeat=seatLatch.Begin(enteringVehicle?nullptr:vehicle,
-                    g_cameraResetSerial,NowMs());
+                    seatTransition.serial,NowMs());
                 if (vehicle != cachedSeatVehicle || resetSeat) {
                     cachedSeatVehicle = vehicle;
                     cachedSeatLocal = {};
@@ -3889,7 +3891,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                         seatedAppearance == 4 || seatedAppearance == 5;
                     const auto seatedModel=*reinterpret_cast<const std::uint16_t*>(
                         static_cast<const char*>(vehicle)+0x32);
-                    const bool stableSanchez=!rearPassenger && seatedModel==468;
+                    const bool stableSanchez=!rearPassenger && seatedModel==468 && passengerSeat==-1;
                     const bool combineCabin=!rearPassenger && seatedModel==532;
                     const bool largeCabin=bigAirframe || combineCabin;
                     if(combineCabin && !cachedSeatLocalValid) {
@@ -3900,7 +3902,19 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                             TraceTracking("COMBINE CABIN",cachedSeatLocal);
                         }
                     }
-                    const bool stableSeat=stableSanchez || (combineCabin && cachedSeatLocalValid);
+                    if(!rearPassenger && !cachedSeatLocalValid) {
+                        GameSymbols::Vec3 eye{};
+                        if(vehiclecabin::ReadSeatEye(g,seatedModel,seatedAppearance,
+                                                    passengerSeat,&eye)) {
+                            cachedSeatLocal={eye.x,eye.y,eye.z};
+                            cachedSeatLocalValid=true;
+                            TraceTracking("NEUTRAL SEAT",cachedSeatLocal);
+                        }
+                    }
+                    const bool modelSeat=!rearPassenger && cachedSeatLocalValid &&
+                        (seatedAppearance==1 || seatedAppearance==2);
+                    const bool stableSeat=stableSanchez || modelSeat ||
+                        (combineCabin && cachedSeatLocalValid);
                     V3 seatedHead{};
                     bool seatedHeadValid = false;
                     if (!stableSeat && g.CPed_GetBonePosition) {
@@ -3987,7 +4001,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                         static double smoothedMs = 0.0;
                         const double nowMs = NowMs();
                         const float target = anchorPosition.z;
-                        if (smoothedVehicle != vehicle) {
+                        if (smoothedVehicle != vehicle || resetSeat || !seatTransition.centered) {
                             smoothedVehicle = vehicle;
                             smoothedZ = target;
                             lastTargetZ = target;
@@ -4074,6 +4088,15 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
 
                 if (anchorReady) {
 
+                        // One transition owner, after both the game and seat
+                        // geometry are ready. A manual tracking reset keeps the
+                        // same seat identity and cannot reopen bone capture.
+                        if(seatTransition.Center(vehicle && !enteringVehicle &&
+                            !thirdPersonView && vehicleBasisValid && cachedSeatLocalValid)) {
+                            RequestRecenter();
+                            LOGI("[camera] centered seated player model=%d seat=%d",seatModel,passengerSeat);
+                        }
+
                         // Use a STABLE body yaw, not the live ped heading. Anchoring
                         // the camera to the heading fed movement back into the
                         // camera (move -> ped turns -> camera turns -> move turns)
@@ -4098,16 +4121,6 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                         const bool useVehicleFrame =
                             vehicle != nullptr || enteringVehicle;
                         if (useVehicleFrame) {
-                            // Vice City re-latches the physical head yaw when
-                            // first-person switches from the ped frame to the
-                            // vehicle frame. Do the equivalent here: the pose
-                            // at the moment of entry becomes straight ahead in
-                            // the cockpit instead of preserving an arbitrary
-                            // room-space yaw from on-foot play.
-                            if (!g_wasDriving) {
-                                g_origin.valid = false;
-                                LOGI("[camera] vehicle entry relatching physical facing");
-                            }
                             // DEFAULT driving follows the vehicle continuously;
                             // head pose remains free on top. Snap-turn is an on-foot
                             // locomotion feature and must not fight steering.
@@ -4361,7 +4374,6 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                         // Publish the yaw-only body frame for the weapon-in-hand
                         // matrix (it must not inherit head pitch/roll).
                         g_vrBase = base; g_vrBaseValid = true;
-                        driving::RefreshVisualTracking();
                 }
             }
 
@@ -4474,6 +4486,9 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
             const Q  headOri{hq[0], hq[1], hq[2], hq[3]};
 
             EnsureOrigin(headPos, headOri);
+            // Seat centering changes both origin and base. Reproject cockpit
+            // hands only after the new pair is valid in this tracking frame.
+            if(g_vrBaseValid)driving::RefreshVisualTracking();
             V3 relPos; Q relOri;
             RelativePose(headPos, headOri, relPos, relOri);
             const CamBasis vr = BuildVrCamera(base, relPos, relOri);
@@ -30531,7 +30546,7 @@ bool GroundWalkControlsActive() {
 void RequestRecenter() {
     g_holsterBody.Invalidate();
     xr::SetHolsterMarkers(nullptr, 0);
-    ++g_cameraResetSerial; // also invalidates the vehicle-local seat cache
+    ++g_cameraResetSerial; // resets physical interactions, not seat geometry
     TraceTracking("RECENTER",g_origin.pos);
     g_duckLatched=false;g_crouchBlend=0.0f;
     physicalweapon::ResetTracking();

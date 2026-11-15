@@ -15,6 +15,33 @@ struct Recovery {
         return true;
     }
 };
+// Physical tracking resets do not change the identity/geometry of a seat.
+struct SeatKey {
+    void* vehicle{};
+    void* ped{};
+    void* pool{};
+    void* objects{};
+    const void* flags{};
+    int model{-1};
+    int seat{-2};
+    std::uint8_t generation{};
+    bool operator==(const SeatKey&) const = default;
+};
+struct SeatTransition {
+    SeatKey key{};
+    std::uint64_t serial{};
+    bool centered{};
+    bool Update(const SeatKey& current) {
+        if(current==key)return false;
+        key=current;++serial;centered=false;
+        return true;
+    }
+    bool Center(bool ready) {
+        if(!ready || !key.vehicle || key.seat < -1 || centered)return false;
+        centered=true;
+        return true;
+    }
+};
 struct SeatLatch {
     void* vehicle{};
     std::uint64_t resetSerial{~std::uint64_t{0}};

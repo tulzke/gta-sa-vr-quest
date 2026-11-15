@@ -58,7 +58,7 @@ void* Lookup(const char* name,int* id){CHECK(!std::strcmp(name,"combine"));*id=f
 void SetSeat(V3 value){void* structure=combineStructure;std::memcpy(combineModel+0x90,&structure,sizeof(structure));std::memcpy(combineStructure+0x30,&value,sizeof(value));}
 
 void Bone(void*,GameSymbols::Vec3* out,unsigned,bool){++boneCalls;*out={liveHead.x,liveHead.y,liveHead.z};}
-V3 Sample(V3 vehiclePosition,V3 vehicleRight,V3 vehicleForward,V3 vehicleUp,bool rearPassenger=false){
+V3 Sample(V3 vehiclePosition,V3 vehicleRight,V3 vehicleForward,V3 vehicleUp,bool rearPassenger=false,int passengerSeat=-1){
  void* vehicle=bike;void* ped=bike;bool vehicleBasisValid=true,usedSeatedHead=false;
  V3 anchorPosition{};const char* anchorSource="";constexpr float kVehicleFallbackEyeHeight=.85f;
 '''+cam[a:z]+r'''
@@ -123,7 +123,7 @@ int main(){
  }
  CHECK(boneCalls==0);
  auto turn=Sample({0,0,0},{0,-1,0},{1,0,0},{0,0,1});CHECK(std::abs(turn.x+.14f)<.0001f && turn.y==0);
- // Other bikes and Just Business retain their native passenger/seat path.
+ // Just Business retains its special live passenger/seat path.
  seatLatch.Begin(nullptr,0,0);liveHead={0,-.5f,1.2f};Sample({0,0,0},{1,0,0},{0,1,0},{0,0,1},true);CHECK(boneCalls==1);
  // Combine seat coordinates cover lateral, forward and vertical offsets.
  g.CModelInfo_GetModelInfoByName=Lookup;appearance=1;model=532;std::memcpy(bike+0x32,&model,2);
@@ -152,7 +152,54 @@ int main(){
  CHECK(vehiclecabin::MigrateCombineSeat(532,1,side,forward,height) && side==0 && forward==0 && height==0);
  CHECK(!vehiclecabin::MigrateCombineSeat(532,1,side,forward,height)); // idempotent
  side=-97;forward=290;height=43;CHECK(!vehiclecabin::MigrateCombineSeat(532,1,side,forward,height));CHECK(side==-97 && forward==290 && height==43);
- std::puts("PASS: legacy/custom bindings, L3 toggle/hold/release/chord/menu/crouch, normal movement axes unchanged; actual mobile sprint hook after button release, vehicle A retained, Sanchez motion/turn/recenter invariant, passenger camera preserved; combine cab, movement/tilt/recenter/stale bones, invalid model/dummy guards, exact shipped-preset migration");
+ // Loaded model seating, independent of stale/moving rider bones. Exercise
+ // the production camera from the very first frame, including immediate start.
+ void* modelInfos[612]{};g.CModelInfo_ms_modelInfoPtrs=modelInfos;
+ const V3 neutralDummies[]={{0,-.40057078f,.46997839f},{-.01151464f,-.33972549f,.42754596f},
+                          {0,-.33672217f,.417f},{0,-.268f,.536f}};
+ const std::uint16_t bikeModels[]={522,481,462,510};
+ for(int m=0;m<4;++m){
+  model=bikeModels[m];appearance=2;std::memcpy(bike+0x32,&model,2);
+  modelInfos[model]=combineModel;SetSeat(neutralDummies[m]);
+  seatLatch.Begin(nullptr,200+m,0);seatLatch.Begin(bike,200+m,0);
+  const int beforeBones=boneCalls;
+  for(int frame=0;frame<150;++frame){
+   now=frame*30.;liveHead={.4f,float(frame%3)-.7f,float(frame%4)*.5f};
+   // A tracking recenter changes no seat identity/serial.
+   CHECK(!seatLatch.Begin(bike,200+m,now));
+   const V3 pos{float(frame),float(frame*2),4};
+   const auto eye=Sample(pos,{1,0,0},{0,1,0},{0,0,1});
+   CHECK(std::abs(eye.x-pos.x)<.0001f);
+   CHECK(std::abs(eye.y-pos.y-neutralDummies[m].y-.06f)<.0001f);
+   CHECK(std::abs(eye.z-pos.z-neutralDummies[m].z-.55f)<.0001f);
+  }
+  CHECK(boneCalls==beforeBones);
+ }
+ // All four car seats use the correct row dummy and left/right mirroring.
+ model=411;appearance=1;std::memcpy(bike+0x32,&model,2);modelInfos[model]=combineModel;
+ SetSeat({.42f,.2f,.3f});const V3 rear{.39f,-.8f,.35f};std::memcpy(combineStructure+0x3c,&rear,sizeof(rear));
+ for(int seat=-1;seat<3;++seat){
+  seatLatch.Begin(nullptr,300+seat,0);seatLatch.Begin(bike,300+seat,0);
+  const auto eye=Sample({0,0,0},{1,0,0},{0,1,0},{0,0,1},false,seat);
+  CHECK(std::abs(eye.x-((seat==-1||seat==1)?-1.f:1.f)*(seat<1?.42f:.39f))<.0001f);
+  CHECK(std::abs(eye.y-(seat<1?.2f:-.8f))<.0001f);
+  CHECK(std::abs(eye.z-(seat<1?.9f:.95f))<.0001f);
+ }
+ // A bike passenger uses its own rear dummy, including on Sanchez.
+ appearance=2;model=468;modelInfos[model]=combineModel;std::memcpy(bike+0x32,&model,2);
+ seatLatch.Begin(nullptr,400,0);seatLatch.Begin(bike,400,0);
+ auto passenger=Sample({0,0,0},{1,0,0},{0,1,0},{0,0,1},false,0);
+ CHECK(passenger.x==0 && std::abs(passenger.y+.74f)<.0001f && std::abs(passenger.z-.9f)<.0001f);
+ // Unsupported/malformed data is rejected without touching the output.
+ GameSymbols::Vec3 invalidEye{9,8,7};
+ CHECK(!vehiclecabin::ReadSeatEye(g,399,2,-1,&invalidEye));
+ CHECK(!vehiclecabin::ReadSeatEye(g,612,2,-1,&invalidEye));
+ CHECK(!vehiclecabin::ReadSeatEye(g,468,2,1,&invalidEye));
+ CHECK(!vehiclecabin::ReadSeatEye(g,468,3,-1,&invalidEye));
+ SetSeat({0,0,std::numeric_limits<float>::quiet_NaN()});
+ CHECK(!vehiclecabin::ReadSeatEye(g,468,2,-1,&invalidEye) && invalidEye.x==9);
+ SetSeat({0,0,0});CHECK(!vehiclecabin::ReadSeatEye(g,468,2,-1,&invalidEye));
+ std::puts("PASS: controls/sprint and special cabins; production neutral seat camera: NRG/BMX/scooter/MTB immediate start, motion/stale bones, tracking recenter, four car seats, Sanchez passenger, malformed model data");
 }
 '''
 (O/'test.cpp').write_text(code,encoding='utf8')

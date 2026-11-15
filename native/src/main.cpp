@@ -1131,21 +1131,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         if (recenterChord && !recenterPrev) vrcam::RequestRecenter();
         recenterPrev = recenterChord;
 
-        // Auto-recenter on the on-foot -> in-vehicle transition: getting into a
-        // car often leaves the driver yawed off the wheel, and players were
-        // reaching for the manual L3+R3 recenter every time they sat down. The
-        // player naturally faces the windshield as they take the seat, so
-        // snapping "straight ahead" to the current head yaw on the rising edge
-        // puts the wheel in front of them. Edge-triggered (fires once per
-        // entry); exiting is left alone — on-foot forward is body-relative.
-        static bool inVehiclePrev = false;
-        const bool inVehicleNow =
-            g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false) != nullptr;
-        if (inVehicleNow && !inVehiclePrev) {
-            vrcam::RequestRecenter();
-            LOGI("[vr] auto-recenter on vehicle entry");
-        }
-        inVehiclePrev = inVehicleNow;
+        // Automatic seat centering is owned by the camera after the game has
+        // completed boarding and a valid first-person seat anchor is ready.
 
         // Both grips + R3: quick first/third person toggle for the CURRENT
         // vehicle, no VR-menu trip. Only in a vehicle; L3+R3 keeps priority

@@ -36,7 +36,9 @@ offset = between(cam, '                        const V3 heightAxis =',
 projection = between(drive, '    const V3 worldCenter=wheel.center;',
                      '    static int loggedModel=-1;')
 # The production call must follow publication of the current camera frame.
-assert 'g_vrBase = base; g_vrBaseValid = true;\n                        driving::RefreshVisualTracking();' in cam
+publish = cam.index('g_vrBase = base; g_vrBaseValid = true;', cam.index('void OnCopyCameraMatrixToRWCam('))
+origin = cam.index('            EnsureOrigin(headPos, headOri);', publish)
+assert publish < origin < cam.index('if(g_vrBaseValid)driving::RefreshVisualTracking();', origin)
 
 code = r'''
 #include "Driving.h"
@@ -47,6 +49,8 @@ code = r'''
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <map>
+#include <atomic>
 using namespace savr;
 #define CHECK(e) do{if(!(e)){std::fprintf(stderr,"FAIL %d %s\n",__LINE__,#e);std::exit(3);}}while(0)
 struct V3{float x{},y{},z{};};
@@ -80,10 +84,14 @@ bool thirdPerson=false;
 bool ThirdPersonViewActive(){return thirdPerson;}
 bool CarCameraTiltEnabled(){return tiltEnabled;}
 bool BoatCameraTiltEnabled(){return false;}
+bool GetPassengerView(int,int,int,float*){return false;}
+int GetModeForVehicleType(int){return 0;}
 }
 ''' + function(cam, 'V3 GameVectorToTracking(') + r'''
 bool WorldPointToTracking(V3 p,V3* out){*out=g_origin.pos+GameVectorToTracking(p-g_vrBase.pos);return true;}
 unsigned char entity[0x900]{},chassis[0x100]{},otherFrame[0x100]{};
+bool resetSeat=false;
+struct{bool centered=true;}seatTransition;
 bool entering=false,driver=true;void* playerVehicle=entity;
 void* PlayerVehicle(int,bool){return playerVehicle;}void* PlayerPed(int){return entity;}
 bool Entering(){return entering;}bool IsDriver(const void*,const void*){return driver;}
@@ -96,7 +104,8 @@ Basis Camera(V3 eye,V3 calibration,bool thirdPersonView=false,bool enteringVehic
  float yaw=std::atan2(-vf.x,vf.y);
  V3 fwd{-std::sin(yaw),std::cos(yaw),0},right{std::cos(yaw),std::sin(yaw),0};
  Basis base{right*-1,fwd,{0,0,1},{}};
- bool aircraftTilt=false,rearPassenger=false;
+ bool aircraftTilt=false,rearPassenger=false,seatedPassenger=false,vehiclePositionValid=true;
+ int passengerSeat=0;V3 vehiclePosition=vp;
  float seatSide=calibration.x,seatDistance=calibration.y,seatHeight=calibration.z;
  constexpr float kEyeForward=.12f;
 ''' + predicate + smoothing + tilt + offset + r'''
@@ -117,10 +126,17 @@ auto g_origComponentRotation=NativeComponentRotation;
 void TraceCombineCabin(float,const void*){}
 ''' + function(drive, 'void OnComponentRotation(') + r'''
 std::mutex g_stateMutex;WheelVisualState g_visual;
+std::mutex g_modelMutex;
+struct Calibration{float mirrorDefault[3]{};bool mirrorDefaultValid{};};
+std::map<int,Calibration>g_modelCalibration;
+struct{void Reset(){}}g_liftLever;std::atomic<float>g_liftAxis{};
+bool BuildLiftTracking(WheelVisualState&,void*){return false;}
+bool IsQuadBikeModelId(int model){return model==471;}
 bool available=true;int wheelCalls=0,bikeCalls=0;bool g_wheelVisible=true;
 bool BuildWheelTracking(WheelVisualState* visual){
  ++wheelCalls;if(!available)return false;
  int modelId=532;
+ bool planeYoke=false;
  V3 worldNormal=vr*.0000001f+vf*.3818912f+vu*-.9242073f;
  V3 worldRight=vr,worldUp=Normalized(Cross(worldRight,worldNormal));
  Wheel wheel{World({.0252865f,3.2100763f,2.4369435f}),worldRight,worldUp,worldNormal,.2177257f};
@@ -128,6 +144,7 @@ bool BuildWheelTracking(WheelVisualState* visual){
  return true;
 }
 bool BuildBikeTracking(WheelVisualState* visual){++bikeCalls;return true;}
+bool BuildQuadTracking(WheelVisualState* visual){return BuildBikeTracking(visual);}
 void FillHandleVisuals(WheelVisualState* v){
  for(int h=0;h<2;++h)for(int a=0;a<3;++a)v->handlePosition[h][a]=v->center[a]+v->right[a]*(h?1:-1)*v->radius;
 }
