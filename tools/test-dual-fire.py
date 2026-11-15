@@ -26,6 +26,8 @@ PRELUDE=r"""
 #include "PhysicalGunCycle.h"
 #include "PairedWeapons.h"
 namespace pairedweapon=savr::pairedweapon;
+namespace arcadereload=savr::arcadereload;
+arcadereload::Gesture g_reloadGestures[2];
 thread_local int g_directHand=-1;
 namespace vrfire {int DirectFiringHand(){return g_directHand;}}
 using savr::vrfire::AdvancePhysicalGun;
@@ -86,6 +88,21 @@ std::atomic<PhysicalFireQuery> g_physicalFireQuery{QueryPhysicalFireHand};
 namespace xr {
 struct InputState {bool b=false;float triggers[2]{};};
 void GetInput(InputState& in){in.triggers[0]=::triggers[0];in.triggers[1]=::triggers[1];}
+struct HandPose {bool valid=true,aimValid=true;float gripPos[3]{},gripOri[4]{0,0,0,1};};
+HandPose tracked[2];bool focused=true,tracking=true;std::uint64_t epoch=1;int haptics[2]{};
+bool IsSessionFocused(){return focused;}
+void TriggerHaptic(int hand,float,float,float){++haptics[hand];}
+}
+namespace physicalweapon {
+struct TrackingPose {float right[3]{0,0,-1};};
+bool GetInteractionTrackingSnapshot(float*,float*,xr::HandPose out[2],std::uint64_t* epoch){
+    std::copy_n(xr::tracked,2,out);*epoch=xr::epoch;return xr::tracking;
+}
+bool GetHeldVisualPoseTracking(int hand,int,TrackingPose* out){
+    const auto& q=xr::tracked[hand].gripOri;
+    const auto barrel=arcadereload::Rotate({q[0],q[1],q[2],q[3]},{0,0,-1});
+    out->right[0]=barrel.x;out->right[1]=barrel.y;out->right[2]=barrel.z;return true;
+}
 }
 namespace vehicleentry {int SeatIndex(void*,void*){return -1;}}
 bool GetPhysicalRay(void*,int type,Vec3& origin,Vec3& direction){
@@ -102,6 +119,7 @@ void Setup(int h,int slot,int type,unsigned clip,unsigned total,unsigned capacit
     *reinterpret_cast<float*>(info[type]+0x44)=.1f;
 }
 int main(){
+    arcadereload::SetMode(arcadereload::AUTOMATIC);
     player[0x8dc]=7;
     Setup(0,2,22,1,40,34,2000,0x800);Setup(1,4,28,10,90,100,1300,0x800);
     triggers[0]=triggers[1]=1;
@@ -189,7 +207,7 @@ def compile_run(source, name):
 def main():
     names=["PlayerFireEnabled","SupportedHitscan","AreaEffectWeapon","SupportedDirectFire",
            "AutomaticHitscan","PhysicalFireIntervalMs","PhysicalWeaponInfo","MagazineCapacity",
-           "OnWeaponUpdate","CorrectPhysicalReload","ResetDirectTrigger","DetonatorTriggerReady",
+           "OnWeaponUpdate","PhysicalReloadDuration","CorrectPhysicalReload","UpdateReloadGesture","ResetDirectTrigger","DetonatorTriggerReady",
            "GetPhysicalTrigger","UpdateHand","Update"]
     constants="\n".join(re.findall(r"^constexpr (?:std::uintptr_t|float) \w+ = .*?;",SOURCE,re.M))
     output=ROOT/"build/dual-fire-tests";output.mkdir(parents=True,exist_ok=True)

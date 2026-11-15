@@ -2,6 +2,7 @@
 #include "JustBusiness.h"
 #include "VrFire.h"
 #include "PhysicalGunCycle.h"
+#include "ArcadeReload.h"
 #include "PairedWeapons.h"
 #include "WeaponRecoil.h"
 #include "Catalyst.h"
@@ -53,6 +54,7 @@ std::atomic<bool> g_directTriggerDown[2]{};
 bool g_detonatorReleaseRequired[2]{true, true};
 std::uint32_t g_directNextFireMs[2]{};
 int g_directWeaponType[2]{-1, -1};
+arcadereload::Gesture g_reloadGestures[2];
 
 constexpr std::uint32_t kWeaponUpdatePrologue[4] = {
     0xA9BB7BFD, 0xA90167FA, 0xA9025FF8, 0xA90357F6,
@@ -186,7 +188,9 @@ void OnWeaponUpdate(void* object, void* ped) {
             const int type = *reinterpret_cast<const int*>(weapon);
             if ((g_managedGunType[slot] != type && !pairedweapon::Enabled(slot)) || !SupportedHitscan(type)) break;
             auto& state = *reinterpret_cast<std::uint32_t*>(weapon + 4);
-            AdvancePhysicalGun(state, *reinterpret_cast<std::uint32_t*>(weapon + 8),
+            const int physicalSlot=pairedweapon::insideShot && g_directHand>=0
+                ? physicalweapon::HeldSlot(g_directHand) : slot;
+            arcadereload::Advance(physicalSlot,type,state, *reinterpret_cast<std::uint32_t*>(weapon + 8),
                 pairedweapon::insideShot ? *reinterpret_cast<const std::uint32_t*>(weapon + 12) : pairedweapon::Available(ped,slot),
                 *reinterpret_cast<const std::uint32_t*>(weapon + 16),
                 *g.CTimer_m_snTimeInMilliseconds, MagazineCapacity(ped, type));
@@ -199,19 +203,57 @@ void OnWeaponUpdate(void* object, void* ped) {
     g_origWeaponUpdate(object, ped);
 }
 
-void CorrectPhysicalReload(void* ped, std::uint8_t* weapon, int type, std::uint32_t now) {
-    if (!SupportedHitscan(type) ||
-        *reinterpret_cast<const std::uint32_t*>(weapon + 4) != 2u) return;
+unsigned PhysicalReloadDuration(void* ped, int type) {
     const void* info = PhysicalWeaponInfo(ped, type);
-    if (!info || !g.CWeaponInfo_GetWeaponReloadTime) return;
+    if (!info || !g.CWeaponInfo_GetWeaponReloadTime) return 0;
     // GetWeaponReloadTime is read-only in retail 2.11.311. Clear the native
     // twin flag in a local copy: this hand reloads ONE physical gun.
     alignas(16) std::uint8_t singleInfo[0x70];
     std::memcpy(singleInfo, info, sizeof(singleInfo));
     *reinterpret_cast<std::uint32_t*>(singleInfo + 0x18) &= ~0x800u;
     const int duration = g.CWeaponInfo_GetWeaponReloadTime(singleInfo);
-    *reinterpret_cast<std::uint32_t*>(weapon + 16) =
-        now + static_cast<unsigned>(std::clamp(duration, 1, 30000));
+    return static_cast<unsigned>(std::clamp(duration, 1, 30000));
+}
+
+void CorrectPhysicalReload(void* ped, std::uint8_t* weapon, int type, std::uint32_t now) {
+    if (!SupportedHitscan(type) ||
+        *reinterpret_cast<const std::uint32_t*>(weapon + 4) != 2u) return;
+    const unsigned duration=PhysicalReloadDuration(ped,type);
+    if (duration) *reinterpret_cast<std::uint32_t*>(weapon + 16)=now+duration;
+}
+
+void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
+                         float trigger, std::uint32_t now) {
+    auto& gesture=g_reloadGestures[hand];
+    const int slot=physicalweapon::HeldSlot(hand);
+    if (arcadereload::Completed(slot) &&
+        static_cast<unsigned>(now-pairedweapon::Field(weapon,16))<150u)
+        xr::TriggerHaptic(hand,.35f,0,45);
+    const unsigned clip=pairedweapon::Field(weapon,8),total=pairedweapon::Field(weapon,12);
+    xr::HandPose tracked[2]{};
+    float head[3]{},orientation[4]{};
+    std::uint64_t epoch{};
+    physicalweapon::TrackingPose pose{};
+    if (!arcadereload::Manual(type) || trigger>=.25f ||
+        arcadereload::Prepare(slot,type).requested || clip>=MagazineCapacity(ped,type) || total<=clip ||
+        !xr::IsSessionFocused() ||
+        !physicalweapon::GetInteractionTrackingSnapshot(head,orientation,tracked,&epoch) ||
+        !tracked[hand].valid || !tracked[hand].aimValid ||
+        !physicalweapon::GetHeldVisualPoseTracking(hand,slot,&pose)) {
+        gesture.Reset(); return;
+    }
+    const auto& q=tracked[hand].gripOri;
+    const auto& p=tracked[hand].gripPos;
+    const arcadereload::Sample sample{{p[0],p[1],p[2]},
+        {pose.right[0],pose.right[1],pose.right[2]}, {q[0],q[1],q[2],q[3]}};
+    if (!gesture.Update(sample,now*.001,slot*64+type,arcadereload::GetMode(),epoch)) return;
+    const unsigned duration=PhysicalReloadDuration(ped,type);
+    if (duration && arcadereload::Begin(slot,type,pairedweapon::Field(weapon,4),clip,total,
+            pairedweapon::Field(weapon,16),now,MagazineCapacity(ped,type),duration)) {
+        xr::TriggerHaptic(hand,.2f,0,25);
+        LOGI("[vr.reload] gesture mode=%d hand=%d type=%d slot=%d duration=%u",
+             arcadereload::GetMode(),hand,type,slot,duration);
+    }
 }
 
 void ResetDirectTrigger() {
@@ -220,6 +262,7 @@ void ResetDirectTrigger() {
         g_directNextFireMs[hand] = 0;
         g_directWeaponType[hand] = -1;
         g_detonatorReleaseRequired[hand] = true;
+        g_reloadGestures[hand].Reset();
     }
 }
 
@@ -849,6 +892,7 @@ void UpdateHand(int requestedHand) {
         g_directNextFireMs[requestedHand] = 0;
         g_directWeaponType[requestedHand] = -1;
         g_detonatorReleaseRequired[requestedHand] = true;
+        g_reloadGestures[requestedHand].Reset();
     };
     if (!g_installed.load(std::memory_order_acquire) ||
         !PlayerFireEnabled() ||
@@ -891,6 +935,7 @@ void UpdateHand(int requestedHand) {
         g_managedGunType[slot] = weaponType;
         OnWeaponUpdate(weapon, ped);
     }
+    UpdateReloadGesture(ped,weapon,weaponType,hand,trigger,*g.CTimer_m_snTimeInMilliseconds);
     if (!DetonatorTriggerReady(weaponType, hand, trigger)) return;
 
     const bool wasDown = g_directTriggerDown[hand].load(std::memory_order_relaxed);
@@ -1031,10 +1076,11 @@ void Update(bool blocked) {
             g_directNextFireMs[hand] = 0;
             g_directWeaponType[hand] = -1;
             g_detonatorReleaseRequired[hand] = true;
+            g_reloadGestures[hand].Reset();
             continue;
         }
         const int type = pairedweapon::Type(ped,slot);
-        if (!SupportedDirectFire(type)) continue;
+        if (!SupportedDirectFire(type)) { g_reloadGestures[hand].Reset(); continue; }
         active = static_cast<std::int8_t>(pairedweapon::Base(slot));
         g_directHand = hand;
         {

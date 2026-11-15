@@ -140,6 +140,10 @@ int main(){
  using namespace savr::calib;
  {std::ofstream f("recoil-calib.ini");f<<"recoil_level 1\n";}
  Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==savr::recoil::kDefaultRecoilLevel);
+ assert(savr::arcadereload::GetMode()==savr::arcadereload::DOWN_UP);
+ SetReloadMode(savr::arcadereload::TWIST);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::TWIST);
+ CycleReloadMode(1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::AUTOMATIC);
+ CycleReloadMode(-1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::TWIST);
  SetPhysicalRecoilLevel(3);Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==3);
  CyclePhysicalRecoil(1);assert(PhysicalRecoilLevel()==0);
  Init();assert(PhysicalRecoilLevel()==0 && RecoilLevel()==1);

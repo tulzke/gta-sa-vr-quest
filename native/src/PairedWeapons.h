@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PhysicalGunCycle.h"
+#include "ArcadeReload.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -35,7 +36,7 @@ inline void* owner{};
 inline thread_local bool insideShot{};
 
 inline bool Enabled(int slot) { return Valid(slot) && copies[Base(slot)].enabled; }
-inline void Reset() { for (auto& copy : copies) copy = {}; owner = nullptr; }
+inline void Reset() { for (auto& copy : copies) copy = {}; owner = nullptr; arcadereload::ResetGuns(); }
 inline void Refresh(void* ped, unsigned mask, const unsigned capacities[kNativeSlots], unsigned now = 0) {
     if (owner != ped) { Reset(); owner = ped; }
     for (int slot = 1; slot < kNativeSlots; ++slot) {
@@ -45,6 +46,7 @@ inline void Refresh(void* ped, unsigned mask, const unsigned capacities[kNativeS
         const bool enabled = (mask & (1u << slot)) && TwinType(type);
         if (type != static_cast<int>(Field(copy.bytes, 0))) copy = {};
         if (enabled && !copy.enabled) {
+            arcadereload::guns[slot+kNativeSlots]={};
             // The original total stays authoritative, including BOTH magazines.
             // Reserve rounds are loaded into the new copy without minting ammo.
             std::memcpy(copy.bytes, native, 0x20);
@@ -58,7 +60,7 @@ inline void Refresh(void* ped, unsigned mask, const unsigned capacities[kNativeS
         if (enabled) Field(copy.bytes, 8) = std::min(Field(copy.bytes, 8), Field(native, 12) - std::min(Field(native, 12),Field(native, 8)));
         copy.enabled = enabled;
         if (!enabled) Field(copy.bytes, 8) = 0;
-        else vrfire::AdvancePhysicalGun(Field(copy.bytes, 4), Field(copy.bytes, 8),
+        else arcadereload::Advance(slot+kNativeSlots,type,Field(copy.bytes, 4), Field(copy.bytes, 8),
             Field(native, 12) - Field(native, 8), Field(copy.bytes, 16), now, capacities[slot]);
     }
 }

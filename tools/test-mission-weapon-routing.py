@@ -32,6 +32,8 @@ PRELUDE = r"""
 #include <cstring>
 #include <limits>
 #include <initializer_list>
+#include "ArcadeReload.h"
+savr::arcadereload::Gesture g_reloadGestures[2];
 struct Vec3 { float x{}, y{}, z{}; };
 alignas(16) std::uint8_t ped[0xa00]{}, camera[0x1000]{}, pad[0x140]{};
 void* FindPed(int) { return ped; }

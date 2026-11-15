@@ -9,9 +9,10 @@ namespace savr::vrfire {
 // slot owns its clock, including during a hand transfer or holster operation.
 inline void AdvancePhysicalGun(std::uint32_t& state, std::uint32_t& clip,
                                std::uint32_t total, std::uint32_t deadline,
-                               std::uint32_t now, std::uint32_t capacity) {
+                               std::uint32_t now, std::uint32_t capacity,
+                               bool allowReload = true) {
     clip = std::min({clip, total, capacity});
-    if ((state == 1u || state == 2u) &&
+    if ((state == 1u || (state == 2u && allowReload)) &&
         static_cast<std::int32_t>(now - deadline) > 0) {
         if (state == 2u) clip = std::min(total, capacity);
         state = total ? 0u : 3u;
