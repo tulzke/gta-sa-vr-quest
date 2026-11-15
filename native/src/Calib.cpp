@@ -269,6 +269,7 @@ void Init() {
     g_recoilLevel.store(2, std::memory_order_relaxed);
     g_physicalRecoilLevel.store(recoil::kDefaultRecoilLevel, std::memory_order_relaxed);
     arcadereload::SetMode(arcadereload::DOWN_UP);
+    arcadereload::SetSound(arcadereload::BOLT);
     for(int type=0;type<kMaxWeapons;++type)for(int skill=0;skill<3;++skill)
         g_recoilTuning[type][skill]=recoil::Defaults(type,skill);
 
@@ -320,6 +321,10 @@ void Init() {
             continue;
         }
         int state = 0;
+        if (std::sscanf(line, "arcade_reload_sound %d", &state) == 1) {
+            arcadereload::SetSound(state);
+            continue;
+        }
         if (std::sscanf(line, "arcade_reload_mode %d", &state) == 1) {
             arcadereload::SetMode(state);
             continue;
@@ -455,6 +460,7 @@ void Save() {
     std::fprintf(f, "recoil_level %d\n", RecoilLevel());
     std::fprintf(f, "physical_recoil_level %d\n", PhysicalRecoilLevel());
     std::fprintf(f, "arcade_reload_mode %d\n", arcadereload::GetMode());
+    std::fprintf(f, "arcade_reload_sound %d\n", arcadereload::GetSound());
     std::fputs("# recoil_weapon_skill <type> <skill:0=poor,1=gangster,2=hitman> <vertical_deg> <jitter_deg> <shoulder_mm> <two_hand_reduction_pct>\n",f);
     for(int type=0;type<kMaxWeapons;++type)if(recoil::Supported(type))for(int skill=0;skill<3;++skill) {
         const auto& t=g_recoilTuning[type][skill];
@@ -602,6 +608,15 @@ void SetReloadMode(int mode) {
     const int previous=arcadereload::GetMode();
     arcadereload::SetMode(mode);
     if (previous!=arcadereload::GetMode()) Save();
+}
+void CycleReloadSound(int direction) {
+    if (!direction) return;
+    SetReloadSound((arcadereload::GetSound()+(direction>0?1:arcadereload::SOUND_COUNT-1))%arcadereload::SOUND_COUNT);
+}
+void SetReloadSound(int sound) {
+    const int previous=arcadereload::GetSound();
+    arcadereload::SetSound(sound);
+    if (previous!=arcadereload::GetSound()) Save();
 }
 
 int PhysicalRecoilLevel() {

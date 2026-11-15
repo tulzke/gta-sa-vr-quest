@@ -40,6 +40,7 @@ int clock_gettime(int,timespec* ts){ts->tv_sec=1;ts->tv_nsec=0;return 0;}
 struct Vec3 {float x{},y{},z{};};
 alignas(16) std::uint8_t player[0xa00]{},pad[0x140]{},info[64][0x70]{};
 unsigned tick=100; int shots[2]{},held[2]{2,4}; float triggers[2]{};
+int reloadSounds[2]{},lastReloadEvent{};
 int checks=0;
 void Check(bool b,const char* msg){++checks;if(!b){std::fprintf(stderr,"FAIL: %s\n",msg);std::exit(1);}}
 void* FindPed(int){return player;} void* GetPad(int){return pad;}
@@ -47,6 +48,11 @@ void* NoVehicle(int,bool){return nullptr;}
 int Skill(void*,int){return 2;}
 void* GetInfo(int type,signed char){return info[type];}
 int ReloadTime(void* ptr){auto* p=static_cast<std::uint8_t*>(ptr);return (*reinterpret_cast<unsigned*>(p+0x18)&0x800)?500:*reinterpret_cast<int*>(p+0x60);}
+void ReloadSound(void* engine,int event,int type,void* parent){
+    Check(engine==player && parent==player,"reload sound uses real audio engine and player entity");
+    Check(type==31 && (event==146 || event==147),"reload sound is a short native weapon one-shot");
+    ++reloadSounds[g_directHand];lastReloadEvent=event;
+}
 bool FakeFire(void* object,void*,Vec3* origin,Vec3*,void*,Vec3*,Vec3*){
     auto* p=static_cast<std::uint8_t*>(object); auto& clip=*reinterpret_cast<unsigned*>(p+8);
     auto& total=*reinterpret_cast<unsigned*>(p+12); if(!clip||!total)return false;
@@ -58,6 +64,8 @@ bool FakeFire(void* object,void*,Vec3* origin,Vec3*,void*,Vec3*,Vec3*){
     *reinterpret_cast<unsigned*>(p+16)=tick+(clip?100:500);return true;
 }
 struct Symbols {
+    void* AudioEngine=player;
+    void (*CAudioEngine_ReportWeaponEvent)(void*,int,int,void*)=ReloadSound;
     void* (*FindPlayerPed)(int)=FindPed;
     void* (*FindPlayerVehicle)(int,bool)=NoVehicle;
     void* (*CPad_GetPad)(int)=GetPad;

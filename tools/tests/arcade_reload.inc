@@ -65,24 +65,24 @@ void ArcadeTests() {
     const auto frame=[] {tick+=10;Update(false);};
     for(int i=0;i<25;++i)frame();
     for(int i=1;i<=12;++i){Pose(0,-i*.01f);frame();}
-    Check(!guns[2].requested,"downward half alone does not start reload");
+    Check(Field(2,8)==0 && reloadSounds[0]==0,"downward half alone does not reload or play a sound");
     for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
-    Check(guns[2].requested && Field(2,8)==0,"return starts reload without instantly filling magazine");
-    Check(Field(2,16)>tick && Field(2,16)<=tick+2000,"gesture uses single-gun skill reload duration");
-    int right=shots[1];triggers[1]=1;tick+=100;Update(false);
-    Check(shots[1]==right+1 && Field(2,8)==0,"other hand keeps firing during gesture reload");
-    triggers[1]=0;tick=Field(2,16)+1;Update(false);
-    Check(Field(2,8)==17 && Field(2,12)==39,"gesture reload preserves reserve and single-gun capacity");
-    Check(!guns[2].requested,"completed reload releases request for next empty magazine");
+    Check(Field(2,8)==17 && Field(2,4)==0,"return instantly fills magazine and makes weapon ready");
+    Check(Field(2,16)<=tick,"gesture leaves no reload deadline to wait for");
+    Check(reloadSounds[0]==1 && lastReloadEvent==147,"completed gesture plays bolt confirmation once");
+    Check(Field(2,12)==39,"instant reload preserves total ammunition");
+    int left=shots[0],right=shots[1];triggers[0]=triggers[1]=1;tick+=10;Update(false);
+    Check(shots[0]==left+1 && shots[1]==right+1,"both guns can shoot immediately after gesture");
+    triggers[0]=triggers[1]=0;frame();
     const int pulses=xr::haptics[0];tick+=10;Update(false);
-    Check(xr::haptics[0]==pulses,"completion pulse is not repeated");
+    Check(xr::haptics[0]==pulses && reloadSounds[0]==1,"no delayed second pulse or sound");
     const unsigned total=Field(2,12);Field(2,8)=5;Field(2,4)=0;
-    SetMode(TWIST);for(int i=0;i<25;++i)frame();
+    SetMode(TWIST);SetSound(MAGAZINE);for(int i=0;i<25;++i)frame();
     for(int i=1;i<=10;++i){Pose(0,0,i*.1f);frame();}
-    Check(!guns[2].requested,"twist alone cannot start reload");
+    Check(Field(2,8)==5 && reloadSounds[0]==1,"twist alone cannot reload or play sound");
     for(int i=9;i>=0;--i){Pose(0,0,i*.1f);frame();}
-    Check(guns[2].requested && Field(2,8)==5,"twist-return starts partial-magazine reload");
-    tick=Field(2,16)+1;Update(false);
+    Check(Field(2,8)==17 && Field(2,4)==0,"twist-return instantly reloads partial magazine");
+    Check(reloadSounds[0]==2 && lastReloadEvent==146,"magazine click selection uses its own event");
     Check(Field(2,8)==17 && Field(2,12)==total,"partial reload never discards or duplicates ammo");
 
     // The mirror's update also runs from PhysicalWeapon while holstered.
@@ -97,8 +97,7 @@ void ArcadeTests() {
     Pose(0,0);Pose(1,0);for(int i=0;i<25;++i)frame();
     for(int i=1;i<=12;++i){Pose(1,-i*.01f);frame();}
     for(int i=11;i>=0;--i){Pose(1,-i*.01f);frame();}
-    Check(guns[15].requested && !guns[2].requested,"mirror gesture targets its own reload request");
-    pairedweapon::Refresh(player,1u<<2,capacities,tick+2001);
+    Check(pairedweapon::Clip(player,15)==15 && ::Field(2,8)==5,"mirror gesture instantly fills only its magazine");
     Check(pairedweapon::Clip(player,15)==15 && ::Field(2,8)==5 && ::Field(2,12)==20,
           "mirror refill excludes other magazine without creating shared ammo");
     SetMode(AUTOMATIC);pairedweapon::Field(mirror,8)=0;pairedweapon::Field(mirror,4)=2;
@@ -106,16 +105,28 @@ void ArcadeTests() {
     Check(pairedweapon::Clip(player,15)==15,"switching back restores automatic mirror reload");
 
     // Engine focus and trigger gates must cancel a gesture before its return.
+    pairedweapon::Refresh(player,0,capacities,tick);
     ResetDirectTrigger();SetMode(DOWN_UP);held[1]=-1;::Field(2,8)=1;::Field(2,4)=0;
     Pose(0,0);for(int i=0;i<25;++i)frame();
     for(int i=1;i<=12;++i){Pose(0,-i*.01f);frame();}
     xr::focused=false;frame();xr::focused=true;
     for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
-    Check(!guns[2].requested,"focus loss prevents completing an old gesture");
+    Check(::Field(2,8)==1,"focus loss prevents completing an old gesture");
     for(int i=0;i<25;++i)frame();
     for(int i=1;i<=12;++i){Pose(0,-i*.01f);frame();}
     triggers[0]=.3f;frame();triggers[0]=0;
     for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
-    Check(!guns[2].requested,"held trigger prevents completing an old gesture");
+    Check(::Field(2,8)==1,"held trigger prevents completing an old gesture");
+    SetSound(SILENT);for(int i=0;i<25;++i)frame();
+    const int mutedSounds=reloadSounds[0],mutedPulses=xr::haptics[0];
+    for(int i=1;i<=12;++i){Pose(0,-i*.01f);frame();}
+    for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
+    Check(::Field(2,8)==17 && ::Field(2,4)==0,"silent mode still instantly reloads");
+    Check(reloadSounds[0]==mutedSounds && xr::haptics[0]==mutedPulses+1,"silent mode keeps haptics and suppresses sound");
+    unsigned state=2,clip=0,deadline=tick+2000;
+    Check(Reload(22,state,clip,3,deadline,tick,17) && clip==3 && state==0 && deadline==tick,
+          "small reserve instantly fills only available rounds");
+    Check(!Reload(22,state,clip,3,deadline,tick,17),"no reserve cannot produce a false reload");
+    clip=17;Check(!Reload(22,state,clip,40,deadline,tick,17),"full magazine cannot produce a false reload");
     Check(!Manual(35) && !Manual(38) && !Manual(41),"launchers, minigun and continuous tools retain native cycle");
 }

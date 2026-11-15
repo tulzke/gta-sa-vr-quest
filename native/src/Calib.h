@@ -113,6 +113,8 @@ void ToggleLaser();                   // persists immediately
 // Global arcade reload selection (automatic / down-up / twist-return).
 void CycleReloadMode(int direction);  // wraps and persists immediately
 void SetReloadMode(int mode);         // persists immediately
+void CycleReloadSound(int direction);
+void SetReloadSound(int sound);       // persists immediately
 
 // Controller recoil kick per shot. Level 0..3 (OFF/LOW/MEDIUM/HIGH).
 int RecoilLevel();

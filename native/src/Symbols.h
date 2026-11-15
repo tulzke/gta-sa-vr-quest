@@ -431,6 +431,9 @@ struct GameSymbols {
     // Native collision audio used for physical fist/melee contacts. Passing the
     // real CColPoint surface id keeps metal/glass/body material selection intact.
     void* AudioEngine;
+    // Short native magazine/bolt one-shots; no reload task or animation.
+    void  (*CAudioEngine_ReportWeaponEvent)(void* audioEngine, int eventId,
+                                           int weaponType, void* physical);
     void  (*CAudioEngine_ReportBulletHit)(void* audioEngine, void* entity,
                                           unsigned char surface,
                                           Vec3* position, float angleDegrees);

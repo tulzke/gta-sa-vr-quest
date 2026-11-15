@@ -188,9 +188,7 @@ void OnWeaponUpdate(void* object, void* ped) {
             const int type = *reinterpret_cast<const int*>(weapon);
             if ((g_managedGunType[slot] != type && !pairedweapon::Enabled(slot)) || !SupportedHitscan(type)) break;
             auto& state = *reinterpret_cast<std::uint32_t*>(weapon + 4);
-            const int physicalSlot=pairedweapon::insideShot && g_directHand>=0
-                ? physicalweapon::HeldSlot(g_directHand) : slot;
-            arcadereload::Advance(physicalSlot,type,state, *reinterpret_cast<std::uint32_t*>(weapon + 8),
+            arcadereload::Advance(type,state, *reinterpret_cast<std::uint32_t*>(weapon + 8),
                 pairedweapon::insideShot ? *reinterpret_cast<const std::uint32_t*>(weapon + 12) : pairedweapon::Available(ped,slot),
                 *reinterpret_cast<const std::uint32_t*>(weapon + 16),
                 *g.CTimer_m_snTimeInMilliseconds, MagazineCapacity(ped, type));
@@ -216,7 +214,7 @@ unsigned PhysicalReloadDuration(void* ped, int type) {
 }
 
 void CorrectPhysicalReload(void* ped, std::uint8_t* weapon, int type, std::uint32_t now) {
-    if (!SupportedHitscan(type) ||
+    if (arcadereload::Manual(type) || !SupportedHitscan(type) ||
         *reinterpret_cast<const std::uint32_t*>(weapon + 4) != 2u) return;
     const unsigned duration=PhysicalReloadDuration(ped,type);
     if (duration) *reinterpret_cast<std::uint32_t*>(weapon + 16)=now+duration;
@@ -226,16 +224,13 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
                          float trigger, std::uint32_t now) {
     auto& gesture=g_reloadGestures[hand];
     const int slot=physicalweapon::HeldSlot(hand);
-    if (arcadereload::Completed(slot) &&
-        static_cast<unsigned>(now-pairedweapon::Field(weapon,16))<150u)
-        xr::TriggerHaptic(hand,.35f,0,45);
     const unsigned clip=pairedweapon::Field(weapon,8),total=pairedweapon::Field(weapon,12);
     xr::HandPose tracked[2]{};
     float head[3]{},orientation[4]{};
     std::uint64_t epoch{};
     physicalweapon::TrackingPose pose{};
     if (!arcadereload::Manual(type) || trigger>=.25f ||
-        arcadereload::Prepare(slot,type).requested || clip>=MagazineCapacity(ped,type) || total<=clip ||
+        clip>=MagazineCapacity(ped,type) || total<=clip ||
         !xr::IsSessionFocused() ||
         !physicalweapon::GetInteractionTrackingSnapshot(head,orientation,tracked,&epoch) ||
         !tracked[hand].valid || !tracked[hand].aimValid ||
@@ -247,12 +242,15 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
     const arcadereload::Sample sample{{p[0],p[1],p[2]},
         {pose.right[0],pose.right[1],pose.right[2]}, {q[0],q[1],q[2],q[3]}};
     if (!gesture.Update(sample,now*.001,slot*64+type,arcadereload::GetMode(),epoch)) return;
-    const unsigned duration=PhysicalReloadDuration(ped,type);
-    if (duration && arcadereload::Begin(slot,type,pairedweapon::Field(weapon,4),clip,total,
-            pairedweapon::Field(weapon,16),now,MagazineCapacity(ped,type),duration)) {
-        xr::TriggerHaptic(hand,.2f,0,25);
-        LOGI("[vr.reload] gesture mode=%d hand=%d type=%d slot=%d duration=%u",
-             arcadereload::GetMode(),hand,type,slot,duration);
+    if (arcadereload::Reload(type,pairedweapon::Field(weapon,4),pairedweapon::Field(weapon,8),total,
+            pairedweapon::Field(weapon,16),now,MagazineCapacity(ped,type))) {
+        g_directNextFireMs[hand]=0;
+        xr::TriggerHaptic(hand,.35f,0,35);
+        const int soundEvent=arcadereload::SoundEvent();
+        if (soundEvent && g.AudioEngine && g.CAudioEngine_ReportWeaponEvent)
+            g.CAudioEngine_ReportWeaponEvent(g.AudioEngine,soundEvent,31,ped);
+        LOGI("[vr.reload] instant gesture mode=%d hand=%d type=%d slot=%d",
+             arcadereload::GetMode(),hand,type,slot);
     }
 }
 
@@ -1134,6 +1132,8 @@ bool Install() {
         kWeaponUpdatePrologue, "CWeapon::Update"));
     if (!g_origWeaponUpdate || !g.CWeaponInfo_GetWeaponReloadTime) return false;
     g_installed.store(true, std::memory_order_release);
+    if (!g.AudioEngine || !g.CAudioEngine_ReportWeaponEvent)
+        LOGW("[vr.reload] native reload confirmation sound unavailable");
     scopeaim::SetSniperFireAvailable(g_origFireSniper != nullptr);
     LOGI("[vr.fire] controller hitscan + pad trigger installed%s "
          "(inactive until physical query)",

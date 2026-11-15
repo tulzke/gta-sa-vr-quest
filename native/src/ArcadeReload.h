@@ -16,42 +16,34 @@ inline const char* ModeName() {
 }
 inline bool Manual(int type) { return GetMode()!=AUTOMATIC && type>=22 && type<=34; }
 
-// Separate from CWeapon: state 2 can mean either empty/waiting or a reload
-// explicitly started by the player. Never put invented states into the game.
-struct Gun { int type{}; bool requested{}, completed{}; };
-inline Gun guns[26]{};
-inline void ResetGuns() { for (auto& gun : guns) gun={}; }
-inline Gun& Prepare(int slot, int type) {
-    auto& gun=guns[slot];
-    if (gun.type!=type) gun={type, false, false};
-    return gun;
+enum Sound { BOLT, MAGAZINE, SILENT, SOUND_COUNT };
+inline std::atomic<int> sound{BOLT};
+inline int GetSound() { return sound.load(std::memory_order_relaxed); }
+inline void SetSound(int value) { sound.store(std::clamp(value,0,SOUND_COUNT-1),std::memory_order_relaxed); }
+inline const char* SoundName() {
+    constexpr const char* names[]{"BOLT CLACK", "MAG CLICK", "OFF"};
+    return names[GetSound()];
 }
-inline void Advance(int slot, int type, unsigned& state, unsigned& clip,
+// Retail 2.11.311 ReportWeaponEvent, M4 (type 31): 147 -> sample 32,
+// 146 -> sample 31. Both are short one-shots from the existing GENRL bank.
+inline int SoundEvent() { return GetSound()==SILENT ? 0 : GetSound()==BOLT ? 147 : 146; }
+
+// State 2 means empty/waiting in gesture modes. Only the completed gesture
+// refills the magazine; the native automatic mode keeps its original clock.
+inline void Advance(int type, unsigned& state, unsigned& clip,
                     unsigned total, unsigned deadline, unsigned now, unsigned capacity) {
-    auto& gun=Prepare(slot,type);
     if (Manual(type) && !clip && total && state<=1u) state=2u;
-    const bool wasReloading=state==2u;
-    vrfire::AdvancePhysicalGun(state,clip,total,deadline,now,capacity,
-                              !Manual(type) || gun.requested);
-    if (wasReloading && state!=2u && gun.requested) gun.completed=true;
-    if (state!=2u) gun.requested=false;
+    vrfire::AdvancePhysicalGun(state,clip,total,deadline,now,capacity,!Manual(type));
 }
-inline bool Begin(int slot, int type, unsigned& state, unsigned clip,
+inline bool Reload(int type, unsigned& state, unsigned& clip,
                   unsigned total, unsigned& deadline, unsigned now,
-                  unsigned capacity, unsigned duration) {
-    auto& gun=Prepare(slot,type);
-    if (!Manual(type) || state>2u || gun.requested || clip>=capacity || total<=clip)
+                  unsigned capacity) {
+    if (!Manual(type) || state>2u || clip>=capacity || total<=clip)
         return false;
-    state=2u;
-    deadline=now+std::clamp(duration,1u,30000u);
-    gun.requested=true;
-    gun.completed=false;
+    clip=std::min(total,capacity);
+    state=0u;
+    deadline=now;
     return true;
-}
-inline bool Completed(int slot) {
-    const bool result=guns[slot].completed;
-    guns[slot].completed=false;
-    return result;
 }
 
 struct Vec { float x{},y{},z{}; };

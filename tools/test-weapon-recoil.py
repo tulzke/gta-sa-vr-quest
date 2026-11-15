@@ -141,6 +141,11 @@ int main(){
  {std::ofstream f("recoil-calib.ini");f<<"recoil_level 1\n";}
  Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==savr::recoil::kDefaultRecoilLevel);
  assert(savr::arcadereload::GetMode()==savr::arcadereload::DOWN_UP);
+ assert(savr::arcadereload::GetSound()==savr::arcadereload::BOLT);
+ SetReloadSound(savr::arcadereload::MAGAZINE);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::MAGAZINE);
+ CycleReloadSound(1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::SILENT);
+ CycleReloadSound(1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::BOLT);
+ CycleReloadSound(-1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::SILENT);
  SetReloadMode(savr::arcadereload::TWIST);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::TWIST);
  CycleReloadMode(1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::AUTOMATIC);
  CycleReloadMode(-1);Init();assert(savr::arcadereload::GetMode()==savr::arcadereload::TWIST);

@@ -244,6 +244,7 @@ bool ResolveGameSymbols(void* handle) {
         {"_ZN7CObject11SetIsStaticEb",                                           reinterpret_cast<void**>(&g.CObject_SetIsStatic),                    false},
         {"_ZN7CObject12ObjectDamageEfP7CVectorS1_P7CEntity11eWeaponType",        reinterpret_cast<void**>(&g.CObject_ObjectDamage),                   false},
         {"AudioEngine",                                                           reinterpret_cast<void**>(&g.AudioEngine),                           false},
+        {"_ZN12CAudioEngine17ReportWeaponEventEi11eWeaponTypeP9CPhysical",         reinterpret_cast<void**>(&g.CAudioEngine_ReportWeaponEvent),         false},
         {"_ZN12CAudioEngine15ReportBulletHitEP7CEntityhR7CVectorf",              reinterpret_cast<void**>(&g.CAudioEngine_ReportBulletHit),          false},
         {"_ZN12CAudioEngine15ReportCollisionEP7CEntityS1_hhR7CVectorPS2_ffhh",   reinterpret_cast<void**>(&g.CAudioEngine_ReportCollision),          false},
         {"_ZN12CAudioEngine24ReportFrontendAudioEventEiff",                      reinterpret_cast<void**>(&g.CAudioEngine_ReportFrontendAudioEvent), false},

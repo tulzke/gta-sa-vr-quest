@@ -7303,6 +7303,8 @@ void BuildControlsTipsMenu() {
         {"DOWN/UP: QUICK DIP AND RETURN",          205, 170, 105, false},
         {"TWIST: ROLL GUN 45 DEG AND BACK",        205, 170, 105, false},
         {"RELEASE TRIGGER BEFORE THE GESTURE",     205, 170, 105, false},
+        {"GESTURE COMPLETE = INSTANT RELOAD",     205, 170, 105, false},
+        {"RELOAD SOUND: BOLT / MAG CLICK / OFF",   205, 170, 105, false},
 
         {"VEHICLES",                               255, 170, 110, true },
         {"B  FIRE HELD WEAPON / TANK GUN",         210, 145,  95, false},
@@ -7393,7 +7395,7 @@ void BuildControlsMenu() {
     PanelText("CONTROLS", cx, 20, 5, 100, 225, 255);
     PanelTextFit("STICK UP/DOWN SELECT   L2/R2 CHANGE",
                  cx, 56, 2, 150, 185, 150);
-    constexpr int firstStick = 2;
+    constexpr int firstStick = 3;
     constexpr int firstButton = firstStick + locomotion::STICK_OPT_COUNT;
     constexpr int tipsRow = firstButton + locomotion::BIND_SRC_COUNT;
     constexpr int resetRow = tipsRow + 1;
@@ -7403,6 +7405,7 @@ void BuildControlsMenu() {
     std::snprintf(rows[0], sizeof(rows[0]), "LAYOUT  < %s >",
                   locomotion::ControlsLayoutName());
     std::snprintf(rows[1], sizeof(rows[1]), "RELOAD  < %s >", arcadereload::ModeName());
+    std::snprintf(rows[2], sizeof(rows[2]), "RELOAD SOUND  < %s >", arcadereload::SoundName());
     const char* stickLabels[locomotion::STICK_OPT_COUNT]={
         "SWAP MOVE / TURN STICKS", "INVERT MOVE X", "INVERT MOVE Y",
         "INVERT TURN X", "INVERT TURN Y"};
