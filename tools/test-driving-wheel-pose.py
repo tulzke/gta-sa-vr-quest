@@ -224,6 +224,40 @@ int main() {
         const float bad[]={NAN,0,0};SetDoorCalibration(411,2,false,bad);
         GetDoorCalibration(411,2,false,out);CHECK(Near(out[0],2.f));
     }
+    {
+        using namespace savr::driving;g_modelCalibration.clear();float out[3]{};
+        const float rear[]{-.55f,-.7f,1.2f},front[]{.4f,.3f,1.4f};
+        CHECK(!GetPassengerView(411,1,MODE_IMMERSIVE,out));
+        SetPassengerView(411,1,MODE_IMMERSIVE,rear);
+        CHECK(GetPassengerView(411,2,MODE_IMMERSIVE,out)&&Near(out[0],.55f)&&Near(out[1],-.7f)&&Near(out[2],1.2f));
+        CHECK(!GetPassengerView(412,2,MODE_IMMERSIVE,out)&&!GetPassengerView(411,1,MODE_DEFAULT,out)&&!GetPassengerView(411,-1,MODE_IMMERSIVE,out));
+        SetPassengerView(411,0,MODE_IMMERSIVE,front);CHECK(GetPassengerView(411,0,MODE_IMMERSIVE,out)&&Near(out[0],.4f));
+        const float right[]{.6f,-.8f,1.3f};SetPassengerView(411,2,MODE_IMMERSIVE,right);
+        CHECK(GetPassengerView(411,1,MODE_IMMERSIVE,out)&&Near(out[0],-.6f)&&Near(out[1],-.8f));
+        float bad[]{0,0,std::numeric_limits<float>::quiet_NaN()};SetPassengerView(411,1,MODE_IMMERSIVE,bad);
+        CHECK(GetPassengerView(411,1,MODE_IMMERSIVE,out)&&Near(out[2],1.3f));
+        const float delta[]{.3f,-.2f,.9f};SetExitCalibration(411,0,true,delta);
+        GetExitCalibration(411,0,true,out);CHECK(Near(out[0],.3f)&&Near(out[1],-.2f)&&out[2]==0);
+        GetExitCalibration(411,1,true,out);CHECK(out[0]==0&&out[1]==0);
+        const float large[]{2,-2,2};SetExitCalibration(411,0,true,large);GetExitCalibration(411,0,true,out);CHECK(Near(out[0],.5f)&&Near(out[1],-.5f));
+        SetExitCalibration(411,0,false,delta);GetExitCalibration(411,0,false,out);CHECK(Near(out[2],.9f));
+        int mirror[12]{};GetRearMirrorCalibration(411,mirror);CHECK(mirror[0]==-15);
+        auto& c=g_modelCalibration[411];c.mirrorDefaultValid=true;c.mirrorDefault[0]=-17;c.mirrorDefault[1]=50;c.mirrorDefault[2]=125;
+        GetRearMirrorCalibration(411,mirror);CHECK(mirror[0]==-17&&mirror[1]==50&&mirror[2]==125);
+        mirror[6]=77;SetRearMirrorCameraCalibration(411,mirror);CHECK(!c.mirrorManual);
+        c.mirrorDefault[0]=-18;GetRearMirrorCalibration(411,mirror);CHECK(mirror[0]==-18&&mirror[6]==77);
+        mirror[0]=22;SetRearMirrorCalibration(411,mirror);c.mirrorDefault[0]=99;GetRearMirrorCalibration(411,mirror);CHECK(mirror[0]==22);
+        FILE* file=std::tmpfile();CHECK(file);WriteVehicleLines(file,411,c);std::rewind(file);g_modelCalibration.clear();char line[128];
+        while(std::fgets(line,sizeof(line),file))ReadVehicleLine(line);std::fclose(file);
+        CHECK(GetPassengerView(411,2,MODE_IMMERSIVE,out)&&Near(out[0],.6f)&&Near(out[1],-.8f));
+        GetExitCalibration(411,0,true,out);CHECK(Near(out[0],.5f)&&out[2]==0);
+        GetRearMirrorCalibration(411,mirror);CHECK(mirror[0]==22&&g_modelCalibration[411].mirrorManual);
+        ReadVehicleLine("RearMirrorCalib.412.0=0");CHECK(g_modelCalibration[412].mirrorManual);
+        ReadVehicleLine("PassengerView.413.1.1.2=120");CHECK(!GetPassengerView(413,1,1,out));
+        g_modelCalibration[411].mirrorManual=false;file=std::tmpfile();CHECK(file);WriteVehicleLines(file,411,g_modelCalibration[411]);std::rewind(file);g_modelCalibration.clear();
+        while(std::fgets(line,sizeof(line),file))ReadVehicleLine(line);std::fclose(file);CHECK(!g_modelCalibration[411].mirrorManual);
+        g_modelCalibration.clear();
+    }
     savr::driving::TestPose();
     savr::driving::TestProfiles();
     savr::driving::TestPersistence();
@@ -243,6 +277,8 @@ def main():
     accessors += function("float GetWheelCalibrationValue(")
     accessors += function("void AdjustWheelCalibrationValue(")
     accessors += function("void ResetVehiclePreset(")
+    for signature in ("bool GetPassengerView(","void SetPassengerView(","void GetExitCalibration(","void SetExitCalibration(","void GetRearMirrorCalibration(","void SetRearMirrorCalibration(","void SetRearMirrorCameraCalibration("):
+        accessors += function(signature)
     save_start = SOURCE.index("            for (int field = 0; field < WHEEL_CAL_FIELD_COUNT; ++field) {")
     save_end = SOURCE.index("\n        }", save_start)
     persistence = "void WriteWheelLines(FILE* file,int model,const ModelCalibration& calibration) {\n"
@@ -257,6 +293,14 @@ def main():
     door_load_start = SOURCE.index('                if(std::sscanf(line,"DoorCalib.')
     door_load_end = SOURCE.index('                if (std::sscanf(line, "ModelSeat.', door_load_start)
     persistence += "void ReadDoorLine(const char* line) { int model=-1,door=-1,inside=-1,axis=-1,value=0; do {\n" + SOURCE[door_load_start:door_load_end] + "} while(false); }\n"
+    calibration_save_start=SOURCE.index('            for (int field=0;field<12;++field)')
+    calibration_save_end=SOURCE.index('            for(int side=0;side<2;',calibration_save_start)
+    persistence += "void WriteVehicleLines(FILE* file,int model,const ModelCalibration& calibration){\n" + SOURCE[calibration_save_start:calibration_save_end] + "}\n"
+    mirror_load_start=SOURCE.index('                if (std::sscanf(line,"RearMirrorCalib.')
+    mirror_load_end=SOURCE.index('                if (std::sscanf(line,"IgnitionPoseLean.',mirror_load_start)
+    passenger_load_start=SOURCE.index('                float passengerValue{};')
+    passenger_load_end=SOURCE.index('                if(std::sscanf(line,"EntryCalib.',passenger_load_start)
+    persistence += "void ReadVehicleLine(const char* line){int model=-1,door=-1,axis=-1,value=0;do{\n" + SOURCE[mirror_load_start:mirror_load_end] + SOURCE[passenger_load_start:passenger_load_end] + "}while(false);}\n"
     source = PRELUDE + math + pose + r"""
 bool IsBicycleModel(int) {return false;}
 bool GetActivePlayerBike(void** vehicle,void*) {static char fake[2048]{};std::uint16_t model=411;std::memcpy(fake+0x32,&model,2);*vehicle=fake;return true;}

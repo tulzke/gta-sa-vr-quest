@@ -2,6 +2,7 @@
 #include "VehicleEntry.h"
 #include "VehicleTestArea.h"
 #include "VehicleAccess.h"
+#include "Driving.h"
 #include "Symbols.h"
 #include "Log.h"
 #include <cstring>
@@ -39,6 +40,55 @@ int ExitNode(void* car,int seat,Vec hint){
  void* matrix=Read<void*>(car,0x18);if(!matrix)return -1;
  return Dot(hint-Read<Vec>(matrix,0x30),Read<Vec>(matrix,0))<0?10:8;
 }
+bool Ground(void* car,GameSymbols::Vec3& point){
+ if(!Finite({point.x,point.y,point.z})||!ground||!g.CWorld_pIgnoreEntity)return false;
+ float floorZ{};
+ if(testarea::FindExitGround(point.x,point.y,point.z,&floorZ)){point.z=floorZ;return std::isfinite(floorZ);}
+ void* previous=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=car;
+ const bool found=ground(&point);*g.CWorld_pIgnoreEntity=previous;
+ return found&&Finite({point.x,point.y,point.z});
+}
+bool Destination(void* car,int seat,int node,GameSymbols::Vec3& destination){
+ destination=doorPosition(car,node);
+ const int model=Read<std::uint16_t>(car,0x32);
+ float correction[3]{};
+ // Special open-vehicle and bike exits keep their existing native placement.
+ if(!Bike(car)&&!vehicleaccess::Find(model))driving::GetExitCalibration(model,seat+1,true,correction);
+ const bool adjusted=std::abs(correction[0])+std::abs(correction[1])>.0001f;
+ if(!adjusted)return Ground(car,destination);
+ if(!g.CWorld_TestSphereAgainstWorld||!g.CWorld_ProcessLineOfSight)return false;
+ void* matrix=Read<void*>(car,0x18);if(!matrix)return false;
+ Basis basis{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+ if(!basis.Valid())return false;
+ GameSymbols::Vec3 original=destination;
+ const Vec offset=basis.Vector({correction[0],correction[1],0});
+ destination.x+=offset.x;destination.y+=offset.y;destination.z+=offset.z;
+ if(!Ground(car,destination)||!Ground(car,original))return false;
+ // Reject drops and steps beyond a normal walking step. The unmodified high-cab
+ // path remains native; this limit only governs the optional local adjustment.
+ if(std::abs(destination.z-original.z)>.4f)return false;
+ // Check a standing capsule (root is ground + 1m), including our own bodywork.
+ // Do not skip the car: that would allow an editor target inside its cabin.
+ void* previous=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=nullptr;
+ bool clear=true;
+ for(float z:{-.65f,-.2f,.25f,.55f}){
+  GameSymbols::Vec3 end{destination.x,destination.y,destination.z+z};
+  GameSymbols::Vec3 start{original.x,original.y,original.z+z};
+  if(g.CWorld_TestSphereAgainstWorld(end,.3f,g.FindPlayerPed(-1),true,true,true,true,true,false)){clear=false;break;}
+  // Sweep the capsule cross-section along the short native-door-to-target path.
+  const Vec delta{end.x-start.x,end.y-start.y,end.z-start.z};
+  const int steps=std::max(1,static_cast<int>(std::ceil(Length(delta)/.1f)));
+  for(int step=1;step<steps;++step){
+   const float t=float(step)/steps;
+   GameSymbols::Vec3 p{start.x+delta.x*t,start.y+delta.y*t,start.z+delta.z*t};
+   if(g.CWorld_TestSphereAgainstWorld(p,.3f,g.FindPlayerPed(-1),true,true,true,true,true,false)){clear=false;break;}
+  }
+  alignas(8) unsigned char collision[0x2c]{};void* hit{};
+  if(!clear||g.CWorld_ProcessLineOfSight(&start,&end,collision,&hit,true,true,false,true,true,false,false,false)){clear=false;break;}
+ }
+ *g.CWorld_pIgnoreEntity=previous;
+ return clear;
+}
 }
 void Install(void* h){
 #define LOAD(v,n) v=reinterpret_cast<decltype(v)>(dlsym(h,n))
@@ -55,6 +105,11 @@ void Install(void* h){
  LOAD(checkDoors,"_ZN37CTaskSimpleCarWaitForDoorNotToBeInUse20CheckDoorsFreeOfPedsERK8CVehicleiRbS3_");
  LOAD(positionOut,"_ZN4CPed25PositionPedOutOfCollisionEiP8CVehicleb");
 #undef LOAD
+}
+bool PlacementPreview(void* car,int seat,Vec& position){
+ if(!car||seat<-1||seat>2||!doorPosition)return false;
+ GameSymbols::Vec3 destination{};const bool clear=Destination(car,seat,nodes[seat+1],destination);
+ position={destination.x,destination.y,destination.z};return clear;
 }
 bool EmergencyAvailable(void* car,int seat){
  if(!car||seat<-1||seat>2||!roomToLeave||!checkDoors)return false;
@@ -79,7 +134,12 @@ Mode Check(void* car,int seat,Vec hint){
   if(sideSeat!=seat&&Read<void*>(car,sideSeat<0?0x5a0:0x5a8))return Mode::Unavailable;
  }
  const bool room=roomToLeave(car,node,nullptr);
- if(room&&(Bike(car)||vehicleaccess::DoorOpen(car,seat+3)))return Mode::Normal;
+ if(room&&(Bike(car)||vehicleaccess::DoorOpen(car,seat+3))){
+  float correction[3]{};
+  if(!Bike(car)&&!vehicleaccess::Find(Read<std::uint16_t>(car,0x32)))driving::GetExitCalibration(Read<std::uint16_t>(car,0x32),seat+1,true,correction);
+  if(std::abs(correction[0])+std::abs(correction[1])>.0001f){GameSymbols::Vec3 destination{};if(!Destination(car,seat,node,destination))return Mode::Unavailable;}
+  return Mode::Normal;
+ }
  // A closed door alone never enables the native emergency search.
  if(!room&&positionOut&&!Bike(car)&&!vehicleaccess::Find(Read<std::uint16_t>(car,0x32))&&EmergencyAvailable(car,seat))return Mode::Emergency;
  return Mode::Unavailable;
@@ -94,16 +154,7 @@ bool TryExit(void* car,int seat,Vec hint,bool emergency){
  if(!emergency){
   // CarSetPedOut normally follows the get-out animation. Supply the engine's
   // door position instead of leaving its collision correction inside the seat.
-  destination=doorPosition(car,node);
-  if(!Finite({destination.x,destination.y,destination.z}))return false;
-  float floorZ{};
-  if(testarea::FindExitGround(destination.x,destination.y,destination.z,&floorZ))destination.z=floorZ;
-  else {
-   void* previous=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=car;
-   const bool found=ground(&destination);*g.CWorld_pIgnoreEntity=previous;
-   if(!found){LOGI("[vehicle-exit] native ground lookup failed seat=%d",seat);return false;}
-  }
-  if(!Finite({destination.x,destination.y,destination.z}))return false;
+  if(!Destination(car,seat,node,destination)){LOGI("[vehicle-exit] target blocked or no ground seat=%d",seat);return false;}
  }
  void* intelligence=Read<void*>(ped,0x538);
  void* manager=static_cast<char*>(intelligence)+8;

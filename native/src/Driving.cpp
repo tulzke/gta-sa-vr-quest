@@ -275,11 +275,19 @@ double g_bicycleTriggerPreviousTime{};
 std::atomic<int> g_vehicleDebugMode{};
 std::atomic<int> g_rearMirrorQuality{1};
 std::atomic<int> g_rearMirrorFov{80};
+std::atomic<int> g_vehicleEditTarget{0};
 struct ModelCalibration {
     int door[4][2][3]{};
     int doorPanel[4][2][6]{};
     int climb[2][12]{};
     int entry[4][3]{};
+    int exitMarker[4][3]{},exitPlacement[4][3]{};
+    float passengerView[2][MODE_COUNT][3]{}; // front right / canonical rear left, cm
+    bool passengerViewSet[2][MODE_COUNT]{};
+    unsigned passengerViewMask[2][MODE_COUNT]{};
+    bool mirrorManual{};
+    bool mirrorDefaultValid{};
+    int mirrorDefault[3]{}; // runtime wheel-relative fallback, never serialized
     float seatSide[MODE_COUNT]{};
     float seatForward[MODE_COUNT]{};
     float seatHeight[MODE_COUNT]{};
@@ -569,7 +577,16 @@ void Save() {
             const int model = entry.first;
             const ModelCalibration& calibration = entry.second;
             for (int field=0;field<12;++field)
-                std::fprintf(file,"RearMirrorCalib.%d.%d=%d\n",model,field,calibration.rearMirror[field]);
+                if(calibration.mirrorManual || field>=6)
+                    std::fprintf(file,"RearMirrorCalib.%d.%d=%d\n",model,field,calibration.rearMirror[field]);
+            std::fprintf(file,"RearMirrorManual.%d=%d\n",model,calibration.mirrorManual?1:0);
+            for(int group=0;group<2;++group)for(int mode=0;mode<MODE_COUNT;++mode)
+                if(calibration.passengerViewSet[group][mode])for(int axis=0;axis<3;++axis)
+                    std::fprintf(file,"PassengerView.%d.%d.%d.%d=%.3f\n",model,group,mode,axis,calibration.passengerView[group][mode][axis]);
+            for(int index=0;index<4;++index)for(int axis=0;axis<3;++axis){
+                std::fprintf(file,"ExitMarker.%d.%d.%d=%d\n",model,index,axis,calibration.exitMarker[index][axis]);
+                if(axis<2)std::fprintf(file,"ExitPlacement.%d.%d.%d=%d\n",model,index,axis,calibration.exitPlacement[index][axis]);
+            }
             for(int side=0;side<2;++side) for(int a=6;a<12;++a)
                 std::fprintf(file,"Climb.%d.%d.%d=%d\n",model,side,a,calibration.climb[side][a]);
             for(int seat=0;seat<4;++seat) for(int axis=0;axis<3;++axis)
@@ -803,6 +820,7 @@ void Load() {
                 int door=-1,inside=-1,axis=-1;
                 if (std::sscanf(line,"RearMirrorCalib.%d.%d=%d",&model,&axis,&value)==3 &&
                     model>=400 && model<=611 && axis>=0 && axis<12) {
+                    if(axis<6)g_modelCalibration[model].mirrorManual=true;
                     g_modelCalibration[model].rearMirror[axis]=std::clamp(value,
                         axis%6<3?-500:-180,axis%6<3?500:180);
                     continue;
@@ -834,6 +852,21 @@ void Load() {
                 if(std::sscanf(line,"DoorPanel.%d.%d.%d.%d=%d",&model,&door,&inside,&axis,&value)==5 &&
                    model>=400&&model<=611&&door>=0&&door<4&&inside>=0&&inside<2&&axis>=0&&axis<6) {
                     g_modelCalibration[model].doorPanel[door][inside][axis]=std::clamp(value,-200,200);continue;
+                }
+                float passengerValue{};int passengerMode{};
+                if(std::sscanf(line,"PassengerView.%d.%d.%d.%d=%f",&model,&door,&passengerMode,&axis,&passengerValue)==5 &&
+                   model>=400&&model<=611&&door>=0&&door<2&&passengerMode>=0&&passengerMode<MODE_COUNT&&axis>=0&&axis<3&&std::isfinite(passengerValue)){
+                    g_modelCalibration[model].passengerView[door][passengerMode][axis]=std::clamp(passengerValue,-1000.f,1000.f);
+                    auto& c=g_modelCalibration[model];c.passengerViewMask[door][passengerMode]|=1u<<axis;
+                    c.passengerViewSet[door][passengerMode]=c.passengerViewMask[door][passengerMode]==7;
+                    continue;
+                }
+                if(std::sscanf(line,"RearMirrorManual.%d=%d",&model,&value)==2&&model>=400&&model<=611){g_modelCalibration[model].mirrorManual=value!=0;continue;}
+                bool exitPlacement=false;
+                if((std::sscanf(line,"ExitMarker.%d.%d.%d=%d",&model,&door,&axis,&value)==4 ||
+                    (exitPlacement=true,std::sscanf(line,"ExitPlacement.%d.%d.%d=%d",&model,&door,&axis,&value)==4))&&
+                   model>=400&&model<=611&&door>=0&&door<4&&axis>=0&&axis<(exitPlacement?2:3)){
+                    auto& c=g_modelCalibration[model];(exitPlacement?c.exitPlacement:c.exitMarker)[door][axis]=std::clamp(value,exitPlacement?-50:-100,exitPlacement?50:100);continue;
                 }
                 if(std::sscanf(line,"EntryCalib.%d.%d.%d=%d",&model,&door,&axis,&value)==4 &&
                    model>=400&&model<=611&&door>=0&&door<4&&axis>=0&&axis<3) {
@@ -1582,6 +1615,15 @@ bool BuildWheelTracking(WheelVisualState* visual) {
     wheelPreset[F_WHEEL_RADIUS]=g_value[F_WHEEL_RADIUS].load();
     const ModelWheelPose wheel=CalibratedWheelPose(pp,vr,vf,vu,wheelPreset,wheelCal);
     const V3 worldCenter=wheel.center;
+    if(!planeYoke){
+        const V3 local=worldCenter-vp;
+        std::lock_guard<std::mutex> modelLock(g_modelMutex);
+        auto& c=g_modelCalibration[modelId];
+        c.mirrorDefault[0]=std::lround((Dot(local,vr)+.23f)*100.f);
+        c.mirrorDefault[1]=std::lround(Dot(local,vf)*100.f);
+        c.mirrorDefault[2]=std::lround((Dot(local,vu)+.18f)*100.f);
+        c.mirrorDefaultValid=true;
+    }
     V3 center,pointRight,pointUp,pointNormal;
     if (!WorldPointToTracking(worldCenter,&center)||
         !WorldPointToTracking(worldCenter+wheel.right,&pointRight)||
@@ -3651,7 +3693,8 @@ constexpr int kDefaultBikeItems[] = {
 };
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
-    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
+    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
+    MENU_VEHICLE_EDIT_TARGET, MENU_PASSENGER_RESET,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3672,7 +3715,8 @@ constexpr int kImmersiveBikeItems[] = {
 };
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
-    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
+    MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
+    MENU_VEHICLE_EDIT_TARGET, MENU_PASSENGER_RESET,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3769,6 +3813,50 @@ void AdjustRearMirrorFov(int direction) {
     g_rearMirrorFov.store(std::clamp(g_rearMirrorFov.load()+(direction<0?-5:5),40,120));
     Save();
 }
+int VehicleEditTarget(){return g_vehicleEditTarget.load();}
+void CycleVehicleEditTarget(int direction){g_vehicleEditTarget.store((VehicleEditTarget()+(direction<0?2:1))%3);ResetInteraction();}
+const char* VehicleEditTargetName(){static const char* names[]={"ALL","EXIT MARKER","EXIT POSITION"};return names[VehicleEditTarget()];}
+void ResetRearMirrorSurface(){
+    const int model=GetActiveVehicleModelId();if(model<400||model>611)return;
+    {std::lock_guard<std::mutex> lock(g_modelMutex);g_modelCalibration[model].mirrorManual=false;}
+    Save();ResetInteraction();
+}
+bool GetPassengerView(int model,int seat,int mode,float out[3]){
+    if(!out||seat<0||seat>2||mode<0||mode>=MODE_COUNT)return false;
+    std::lock_guard<std::mutex> lock(g_modelMutex);const auto it=g_modelCalibration.find(model);
+    if(it==g_modelCalibration.end())return false;
+    const int group=seat==0?0:1;const auto& c=it->second;
+    if(!c.passengerViewSet[group][mode])return false;
+    for(int a=0;a<3;++a)out[a]=c.passengerView[group][mode][a]*.01f;
+    if(seat==2)out[0]=-out[0];return true;
+}
+void SetPassengerView(int model,int seat,int mode,const float value[3]){
+    if(model<400||model>611||seat<0||seat>2||mode<0||mode>=MODE_COUNT||!value)return;
+    for(int a=0;a<3;++a)if(!std::isfinite(value[a]))return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];const int group=seat==0?0:1;
+    for(int a=0;a<3;++a)c.passengerView[group][mode][a]=std::clamp(value[a]*(a==0&&seat==2?-100.f:100.f),-1000.f,1000.f);
+    c.passengerViewSet[group][mode]=true;c.passengerViewMask[group][mode]=7;
+}
+void ResetPassengerView(){
+    if(!g.FindPlayerVehicle||!g.FindPlayerPed)return;void* car=g.FindPlayerVehicle(-1,false);
+    const int seat=vehicleentry::SeatIndex(car,g.FindPlayerPed(-1));if(seat<0||seat>2)return;
+    const int model=*reinterpret_cast<const std::uint16_t*>(static_cast<char*>(car)+0x32),mode=GetModeForVehicleType(VEHICLE_CAR);
+    if(model<400||model>611||mode<0||mode>=MODE_COUNT)return;
+    {std::lock_guard<std::mutex> lock(g_modelMutex);g_modelCalibration[model].passengerViewSet[seat==0?0:1][mode]=false;}
+    Save();ResetInteraction();
+}
+void GetExitCalibration(int model,int index,bool placement,float out[3]){
+    std::fill_n(out,3,0.f);if(index<0||index>3)return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);const auto it=g_modelCalibration.find(model);if(it==g_modelCalibration.end())return;
+    const auto& values=placement?it->second.exitPlacement:it->second.exitMarker;
+    for(int a=0;a<(placement?2:3);++a)out[a]=values[index][a]*.01f;
+}
+void SetExitCalibration(int model,int index,bool placement,const float value[3]){
+    if(model<400||model>611||index<0||index>3)return;
+    for(int a=0;a<3;++a)if(!std::isfinite(value[a]))return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];auto& values=placement?c.exitPlacement:c.exitMarker;
+    for(int a=0;a<(placement?2:3);++a)values[index][a]=std::lround(std::clamp(value[a],placement?-.5f:-1.f,placement?.5f:1.f)*100.f);
+}
 void GetRearMirrorCalibration(int model,int out[12]) {
     EnsureInit();
     std::lock_guard<std::mutex> lock(g_modelMutex);
@@ -3776,14 +3864,25 @@ void GetRearMirrorCalibration(int model,int out[12]) {
     const ModelCalibration defaults{};
     const auto& c=it==g_modelCalibration.end()?defaults:it->second;
     std::copy(std::begin(c.rearMirror),std::end(c.rearMirror),out);
+    if(!c.mirrorManual){
+        if(c.mirrorDefaultValid)std::copy_n(c.mirrorDefault,3,out);
+        else {out[0]=-15;out[1]=45;out[2]=110;}
+        out[3]=out[4]=out[5]=0;
+    }
 }
 void SetRearMirrorCalibration(int model,const int values[12]) {
     if (model<400 || model>611) return;
     std::lock_guard<std::mutex> lock(g_modelMutex);
+    g_modelCalibration[model].mirrorManual=true;
     for(int i=0;i<12;++i) {
         const int limit=i%6<3?500:180;
         g_modelCalibration[model].rearMirror[i]=std::clamp(values[i],-limit,limit);
     }
+}
+void SetRearMirrorCameraCalibration(int model,const int values[12]) {
+    if(model<400||model>611)return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);
+    for(int i=6;i<12;++i){const int limit=i%6<3?500:180;g_modelCalibration[model].rearMirror[i]=std::clamp(values[i],-limit,limit);}
 }
 
 int GetActiveVehicleType() {
@@ -4187,6 +4286,7 @@ void ResetVehiclePreset(int vehicleType) {
         if (vehicleType==VEHICLE_CAR) {
             const ModelCalibration defaults{};
             std::copy(std::begin(defaults.rearMirror),std::end(defaults.rearMirror),calibration.rearMirror);
+            calibration.mirrorManual=false;
         }
         calibration.seatSide[mode]=0;
         calibration.seatForward[mode]=0;

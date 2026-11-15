@@ -5,6 +5,6 @@ bool ConsumesMove();
 unsigned ClaimedHands();
 int SeatIndex(void* car,void* ped);
 void Install(void* handle);
-void Update(bool usable, std::uint64_t epoch);
+void Update(bool usable, std::uint64_t epoch,unsigned occupied=0);
 void Append(vehicledoors::MarkerFrame& frame);
 }

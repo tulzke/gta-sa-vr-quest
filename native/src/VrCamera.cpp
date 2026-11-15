@@ -4333,6 +4333,13 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                         base.pos = anchorPosition + heightAxis * seatHeight +
                                    seatForwardAxis * (eyeForward + seatDistance) +
                                    seatRightAxis * seatSide;
+                        if(vehicle && seatedPassenger && !enteringVehicle && !thirdPersonView && !rearPassenger &&
+                           vehicleBasisValid && vehiclePositionValid && g.CVehicle_GetVehicleAppearance && g.CVehicle_GetVehicleAppearance(vehicle)==1){
+                            float passengerView[3]{};
+                            if(driving::GetPassengerView(*reinterpret_cast<const std::uint16_t*>(reinterpret_cast<const char*>(vehicle)+0x32),passengerSeat,
+                               driving::GetModeForVehicleType(driving::VEHICLE_CAR),passengerView))
+                                base.pos=vehiclePosition+vehicleRight*passengerView[0]+vehicleForward*passengerView[1]+vehicleUp*passengerView[2];
+                        }
                         static void* loggedVehicle = nullptr;
                         static bool loggedHead = false;
                         if (vehicle != loggedVehicle || usedSeatedHead != loggedHead) {

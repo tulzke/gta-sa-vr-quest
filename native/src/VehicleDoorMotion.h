@@ -102,7 +102,7 @@ struct Motion {
 struct Marker {
     Vec position{},direction{},up{};bool held{},fist{};
     float opacity{1.f},highlight{},scale{1.f};
-    int seatIcon{};float progress{};
+    int seatIcon{};float progress{};bool exitBlocked{};
     Vec strikeDirection{};
     bool arrowOut{};
     bool doorGrab{};

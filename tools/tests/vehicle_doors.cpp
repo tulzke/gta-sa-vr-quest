@@ -24,7 +24,7 @@ int stopsRequested{};unsigned claimedHands{};
 void OnDoorOpening(void*) {++stopsRequested;}
 unsigned ClaimedHands() {return claimedHands;}
 }
-namespace savr::vehicleentry { int SeatIndex(void* car,void* ped){ if(!car||!ped)return -2;void* v{};std::memcpy(&v,static_cast<char*>(car)+0x5a0,8);if(v==ped)return -1;for(int i=0;i<3;++i){std::memcpy(&v,static_cast<char*>(car)+0x5a8+i*8,8);if(v==ped)return i;}return -2;} unsigned ClaimedHands(){return 0;} void Update(bool,std::uint64_t) {} void Append(vehicledoors::MarkerFrame&) {} }
+namespace savr::vehicleentry { int SeatIndex(void* car,void* ped){ if(!car||!ped)return -2;void* v{};std::memcpy(&v,static_cast<char*>(car)+0x5a0,8);if(v==ped)return -1;for(int i=0;i<3;++i){std::memcpy(&v,static_cast<char*>(car)+0x5a8+i*8,8);if(v==ped)return i;}return -2;} unsigned ClaimedHands(){return 0;} void Update(bool,std::uint64_t,unsigned) {} void Append(vehicledoors::MarkerFrame&) {} }
 namespace savr {
 GameSymbols g{};
 namespace xr {
@@ -60,6 +60,9 @@ void SetBikeGripCalibration(int,int grip,const float in[3]){std::copy_n(in,3,bik
 int debugMode{},saves{};
 std::map<int,std::array<float,24>> corrections;
 int GetVehicleDebugMode() {return debugMode;}
+int VehicleEditTarget(){return 0;}
+int passengerWrites{};float passengerTarget[3]{};int passengerSeat=-1;
+void SetPassengerView(int,int seat,int,const float value[3]){++passengerWrites;passengerSeat=seat;std::copy_n(value,3,passengerTarget);}
 std::map<int,std::array<float,48>> panelCorrections;
 void GetDoorPanelCalibration(int model,int door,bool inside,float out[6]) {
     for(int a=0;a<6;++a)out[a]=panelCorrections[model][(door-2)*12+inside*6+a];
@@ -76,7 +79,7 @@ void SetDoorCalibration(int model,int door,bool inside,const float in[3]) {
         corrections[model][((door-2)^1)*6+inside*3+a]=a==0?-in[a]:in[a];}
 }
 void SaveDebugCalibration() {++saves;}
-bool bikeWheel{};
+bool bikeWheel{},wheelAvailable=true;
 int GetActiveVehicleType() {return bikeWheel?VEHICLE_BIKE:VEHICLE_CAR;}
 int GetModeForVehicleType(int) {return MODE_IMMERSIVE;}
 float GetActiveSeatSideCm() {return 0;}
@@ -92,6 +95,7 @@ void SetRadioPose(int,const float*) {}
 int mirrorValues[12]{0,45,110,0,0,0,0,-200,100,0,0,0};
 void GetRearMirrorCalibration(int,int out[12]) {std::copy_n(mirrorValues,12,out);}
 void SetRearMirrorCalibration(int,const int values[12]) {std::copy_n(values,12,mirrorValues);}
+void SetRearMirrorCameraCalibration(int,const int values[12]) {std::copy_n(values+6,6,mirrorValues+6);}
 int radiusValue{},radiusWrites{};
 void SetDebugWheelRadius(int,int value) {radiusValue=value;++radiusWrites;}
 void SetDebugWheelPitch(int,int) {}
@@ -100,6 +104,7 @@ void SetDebugPosition(int,int,bool,const int value[3]) { std::copy_n(value,3,pos
 
 unsigned grabbed{}; int interactionTarget=4;
 bool GetWheelVisualState(WheelVisualState* out) {
+    if(!wheelAvailable)return false;
     for(int i=0;i<2;++i)out->grabbed[i]=(grabbed&(1u<<i))!=0;
     if(bikeWheel){out->active=true;out->bike=true;out->dashAnchorValid=true;out->modelId=461;
         out->right[0]=1;out->up[1]=1;out->normal[2]=1;
@@ -515,6 +520,22 @@ int main() {
     Setup();driving::debugMode=1;Ready();hands[0].grip=1;Tick();
     CHECK(g_grab.hand==0&&ClaimedHands()==1);
     hands[0].grip=0;Tick();CHECK(g_grab.hand<0);
+    // Passenger viewpoint editing does not require driver status or wheel data.
+    for(int seat=0;seat<3;++seat)for(int hand=0;hand<2;++hand){
+        Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+        Write(vehicle,0x5a0,static_cast<void*>(nullptr));Write(vehicle,0x5a8+seat*8,static_cast<void*>(pedMemory));
+        g.CVehicle_IsDriver=[](const void*,const void*){return false;};driving::wheelAvailable=false;driving::passengerWrites=0;
+        const Vec neutral{-.4f,.2f,1.4f};std::memcpy(hands[hand].gripPos,&neutral,12);Tick();
+        hands[hand].trigger=1;Tick();CHECK(g_editKind==3&&g_edit.hand==hand&&ClaimedHands()==(1u<<hand));
+        hands[hand].gripPos[0]+=.12f;Tick();CHECK(driving::passengerWrites==0);
+        hands[hand].trigger=0;Tick();CHECK(driving::passengerWrites==1&&driving::passengerSeat==seat&&std::abs(driving::passengerTarget[0]+.28f)<1e-5f&&driving::saves==1);
+        driving::wheelAvailable=true;
+    }
+    Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+    Write(vehicle,0x5a0,static_cast<void*>(nullptr));Write(vehicle,0x5a8,static_cast<void*>(pedMemory));driving::passengerWrites=0;
+    const Vec neutral{-.4f,.2f,1.4f};std::memcpy(hands[0].gripPos,&neutral,12);Tick();hands[0].trigger=1;Tick();
+    Write(vehicle,0x5a8,static_cast<void*>(nullptr));Write(vehicle,0x5b0,static_cast<void*>(pedMemory));hands[0].trigger=0;Tick();
+    CHECK(driving::passengerWrites==0&&g_edit.hand<0);
     // Wheel edits apply live; seat previews commit only on release.
     for(int editMode:{2,3}) for(int h:{0,1}) {
         Setup();driving::debugMode=1;seated=vehicle;

@@ -1,4 +1,5 @@
 #include "VehicleExit.h"
+#include "Driving.h"
 #include "VehicleAccess.h"
 #include "VehicleEntry.h"
 #include "Symbols.h"
@@ -7,6 +8,7 @@
 #include <cstdlib>
 namespace savr { GameSymbols g{};
 namespace testarea { bool active{}; bool FindExitGround(float,float,float,float* z){if(!active)return false;*z=1;return true;} }
+namespace driving {float adjustment[3]{};void GetExitCalibration(int,int,bool,float* out){std::copy_n(adjustment,3,out);}}
 namespace vehicleentry { int SeatIndex(void* car,void* ped){void* p{};std::memcpy(&p,static_cast<char*>(car)+0x5a0,8);if(p==ped)return -1;for(int i=0;i<3;++i){std::memcpy(&p,static_cast<char*>(car)+0x5a8+i*8,8);if(p==ped)return i;}return -2;} }
 }
 #define LOGI(...) ((void)0)
@@ -21,6 +23,7 @@ float expectedX{},doorZ{};bool corrected{};
 template<class T>void Put(void* p,int off,T v){std::memcpy(static_cast<char*>(p)+off,&v,sizeof(v));}
 void Setup(int seat){
  std::memset(car,0,sizeof(car));std::memset(ped,0,sizeof(ped));std::memset(pad,0,sizeof(pad));std::memset(intelligence,0,sizeof(intelligence));
+ std::fill_n(driving::adjustment,3,0.f);
  current=car;selected=seat;expectedNode=nodes[seat+1];ctorCalls=processCalls=dtorCalls=removes=adds=clears=groundCalls=emergencyCalls=0;
  testarea::active=false;terrain=ownRoom=stepAllowed=true;oppositeRoom=doorBusy=otherBusy=emergencyTask=corrected=false;
  ignored=obstacle;expectedX=2;doorZ=1;taskType=725;
@@ -77,5 +80,29 @@ int main(){
  }
  Setup(-1);Put(car,0x32,std::uint16_t(424));Put(car,0x5a8,static_cast<void*>(obstacle));expectedNode=8;CHECK(Check(car,-1,{2,0,1})==Mode::Unavailable);
  Setup(-1);Put(car,0x758+9+2,std::uint8_t(4));Put(car,0x77c+2*0x18,0.f);CHECK(TryExit(car,-1,{2,0,1}));
+ // Optional placement validates ground, endpoint bodywork and the whole short path.
+ Setup(-1);driving::adjustment[0]=.2f;expectedX=2.2f;
+ doorPosition=[](const void*,int){return GameSymbols::Vec3{2,0,1};};
+ g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3 centre,float radius,void* ignore,bool b,bool v,bool p,bool o,bool d,bool see)->void*{
+  CHECK(centre.x>=2&&centre.x<=2.21f&&radius==.3f&&ignore==ped&&b&&v&&p&&o&&d&&!see&&ignored==nullptr);return nullptr;
+ };
+ g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void**,bool,bool,bool,bool,bool,bool,bool,bool){return false;};
+ CHECK(Check(car,-1,{2,0,1})==Mode::Normal&&TryExit(car,-1,{2,0,1})&&std::abs(Read<Vec>(matrix,0x30).x-2.2f)<1e-5f&&ignored==obstacle);
+ Setup(-1);driving::adjustment[0]=.2f;doorPosition=[](const void*,int){return GameSymbols::Vec3{2,0,1};};
+ g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3,float,void*,bool,bool,bool,bool,bool,bool)->void*{return car;};
+ g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void**,bool,bool,bool,bool,bool,bool,bool,bool){return false;};
+ CHECK(Check(car,-1,{2,0,1})==Mode::Unavailable&&!TryExit(car,-1,{2,0,1})&&removes==0&&clears==0&&ignored==obstacle);
+ g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3 c,float,void*,bool,bool,bool,bool,bool,bool)->void*{return c.x>2.05f&&c.x<2.15f?obstacle:nullptr;};
+ CHECK(Check(car,-1,{2,0,1})==Mode::Unavailable&&removes==0); // obstacle only along sweep
+ g.CWorld_TestSphereAgainstWorld=[](GameSymbols::Vec3,float,void*,bool,bool,bool,bool,bool,bool)->void*{return nullptr;};
+ g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void**,bool,bool,bool,bool,bool,bool,bool,bool){return true;};
+ CHECK(Check(car,-1,{2,0,1})==Mode::Unavailable&&removes==0);
+ g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void**,bool,bool,bool,bool,bool,bool,bool,bool){return false;};
+ CHECK(Check(car,-1,{2,0,1})==Mode::Normal);terrain=false;CHECK(!TryExit(car,-1,{2,0,1})&&removes==0); // world changes after preview
+ terrain=true;Put(carMatrix,0,Vec{0,1,0});Put(carMatrix,0x10,Vec{-1,0,0});Vec preview{};
+ CHECK(PlacementPreview(car,-1,preview)&&std::abs(preview.x-2)<1e-5f&&std::abs(preview.y-.2f)<1e-5f);
+ // Offset failure cannot enable the emergency route; zero restores native behavior.
+ ownRoom=true;oppositeRoom=false;g.CWorld_TestSphereAgainstWorld=nullptr;CHECK(Check(car,-1,{2,0,1})==Mode::Unavailable);
+ driving::adjustment[0]=0;CHECK(Check(car,-1,{2,0,1})==Mode::Normal);
  std::puts("native exit: four seats, engine eligibility/placement, high cabs, doors, emergency, revalidation and unchanged door angle passed");
 }

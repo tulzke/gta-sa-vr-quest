@@ -7879,6 +7879,12 @@ void BuildDrivingMenu() {
             case driving::MENU_REAR_MIRROR:
                 std::snprintf(rows[row],sizeof(rows[row]),"REAR MIRROR < %s >",driving::RearMirrorQualityName());
                 break;
+            case driving::MENU_MIRROR_RESET_POSE:
+                std::snprintf(rows[row],sizeof(rows[row]),"RESET MIRROR POSITION");break;
+            case driving::MENU_PASSENGER_RESET:
+                std::snprintf(rows[row],sizeof(rows[row]),"RESET PASSENGER VIEW / REAR PAIR");break;
+            case driving::MENU_VEHICLE_EDIT_TARGET:
+                std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE EDIT < %s >",driving::VehicleEditTargetName());break;
             case driving::MENU_REAR_MIRROR_FOV:
                 std::snprintf(rows[row],sizeof(rows[row]),"MIRROR FIELD OF VIEW < %d DEG >",driving::RearMirrorFov());
                 break;
@@ -10330,11 +10336,11 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
             using vehicledoors::Vec;
             const Vec r=vehicledoors::Cross(marker.direction,marker.up),u=marker.up;
             const auto draw=[&](const std::vector<Vec>& v,float alpha){
-                glUniform4f(g_markerColLoc,1.f,.86f+.14f*marker.highlight,.08f+.82f*marker.highlight,alpha);
+                glUniform4f(g_markerColLoc,1.f,marker.exitBlocked?.12f:(.86f+.14f*marker.highlight),marker.exitBlocked?.08f:(.08f+.82f*marker.highlight),alpha);
                 glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(Vec),v.data(),GL_DYNAMIC_DRAW);
                 glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()));
             };
-            const auto point=[&](float x,float y){return marker.position+r*x+u*y;};
+            const auto point=[&](float x,float y){return marker.position+(r*x+u*y)*marker.scale;};
             const auto ring=[&](float radius,float thickness,int segments){
                 std::vector<Vec> v;
                 for(int n=0;n<segments;++n){

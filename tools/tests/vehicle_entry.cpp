@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+namespace savr::ledgeclimb { unsigned ClaimedHands(){return 0;} }
 namespace savr::vehicleclimb { unsigned ClaimedHands(){return 0;} }
 using savr::vehicledoors::Vec;
 double testNow=1;float eyeX=-1.3f,eyeY=0;int vehicleAppearance=1;bool locksOpen=true;
@@ -13,10 +14,11 @@ namespace savr {
 GameSymbols g{};
 namespace passengerreaction { void Update(bool){} }
 namespace xr { struct HandPose {bool valid{};float trigger{},gripPos[3]{};};HandPose handPoses[2]{};void GetHandPoses(HandPose* out){out[0]=handPoses[0];out[1]=handPoses[1];} struct InputState {float leftStick[2]{},rightStick[2]{};};InputState input;void GetInput(InputState& out){out=input;}void TriggerHaptic(int,float,float,float){} }
-namespace driving { int debug{},saves{};float calibration[4][3]{};int GetVehicleDebugMode(){return debug;}void SaveDebugCalibration(){++saves;} void GetEntryCalibration(int,int seat,float* out){for(int i=0;i<3;++i)out[i]=calibration[seat][i];}void SetEntryCalibration(int,int seat,const float* in){for(int i=0;i<3;++i)calibration[seat][i]=in[i];} }
+namespace driving { int debug{},saves{};float calibration[4][3]{};int GetVehicleDebugMode(){return debug;} int editTarget{};int VehicleEditTarget(){return editTarget;} float exitCal[2][4][3]{};void GetExitCalibration(int,int i,bool p,float* out){std::copy_n(exitCal[p][i],3,out);}void SetExitCalibration(int,int i,bool p,const float* v){std::copy_n(v,3,exitCal[p][i]);}void SaveDebugCalibration(){++saves;} void GetEntryCalibration(int,int seat,float* out){for(int i=0;i<3;++i)out[i]=calibration[seat][i];}void SetEntryCalibration(int,int seat,const float* in){for(int i=0;i<3;++i)calibration[seat][i]=in[i];} }
 namespace locomotion { void MapGameplaySticks(float x,float y,float,float,float* mx,float* my,float*,float*){*mx=x;*my=y;} }
 namespace vrcam { int exits{};void RequestVehicleExit(){++exits;}bool TrackingPointToWorld(const float* in,float* out){for(int i=0;i<3;++i)out[i]=in[i];return true;} bool GetHeadWorldRay(float* o,float* f){o[0]=eyeX;o[1]=eyeY;o[2]=.6f;f[0]=0;f[1]=1;f[2]=0;return true;} }
 namespace vehicleexit {
+ bool PlacementPreview(void*,int,vehicledoors::Vec& out){out={1,0,1};return true;}
  bool emergencyAvailable{},lastEmergency{},nativeAllowed=true;
  Mode Check(void* car,int seat,vehicledoors::Vec){
   if(!nativeAllowed)return Mode::Unavailable;
@@ -196,6 +198,22 @@ int main(){
  vehicleexit::emergencyAvailable=true;Tick();const int modeSwitchExits=vrcam::exits;
  for(int i=0;i<5;++i)Tick();CHECK(vrcam::exits==modeSwitchExits);
  for(int i=0;i<6;++i)Tick();CHECK(vrcam::exits==modeSwitchExits+1&&vehicleexit::lastEmergency);
+ // Exit handles edit a separate profile and consume the stick action.
+ current=nullptr;Put(cars,0x5a0,static_cast<void*>(nullptr));Put(cars,0x32,std::uint16_t(400));Put(leftMatrix,0x30,Vec{-1,.35f,.4f});
+ driving::debug=1;driving::editTarget=1;blockedLeft=blockedRight=false;eyeX=-1.3f;xr::input.leftStick[0]=0;
+ xr::handPoses[0].valid=true;xr::handPoses[0].trigger=0;
+ const Vec proxy{-1.45f,0,.75f};std::memcpy(xr::handPoses[0].gripPos,&proxy,12);for(int i=0;i<3;++i)Tick();
+ xr::handPoses[0].trigger=1;Tick();CHECK(editHand==0&&ClaimedHands()==1);
+ xr::handPoses[0].gripPos[0]+=.1f;Tick();CHECK(std::abs(driving::exitCal[0][0][0]-.1f)<1e-4f);
+ const int saved=driving::saves;xr::handPoses[0].trigger=0;Tick();CHECK(editHand<0&&driving::saves==saved+1&&started==0);
+ driving::editTarget=2;std::memcpy(xr::handPoses[0].gripPos,&proxy,12);Tick();xr::handPoses[0].trigger=1;Tick();CHECK(editHand==0);
+ xr::handPoses[0].gripPos[1]+=.15f;xr::handPoses[0].gripPos[2]+=.2f;Tick();CHECK(std::abs(driving::exitCal[1][0][1]-.15f)<1e-4f&&driving::exitCal[1][0][2]==0);
+ flags[0]++;Tick();CHECK(editHand<0&&ClaimedHands()==0);
+ // External ownership prevents an editor grab even on the exact handle.
+ xr::handPoses[0].trigger=0;Tick();std::memcpy(xr::handPoses[0].gripPos,&proxy,12);xr::handPoses[0].trigger=1;testNow+=.1;Update(true,1,1);CHECK(editHand<0);
+ // Holding a weapon still permits normal boarding outside the editor.
+ driving::debug=0;driving::editTarget=0;driving::calibration[0][2]=0;xr::handPoses[0].trigger=0;xr::input.leftStick[0]=0;Tick();Tick();
+ xr::input.leftStick[0]=1;testNow+=.1;Update(true,1,1);CHECK(started>0);
  std::puts("vehicle entry: continuous hold, direction cancellation, occupancy, flash and release latch passed");
 }
 
