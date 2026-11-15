@@ -2706,7 +2706,7 @@ void* WeaponModelClumpForSlot(int slot, int weaponType) {
     return source;
 }
 
-void PublishReloadHintVisuals(void* ped,unsigned renderedHands) {
+void PublishReloadHintVisuals(void* ped,unsigned renderedHands,const xr::TwoHandVisualState& twoHand) {
     struct Cache {void* clump{};int type{};std::shared_ptr<const reloadhint::Model> mesh;};
     static Cache cache[kWeaponSlotCount];
     reloadhint::VisualFrame frame;
@@ -2738,6 +2738,23 @@ void PublishReloadHintVisuals(void* ped,unsigned renderedHands) {
             const auto& wrist=hands[h].gripPos;
             frame.items[h].model=model.mesh;
             frame.items[h].pose=reloadhint::BuildPose(anchor,{wrist[0],wrist[1],wrist[2]},h,request.mode,request.phaseMs);
+            if (reloadhint::RifleLeverHint(request.type,request.mode)) {
+                physicalweapon::TrackingPose support{};
+                // Match the visible wrists: the socket API is in the one-hand
+                // base frame; Xr applies the captured two-hand arc, then recoil.
+                // The socket is also available before a support grip engages.
+                if (physicalweapon::GetSupportAnchorTracking(h,&support)) {
+                    const auto visualPoint=[&](reloadhint::Vec p) {
+                        if (twoHand.active && twoHand.primaryHand==h)
+                            p=reloadhint::Pivoted({p},{twoHand.pivot[0],twoHand.pivot[1],twoHand.pivot[2]},
+                                reloadhint::Unit({twoHand.axis[0],twoHand.axis[1],twoHand.axis[2]},{0,1,0}),twoHand.angleRadians).position;
+                        const auto kicked=twoHand.weaponRecoil[h].Point({p.x,p.y,p.z});
+                        return reloadhint::Vec{kicked.x,kicked.y,kicked.z};
+                    };
+                    frame.items[h].pose=reloadhint::BuildRiflePose(anchor,visualPoint({wrist[0],wrist[1],wrist[2]}),
+                        visualPoint({support.position[0],support.position[1],support.position[2]}),request.mode,request.phaseMs);
+                }
+            }
             frame.items[h].opacity=reloadhint::kOpacity*reloadhint::Animation(request.mode,request.phaseMs).visibility;
         }
     }
@@ -21733,7 +21750,7 @@ void OnRenderScene(bool underwater) {
     }
     xr::SetHandWeaponTypes(renderedWeaponTypes[0],renderedWeaponTypes[1]);
     xr::SetTwoHandVisualState(twoHandVisualState);
-    PublishReloadHintVisuals(playerPed,renderedHeldMask);
+    PublishReloadHintVisuals(playerPed,renderedHeldMask,twoHandVisualState);
     xr::SetWeaponHeldHands(renderedHeldMask,
                            preferredType != 0 && preferredHand >= 0 &&
                                    (renderedHeldMask & (1u << preferredHand)) != 0

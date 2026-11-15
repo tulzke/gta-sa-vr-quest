@@ -72,6 +72,26 @@ inline Vec Unit(Vec v,Vec fallback) {
     const float length=std::sqrt(arcadereload::Dot(v,v));
     return std::isfinite(length) && length>.0001f?arcadereload::Scale(v,1/length):fallback;
 }
+inline Pose Pivoted(Pose pose,Vec pivot,Vec axis,float angle) {
+    using namespace arcadereload;
+    pose.position=Add(pivot,Rotated(Add(pose.position,Scale(pivot,-1)),axis,angle));
+    pose.barrel=Rotated(pose.barrel,axis,angle);
+    pose.top=Rotated(pose.top,axis,angle);
+    pose.side=Rotated(pose.side,axis,angle);
+    return pose;
+}
+inline bool RifleLeverHint(int type,int mode) {
+    return (type==33 || type==34) && (mode==arcadereload::DOWN_FLICK || mode==arcadereload::DOWN_UP);
+}
+inline Pose BuildRiflePose(const Pose& weapon,Vec wrist,Vec support,int mode,unsigned phaseMs) {
+    using namespace arcadereload;
+    const Vec arm=Unit(Add(wrist,Scale(support,-1)),Scale(Unit(weapon.barrel,{0,0,-1}),-1));
+    const Vec axis=Unit(Cross(arm,{0,1,0}),Unit(weapon.side,{1,0,0}));
+    // The rear grip drops while the foregrip stays fixed. Do not translate the
+    // whole rifle or pitch it down around the primary wrist as with a pistol.
+    const float angle=std::min(.95f,std::max(0.f,std::asin(std::clamp(arm.y,-1.f,1.f))+1.540796327f));
+    return Pivoted(weapon,support,axis,-angle*(Animation(mode,phaseMs).down/.58f));
+}
 inline Pose BuildPose(const Pose& weapon,Vec wrist,int hand,int mode,unsigned phaseMs) {
     using namespace arcadereload;
     const float sign=hand==0?-1.f:1.f;
@@ -83,10 +103,7 @@ inline Pose BuildPose(const Pose& weapon,Vec wrist,int hand,int mode,unsigned ph
     const Vec nodAxis=Unit(Cross(barrel,up),Unit(weapon.side,{1,0,0}));
     const float down=std::min(motion.down,std::max(0.f,std::asin(std::clamp(barrel.y,-1.f,1.f))+1.540796327f));
     const auto rotate=[&](Vec axis,float angle) {
-        pose.position=Add(wrist,Rotated(Add(pose.position,Scale(wrist,-1)),axis,angle));
-        pose.barrel=Rotated(pose.barrel,axis,angle);
-        pose.top=Rotated(pose.top,axis,angle);
-        pose.side=Rotated(pose.side,axis,angle);
+        pose=Pivoted(pose,wrist,axis,angle);
     };
     rotate(nodAxis,-down);
     if (mode==DOWN_FLICK) {

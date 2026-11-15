@@ -80,6 +80,28 @@ int main() {
     Check(Dot(difference,difference)<.00001f && Dot(movedRoll.top,Rotated(rolled.top,axis,turn))>.999f,"moving and turning the hand carries the active animation with it");
     Check(Animation(TWIST,1000).roll==Animation(TWIST,600).roll && Animation(TWIST,1400).visibility==0,"side tutorial holds its outward pose and hides the reset instead of returning");
 
+    Check(RifleLeverHint(33,DOWN_FLICK) && RifleLeverHint(34,DOWN_UP) && !RifleLeverHint(33,TWIST) &&
+          !RifleLeverHint(30,TWIST) && !RifleLeverHint(22,DOWN_FLICK),"foregrip animation is limited to rifle downward gestures");
+    for(int hand:{0,1})for(float pitch:{-.6f,0.f,.6f}) {
+        Pose rifle=anchor;rifle.side=Scale(rifle.side,hand==0?-1.f:1.f);
+        rifle=Pivoted(rifle,rifle.position,{1,0,0},pitch);
+        const Vec support=Add(rifle.position,Scale(rifle.barrel,.42f));
+        for(unsigned ms:{0u,340u,500u,800u,1300u,1600u}) {
+            const auto lever=BuildRiflePose(rifle,rifle.position,support,DOWN_FLICK,ms);
+            const Vec fixed=Add(lever.position,Scale(lever.barrel,.42f));
+            const Vec error=Add(fixed,Scale(support,-1));
+            Check(Dot(error,error)<.000001f,"rifle foregrip stays fixed throughout the animation for either hand and pitched weapons");
+            Check(lever.position.y<=rifle.position.y+.0001f,"primary grip moves down rather than lifting or translating the whole rifle");
+            Check(std::abs(Dot(lever.barrel,Cross(lever.top,lever.side))-Dot(rifle.barrel,Cross(rifle.top,rifle.side)))<.0001f,"lever motion preserves live reflected handedness");
+        }
+        const auto lever=BuildRiflePose(rifle,rifle.position,support,DOWN_FLICK,500);
+        Check(lever.position.y<rifle.position.y-.15f,"rifle tutorial has a clear rear-grip downward stroke");
+        const Vec shift{.3f,.1f,-.4f};Pose shifted=rifle;shifted.position=Add(shifted.position,shift);
+        const auto carried=BuildRiflePose(shifted,shifted.position,Add(support,shift),DOWN_FLICK,500);
+        const Vec error=Add(carried.position,Scale(Add(lever.position,shift),-1));
+        Check(Dot(error,error)<.000001f,"moving the support anchor carries the lever animation with the hand");
+    }
+
     alignas(16) unsigned char clump[64]{},root[256]{},child[256]{},a[128]{},b[128]{},geometry[192]{},morph[64]{};
     float vertices[]{0,0,0, .4f,0,0, 0,.2f,0};unsigned short triangles[]{0,1,2,0};
     Put<void*>(clump,8,root);Put<void*>(a,8,root);Put<void*>(b,8,child);Put<void*>(child,8,root);
