@@ -5,6 +5,7 @@
 #include "NpcGrab.h"
 #include "VehicleDoorMotion.h"
 #include "VehicleDebugDrag.h"
+#include "PdaDashboardPlacement.h"
 #include "Basketball.h"
 #include "Driving.h"
 #include "Log.h"
@@ -59,6 +60,8 @@ Vec g_editDoorBase{};
 float g_panelBase[6]{},g_panelWidth{},g_panelHeight{},g_panelThickness{};
 int g_panelCorner{};
 bool g_editDirty{};
+bool g_pdaEditDirty{};
+hud::WristSettings g_pdaStart{};
 void* g_editVehicle{};
 
 
@@ -238,6 +241,17 @@ bool ToTracking(Vec world,Vec& local) {
 bool ToWorld(const float in[3],Vec& world) {
     float out[3]{};if (!vrcam::TrackingPointToWorld(in,out)) return false;
     world={out[0],out[1],out[2]};return Finite(world);
+}
+bool PdaWorldFrame(const driving::WheelVisualState& wheel,pda::Frame& frame){
+    if(!wheel.dashAnchorValid||!hud::ShouldRenderWristHud()||!hud::GetElementSettings(hud::RADAR).enabled)return false;
+    if(!xr::VehiclePdaMapVisible())return false;
+    Vec centre{};if(!ToWorld(wheel.center,centre))return false;
+    Vec axes[3]{};
+    const float* source[3]={wheel.right,wheel.bike?wheel.normal:wheel.up,wheel.bike?wheel.up:wheel.normal};
+    for(int a=0;a<3;++a){float endpoint[3]{};for(int k=0;k<3;++k)endpoint[k]=wheel.center[k]+source[a][k]*(a==2?-1.f:1.f);
+        Vec end{};if(!ToWorld(endpoint,end))return false;axes[a]=end-centre;}
+    frame=pda::Place(centre,axes[0],axes[1],axes[2],hud::GetWristSettings(hud::RADAR,hud::WRIST_SLOT_VEHICLE,wheel.modelId));
+    return Finite(frame.centre);
 }
 bool SeatedBikeGrip(const driving::WheelVisualState& wheel,int grip,Basis& frame,Vec& point) {
     if(!wheel.bike||!wheel.dashAnchorValid||grip<0||grip>1||!ToWorld(wheel.handlePosition[grip],point))return false;
@@ -469,6 +483,8 @@ void PublishMarkers() {
 void EndDebugEdit() {
     g_debugPinchHands.store(0,std::memory_order_relaxed);
     if(g_editDirty||g_bikeEdit.dirty) driving::SaveDebugCalibration();
+    if(g_pdaEditDirty)hud::SavePdaCalibration();
+    g_pdaEditDirty=false;
     g_bikeEdit={};
     g_edit={}; g_editDirty=false; g_editVehicle=nullptr;
     g_editTarget={}; g_editKind=0; g_secondHand=-1;
@@ -793,7 +809,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         Publish(markers);return;
     }
 
-    int cockpitKind=(g_editKind==2||g_editKind==3||g_editKind==5||g_editKind==6||g_editKind==8||g_editKind==9)?g_editKind:0;
+    int cockpitKind=(g_editKind==2||g_editKind==3||g_editKind==5||g_editKind==6||g_editKind==8||g_editKind==9||g_editKind==10)?g_editKind:0;
     if(editMode && seated && g_edit.hand<0 && g.CVehicle_IsDriver && g.CVehicle_IsDriver(seated,ped)) {
         driving::WheelVisualState wheel{}; driving::GetWheelVisualState(&wheel);
         Vec wheelPoint{}; float seatEye[3]{};
@@ -821,6 +837,9 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const bool keyReady=wheel.ignitionVisible&&ToWorld(wheel.ignitionCenter,keyPoint);
             Vec radioPoint{};
             const bool radioReady=wheel.radioVisible&&ToWorld(wheel.radioCenter,radioPoint);
+            pda::Frame pdaFrame{};const bool pdaReady=PdaWorldFrame(wheel,pdaFrame);
+            const auto pdaSettings=hud::GetWristSettings(hud::RADAR,hud::WRIST_SLOT_VEHICLE,wheel.modelId);
+            if(pdaReady&&markers.count<MarkerFrame::kCapacity)markers.markers[markers.count++]={pdaFrame.centre,pdaFrame.normal,pdaFrame.up,false};
             for(int h=0;h<2;++h) if(valid[h]&&editFresh[h]&&!(occupied&(1u<<h))) {
                 if(radioReady&&Length(world[h]-radioPoint)<.10f&&Length(world[h]-radioPoint)<best){best=Length(world[h]-radioPoint);cockpitKind=9;}
                 if(keyReady&&Length(world[h]-keyPoint)<.10f&&Length(world[h]-keyPoint)<best){best=Length(world[h]-keyPoint);cockpitKind=8;}
@@ -828,6 +847,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 if(seatReady&&Length(world[h]-seatPoint)<best) {best=Length(world[h]-seatPoint);cockpitKind=3;}
                 if(mirrorReady&&Length(world[h]-mirrorPoint)<best){best=Length(world[h]-mirrorPoint);cockpitKind=5;}
                 if(mirrorReady&&Length(world[h]-cameraPoint)<best){best=Length(world[h]-cameraPoint);cockpitKind=6;}
+                if(pdaReady){const float distance=pda::Distance(pdaFrame,world[h],hud::PdaPortrait(),pdaSettings.scaleTenths);
+                    if(distance<.08f&&distance<best){best=distance;cockpitKind=10;}}
             }
             // When the in-cabin door handle overlaps a cockpit marker, the
             // nearest target wins, independent of the order of marker passes.
@@ -879,6 +900,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const int mirrorOffset=cockpitKind==6?6:0;
         if(cockpitKind==8 && (!wheel.ignitionVisible||!ToWorld(wheel.ignitionCenter,point))) { Reset();return; }
         if(cockpitKind==9 && (!wheel.radioVisible||!ToWorld(wheel.radioCenter,point))) { Reset();return; }
+        pda::Frame pdaFrame{};
+        if(cockpitKind==10){if(!PdaWorldFrame(wheel,pdaFrame)){Reset();return;}point=pdaFrame.centre;}
         if(cockpitKind==5||cockpitKind==6) {
             driving::GetRearMirrorCalibration(model,mirrorValues);
             point=car.Point({mirrorValues[0]*.01f,mirrorValues[1]*.01f,mirrorValues[2]*.01f});
@@ -893,6 +916,12 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             int value[3]{};
             const float delta[]={g_edit.delta.x,g_edit.delta.y,g_edit.delta.z};
             for(int a=0;a<3;++a) value[a]=g_editBase[a]+std::lround(delta[a]*100.f);
+            if(cockpitKind==10){
+                if(occupied&(1u<<h)){Reset();return;}
+                hud::SetVehiclePdaPosition(model,pda::Translate(g_pdaStart,pdaFrame,car.Vector(g_edit.delta)));
+                g_pdaEditDirty=true;
+                if(!PdaWorldFrame(wheel,pdaFrame)){Reset();return;}point=pdaFrame.centre;
+            }
             if(cockpitKind==8||cockpitKind==9) {
                 Basis current;if(!DebugHandBasis(hands[h],world[h],car,current)){Reset();return;}
                 const auto rotate=[&](Vec v){return current.Vector({Dot(v,g_mirrorHandStart.right),Dot(v,g_mirrorHandStart.forward),Dot(v,g_mirrorHandStart.up)});};
@@ -960,11 +989,14 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             if(cockpitKind==3) point=point+car.Vector(g_edit.delta);
             if(hands[h].trigger<=.35f) { EndDebugEdit();g_claimed.store(0);return; }
         } else {
-            for(int h=0;h<2;++h) if(valid[h]&&editFresh[h]&&!(occupied&(1u<<h))&&Length(world[h]-point)<.24f) {
+            for(int h=0;h<2;++h) if(valid[h]&&editFresh[h]&&!(occupied&(1u<<h))&&
+                (cockpitKind==10?pda::Distance(pdaFrame,world[h],hud::PdaPortrait(),hud::GetWristSettings(hud::RADAR,hud::WRIST_SLOT_VEHICLE,model).scaleTenths)<.08f:Length(world[h]-point)<.24f)) {
                 g_edit.Begin(h,car.Local(world[h]));g_editVehicle=seated;
                 g_editModel=model;g_editDrivingMode=mode;g_editKind=cockpitKind;
                 g_editTarget={seated,pool.identity,pool.objects,pool.flags,slot,0,0,pool.flags[slot]};
-                if(cockpitKind==3) {
+                if(cockpitKind==10){
+                    g_pdaStart=hud::GetWristSettings(hud::RADAR,hud::WRIST_SLOT_VEHICLE,model);
+                } else if(cockpitKind==3) {
                     g_editBase[0]=driving::GetCurrentModelSeatSideCm(type);
                     g_editBase[1]=driving::GetCurrentModelSeatForwardCm(type);
                     g_editBase[2]=driving::GetCurrentModelSeatHeightCm(type);
@@ -997,7 +1029,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         }
         if(!existing&&markers.count<MarkerFrame::kCapacity) {
             Basis orientation=car;
-            if(cockpitKind>=5) {
+            if(cockpitKind==10){orientation.forward=pdaFrame.normal;orientation.up=pdaFrame.up;}
+            else if(cockpitKind>=5) {
                 driving::GetRearMirrorCalibration(model,mirrorValues);
                 const auto local=MirrorOrientation(mirrorValues+mirrorOffset+3);
                 orientation.forward=car.Vector(local.forward);orientation.up=car.Vector(local.up);

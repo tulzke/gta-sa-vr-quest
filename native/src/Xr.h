@@ -274,6 +274,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
 // True while the wrist map projection is opening, open or closing.
 bool WatchProjectionNeeded();
 bool WatchConsumesTrigger(int hand);
+bool VehiclePdaMapVisible(); // published with the current stereo map texture
 
 // RenderQueue command 46 normally presents the hidden Android surface through
 // eglSwapBuffers.  Once a direct stereo generation is pending, the RenderQueue

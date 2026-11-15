@@ -1,6 +1,7 @@
 #include "VehicleDoorMotion.h"
 #include "VehicleDoors.h"
 #include "VehicleDebugDrag.h"
+#include "PdaDashboardPlacement.h"
 #include "Driving.h"
 #include "CockpitSelection.h"
 #include <map>
@@ -17,6 +18,7 @@
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::exit(1); } } while(0)
 #define LOGI(...) ((void)0)
 namespace savr::vehicleclimb { unsigned ClaimedHands(){return 0;} bool Editing(){return false;} void Update(bool,const xr::HandPose*,std::uint64_t,unsigned){} void Append(vehicledoors::MarkerFrame&){} }
+namespace savr::ledgeclimb { unsigned ClaimedHands(){return 0;} void Reset(){} void Update(bool,const xr::HandPose*,std::uint64_t,unsigned){} void Append(vehicledoors::MarkerFrame&){} }
 namespace savr::npcgrab {
 int stopsRequested{};unsigned claimedHands{};
 void OnDoorOpening(void*) {++stopsRequested;}
@@ -31,6 +33,18 @@ vehicledoors::MarkerFrame published;
 void SetVehicleDoorMarkers(const vehicledoors::MarkerFrame& f) { published=f; }
 void TriggerHaptic(int,float,float,float) {}
 bool focused=true;bool IsSessionFocused() {return focused;}
+bool pdaVisible=false;bool VehiclePdaMapVisible(){return pdaVisible;}
+}
+namespace hud {
+bool pdaEnabled=false;int pdaSaves=0;std::map<int,WristSettings> pdaPositions;
+bool ShouldRenderWristHud(){return pdaEnabled;}
+ElementSettings GetElementSettings(int){ElementSettings s{};s.enabled=pdaEnabled;return s;}
+bool PdaPortrait(){return false;}
+WristSettings GetWristSettings(int,int,int model){
+    const auto it=pdaPositions.find(model);return it==pdaPositions.end()?WristSettings{0,140,-60,0,0,0,10}:it->second;
+}
+void SetVehiclePdaPosition(int model,const WristSettings& s){pdaPositions[model]=s;}
+void SavePdaCalibration(){++pdaSaves;}
 }
 namespace physicalweapon {
 unsigned mask{},support{};
@@ -65,13 +79,13 @@ void SaveDebugCalibration() {++saves;}
 bool bikeWheel{};
 int GetActiveVehicleType() {return bikeWheel?VEHICLE_BIKE:VEHICLE_CAR;}
 int GetModeForVehicleType(int) {return MODE_IMMERSIVE;}
-int GetActiveSeatSideCm() {return 0;}
-int GetActiveSeatForwardCm() {return 0;}
-int GetActiveSeatHeightCm() {return 0;}
-int GetCurrentModelSeatSideCm(int) {return 0;}
-int GetCurrentModelSeatForwardCm(int) {return 0;}
-int GetCurrentModelSeatHeightCm(int) {return 0;}
-int GetWheelCalibrationValue(int) {return 0;}
+float GetActiveSeatSideCm() {return 0;}
+float GetActiveSeatForwardCm() {return 0;}
+float GetActiveSeatHeightCm() {return 0;}
+float GetCurrentModelSeatSideCm(int) {return 0;}
+float GetCurrentModelSeatForwardCm(int) {return 0;}
+float GetCurrentModelSeatHeightCm(int) {return 0;}
+float GetWheelCalibrationValue(int) {return 0;}
 bool GetIgnitionFrame(void*,bool,float out[12]) { const float frame[12]{1,0,0,0,1,0,0,0,1,0,0,0}; std::copy_n(frame,12,out);return true; }
 void SetIgnitionPose(int,bool,const float*) {}
 void SetRadioPose(int,const float*) {}
@@ -93,7 +107,8 @@ bool GetWheelVisualState(WheelVisualState* out) {
         for(int i=0;i<2;++i){out->handlePosition[i][0]=(i?1.f:-1.f)*.31f+bikeGrip[i][0];
             out->handlePosition[i][1]=.5f+bikeGrip[i][1];out->handlePosition[i][2]=.8f+bikeGrip[i][2];}
         return true;}
-    out->dashAnchorValid=true;out->interactionTarget[0]=out->interactionTarget[1]=interactionTarget;out->modelId=400;out->radius=.2f;out->center[0]=-.4f;out->center[1]=.2f;out->center[2]=1.f;return true;
+    out->dashAnchorValid=true;out->interactionTarget[0]=out->interactionTarget[1]=interactionTarget;out->modelId=400;out->radius=.2f;out->center[0]=-.4f;out->center[1]=.2f;out->center[2]=1.f;
+    out->right[0]=1;out->up[2]=1;out->normal[1]=1;return true;
 }
 }
 namespace vrcam {
@@ -189,6 +204,7 @@ void Setup() {
     writes=nativeSwings=invalidWrites=0;
     npcgrab::stopsRequested=0;
     npcgrab::claimedHands=0;
+    hud::pdaEnabled=false;hud::pdaSaves=0;hud::pdaPositions.clear();xr::pdaVisible=false;
     vrcam::eye={-1.7f,-.3f,1.3f};
     vrcam::rebase={};
 }
@@ -700,5 +716,21 @@ int main() {
         Reset();CHECK(DebugPinchHands()==0);
     }
     Setup();g_editKind=5;g_edit.hand=0;Publish({});CHECK(DebugPinchHands()==0);Reset();
+    for(int h:{0,1}){
+        Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+        hud::pdaEnabled=true;xr::pdaVisible=true;
+        const Vec centre{-.58f,.2f,1.06f};std::memcpy(hands[h].gripPos,&centre,12);
+        Tick();hands[h].trigger=1;Tick();CHECK(g_editKind==10&&g_edit.hand==h&&ClaimedHands()==(1u<<h));
+        hands[h].gripPos[0]+=.06f;hands[h].gripPos[1]+=.04f;hands[h].gripPos[2]+=.03f;
+        hands[h].gripOri[2]=.258819f;hands[h].gripOri[3]=.965926f;Tick();
+        const auto position=hud::pdaPositions[400];
+        CHECK(std::abs(position.acrossMm-200)<.01f&&std::abs(position.alongMm+40)<.01f&&std::abs(position.liftMm+30)<.01f);
+        CHECK(position.pitchDeg==0&&position.yawDeg==0&&position.rollDeg==0&&hud::pdaSaves==0);
+        hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&hud::pdaSaves==1&&driving::saves==0);
+        Tick(); // common debug editor re-arms on an open frame after release
+        hands[h].trigger=1;Tick();CHECK(g_editKind==10);
+        xr::pdaVisible=false;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0);
+    }
+    std::puts("vehicle PDA: both hands, three-axis trigger drag, fixed angles, model placement, release save and visibility cancellation passed");
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

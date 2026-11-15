@@ -29,10 +29,22 @@ int main(){
     assert(GetWristSettings(WATCH,WRIST_SLOT_HAND,-1).rollDeg==35);
     ToggleDeviceHand(WATCH);ToggleWatchInside();
     assert(DeviceHand(WATCH)==0&&!WatchInside());
+    const auto other=GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,412);
+    const auto original=GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,411);
+    auto moved=original;moved.alongMm=80;moved.acrossMm=-100;moved.liftMm=120;moved.yawDeg=90;
+    SetVehiclePdaPosition(411,moved);
+    const auto actual=GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,411);
+    assert(actual.alongMm==80&&actual.acrossMm==-100&&actual.liftMm==120);
+    assert(actual.yawDeg==original.yawDeg&&actual.pitchDeg==original.pitchDeg&&actual.scaleTenths==original.scaleTenths);
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,412).acrossMm==other.acrossMm);
+    SavePdaCalibration();
     std::ifstream file("watch-settings.ini");std::string text((std::istreambuf_iterator<char>(file)),{});
     assert(text.find("WatchMapZoomPercent=140")!=text.npos);
     assert(text.find("WatchHand=0")!=text.npos&&text.find("WatchInside=0")!=text.npos);
     assert(text.find("Hud.Watch.WristRollDeg=35")!=text.npos);
+    assert(text.find("Hud.Radar.DashM411.AlongMm=80")!=text.npos);
+    assert(text.find("Hud.Radar.DashM411.AcrossMm=-100")!=text.npos);
+    assert(text.find("Hud.Radar.DashM411.LiftMm=120")!=text.npos);
     std::puts("PASS watch hand, side and rotation settings load/save");
 }
 '''

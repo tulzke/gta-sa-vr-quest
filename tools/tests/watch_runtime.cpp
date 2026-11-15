@@ -7,6 +7,8 @@
 #include "RadarMapLayout.h"
 #include "RadarTextureLeases.h"
 #include "RadarTextureStreaming.h"
+#include "PdaDashboardPlacement.h"
+#include "VehicleDebugDrag.h"
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -219,6 +221,29 @@ int main(){
         CHECK(!projection.Update(false,1,0,true,1,0,.005f,.023f,.02f)&&!projection.Needed());
         CHECK(!projection.Update(true,1,0,true,1,0,.005f,.023f,.02f)); // indoor exit cannot queue a held click
     }
+    {
+        using vehicledoors::Vec;using vehicledoors::Basis;using vehicledoors::Length;
+        const Vec wheel{1,2,3},right{1,0,0},up{0,0,1},normal{0,-1,0},delta{.05f,.08f,.03f};
+        hud::WristSettings start{0,140,-60,17,28,39,10};
+        const auto initial=pda::Place(wheel,right,up,normal,start);
+        CHECK(Length(initial.centre-Vec{.82f,2,3.06f})<.00001f);
+        for(float angle:{0.f,.7f,2.f,-1.2f}){
+            const auto rotate=[&](Vec v){return vehicledoors::Rotate(v,angle);};
+            const Basis car{rotate({1,0,0}),rotate({0,1,0}),up,{30,-10,5}};
+            const auto frame=pda::Place(car.Point(wheel),car.Vector(right),car.Vector(up),car.Vector(normal),start);
+            const auto moved=pda::Translate(start,frame,car.Vector(delta));
+            const auto result=pda::Place(car.Point(wheel),frame.right,frame.up,frame.normal,moved);
+            CHECK(Length(result.centre-frame.centre-car.Vector(delta))<.00001f);
+            CHECK(moved.pitchDeg==start.pitchDeg&&moved.yawDeg==start.yawDeg&&moved.rollDeg==start.rollDeg&&moved.scaleTenths==10);
+            CHECK(pda::Distance(frame,frame.centre,false,10)==0);
+            CHECK(pda::Distance(frame,frame.centre+frame.right*.4f,false,10)>.3f);
+            CHECK(pda::Distance(frame,frame.centre+frame.up*.08f,true,10)<.02f);
+            vehicledoors::DebugDrag drag;CHECK(drag.Begin(0,car.Local(frame.centre)));
+            CHECK(drag.Step(car.Local(frame.centre+car.Vector(delta))));
+            CHECK(Length(drag.delta-delta)<.00001f);
+        }
+    }
+    std::puts("PASS vehicle PDA translation on all axes, rotated vehicle basis, hit surface, fixed angles and debug displacement");
     std::puts("PASS map-only priority transaction, queue ownership, texel accounting and interior projection reset");
     std::puts("PASS visible-texture promotion from thumbnail queue; packed retail entry; full/pending/null cases");
     std::puts("PASS retained far-tile streaming across 100 stock unload/reacquire cycles; shared map passes and balanced releases");

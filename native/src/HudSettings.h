@@ -154,6 +154,8 @@ ElementSettings GetElementSettings(int element);
 // per-vehicle override (created on first adjustment; the shared Dash* values
 // are its defaults). Pass -1 (or any slot!=VEHICLE) for the shared values.
 WristSettings GetWristSettings(int element, int slot, int vehicleModel);
+void SetVehiclePdaPosition(int model,const WristSettings& position);
+void SavePdaCalibration();
 int CalibrationElement();
 void CycleCalibrationElement(int direction);
 void SetElementEnabled(int element, bool enabled);

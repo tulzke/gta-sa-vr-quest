@@ -11,6 +11,7 @@
 #include "WatchModel.h"
 #include "WatchLayout.h"
 #include "WatchInteraction.h"
+#include "PdaDashboardPlacement.h"
 #include "WatchShaders.h"
 #include "ReloadHintHand.h"
 #include "VehicleDoors.h"
@@ -285,6 +286,7 @@ std::atomic<unsigned int> g_stereoEyeDepth[kStereoSets][2] = {};
 std::atomic<unsigned int> g_eyeFoveationAttemptedTex[kStereoSets][2] = {};
 std::atomic<unsigned int> g_stereoHudTex[kStereoSets] = {};
 std::atomic<unsigned int> g_stereoPdaTex[kStereoSets] = {};
+std::atomic<bool> g_vehiclePdaVisible{false};
 std::atomic<unsigned int> g_stereoWatchTex[kStereoSets] = {};
 std::atomic<unsigned int> g_stereoWatchProjectionTex[kStereoSets] = {};
 watchhud::Readout g_stereoWatchReadout[kStereoSets]{};
@@ -5583,6 +5585,7 @@ void SetGraphicsDistanceMenu(bool active, int selection) {
 }
 
 void ResetStereoEyeTextures() {
+    g_vehiclePdaVisible.store(false,std::memory_order_release);
     // Close the publication epoch first.  A consumer which already acquired a
     // slot may finish using its immutable snapshot; no new consumer can enter.
     // Clear only slots we can claim exclusively, otherwise leave their metadata
@@ -6280,6 +6283,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     g_stereoHudTex[ws].store(hudTex ? hudTex[ws] : 0,
                               std::memory_order_relaxed);
     g_stereoPdaTex[ws].store(pdaTex ? pdaTex[ws] : 0, std::memory_order_relaxed);
+    g_vehiclePdaVisible.store(mapVisible&&pdaTex&&pdaTex[ws]!=0,std::memory_order_release);
     g_stereoWatchTex[ws].store(watchTex ? watchTex[ws] : 0, std::memory_order_relaxed);
     g_stereoWatchProjectionTex[ws].store(projectionTex ? projectionTex[ws] : 0, std::memory_order_relaxed);
     g_stereoPdaHeading[ws].store(pdaHeading, std::memory_order_relaxed);
@@ -9811,15 +9815,16 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
              vscale(liftAxis, wrist.liftMm * 0.001f)));
 
     constexpr float kToRadians = 3.14159265f / 180.0f;
-    if (wrist.yawDeg)
+    const bool fixedDashboard=element==hud::RADAR&&slot==hud::WRIST_SLOT_VEHICLE;
+    if (!fixedDashboard&&wrist.yawDeg)
         RotateWristAxes(normal, right, wrist.yawDeg * kToRadians);
-    if (wrist.pitchDeg)
+    if (!fixedDashboard&&wrist.pitchDeg)
         RotateWristAxes(up, normal, wrist.pitchDeg * kToRadians);
-    if (wrist.rollDeg)
+    if (!fixedDashboard&&wrist.rollDeg)
         RotateWristAxes(right, up, wrist.rollDeg * kToRadians);
 
     const float opacity =
-        calibrating ? 1.0f : WristPanelGazeOpacity(rp, centre, gazeRange);
+        (calibrating||(fixedDashboard&&driving::GetVehicleDebugMode()!=0)) ? 1.0f : WristPanelGazeOpacity(rp, centre, gazeRange);
     if (opacity <= 0.0f) return;
 
     const bool watch = element == hud::WATCH;
@@ -9906,8 +9911,8 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
 #include "WatchRenderer.inl"
 
 // Dashboard map offset from the steering-wheel centre before calibration.
-constexpr float kDashPanelAcrossMetres = -0.32f;
-constexpr float kDashPanelUpMetres = 0.12f;
+constexpr float kDashPanelAcrossMetres = pda::kAcross;
+constexpr float kDashPanelUpMetres = pda::kUp;
 
 // Both panels for the current eye. The map moves to the dashboard in a
 // vehicle; the status panel stays on its wrist. Runs inside the hand pass:

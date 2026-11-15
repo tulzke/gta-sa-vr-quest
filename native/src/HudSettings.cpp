@@ -82,7 +82,7 @@ const char* const kDashModelFieldKeys[WRIST_FIELD_COUNT] = {
 constexpr int kWristFieldDefaults[WRIST_FIELD_COUNT] = {0, 0, 0, 0, 0, 0, 10};
 // PDA sits slightly left of the wheel. Saved per-model placements still win.
 constexpr int kDashRadarDefaults[WRIST_FIELD_COUNT] =
-    {0, 140, -60, 0, 5, 0, 10};
+    {0, 140, -60, 0, 0, 0, 10};
 constexpr int kDashHealthDefaults[WRIST_FIELD_COUNT] =
     {0, -47, -169, 0, 0, 0, 23};
 
@@ -518,6 +518,17 @@ WristSettings GetWristSettings(int element, int slot, int vehicleModel) {
     };
 }
 
+void SetVehiclePdaPosition(int model,const WristSettings& position){
+    EnsureLoaded();if(model<400||model>611||!std::isfinite(position.alongMm)||
+        !std::isfinite(position.acrossMm)||!std::isfinite(position.liftMm))return;
+    std::lock_guard<std::mutex> lock(g_dashModelMutex);
+    auto [it,inserted]=g_dashModel[RADAR].try_emplace(model);
+    if(inserted)for(int f=0;f<WRIST_FIELD_COUNT;++f)it->second[f]=g_wrist[WRIST_SLOT_VEHICLE][RADAR][f].load();
+    it->second[WRIST_ALONG_MM]=ClampWristField(WRIST_ALONG_MM,position.alongMm);
+    it->second[WRIST_ACROSS_MM]=ClampWristField(WRIST_ACROSS_MM,position.acrossMm);
+    it->second[WRIST_LIFT_MM]=ClampWristField(WRIST_LIFT_MM,position.liftMm);
+}
+void SavePdaCalibration(){Save();}
 void AdjustWristField(int element, int field, int direction, int slot,
                       int vehicleModel) {
     EnsureLoaded();

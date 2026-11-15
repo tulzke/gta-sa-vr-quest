@@ -19,6 +19,7 @@ handskeleton::Mat g_watchFrameModel{};
 bool g_watchFrameValid=false;
 std::atomic<bool> g_watchProjectionNeeded{false};
 bool WatchProjectionNeeded(){return g_watchProjectionNeeded.load(std::memory_order_relaxed);}
+bool VehiclePdaMapVisible(){return g_vehiclePdaVisible.load(std::memory_order_acquire);}
 std::atomic<std::uint64_t> g_watchTriggerUntil[2]{};
 bool WatchConsumesTrigger(int hand){
     return hand>=0&&hand<2&&IsSessionFocused()&&!IsMenuVisible()&&hud::ShouldRenderWristHud()&&
