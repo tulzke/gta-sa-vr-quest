@@ -7,6 +7,7 @@
 #include "TheaterScreen.h"
 #include "HandAnimation.h"
 #include "HandSkeleton.h"
+#include "ReloadHintHand.h"
 #include "VehicleDoors.h"
 
 #include "Appearance.h"
@@ -7310,6 +7311,7 @@ void BuildControlsTipsMenu() {
         {"SIDEARMS: QUICK DOWN FLICK TO RELOAD",   205, 170, 105, false},
         {"NOD AMPLITUDE: TUNE IN CONTROLS",       205, 170, 105, false},
         {"SPAS/MP5/AK/M4: ROLL SIDEWAYS",          205, 170, 105, false},
+        {"EMPTY SHOTGUN: PUMP BACK THEN FORWARD", 205, 170, 105, false},
         {"RELEASE TRIGGER BEFORE THE GESTURE",     205, 170, 105, false},
         {"GESTURE COMPLETE = INSTANT RELOAD",     205, 170, 105, false},
 
@@ -12456,7 +12458,13 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         MatPersp(hintProjection,g_stereoTanX.load(std::memory_order_relaxed),
                  g_stereoTanY.load(std::memory_order_relaxed),nearZ,farZ);
         MatMul(hintMvp,hintProjection,view);
-        DrawReloadHintsForEye(hintMvp,reloadHints,scope.active);
+        auto hints=reloadHints;
+        if (hints.items[0].pumpHand>=0 || hints.items[1].pumpHand>=0) {
+            static std::shared_ptr<const reloadhint::Model> pumpHand;
+            if (!pumpHand) pumpHand=reloadhint::CopyPumpHandModel(g_handSkeleton);
+            reloadhint::AddPumpHands(hints,pumpHand);
+        }
+        DrawReloadHintsForEye(hintMvp,hints,scope.active);
     }
 
     glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);

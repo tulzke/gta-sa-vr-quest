@@ -26,6 +26,7 @@ code = r'''
 #include "PhysicalWeapon.h"
 #include "Calib.h"
 #include "HandAnimation.h"
+#include "PairedWeapons.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -154,6 +155,16 @@ int main(){
   else {CHECK(gHeldSlot[support]==2&&gHeldSlot[primary]==-1);CHECK(gSupportHand[primary]==-1);} // support promoted on primary release
  }
 
+ for(int primary:{0,1}) {
+  Reset(primary,25);const int support=1-primary;TrackingPose anchor{};
+  CHECK(BuildSupportAnchorLocked(primary,&anchor));
+  std::memcpy(gHands[support].gripPos,anchor.position,sizeof(anchor.position));Tick();
+  for(float offset:{0.f,-.12f,-.35f,.20f}) {
+   for(int a=0;a<3;++a)gHands[support].gripPos[a]=anchor.position[a]+gHeldBasePose[primary].right[a]*offset;
+   V3 pivot{},axis{};float angle{};CHECK(BuildTwoHandTransformLocked(primary,pivot,axis,angle));
+   CHECK(std::abs(angle)<.0001f); // rail motion cannot steer or pitch the gun
+  }
+ }
  for(int t:{25,26,27,29,30,31,32,33,34,35,36,37,38})for(int primary:{0,1}){
   Reset(primary,t);const int support=1-primary;TrackingPose anchor{};
   CHECK(BuildSupportAnchorLocked(primary,&anchor));

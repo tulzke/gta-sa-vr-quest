@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ArcadeReload.h"
+#include "PumpReload.h"
 #include <array>
 #include <memory>
 #include <vector>
@@ -40,16 +40,21 @@ struct Model {
     float extent{};
 };
 struct Pose { Vec position{},barrel{1,0,0},top{0,1,0},side{0,0,1}; };
-struct Visual { std::shared_ptr<const Model> model;Pose pose{};float opacity{kOpacity}; };
+struct Visual {
+    std::shared_ptr<const Model> model;Pose pose{};float opacity{kOpacity};
+    int pumpHand{-1};Pose pumpWrist{};
+};
 struct VisualFrame {
-    std::array<Visual,2> items{};
+    // Two weapons and, for pump reloads, two animated support-hand ghosts.
+    std::array<Visual,4> items{};
     std::uint64_t epoch{};
-    bool Visible() const { return (items[0].model && items[0].opacity>0) || (items[1].model && items[1].opacity>0); }
+    bool Visible() const { for(const auto& item:items)if(item.model && item.opacity>0)return true;return false; }
 };
 inline float Smooth(float x) { x=std::clamp(x,0.f,1.f);return x*x*(3-2*x); }
 struct Motion { float down{},roll{},visibility{1}; };
 inline Motion Animation(int mode,unsigned phaseMs) {
     const float t=(phaseMs%kLoopMs)*.001f;
+    if (mode==arcadereload::PUMP) return {0,0}; // Only the support wrist slides.
     if (mode==arcadereload::TWIST) {
         const float amount=t<.25f?0:t<.48f?Smooth((t-.25f)/.23f):1;
         // Show only the outward gesture. Reset to the hand pose while hidden,

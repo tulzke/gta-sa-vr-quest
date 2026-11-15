@@ -795,6 +795,13 @@ bool BuildTwoHandTransformLocked(int primaryHand, V3& pivot, V3& axis,
     pivot = GripPosition(gHands[primaryHand]);
     V3 expected = Sub(PositionOf(anchor), pivot);
     V3 actual = Sub(GripPosition(gHands[support]), pivot);
+    if (weaponType==25) {
+        // Axial pump travel belongs to the sliding wrist, not to the aim solver.
+        // Keep the same forward rail position even when the loaded gun is locked.
+        const auto& base=gHeldBasePose[primaryHand];
+        const V3 barrel=Normalized({base.right[0],base.right[1],base.right[2]});
+        actual=Sub(actual,Scale(barrel,Dot(Sub(actual,expected),barrel)));
+    }
     if (LengthSquared(expected) < 0.0001f || LengthSquared(actual) < 0.0001f)
         return false;
     expected = Normalized(expected);

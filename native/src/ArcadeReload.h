@@ -8,6 +8,8 @@ namespace savr::arcadereload {
 
 // Keep saved values 0..2 stable; new profiles are appended.
 enum Mode { AUTOMATIC, DOWN_UP, TWIST, DOWN_FLICK, MODE_COUNT };
+// Per-weapon profile only; never a selectable/saved fallback mode.
+inline constexpr int PUMP=MODE_COUNT;
 inline std::atomic<int> mode{DOWN_UP};
 inline int GetMode() { return mode.load(std::memory_order_relaxed); }
 inline void SetMode(int value) { mode.store(std::clamp(value, 0, MODE_COUNT-1), std::memory_order_relaxed); }
@@ -17,6 +19,8 @@ inline const char* ModeName() {
 }
 inline int ModeForWeapon(int type) {
     switch(type) {
+    case 25:
+        return PUMP;
     case 22: case 23: case 24: case 26: case 28: case 32:
         return DOWN_FLICK;
     case 27: case 29: case 30: case 31:
@@ -146,7 +150,7 @@ struct Gesture {
         return false;
     }
     bool Update(Sample sample,double now,int key,int selection,std::uint64_t trackingEpoch) {
-        if (selection==AUTOMATIC || !std::isfinite(now) || !Normalize(sample)) { Reset(); return false; }
+        if (selection==AUTOMATIC || selection==PUMP || !std::isfinite(now) || !Normalize(sample)) { Reset(); return false; }
         if (!valid || identity!=key || selected!=selection || epoch!=trackingEpoch ||
             now<previousTime || now-previousTime>.12) {
             Reset(); valid=true; identity=key; selected=selection; epoch=trackingEpoch;

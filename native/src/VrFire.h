@@ -1,5 +1,6 @@
 #pragma once
 #include "ReloadHint.h"
+#include "PumpReload.h"
 
 namespace savr::vrfire {
 
@@ -27,5 +28,7 @@ int DirectFiringHand();
 // Immutable request snapshot for the stereo producer. Meshes are copied from
 // the currently rendered weapon by VrCamera, never from an inventory icon.
 void GetReloadHints(reloadhint::Requests& out);
+// Clamped axial displacement of the empty shotgun's visible support wrist.
+float PumpTravel(int primaryHand);
 
 } // namespace savr::vrfire

@@ -69,5 +69,8 @@ int main(){
     frame.items[0].opacity=frame.items[1].opacity=0;
     DrawReloadHintsForEye(identity.data(),frame,false);Check(draws==12,"invisible reset phase draws neither color nor depth");
     frame={};DrawReloadHintsForEye(identity.data(),frame,false);Check(draws==12,"empty snapshot draws no stale hint");
+    frame.items[2].model=model;frame.items[3].model=model;
+    DrawReloadHintsForEye(identity.data(),frame,false);
+    Check(draws==16 && uploads==8,"both pump-hand ghost slots participate in the same nearest-surface renderer");
     std::printf("PASS: %d translucent hint renderer checks\n",checks);
 }

@@ -30,6 +30,9 @@ PRELUDE=r"""
 namespace pairedweapon=savr::pairedweapon;
 namespace arcadereload=savr::arcadereload;
 arcadereload::Gesture g_reloadGestures[2];
+namespace pumpreload=savr::pumpreload;
+pumpreload::Pump g_pumps[2];
+std::atomic<float> g_pumpTravel[2]{};
 namespace reloadhint=savr::reloadhint;
 reloadhint::Tracker g_reloadHints;
 std::mutex g_reloadHintMutex;
@@ -81,7 +84,7 @@ struct Symbols {
     int (*CWeaponInfo_GetWeaponReloadTime)(void*)=ReloadTime;
     void* TheCamera=nullptr;
 } g;
-namespace physicalweapon {constexpr int kHandCount=2; int HeldSlot(int h){return held[h];} bool IsPrimaryDetached(int){return false;}}
+namespace physicalweapon {constexpr int kHandCount=2; int supportHands[2]{-1,-1};int SupportHand(int h){return supportHands[h];} int HeldSlot(int h){return held[h];} bool IsPrimaryDetached(int){return false;}}
 namespace driving {bool VehicleWeaponsImmersive(){return false;}}
 namespace scopeaim {bool IsActiveFor(int,int){return true;}}
 namespace justbusiness {bool Active(){return false;}void RecordShot(int,int){}}
@@ -154,7 +157,7 @@ def compile_run(source, name):
 def main():
     names=["PlayerFireEnabled","SupportedHitscan","AreaEffectWeapon","SupportedDirectFire",
            "AutomaticHitscan","PhysicalFireIntervalMs","PhysicalWeaponInfo","MagazineCapacity",
-           "OnWeaponUpdate","PhysicalReloadDuration","CorrectPhysicalReload","UpdateReloadGesture","ResetDirectTrigger","UpdateReloadHints","DetonatorTriggerReady",
+           "OnWeaponUpdate","PhysicalReloadDuration","CorrectPhysicalReload","ResetReloadGesture","ReloadClick","UpdateReloadGesture","ResetDirectTrigger","UpdateReloadHints","DetonatorTriggerReady",
            "GetPhysicalTrigger","UpdateHand","Update"]
     constants="\n".join(re.findall(r"^constexpr (?:std::uintptr_t|float) \w+ = .*?;",SOURCE,re.M))
     output=ROOT/"build/dual-fire-tests";output.mkdir(parents=True,exist_ok=True)

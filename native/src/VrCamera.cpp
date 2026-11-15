@@ -2738,7 +2738,7 @@ void PublishReloadHintVisuals(void* ped,unsigned renderedHands,const xr::TwoHand
             const auto& wrist=hands[h].gripPos;
             frame.items[h].model=model.mesh;
             frame.items[h].pose=reloadhint::BuildPose(anchor,{wrist[0],wrist[1],wrist[2]},h,request.mode,request.phaseMs);
-            if (reloadhint::RifleLeverHint(request.type,request.mode)) {
+            if (reloadhint::RifleLeverHint(request.type,request.mode) || request.mode==arcadereload::PUMP) {
                 physicalweapon::TrackingPose support{};
                 // Match the visible wrists: the socket API is in the one-hand
                 // base frame; Xr applies the captured two-hand arc, then recoil.
@@ -2753,6 +2753,22 @@ void PublishReloadHintVisuals(void* ped,unsigned renderedHands,const xr::TwoHand
                     };
                     frame.items[h].pose=reloadhint::BuildRiflePose(anchor,visualPoint({wrist[0],wrist[1],wrist[2]}),
                         visualPoint({support.position[0],support.position[1],support.position[2]}),request.mode,request.phaseMs);
+                    if (request.mode==arcadereload::PUMP) {
+                        frame.items[h].pose=anchor;
+                        auto vector=[&](const float v[3]) {
+                            reloadhint::Vec p{v[0],v[1],v[2]};
+                            if (twoHand.active && twoHand.primaryHand==h)
+                                p=reloadhint::Rotated(p,reloadhint::Unit({twoHand.axis[0],twoHand.axis[1],twoHand.axis[2]},{0,1,0}),twoHand.angleRadians);
+                            const auto kicked=twoHand.weaponRecoil[h].Vector({p.x,p.y,p.z});
+                            return reloadhint::Vec{kicked.x,kicked.y,kicked.z};
+                        };
+                        auto& item=frame.items[h];item.pumpHand=1-h;
+                        item.pumpWrist={visualPoint({support.position[0],support.position[1],support.position[2]}),
+                            vector(support.right),vector(support.forward),vector(support.up)};
+                        item.pumpWrist.position=arcadereload::Add(item.pumpWrist.position,
+                            arcadereload::Scale(reloadhint::Unit(anchor.barrel,{0,0,-1}),-pumpreload::HintTravel(request.phaseMs)));
+                        if (item.pumpHand==0) item.pumpWrist.barrel=arcadereload::Scale(item.pumpWrist.barrel,-1);
+                    }
                 }
             }
             frame.items[h].opacity=reloadhint::kOpacity*reloadhint::Animation(request.mode,request.phaseMs).visibility;
@@ -21641,6 +21657,13 @@ void OnRenderScene(bool underwater) {
                     // this position/basis when it builds the late support hand.
                     physicalweapon::TrackingPose supportAnchor{};
                     if (physicalweapon::GetSupportAnchorTracking(hand, &supportAnchor)) {
+                        if (weaponType==25 && pairedweapon::Clip(playerPed,slot)==0) {
+                            const float travel=vrfire::PumpTravel(hand);
+                            const auto barrel=reloadhint::Unit({basePose.right[0],basePose.right[1],basePose.right[2]},{0,0,-1});
+                            supportAnchor.position[0]-=barrel.x*travel;
+                            supportAnchor.position[1]-=barrel.y*travel;
+                            supportAnchor.position[2]-=barrel.z*travel;
+                        }
                         twoHandVisualState.supportAnchorValid = true;
                         twoHandVisualState.supportBasisValid = true;
                         std::memcpy(twoHandVisualState.supportAnchor,

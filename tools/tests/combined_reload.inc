@@ -14,7 +14,8 @@ int main(){
         SetMode(saved);
         for(int type:{22,23,24,26,28,32})Check(ModeForWeapon(type)==DOWN_FLICK,"sidearm always uses permissive downward nod");
         for(int type:{27,29,30,31})Check(ModeForWeapon(type)==TWIST,"listed long gun always uses lateral roll");
-        for(int type:{25,33,34,38,35,41})Check(ModeForWeapon(type)==saved,"unlisted weapon retains configured mode");
+        Check(ModeForWeapon(25)==PUMP,"pump shotgun always requires a support-hand pump cycle");
+        for(int type:{33,34,38,35,41})Check(ModeForWeapon(type)==saved,"unlisted weapon retains configured mode");
     }
     SetMode(DOWN_FLICK);SetSound(BOLT);player[0x8dc]=7;
     Setup(0,2,22,1,40,34,2000,0x800);Setup(1,4,29,1,90,30,1300);
@@ -86,5 +87,32 @@ int main(){
     Check(state==0 && clip==17,"native automatic deadline still supports timer wrap");
     Check(PhysicalMagazineCapacity(2,0x800)==1,"single sawn-off uses half twin capacity");
     Check(!pairedweapon::Allowed(22,1,0x800) && pairedweapon::Allowed(22,2,0x800),"paired weapon skill restrictions remain intact");
+
+    // Pump-shotgun reload uses only an empty magazine and the support wrist.
+    ResetDirectTrigger();pairedweapon::Reset();Setup(0,3,25,1,30,7,1200);held[1]=-1;
+    physicalweapon::supportHands[0]=1;SetSound(BOLT);SetPose(0);SetPose(1);
+    xr::tracked[1].gripPos[2]=-.4f;triggers[0]=triggers[1]=0;Frame();
+    sounds=reloadSounds[0];
+    for(int i=1;i<=12;++i){xr::tracked[1].gripPos[2]=-.4f+i*.01f;Frame();}
+    Check(g_pumpTravel[0]==0 && reloadSounds[0]==sounds && Field(3,8)==1,"loaded shotgun locks the pump forward without reload or checkpoint feedback");
+    Field(3,8)=0;xr::tracked[1].gripPos[2]=-.4f;ResetReloadGesture(0);Frame();
+    for(int i=1;i<=12;++i){xr::tracked[1].gripPos[2]=-.4f+i*.01f;Frame();}
+    Check(Field(3,8)==0 && reloadSounds[0]==sounds+1 && g_pumpTravel[0]>.119f,"rear checkpoint clicks once but does not reload");
+    HoldStill();Check(reloadSounds[0]==sounds+1,"rear stop held still never repeats its click");
+    for(int i=1;i<=12;++i){xr::tracked[1].gripPos[2]=-.28f-i*.01f;Frame();}
+    Check(Field(3,8)==7 && Field(3,4)==0 && Field(3,16)<=tick && Field(3,12)==30,"full support-hand cycle reloads immediately without changing total ammunition");
+    Check(reloadSounds[0]==sounds+2 && g_pumpTravel[0]==0,"forward checkpoint clicks once and locks the loaded wrist forward");
+    triggers[0]=1;Frame();Check(Field(3,8)==6,"shotgun fires immediately after the completed pump cycle");triggers[0]=0;
+    Field(3,8)=0;ResetReloadGesture(0);xr::tracked[1].gripPos[2]=-.4f;Frame();
+    for(int i=1;i<=12;++i){xr::tracked[1].gripPos[2]=-.4f+i*.01f;Frame();}
+    Update(true);xr::tracked[1].gripPos[2]=-.4f;Frame();
+    Check(Field(3,8)==0 && g_pumpTravel[0]==0,"menu interrupts the pump cycle instead of completing it on resume");
+    physicalweapon::supportHands[0]=-1;Frame();Nod(0);
+    Check(Field(3,8)==0 && g_pumpTravel[0]==0,"shotgun cannot reload by primary-hand nod or without a support grip");
+    Field(3,12)=0;physicalweapon::supportHands[0]=1;ResetReloadGesture(0);SetPose(0);xr::tracked[1].gripPos[2]=-.4f;Frame();
+    sounds=reloadSounds[0];
+    for(int i=1;i<=12;++i){xr::tracked[1].gripPos[2]=-.4f+i*.01f;Frame();}
+    Check(Field(3,8)==0 && reloadSounds[0]==sounds && g_pumpTravel[0]==0,"no reserve keeps the pump locked and silent");
+    physicalweapon::supportHands[0]=-1;ResetDirectTrigger();
     std::printf("PASS: %d production dual-fire checks\n",checks);
 }

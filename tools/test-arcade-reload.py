@@ -7,7 +7,8 @@ spec = importlib.util.spec_from_file_location("dual_fire", ROOT / "tools/test-du
 dual = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dual)
 tests = (ROOT / "tools/tests/arcade_reload.inc").read_text(encoding="utf-8")
+tests += (ROOT / "tools/tests/pump_reload.inc").read_text(encoding="utf-8")
 # Reuse the production-function harness, retaining all existing dual-fire checks.
 dual.TESTS = dual.TESTS.replace("int main(){", tests + "\nint main(){")
-dual.TESTS = dual.TESTS.replace('    std::printf("PASS:', '    ArcadeTests();\n    std::printf("PASS:')
+dual.TESTS = dual.TESTS.replace('    std::printf("PASS:', '    ArcadeTests();PumpReloadTests();\n    std::printf("PASS:')
 dual.main()

@@ -4,7 +4,7 @@ struct ReloadHintGpu {
     GLuint vertices{},indices{};
     std::shared_ptr<const reloadhint::Model> uploaded;
 };
-ReloadHintGpu g_reloadHintGpu[2];
+ReloadHintGpu g_reloadHintGpu[4];
 void DrawReloadHintsForEye(const float* viewProjection,const reloadhint::VisualFrame& frame,bool clearDepth) {
     if (!frame.Visible()) return;
     EnsureMarkerProgram();if (!g_markerProg) return;
@@ -22,8 +22,8 @@ void DrawReloadHintsForEye(const float* viewProjection,const reloadhint::VisualF
     glUseProgram(g_markerProg);glEnable(GL_DEPTH_TEST);glEnable(GL_CULL_FACE);glCullFace(GL_BACK);
     glDepthMask(GL_TRUE);glDepthFunc(GL_LEQUAL);glDisable(GL_BLEND);
     if (clearDepth) glClear(GL_DEPTH_BUFFER_BIT); // scope pixels have a different projection
-    std::array<float,16> matrices[2];bool ready[2]{};
-    for(int h=0;h<2;++h) {
+    std::array<float,16> matrices[4];bool ready[4]{};
+    for(int h=0;h<4;++h) {
         const auto& visual=frame.items[h];if (!visual.model || visual.opacity<=0) continue;
         auto& gpu=g_reloadHintGpu[h];
         if (!gpu.vertices || !glIsBuffer(gpu.vertices)) {
@@ -40,7 +40,7 @@ void DrawReloadHintsForEye(const float* viewProjection,const reloadhint::VisualF
         MatMul(matrices[h].data(),viewProjection,model.data());ready[h]=true;
     }
     const auto draw=[&] {
-        for(int h=0;h<2;++h)if(ready[h]) {
+        for(int h=0;h<4;++h)if(ready[h]) {
             const auto& pose=frame.items[h].pose;
             const float determinant=arcadereload::Dot(pose.barrel,arcadereload::Cross(pose.top,pose.side));
             glCullFace(determinant<0?GL_FRONT:GL_BACK);

@@ -56,6 +56,8 @@ bool g_detonatorReleaseRequired[2]{true, true};
 std::uint32_t g_directNextFireMs[2]{};
 int g_directWeaponType[2]{-1, -1};
 arcadereload::Gesture g_reloadGestures[2];
+pumpreload::Pump g_pumps[2];
+std::atomic<float> g_pumpTravel[2]{};
 reloadhint::Tracker g_reloadHints;
 std::mutex g_reloadHintMutex;
 
@@ -223,6 +225,17 @@ void CorrectPhysicalReload(void* ped, std::uint8_t* weapon, int type, std::uint3
     if (duration) *reinterpret_cast<std::uint32_t*>(weapon + 16)=now+duration;
 }
 
+void ResetReloadGesture(int hand) {
+    g_reloadGestures[hand].Reset();g_pumps[hand].Reset();
+    g_pumpTravel[hand].store(0,std::memory_order_relaxed);
+}
+
+void ReloadClick(void* ped) {
+    const int soundEvent=arcadereload::SoundEvent();
+    if (soundEvent && g.AudioEngine && g.CAudioEngine_ReportWeaponEvent)
+        g.CAudioEngine_ReportWeaponEvent(g.AudioEngine,soundEvent,31,ped);
+}
+
 void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
                          float trigger, std::uint32_t now) {
     auto& gesture=g_reloadGestures[hand];
@@ -232,6 +245,34 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
     float head[3]{},orientation[4]{};
     std::uint64_t epoch{};
     physicalweapon::TrackingPose pose{};
+    if (type==25) {
+        gesture.Reset();
+        const int support=physicalweapon::SupportHand(hand);
+        if (support<0 || support>1 || !xr::IsSessionFocused() || physicalweapon::IsPrimaryDetached(hand) ||
+            !physicalweapon::GetInteractionTrackingSnapshot(head,orientation,tracked,&epoch) ||
+            !tracked[hand].valid || !tracked[hand].aimValid || !tracked[support].valid ||
+            !tracked[support].aimValid || !physicalweapon::GetHeldVisualPoseTracking(hand,slot,&pose)) {
+            ResetReloadGesture(hand);return;
+        }
+        const auto& q=tracked[hand].gripOri;const auto& p=tracked[hand].gripPos;
+        const auto& off=tracked[support].gripPos;
+        const arcadereload::Sample primary{{p[0],p[1],p[2]},
+            {pose.right[0],pose.right[1],pose.right[2]},{q[0],q[1],q[2],q[3]}};
+        const auto checkpoint=g_pumps[hand].Update(primary,{off[0],off[1],off[2]},slot,support,epoch,
+            now*.001,clip==0 && total>0 && trigger<.25f);
+        g_pumpTravel[hand].store(g_pumps[hand].travel,std::memory_order_relaxed);
+        if (checkpoint==pumpreload::None) return;
+        ReloadClick(ped);
+        xr::TriggerHaptic(support,.35f,0,25);
+        if (checkpoint==pumpreload::Front &&
+            arcadereload::Reload(type,pairedweapon::Field(weapon,4),pairedweapon::Field(weapon,8),total,
+                pairedweapon::Field(weapon,16),now,MagazineCapacity(ped,type))) {
+            g_directNextFireMs[hand]=0;
+            xr::TriggerHaptic(hand,.65f,0,55);
+        }
+        return;
+    }
+    g_pumps[hand].Reset();g_pumpTravel[hand].store(0,std::memory_order_relaxed);
     if (!arcadereload::Manual(type) || trigger>=.25f ||
         clip>=MagazineCapacity(ped,type) || total<=clip ||
         !xr::IsSessionFocused() ||
@@ -250,9 +291,7 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
             pairedweapon::Field(weapon,16),now,MagazineCapacity(ped,type))) {
         g_directNextFireMs[hand]=0;
         xr::TriggerHaptic(hand,.65f,0,55);
-        const int soundEvent=arcadereload::SoundEvent();
-        if (soundEvent && g.AudioEngine && g.CAudioEngine_ReportWeaponEvent)
-            g.CAudioEngine_ReportWeaponEvent(g.AudioEngine,soundEvent,31,ped);
+        ReloadClick(ped);
         LOGI("[vr.reload] instant gesture mode=%d hand=%d type=%d slot=%d",
              mode,hand,type,slot);
     }
@@ -264,7 +303,7 @@ void ResetDirectTrigger() {
         g_directNextFireMs[hand] = 0;
         g_directWeaponType[hand] = -1;
         g_detonatorReleaseRequired[hand] = true;
-        g_reloadGestures[hand].Reset();
+        ResetReloadGesture(hand);
     }
 }
 
@@ -914,7 +953,7 @@ void UpdateHand(int requestedHand) {
         g_directNextFireMs[requestedHand] = 0;
         g_directWeaponType[requestedHand] = -1;
         g_detonatorReleaseRequired[requestedHand] = true;
-        g_reloadGestures[requestedHand].Reset();
+        ResetReloadGesture(requestedHand);
     };
     if (!g_installed.load(std::memory_order_acquire) ||
         !PlayerFireEnabled() ||
@@ -1098,11 +1137,11 @@ void Update(bool blocked) {
             g_directNextFireMs[hand] = 0;
             g_directWeaponType[hand] = -1;
             g_detonatorReleaseRequired[hand] = true;
-            g_reloadGestures[hand].Reset();
+            ResetReloadGesture(hand);
             continue;
         }
         const int type = pairedweapon::Type(ped,slot);
-        if (!SupportedDirectFire(type)) { g_reloadGestures[hand].Reset(); continue; }
+        if (!SupportedDirectFire(type)) { ResetReloadGesture(hand); continue; }
         active = static_cast<std::int8_t>(pairedweapon::Base(slot));
         g_directHand = hand;
         {
@@ -1116,6 +1155,9 @@ void Update(bool blocked) {
 }
 
 int DirectFiringHand() { return g_directHand; }
+float PumpTravel(int primaryHand) {
+    return primaryHand>=0 && primaryHand<2?g_pumpTravel[primaryHand].load(std::memory_order_relaxed):0;
+}
 
 void GetReloadHints(reloadhint::Requests& out) {
     std::lock_guard<std::mutex> lock(g_reloadHintMutex);

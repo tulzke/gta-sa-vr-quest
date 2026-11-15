@@ -26,8 +26,15 @@ int main() {
     Check(tracker.requests[0].visible,"waiting timer supports native millisecond wrap");
     tracker.Step(0,2,22,AUTOMATIC,true,6000,3);Check(!tracker.requests[0].visible,"automatic weapons have no gesture tutorial");
     Check(kOpacity==.20f,"requested opacity is twenty percent");
+    tracker.Step(0,3,25,PUMP,true,10000,4);tracker.Step(0,3,25,PUMP,true,13000,4);
+    Check(tracker.requests[0].visible && tracker.requests[0].mode==PUMP,"empty shotgun requests its own support-hand tutorial");
 
     const Pose anchor{{0,1.2f,-.4f},{0,0,-1},{0,1,0},{1,0,0}};
+    for(unsigned ms:{0u,340u,500u,800u,1300u}) {
+        const auto pump=BuildPose(anchor,anchor.position,1,PUMP,ms);
+        Check(pump.position.y==anchor.position.y && pump.barrel.z==anchor.barrel.z &&
+              Animation(PUMP,ms).down==0,"shotgun hint leaves the weapon fixed while the separate hand pumps");
+    }
     for(int mode:{DOWN_FLICK,TWIST,DOWN_UP})for(int fps:{36,72,90,120}) {
         Gesture gesture;int recognized=0;
         const Pose base=BuildPose(anchor,anchor.position,1,mode,0);

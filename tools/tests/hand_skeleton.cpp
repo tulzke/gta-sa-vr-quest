@@ -1,4 +1,5 @@
 #include "HandSkeleton.h"
+#include "ReloadHintHand.h"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +23,17 @@ int main(int argc,char** argv) {
     assert(argc==4);Library lib;
     if(!lib.Load(argv[1])) {std::fprintf(stderr,"GLB FAILED: %s\n",lib.error.c_str());return 1;}
     assert(lib.loaded && lib.joints.size()==25 && lib.vertices.size()==2437 && lib.indices.size()==13092);
+    const auto pumpHand=reloadhint::CopyPumpHandModel(lib);
+    assert(pumpHand && pumpHand->vertices.size()==lib.vertices.size()*3 && pumpHand->indices==lib.indices);
+    Palette pumpPalette{};lib.Evaluate({handanimation::Gesture::GripShotgunOffhand,handanimation::Gesture::GripShotgunOffhand,1,0},0,0,pumpPalette);
+    for(std::size_t i=0;i<lib.vertices.size();++i) {
+        const auto actual=Skin(lib.vertices[i],pumpPalette);
+        for(int k=0;k<3;++k)assert(std::abs(actual[k]-pumpHand->vertices[i*3+k])<.000001f);
+    }
+    reloadhint::VisualFrame hint;hint.items[0].model=pumpHand;hint.items[0].pumpHand=1;
+    hint.items[0].pumpWrist.position={1,2,3};reloadhint::AddPumpHands(hint,pumpHand);
+    assert(hint.items[2].model==pumpHand && !hint.items[3].model);
+    assert(std::abs(hint.items[2].pose.position.y-1.945f)<.000001f);
     Pose rest{};for(std::size_t i=0;i<lib.nodes.size();++i)rest[i]=lib.nodes[i].rest;
     Palette p{};lib.Matrices(rest,p);
     float bindError=0;
