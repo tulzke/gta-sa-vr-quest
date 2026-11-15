@@ -36,7 +36,7 @@ void DrawReloadHintsForEye(const float* viewProjection,const reloadhint::VisualF
             glBufferData(GL_ELEMENT_ARRAY_BUFFER,mesh.indices.size()*sizeof(unsigned short),mesh.indices.data(),GL_STATIC_DRAW);
             gpu.uploaded=visual.model;
         }
-        const auto model=reloadhint::ModelMatrix(visual.pose);
+        const auto model=reloadhint::ModelMatrix(visual.pose,*visual.model);
         MatMul(matrices[h].data(),viewProjection,model.data());ready[h]=true;
     }
     const auto draw=[&] {

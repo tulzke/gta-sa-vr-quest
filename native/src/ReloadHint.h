@@ -11,6 +11,7 @@ using Quat=arcadereload::Quat;
 inline constexpr unsigned kDelayMs=3000;
 inline constexpr unsigned kLoopMs=1600;
 inline constexpr float kOpacity=.20f;
+inline constexpr float kModelScale=1.02f;
 struct Request {
     bool visible{};
     int slot{-1},type{},mode{},hand{};
@@ -97,8 +98,14 @@ inline Pose BuildPose(const Pose& weapon,Vec wrist,int hand,int mode,unsigned ph
     rotate(barrel,sign*motion.roll);
     return pose;
 }
-inline std::array<float,16> ModelMatrix(const Pose& pose) {
-    const Vec x=pose.barrel,y=pose.top,z=pose.side,p=pose.position;
+inline std::array<float,16> ModelMatrix(const Pose& pose,const Model& model) {
+    using namespace arcadereload;
+    // Expand around the geometry bounds center, not the calibrated grip origin:
+    // the shell then extends on both sides of the real weapon without drifting.
+    const Vec offset=Scale(model.center,1-kModelScale);
+    const Vec p=Add(pose.position,Add(Scale(pose.barrel,offset.x),
+                                   Add(Scale(pose.top,offset.y),Scale(pose.side,offset.z))));
+    const Vec x=Scale(pose.barrel,kModelScale),y=Scale(pose.top,kModelScale),z=Scale(pose.side,kModelScale);
     return {x.x,x.y,x.z,0,y.x,y.y,y.z,0,z.x,z.y,z.z,0,p.x,p.y,p.z,1};
 }
 } // namespace savr::reloadhint
