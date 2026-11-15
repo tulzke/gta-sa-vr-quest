@@ -7,6 +7,7 @@
 #include "VehicleDoors.h"
 #include "VehicleEntry.h"
 #include "BikeSteering.h"
+#include "BicycleSway.h"
 #include "WheelReturn.h"
 #include "QuadHandlebar.h"
 #include "MissionComfort.h"
@@ -2876,6 +2877,58 @@ void* InstallVerifiedTrampoline(void* target,void* replacement,
     return trampoline;
 }
 
+using BmxControlFn=void(*)(void*);
+BmxControlFn g_origBmxControl{};
+
+void CaptureBicycleBaseLean(void* bike) {
+    bicyclesway::CaptureBaseLean(bike);
+}
+
+void OnBmxProcessControl(void* bike) {
+    if (!g_origBmxControl) return;
+    void* playerVehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+    void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    const int model=bike?*reinterpret_cast<const std::uint16_t*>(
+        static_cast<const char*>(bike)+0x32):-1;
+    const bool driver=ped&&bike&&g.CVehicle_IsDriver&&g.CVehicle_IsDriver(bike,ped);
+    const bool active=bicyclesway::Eligible(bike,playerVehicle,driver,
+                                           vrcam::IsStereoActive(),model);
+    // Push an inactive scope too: nested NPC updates must not sample the
+    // enclosing player's bicycle or leak its baseline into another object.
+    bicyclesway::Scope scope(active?bike:nullptr);
+    g_origBmxControl(bike);
+    scope.Finish();
+}
+
+void InstallBicycleSwayHook() {
+    if (!g.LoadBase||g_origBmxControl) return;
+    void* target=reinterpret_cast<void*>(g.LoadBase+bicyclesway::kControlAddress);
+    if (!bicyclesway::MatchesRetail(target)) {
+        LOGE("[driving] bicycle sway control mismatch; experiment disabled");
+        return;
+    }
+    const long pageSize=sysconf(_SC_PAGESIZE);
+    if (pageSize<=0) return;
+    void* trampoline=mmap(nullptr,static_cast<std::size_t>(pageSize),
+        PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    if (trampoline==MAP_FAILED) return;
+    bicyclesway::BuildTrampoline(trampoline,
+        g.LoadBase+bicyclesway::kBaseCallAddress,
+        reinterpret_cast<std::uintptr_t>(&CaptureBicycleBaseLean),
+        reinterpret_cast<std::uintptr_t>(target)+bicyclesway::kResumeOffset);
+    __builtin___clear_cache(static_cast<char*>(trampoline),
+        static_cast<char*>(trampoline)+bicyclesway::kTrampolineBytes);
+    // A single entry patch enables the complete experiment. All validation
+    // and allocation precede it; a failed patch leaves the retail path intact.
+    g_origBmxControl=reinterpret_cast<BmxControlFn>(trampoline);
+    if (!PatchAbsoluteJump(target,reinterpret_cast<void*>(&OnBmxProcessControl))) {
+        g_origBmxControl=nullptr;
+        munmap(trampoline,static_cast<std::size_t>(pageSize));
+        return;
+    }
+    LOGI("[driving] bicycle animation sway suppression installed (481/509/510)");
+}
+
 using SetDriverFn=bool(*)(void*,void*);
 SetDriverFn g_origSetDriver{};
 bool OnSetDriver(void* task,void* ped) {
@@ -3363,6 +3416,7 @@ bool InstallInputTypePatch() {
 }
 
 void InstallPadHooks() {
+    InstallBicycleSwayHook();
     if (g.LoadBase) {
         constexpr std::uint32_t entry[4]={0xd101c3ffu,0xa9037bfdu,0xa9045ff8u,0xa90557f6u};
         g_origSetDriver=reinterpret_cast<SetDriverFn>(InstallVerifiedTrampoline(
