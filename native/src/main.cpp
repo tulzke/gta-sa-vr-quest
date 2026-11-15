@@ -24,6 +24,7 @@
 #include "Melee.h"
 #include "Combat.h"
 #include "WantedFeedback.h"
+#include "VitalsFeedback.h"
 #include "MissionControls.h"
 #include "Catalyst.h"
 #include "MenuNavigation.h"
@@ -2026,6 +2027,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
 
     // World feedback follows gameplay, not weapon/hand interaction ownership.
     savr::wantedfeedback::Update(inGameplay && !anyMenu);
+    savr::vitalsfeedback::Update(inGameplay && !anyMenu);
     savr::hud::FlushWatchSettings();
 
     // The left stick drives the menu, not the player, while a menu is up.

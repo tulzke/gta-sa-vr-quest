@@ -15,7 +15,7 @@ public:
     PunchImpactScope(const PunchImpactScope&)=delete;
     PunchImpactScope& operator=(const PunchImpactScope&)=delete;
 };
-struct Feedback { float damage{}, block{}; };
+struct Feedback { float block{}; };
 // Atomically published events; read once for the pair of eyes.
 Feedback GetFeedback();
 }

@@ -68,7 +68,17 @@ endif()
 configure_file(src/WatchAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S" @ONLY)
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S" PROPERTY OBJECT_DEPENDS "${WATCH_GLB};${WATCH_ATTRIBUTION}")
 
+set(HEARTBEAT_WAV "${CMAKE_CURRENT_SOURCE_DIR}/../assets/audio/heartbit/254366__poyekhali__heartbeat-fast.wav")
+set(HEARTBEAT_ATTRIBUTION "${CMAKE_CURRENT_SOURCE_DIR}/../assets/audio/heartbit/ATTRIBUTION.md")
+file(READ "${HEARTBEAT_WAV}" HEARTBEAT_MAGIC LIMIT 4 HEX)
+if(NOT HEARTBEAT_MAGIC STREQUAL "52494646")
+    message(FATAL_ERROR "Missing heartbeat WAV data; run git lfs pull")
+endif()
+configure_file(src/HeartbeatAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S" @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S" PROPERTY OBJECT_DEPENDS "${HEARTBEAT_WAV};${HEARTBEAT_ATTRIBUTION}")
+
 add_library(savr SHARED
+    "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S"
     "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S"
@@ -114,6 +124,8 @@ add_library(savr SHARED
     src/NpcGrab.cpp
     src/Melee.cpp
     src/Combat.cpp
+    src/VitalsFeedback.cpp
+    src/HeartbeatAudio.cpp
     src/WantedFeedback.cpp
     src/MissionControls.cpp
     src/Catalyst.cpp

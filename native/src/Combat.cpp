@@ -44,9 +44,8 @@ void* owner{};
 double updated{};
 std::uint64_t trackingEpoch{};
 Vec headWorld{},forwardWorld{};
-float previousHealth{},previousArmour{};
-bool vitalsValid{},ready{};
-std::atomic<double> damageAt{},blockAt{};
+bool ready{};
+std::atomic<double> blockAt{};
 void (*computeDamage)(void*,void*,void*,bool){};
 void (*computeDamageAnim)(void*,void*,bool){};
 thread_local void* physicalPunchVictim{};
@@ -235,9 +234,9 @@ void Install(void* handle) {
 PunchImpactScope::PunchImpactScope(void* victim) : previous(physicalPunchVictim) { physicalPunchVictim=victim; }
 PunchImpactScope::~PunchImpactScope() { physicalPunchVictim=previous; }
 void Reset() {
-    ClearGuards();owner=nullptr;updated=0;vitalsValid=false;
+    ClearGuards();owner=nullptr;updated=0;
     blockSound={};
-    damageAt.store(0,std::memory_order_relaxed);blockAt.store(0,std::memory_order_relaxed);
+    blockAt.store(0,std::memory_order_relaxed);
 }
 void Update(bool blocked) {
     void* player=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
@@ -246,12 +245,6 @@ void Update(bool blocked) {
     if (owner!=player || dt<=0 || dt>.15) {
         Reset();owner=player;
     }
-    const float health=Read<float>(player,0x6ac),armour=Read<float>(player,0x6b4);
-    if (std::isfinite(health) && std::isfinite(armour)) {
-        if (vitalsValid && (health<previousHealth-.01f || armour<previousArmour-.01f))
-            damageAt.store(now,std::memory_order_relaxed);
-        previousHealth=health;previousArmour=armour;vitalsValid=true;
-    } else vitalsValid=false;
     updated=now;
     float head[3]{},q[4]{};xr::HandPose hands[2]{};std::uint64_t epoch{};
     if (!ready || playerlife::Dead(player) || !g.FindPlayerVehicle ||
@@ -324,7 +317,6 @@ void LimitMovement(float* x,float* y) {
 }
 Feedback GetFeedback() {
     const double now=Now();
-    return {combatpolicy::Fade(now,damageAt.load(std::memory_order_relaxed),.7),
-            combatpolicy::Fade(now,blockAt.load(std::memory_order_relaxed),.5)};
+    return {combatpolicy::Fade(now,blockAt.load(std::memory_order_relaxed),.5)};
 }
 }

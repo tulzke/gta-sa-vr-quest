@@ -106,9 +106,9 @@ int main() {
     Tick(2,.06);CHECK(Read().blue>Read().red);CHECK(Near(Read().opacity,.22f));
 
     // Priority has one colour/alpha; wanted expires on schedule beneath combat.
-    auto halo=peripheral::Select({.8f,1.f},Read());
+    auto halo=peripheral::Select({1.f},Read(),{.8f,0,0});
     CHECK(halo.red==1&&Near(halo.opacity,.44f)&&halo.inner==.48f);
-    halo=peripheral::Select({0,1},Read());CHECK(halo.red==halo.blue&&Near(halo.opacity,.42f));
+    halo=peripheral::Select({1},Read());CHECK(halo.red==halo.blue&&Near(halo.opacity,.42f));
     halo=peripheral::Select({},Read());CHECK(halo.blue>halo.red&&Near(halo.opacity,.22f));
     Tick(2,.4);Tick(2,.2);CHECK(!peripheral::Select({},Read()).Active());
 

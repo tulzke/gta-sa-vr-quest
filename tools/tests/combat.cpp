@@ -176,7 +176,7 @@ int main() {
     combat::OnComputeDamageAnim(blockEvent,player,true);
     CHECK(nativeAnimations==0&&combat::Read<float>(player,0x68)==.2f&&combat::Read<float>(player,0x70)==-.03f);
     CHECK(thuds==1&&combat::OnSayEvent(player+0x340,52,345,0,1,0,0,0)==7);
-    testNow+=.02;combat::Update(false);CHECK(combat::GetFeedback().damage==1&&combat::GetFeedback().block>0);
+    testNow+=.02;combat::Update(false);CHECK(combat::GetFeedback().block>0);
     Setup();Raise();Incoming(4);CHECK(combat::Read<float>(player,0x6ac)==87);
     Setup();slot=1;Write(player,0x750,5);Raise();Incoming(5);CHECK(nativeCalls==0);
     Setup();Raise();Incoming(22);CHECK(nativeCalls==1); // bullets cannot be hand-blocked
@@ -204,9 +204,6 @@ int main() {
     CHECK(amplitude==0&&duration==1); // weak ready pulse stops when either palm turns away
     x=1;y=0;combat::LimitMovement(&x,&y);CHECK(x==1&&y==0);
     Setup();Raise();testNow+=.2;x=1;y=0;combat::LimitMovement(&x,&y);CHECK(x==1&&y==0); // no stale slowdown
-    Setup();combat::Update(false);Write(player,0x6b4,50.f);testNow+=.02;combat::Update(false);
-    CHECK(combat::GetFeedback().damage==0);Write(player,0x6b4,40.f);testNow+=.02;combat::Update(false);
-    CHECK(combat::GetFeedback().damage==1);testNow+=1;CHECK(combat::GetFeedback().damage==0);
     // Production sweep: a fast twitch/contact is insufficient, every punch needs 40 cm.
     Setup();melee::Update(false);testNow+=.02;melee::Update(false);CHECK(hits==0);
     Move(-.05f,7);CHECK(hits==0);Move(-.05f);CHECK(hits==1&&audioCalls==1);

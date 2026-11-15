@@ -12608,7 +12608,10 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     const auto wantedFx=wantedfeedback::GetFeedback(
         IsSessionFocused() && !IsMenuVisible() && g_headPoseValid,
         g_trackingRecovery.epoch);
-    const auto haloFx=peripheral::Select(combatFx,wantedFx);
+    const auto vitalsFx=vitalsfeedback::GetFeedback(
+        IsSessionFocused() && !IsMenuVisible() && g_headPoseValid,
+        g_trackingRecovery.epoch);
+    const auto haloFx=peripheral::Select(combatFx,wantedFx,vitalsFx);
     const bool shaderCopyMayRun = fxaaStats.requested ||
         underWaterness > 0.001f || mobileColor.mode != 0 || haloFx.Active();
     // Submit projection layers with their recorded render pose; use theater until that pose is available.

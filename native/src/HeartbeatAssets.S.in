@@ -1,0 +1,14 @@
+.section .rodata
+.balign 4
+.global savr_heartbeat_wav
+.hidden savr_heartbeat_wav
+savr_heartbeat_wav:
+    .incbin "@HEARTBEAT_WAV@"
+.global savr_heartbeat_wav_end
+.hidden savr_heartbeat_wav_end
+savr_heartbeat_wav_end:
+.global savr_heartbeat_attribution
+.hidden savr_heartbeat_attribution
+savr_heartbeat_attribution:
+    .incbin "@HEARTBEAT_ATTRIBUTION@"
+    .byte 0
