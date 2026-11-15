@@ -110,7 +110,8 @@ bool LaserEnabled();
 void SetLaserEnabled(bool enabled);   // persists immediately when changed
 void ToggleLaser();                   // persists immediately
 
-// Global arcade reload selection (automatic / down-up / twist-return).
+// Legacy fallback for unlisted weapons and persisted confirmation sound.
+// Fixed per-weapon gestures and sound have no menu selectors.
 void CycleReloadMode(int direction);  // wraps and persists immediately
 void SetReloadMode(int mode);         // persists immediately
 void CycleReloadSound(int direction);

@@ -1,5 +1,4 @@
 #include "WeaponCalibrationMenu.h"
-#include "ArcadeReload.h"
 #include "VehicleEntry.h"
 #include "Tbone.h"
 #include "BeachDance.h"
@@ -1851,7 +1850,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         }
         case PG_CONTROLS: {
             // Menu accessibility remains separate from gameplay remapping.
-            const int firstStick = 3;
+            const int firstStick = 1;
             const int firstButton = firstStick + savr::locomotion::STICK_OPT_COUNT;
             const int tipsRow = firstButton + savr::locomotion::BIND_SRC_COUNT;
             const int resetRow = tipsRow + 1;
@@ -1866,10 +1865,6 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                     layout == savr::locomotion::CONTROLS_LAYOUT_DEFAULT
                         ? savr::locomotion::CONTROLS_LAYOUT_SWAPPED_HANDS
                         : savr::locomotion::CONTROLS_LAYOUT_DEFAULT);
-            } else if (controlsSel == 1 && (step || enter)) {
-                savr::calib::CycleReloadMode(step ? step : 1);
-            } else if (controlsSel == 2 && (step || enter)) {
-                savr::calib::CycleReloadSound(step ? step : 1);
             } else if (controlsSel >= firstStick && controlsSel < firstButton &&
                        (step || enter)) {
                 savr::locomotion::ToggleStickOption(controlsSel - firstStick);
@@ -1879,8 +1874,6 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             if (enter && controlsSel == tipsRow) menuPage = PG_CONTROLS_TIPS;
             if (enter && controlsSel == resetRow) {
                 savr::locomotion::ResetControls();
-                savr::calib::SetReloadMode(savr::arcadereload::DOWN_UP);
-                savr::calib::SetReloadSound(savr::arcadereload::BOLT);
             }
             if (enter && controlsSel == backRow) menuPage = PG_MAIN;
             if (back) menuPage = PG_MAIN;

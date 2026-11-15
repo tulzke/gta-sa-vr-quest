@@ -15,7 +15,17 @@ inline const char* ModeName() {
     constexpr const char* names[]{"AUTOMATIC", "DOWN / UP", "TWIST / RETURN", "DOWN FLICK"};
     return names[GetMode()];
 }
-inline bool Manual(int type) { return GetMode()!=AUTOMATIC && type>=22 && type<=34; }
+inline int ModeForWeapon(int type) {
+    switch(type) {
+    case 22: case 23: case 24: case 26: case 28: case 32:
+        return DOWN_FLICK;
+    case 27: case 29: case 30: case 31:
+        return TWIST;
+    default:
+        return GetMode(); // Preserve the existing config for other weapons.
+    }
+}
+inline bool Manual(int type) { return ModeForWeapon(type)!=AUTOMATIC && type>=22 && type<=34; }
 
 enum Sound { BOLT, MAGAZINE, SILENT, SOUND_COUNT };
 inline std::atomic<int> sound{BOLT};
@@ -90,8 +100,6 @@ struct Gesture {
     int historyCount{},historyNext{};
     Sample previous{},start{};
     double previousTime{},startTime{},readyAt{};
-    double flickSpeedTime{},brakeSince{};
-    float flickSpeed{},peakSpeed{};
     int identity{-1},selected{-1},phase{},path{};
     std::uint64_t epoch{};
     bool valid{};
@@ -101,58 +109,29 @@ struct Gesture {
         historyNext=(historyNext+1)%48;
         historyCount=std::min(historyCount+1,48);
     }
-    void ClearFlick() {
-        historyCount=historyNext=phase=0;
-        flickSpeed=peakSpeed=0;flickSpeedTime=brakeSince=0;
-    }
-    static float PitchDrop(const Sample& from,const Sample& to) {
-        const Vec barrel=Rotate(Delta(to.orientation,from.orientation),from.barrel);
-        return std::asin(std::clamp(from.barrel.y,-1.f,1.f))-
-               std::asin(std::clamp(barrel.y,-1.f,1.f));
-    }
     bool DownFlick(Sample sample,double now) {
-        if (now<readyAt) { ClearFlick(); return false; }
-        // Smooth angular speed over ~30ms, using tracked rotations only.
-        // Translation never arms this gesture; arcs, yaw and roll remain free.
-        const TimedSample* recent=nullptr;
-        double seconds=.076;
+        if (now<readyAt) { historyCount=historyNext=0; return false; }
+        bool complete=false;
         for(int i=0;i<historyCount;++i) {
             const auto& from=history[i];
-            const double age=now-from.time;
-            if (age>=.025 && age<seconds) { recent=&from;seconds=age; }
+            const double seconds=now-from.time;
+            if (seconds<.05 || seconds>.32) continue;
+            // Follow a point 20cm along the calibrated barrel. Rotation about
+            // the wrist/elbow can lower this point along an arc without a
+            // straight vertical hand stroke. Yaw/roll and sideways travel are
+            // deliberately unrestricted; only downward progress matters.
+            const Vec barrel=Rotate(Delta(sample.orientation,from.sample.orientation),from.sample.barrel);
+            const float drop=from.sample.position.y-sample.position.y+
+                             .20f*(from.sample.barrel.y-barrel.y);
+            const float pitchDrop=std::asin(std::clamp(from.sample.barrel.y,-1.f,1.f))-
+                                  std::asin(std::clamp(barrel.y,-1.f,1.f));
+            if ((drop>=.07f && drop/seconds>=.40) ||
+                (pitchDrop>=.35f && pitchDrop/seconds>=1.5)) {
+                complete=true;break;
+            }
         }
-        if (recent) {
-            const float speed=PitchDrop(recent->sample,sample)/static_cast<float>(seconds);
-            const double interval=flickSpeedTime ? now-flickSpeedTime : seconds;
-            const float acceleration=(speed-flickSpeed)/static_cast<float>(interval);
-            flickSpeed=speed;flickSpeedTime=now;
-            if (!phase && speed>=2.2f && acceleration>=8.f) {
-                start=recent->sample;startTime=recent->time;
-                // Count the beginning of a naturally accelerating nod too.
-                // Starting the angle at the speed threshold discarded most
-                // of a small wrist flick before it reached peak speed.
-                double lead=seconds;
-                for(int i=0;i<historyCount;++i) {
-                    const double age=now-history[i].time;
-                    if (age<=.14 && age>lead) { start=history[i].sample;lead=age; }
-                }
-                peakSpeed=speed;brakeSince=0;phase=1;
-            }
-            if (phase) {
-                peakSpeed=std::max(peakSpeed,speed);
-                const float angle=PitchDrop(start,sample);
-                // A long aiming/holstering sweep is not a short wrist snap.
-                if (now-startTime>.42 || angle>1.25f || angle<-.12f) {
-                    phase=0;brakeSince=0;readyAt=now+.15;
-                } else if (angle>=.20f && std::abs(speed)<=std::min(1.5f,peakSpeed*.55f)) {
-                    // A clear slowdown is enough; no perfectly still wrist or
-                    // upward return. Brief confirmation rejects a noisy frame.
-                    if (!brakeSince) brakeSince=now;
-                    if (now-brakeSince>=.012) {
-                        ClearFlick();readyAt=now+.45;return true;
-                    }
-                } else brakeSince=0;
-            }
+        if (complete) {
+            historyCount=historyNext=0;readyAt=now+.45;return true;
         }
         Remember(sample,now);
         return false;
@@ -175,7 +154,7 @@ struct Gesture {
                            sample.position.z-old.position.z};
             const auto& a=sample.orientation;const auto& b=old.orientation;
             if (Dot(jump,jump)>.16f || std::abs(a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w)<.5f) {
-                ClearFlick();Remember(sample,now);return false;
+                historyCount=historyNext=0;Remember(sample,now);return false;
             }
             return DownFlick(sample,now);
         }

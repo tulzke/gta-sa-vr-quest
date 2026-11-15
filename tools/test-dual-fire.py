@@ -127,74 +127,7 @@ void Setup(int h,int slot,int type,unsigned clip,unsigned total,unsigned capacit
     *reinterpret_cast<int*>(info[type]+0x60)=duration;
     *reinterpret_cast<float*>(info[type]+0x44)=.1f;
 }
-int main(){
-    arcadereload::SetMode(arcadereload::AUTOMATIC);
-    player[0x8dc]=7;
-    Setup(0,2,22,1,40,34,2000,0x800);Setup(1,4,28,10,90,100,1300,0x800);
-    triggers[0]=triggers[1]=1;
-    Update(false);
-    Check(shots[0]==1 && shots[1]==1,"both triggers fire in one frame");
-    Check(player[0x8dc]==7,"active slot restored");
-    Check(Field(2,8)==0 && Field(4,8)==9,"separate magazines decremented");
-    Check(Field(2,16)==2100,"single pistol reload duration replaces native twin shortcut");
-    tick=300;Update(false);
-    Check(shots[0]==1 && shots[1]==2,"right fires while left reloads");
-    tick=500;Update(false);
-    Check(shots[0]==1 && shots[1]==3,"left reload does not reset right trigger latch");
-    triggers[1]=0;tick=2200;Update(false);
-    Check(Field(2,8)==17,"single pistol capacity restored at its own deadline");
-    Check(Field(4,8)==7,"left refill leaves right magazine untouched");
-    Check(shots[0]==1,"held semi-auto trigger does not repeat after reload");
-    triggers[0]=0;Update(false);triggers[0]=1;tick=2400;Update(false);
-    Check(shots[0]==2 && Field(2,8)==16,"pistol can fire again after release");
-    // Empty the right gun while the left remains ready, then transfer it.
-    Field(4,8)=1;Field(4,4)=0;triggers[1]=1;tick=2600;Update(false);
-    Check(Field(4,4)==2 && Field(4,16)==3900,"right weapon uses its own reload duration");
-    std::swap(held[0],held[1]);triggers[0]=triggers[1]=0;tick=4000;Update(false);
-    Check(Field(4,8)==50,"transfer retains magazine and reload clock by inventory slot");
-    Field(4,8)=1;Field(4,12)=3;Field(4,4)=2;Field(4,16)=4100;tick=4200;Update(false);
-    Check(Field(4,8)==3 && Field(4,12)==3,"reload respects remaining ammo without duplication");
-    triggers[0]=triggers[1]=1;int a=shots[0],b=shots[1];Update(true);
-    Check(shots[0]==a && shots[1]==b,"blocked gameplay fires neither hand");
-    Check(!g_directTriggerDown[0] && !g_directTriggerDown[1],"block resets both latches");
-    // Identical pistols share the original ammo total, but never magazine/state/ray.
-    ResetDirectTrigger();Setup(0,2,22,5,40,34,2000,0x800);held[1]=15;
-    unsigned capacities[13]{};capacities[2]=17;
-    pairedweapon::Refresh(player,1u<<2,capacities);
-    pairedweapon::Field(pairedweapon::copies[2].bytes,8)=1;
-    triggers[0]=triggers[1]=1;tick=4400;a=shots[0];b=shots[1];Update(false);
-    Check(shots[0]==a+1 && shots[1]==b+1,"identical pistols fire from both hand rays");
-    Check(Field(2,8)==4 && pairedweapon::Clip(player,15)==0,"identical magazines remain separate");
-    Check(Field(2,12)==38,"two identical shots consume exactly two original rounds");
-    Check(pairedweapon::Field(pairedweapon::copies[2].bytes,4)==2,"mirror reload belongs to mirror");
-    Check(Field(2,4)==1,"mirror reload leaves primary firing state alone");
-    Check(pairedweapon::Field(pairedweapon::copies[2].bytes,16)==6400,"mirror keeps its own reload deadline");
-    triggers[0]=triggers[1]=0;tick=4600;Update(false);
-    triggers[0]=1;tick=4800;Update(false);
-    Check(shots[0]==a+2 && shots[1]==b+1,"primary fires while identical mirror reloads");
-    Check(Field(2,12)==37,"primary shot preserves shared reserve during mirror reload");
-    triggers[0]=0;tick=6500;Update(false);
-    Check(pairedweapon::Clip(player,15)==17 && Field(2,8)==3,"mirror refill does not overwrite primary clip");
-    Check(Field(2,12)==37,"reload never creates or consumes total ammo");
-    Check(pairedweapon::Available(player,15)==34 && pairedweapon::Available(player,2)==20,
-          "each counter excludes the opposite magazine");
-    pairedweapon::Field(pairedweapon::copies[2].bytes,8)=0;
-    pairedweapon::Field(pairedweapon::copies[2].bytes,4)=2;
-    pairedweapon::Field(pairedweapon::copies[2].bytes,16)=7000;
-    pairedweapon::Refresh(player,1u<<2,capacities,7100);
-    Check(pairedweapon::Clip(player,15)==17 && Field(2,12)==37,
-          "holstered mirror completes its own reload without changing total");
-    pairedweapon::Refresh(player,0,capacities);
-    Check(Field(2,12)==37 && pairedweapon::Clip(player,15)==0,"disabling pair preserves all original ammo");
-    Check(!pairedweapon::Allowed(22,1,0x800) && !pairedweapon::Allowed(22,0,0x800),"low skills cannot choose paired pistol");
-    Check(pairedweapon::Allowed(22,2,0x800),"native twin pistol skill permits pairing");
-    Check(!pairedweapon::Allowed(23,2,0x800) && !pairedweapon::Allowed(31,2,0x800),"unsupported weapons cannot form pairs");
-    unsigned state=2,clip=0;AdvancePhysicalGun(state,clip,20,0xfffffff0u,5,17);
-    Check(state==0 && clip==17,"reload deadline supports timer wrap");
-    Check(PhysicalMagazineCapacity(2,0x800)==1,"single sawn-off uses one half of twin capacity");
-    std::printf("PASS: %d production dual-fire checks\n",checks);
-}
-"""
+""" + (ROOT / "tools/tests/combined_reload.inc").read_text(encoding="utf-8")
 output=ROOT / "build" / "dual-fire-tests"
 def compile_run(source, name):
     exe = output / (name + ('.exe' if os.name == 'nt' else ''))

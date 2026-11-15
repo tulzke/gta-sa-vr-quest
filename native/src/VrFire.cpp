@@ -241,7 +241,8 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
     const auto& p=tracked[hand].gripPos;
     const arcadereload::Sample sample{{p[0],p[1],p[2]},
         {pose.right[0],pose.right[1],pose.right[2]}, {q[0],q[1],q[2],q[3]}};
-    if (!gesture.Update(sample,now*.001,slot*64+type,arcadereload::GetMode(),epoch)) return;
+    const int mode=arcadereload::ModeForWeapon(type);
+    if (!gesture.Update(sample,now*.001,slot*64+type,mode,epoch)) return;
     if (arcadereload::Reload(type,pairedweapon::Field(weapon,4),pairedweapon::Field(weapon,8),total,
             pairedweapon::Field(weapon,16),now,MagazineCapacity(ped,type))) {
         g_directNextFireMs[hand]=0;
@@ -250,7 +251,7 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
         if (soundEvent && g.AudioEngine && g.CAudioEngine_ReportWeaponEvent)
             g.CAudioEngine_ReportWeaponEvent(g.AudioEngine,soundEvent,31,ped);
         LOGI("[vr.reload] instant gesture mode=%d hand=%d type=%d slot=%d",
-             arcadereload::GetMode(),hand,type,slot);
+             mode,hand,type,slot);
     }
 }
 

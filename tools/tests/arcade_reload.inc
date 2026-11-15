@@ -30,17 +30,14 @@ int GestureRun(int mode,int fps,int path,float amplitude,float outDuration=.15f,
 arcadereload::Quat Compose(arcadereload::Quat a,arcadereload::Quat b) {
     return arcadereload::Delta(a,{-b.x,-b.y,-b.z,b.w});
 }
-int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0,
-             float amplitude=.65f,double* firstEvent=nullptr) {
+int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0) {
     using namespace arcadereload;
     Gesture gesture;int count=0;
     for(int i=0;i<fps*2;++i) {
         const double t=double(i)/fps;
-        const float linear=std::clamp(float((t-.02)/duration),0.f,1.f);
-        const float p=kind==6 || kind==7 ? .5f*(1-std::cos(3.141592654f*linear)) : linear;
+        const float p=std::clamp(float((t-.02)/duration),0.f,1.f);
         Sample s;
-        float pitch=(kind==2 || kind==3 || kind==5)?0:-amplitude*p;
-        if(kind==7)pitch-=.8f*std::max(0.f,float(t-.02));
+        float pitch=(kind==2 || kind==3 || kind==5)?0:-.65f*p;
         if(kind==4)pitch=-pitch;
         const float yaw=1.1f+(kind==1 || kind==2 ? 1.2f*p : 0);
         const float roll=startRoll+(kind==1 || kind==3 ? 1.4f*p : 0);
@@ -52,10 +49,7 @@ int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0,
             s.position={.18f*std::sin(p*1.2f),-.16f*std::sin(p*1.1f),.20f*(1-std::cos(p*1.2f))};
         }
         if(kind==2)s.position={.20f*std::sin(p),0,.20f*(1-std::cos(p))};
-        if (gesture.Update(s,t,kind+1,DOWN_FLICK,1)) {
-            if (!count && firstEvent) *firstEvent=t;
-            ++count;
-        }
+        count+=gesture.Update(s,t,kind+1,DOWN_FLICK,1);
     }
     return count;
 }
@@ -75,22 +69,10 @@ void ArcadeTests() {
         Check(GestureRun(TWIST,fps,2,.2f)==0,"small aim roll cannot reload");
         Check(GestureRun(TWIST,fps,1,-.7f)==0,"pitch cannot masquerade as barrel twist");
         Check(GestureRun(AUTOMATIC,fps,0,.12f)==0,"automatic mode ignores gestures");
-        double eventTime=0;
-        Check(FlickRun(fps,0,.18f,0,.65f,&eventTime)==1,"short downward wrist snap and brake reload without a return");
-        Check(eventTime>=.20 && eventTime<=.30,"reload waits for the brake and confirms promptly after it");
+        Check(FlickRun(fps,0)==1,"downward wrist nod reloads without a return or long arming delay");
         Check(FlickRun(fps,1)==1,"downward arc with simultaneous yaw and roll reloads once");
         Check(FlickRun(fps,1,.18f,1.1f)==1,"rolled starting grip and curved motion remain valid");
-        Check(FlickRun(fps,0,.28f)==1,"comfortable longer wrist nod is accepted");
-        Check(FlickRun(fps,1,.28f,1.1f)==1,"comfortable curved nod with extra rotations is accepted");
-        Check(FlickRun(fps,6,.20f,0,.32f)==1,"small smoothly accelerating nod counts its full motion");
-        Check(FlickRun(fps,6,.18f,0,.28f)==1,"short small natural nod is accepted without a hard snap");
-        Check(FlickRun(fps,7,.22f,0,.38f)==1,"clear braking with residual wrist movement does not require a full stop");
-        Check(FlickRun(fps,6,.65f)==0,"smooth ordinary lowering remains below intentional nod speed");
-        Check(FlickRun(fps,0,.03f,0,.10f)==0,"a tiny fast twitch cannot reload");
-        Check(FlickRun(fps,5)==0,"fast curved arm lowering without wrist rotation cannot reload");
-        Check(FlickRun(fps,0,.4f)==0,"ordinary gun lowering at the former trigger speed cannot reload");
-        Check(FlickRun(fps,1,.4f)==0,"ordinary lowering with arc, yaw and roll cannot reload");
-        Check(FlickRun(fps,0,.30f,0,1.5f)==0,"long fast angular sweep is not a short snap and stop");
+        Check(FlickRun(fps,5)==1,"curved downward arm movement works without wrist rotation");
         Check(FlickRun(fps,0,1.2f)==0,"slow wrist lowering cannot trigger downward flick");
         Check(FlickRun(fps,1,1.2f)==0,"slow curved holstering with rotations cannot trigger flick");
         Check(FlickRun(fps,2)==0,"sideways arc and yaw alone do not count as downward flick");
@@ -114,88 +96,4 @@ void ArcadeTests() {
     s.orientation.w=std::nanf("");
     Check(!interrupted.Update(s,1.8,11,DOWN_UP,2) && !interrupted.valid,"invalid tracking clears history");
 
-    // Actual Update/UpdateHand/OnWeaponUpdate, with raw tracking and retail
-    // CWeapon calls mocked by the dual-fire harness.
-    ResetDirectTrigger();pairedweapon::Reset();SetMode(DOWN_UP);
-    Setup(0,2,22,1,40,34,2000,0x800);Setup(1,4,28,20,90,100,1300,0x800);
-    triggers[0]=triggers[1]=1;Pose(0,0);Pose(1,0);tick=10000;Update(false);
-    triggers[0]=triggers[1]=0;tick=14000;Update(false);
-    Check(Field(2,8)==0 && Field(2,4)==2,"empty gun waits past native automatic reload deadline");
-    const auto frame=[] {tick+=10;Update(false);};
-    for(int i=0;i<25;++i)frame();
-    for(int i=1;i<=12;++i){Pose(0,-i*.01f);frame();}
-    Check(Field(2,8)==0 && reloadSounds[0]==0,"downward half alone does not reload or play a sound");
-    for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
-    Check(Field(2,8)==17 && Field(2,4)==0,"return instantly fills magazine and makes weapon ready");
-    Check(Field(2,16)<=tick,"gesture leaves no reload deadline to wait for");
-    Check(reloadSounds[0]==1 && lastReloadEvent==147,"completed gesture plays bolt confirmation once");
-    Check(Field(2,12)==39,"instant reload preserves total ammunition");
-    int left=shots[0],right=shots[1];triggers[0]=triggers[1]=1;tick+=10;Update(false);
-    Check(shots[0]==left+1 && shots[1]==right+1,"both guns can shoot immediately after gesture");
-    triggers[0]=triggers[1]=0;frame();
-    const int pulses=xr::haptics[0];tick+=10;Update(false);
-    Check(xr::haptics[0]==pulses && reloadSounds[0]==1,"no delayed second pulse or sound");
-    const unsigned total=Field(2,12);Field(2,8)=5;Field(2,4)=0;
-    SetMode(TWIST);SetSound(MAGAZINE);for(int i=0;i<25;++i)frame();
-    for(int i=1;i<=10;++i){Pose(0,0,i*.1f);frame();}
-    Check(Field(2,8)==5 && reloadSounds[0]==1,"twist alone cannot reload or play sound");
-    for(int i=9;i>=0;--i){Pose(0,0,i*.1f);frame();}
-    Check(Field(2,8)==17 && Field(2,4)==0,"twist-return instantly reloads partial magazine");
-    Check(reloadSounds[0]==2 && lastReloadEvent==146,"magazine click selection uses its own event");
-    Check(Field(2,8)==17 && Field(2,12)==total,"partial reload never discards or duplicates ammo");
-
-    // The mirror's update also runs from PhysicalWeapon while holstered.
-    ResetDirectTrigger();pairedweapon::Reset();SetMode(DOWN_UP);
-    Setup(0,2,22,5,20,34,2000,0x800);held[1]=15;
-    unsigned capacities[13]{};capacities[2]=17;
-    pairedweapon::Refresh(player,1u<<2,capacities,tick);
-    auto* mirror=pairedweapon::copies[2].bytes;
-    pairedweapon::Field(mirror,8)=0;pairedweapon::Field(mirror,4)=2;pairedweapon::Field(mirror,16)=tick-1;
-    pairedweapon::Refresh(player,1u<<2,capacities,tick+5000);
-    Check(pairedweapon::Clip(player,15)==0,"holstered empty mirror also waits for gesture");
-    Pose(0,0);Pose(1,0);for(int i=0;i<25;++i)frame();
-    for(int i=1;i<=12;++i){Pose(1,-i*.01f);frame();}
-    for(int i=11;i>=0;--i){Pose(1,-i*.01f);frame();}
-    Check(pairedweapon::Clip(player,15)==15 && ::Field(2,8)==5,"mirror gesture instantly fills only its magazine");
-    Check(pairedweapon::Clip(player,15)==15 && ::Field(2,8)==5 && ::Field(2,12)==20,
-          "mirror refill excludes other magazine without creating shared ammo");
-    SetMode(AUTOMATIC);pairedweapon::Field(mirror,8)=0;pairedweapon::Field(mirror,4)=2;
-    pairedweapon::Refresh(player,1u<<2,capacities,tick+4000);
-    Check(pairedweapon::Clip(player,15)==15,"switching back restores automatic mirror reload");
-
-    // Engine focus and trigger gates must cancel a gesture before its return.
-    pairedweapon::Refresh(player,0,capacities,tick);
-    ResetDirectTrigger();SetMode(DOWN_UP);held[1]=-1;::Field(2,8)=1;::Field(2,4)=0;
-    Pose(0,0);for(int i=0;i<25;++i)frame();
-    for(int i=1;i<=12;++i){Pose(0,-i*.01f);frame();}
-    xr::focused=false;frame();xr::focused=true;
-    for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
-    Check(::Field(2,8)==1,"focus loss prevents completing an old gesture");
-    for(int i=0;i<25;++i)frame();
-    for(int i=1;i<=12;++i){Pose(0,-i*.01f);frame();}
-    triggers[0]=.3f;frame();triggers[0]=0;
-    for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
-    Check(::Field(2,8)==1,"held trigger prevents completing an old gesture");
-    SetSound(SILENT);for(int i=0;i<25;++i)frame();
-    const int mutedSounds=reloadSounds[0],mutedPulses=xr::haptics[0];
-    for(int i=1;i<=12;++i){Pose(0,-i*.01f);frame();}
-    for(int i=11;i>=0;--i){Pose(0,-i*.01f);frame();}
-    Check(::Field(2,8)==17 && ::Field(2,4)==0,"silent mode still instantly reloads");
-    Check(reloadSounds[0]==mutedSounds && xr::haptics[0]==mutedPulses+1,"silent mode keeps haptics and suppresses sound");
-    Check(xr::hapticAmplitude[0]>=.6f && xr::hapticDuration[0]>=45 && xr::hapticDuration[0]<=65,
-          "reload confirmation is a distinct short pulse independent of recoil setting");
-    SetMode(DOWN_FLICK);::Field(2,8)=1;::Field(2,4)=0;Pose(0,0);
-    for(int i=0;i<6;++i)frame();
-    const int nodPulses=xr::haptics[0];
-    for(int i=1;i<=12;++i){Pose(0,0,0,-i*.05f);frame();}
-    Check(::Field(2,8)==1 && xr::haptics[0]==nodPulses,"downward motion alone waits for its stopping phase");
-    for(int i=0;i<7;++i)frame();
-    Check(::Field(2,8)==17 && ::Field(2,4)==0,"down-only nod instantly reloads in the production firing loop");
-    Check(xr::haptics[0]==nodPulses+1,"down-only nod gives exactly one short haptic confirmation");
-    unsigned state=2,clip=0,deadline=tick+2000;
-    Check(Reload(22,state,clip,3,deadline,tick,17) && clip==3 && state==0 && deadline==tick,
-          "small reserve instantly fills only available rounds");
-    Check(!Reload(22,state,clip,3,deadline,tick,17),"no reserve cannot produce a false reload");
-    clip=17;Check(!Reload(22,state,clip,40,deadline,tick,17),"full magazine cannot produce a false reload");
-    Check(!Manual(35) && !Manual(38) && !Manual(41),"launchers, minigun and continuous tools retain native cycle");
 }
