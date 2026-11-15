@@ -25,8 +25,10 @@ void Basis(Vec x,Vec y,float out[4]){
 xr::HandPose Hand(int index,Vec point,const Frame& frame=wheel,Vec fingers={0,1,0}){
     xr::HandPose hand;hand.valid=true;hand.trigger=1;
     const Vec forward=frame.right*fingers.x+frame.up*fingers.y;
-    Basis(frame.normal*(index==0?-1.f:1.f),forward,hand.gripOri);
-    Save(frame.World(point)-forward*kPalmForward-frame.normal*kPalmUp,hand.gripPos);
+    Basis(frame.normal*(index==0?1.f:-1.f),forward,hand.gripOri);
+    hand.aimValid=true;
+    Basis(Cross(forward,frame.normal),frame.normal,hand.aimOri);
+    Save(frame.World(point)-PalmPoint(Tracked(hand,index)),hand.gripPos);
     CHECK(Tracked(hand,index).valid);
     CHECK(Near(PalmPoint(Tracked(hand,index)),frame.World(point)));
     return hand;
@@ -40,6 +42,36 @@ Vec Skin(const handskeleton::Vertex& vertex,const handskeleton::Palette& palette
 }
 int main(int argc,char** argv){
     CHECK(argc==2);CHECK(wheel.Valid());
+    // Infer the palm side from the asset's authored finger closure, rather
+    // than constructing all input poses from the solver's own axis convention.
+    handskeleton::Library asset;CHECK(asset.Load(argv[1]));
+    handskeleton::Palette open{},closed{};
+    asset.Evaluate({handanimation::Gesture::OpenPalm,handanimation::Gesture::OpenPalm,1,0},0,0,open);
+    asset.Evaluate({handanimation::Gesture::Grip,handanimation::Gesture::Grip,1,0},0,0,closed);
+    Vec curl{};int fingertips=0;
+    for(const auto& vertex:asset.vertices){
+        const Vec p=Skin(vertex,open);
+        if(p.x>.17f&&p.z<.05f){curl=curl+Skin(vertex,closed)-p;++fingertips;}
+    }
+    CHECK(fingertips>500);curl=curl*(1.f/fingertips);CHECK(curl.y>.04f);
+    for(bool mirrored:{false,true}){
+        Visual visual;visual.point={0,0,0};visual.fingers={0,1,0};visual.mirrored=mirrored;
+        const auto attached=AttachedPose(wheel,visual);
+        const Vec closing=attached.forward*curl.x-attached.up*curl.y+attached.right*curl.z;
+        CHECK(Dot(closing,wheel.normal)>.04f); // fingers must close INTO the button, never away
+    }
+    // Literal grip quaternions, independent of Hand() and the solver's contact
+    // offsets: both visible palm faces point toward -X in this orientation.
+    for(int h=0;h<2;++h){
+        xr::HandPose raw;raw.valid=true;raw.aimValid=true;
+        if(h==0){raw.gripOri[1]=1;raw.gripOri[3]=0;}
+        Basis({0,0,1},{-1,0,0},raw.aimOri);
+        Frame button{{-.06f,-.01f,h==0?.011f:-.011f},{0,0,1},{0,1,0},{-1,0,0},.17f};
+        HandState state;state.Step(button,raw,h,true,0,.08f);
+        CHECK(state.visual.attached&&!state.visual.pressed);
+        raw.gripPos[0]=-.017f;state.Step(button,raw,h,true,0,.08f);
+        CHECK(state.visual.pressed&&state.justPressed);
+    }
     for(int h=0;h<2;++h){
         HandState state;
         Step(state,{0,0,.031f},h);CHECK(!state.visual.attached);
@@ -47,7 +79,7 @@ int main(int argc,char** argv){
         CHECK(Near(state.visual.weight,1));
         const Pose pinned=AttachedPose(wheel,state.visual);
         CHECK(pinned.valid&&Near(PalmPoint(pinned),wheel.World({0,0,.02999f})));
-        CHECK(Near(pinned.up,wheel.normal));
+        CHECK(Near(PalmNormal(pinned),wheel.normal));
         Step(state,{0,0,.004f},h,1);CHECK(state.visual.pressed&&state.justPressed);
         Step(state,{0,0,.007f},h,1);CHECK(state.visual.pressed&&!state.justPressed);
         Step(state,{0,0,.011f},h,1);CHECK(!state.visual.pressed&&state.visual.attached);
@@ -79,14 +111,14 @@ int main(int argc,char** argv){
             s.Step(wheel,raw,h,true,1,.08f);CHECK(s.visual.attached);
             const auto pose=AttachedPose(wheel,s.visual);
             CHECK(Near(PalmPoint(pose),wheel.World({0,0,.02f})));
-            CHECK(Near(pose.up,wheel.normal));
+            CHECK(Near(PalmNormal(pose),wheel.normal));
             CHECK(Near(pose.forward,wheel.right*std::sin(angle)+wheel.up*std::cos(angle)));
         }
         // Tilt is filtered out; it does not become a button press or a release.
         auto tilted=original;
-        Basis(Rotate(wheel.normal*(h==0?-1.f:1.f),wheel.right,.7f),Rotate(wheel.up,wheel.right,.7f),tilted.gripOri);
+        Basis(Rotate(wheel.normal*(h==0?1.f:-1.f),wheel.right,.7f),Rotate(wheel.up,wheel.right,.7f),tilted.gripOri);
         s.Step(wheel,tilted,h,true,0,.08f);CHECK(s.visual.attached&&!s.visual.pressed);
-        CHECK(Near(AttachedPose(wheel,s.visual).up,wheel.normal));
+        CHECK(Near(PalmNormal(AttachedPose(wheel,s.visual)),wheel.normal));
     }
     for(int h=0;h<2;++h){
         HandState s;Step(s,{.02f,-.01f,.004f},h);
@@ -108,8 +140,10 @@ int main(int argc,char** argv){
         if(kind==3)grip=nan;if(kind==4)available=false;if(kind==5)for(auto& x:raw.gripOri)x=0;
         s.Step(frame,raw,0,available,grip,.08f);CHECK(!s.visual.attached&&!s.visual.pressed&&s.visual.weight==0);
     }
-    {HandState s;auto raw=Hand(0,{0,0,.02f});Basis(wheel.normal*-1.f,wheel.up,raw.gripOri); // left hand: up points INTO wheel
-        Basis(wheel.normal,wheel.up,raw.gripOri);s.Step(wheel,raw,0,true,0,.08f);CHECK(!s.visual.attached);}
+    {HandState s;auto raw=Hand(0,{0,0,.02f});Basis(wheel.normal*-1.f,wheel.up,raw.gripOri);
+        const Vec point=PalmPoint(Tracked(raw,0));
+        Save(Read(raw.gripPos)+wheel.World({0,0,.02f})-point,raw.gripPos);
+        s.Step(wheel,raw,0,true,0,.08f);CHECK(!s.visual.attached);}
     // Frame-rate independent transitions and finite, orthonormal turns.
     for(int hz:{72,90,120}){HandState s;for(int i=0;i<hz/2;++i)Step(s,{0,0,.02f},0,0,1.f/hz);CHECK(Near(s.visual.weight,1));}
     for(int h=0;h<2;++h){
@@ -119,10 +153,10 @@ int main(int argc,char** argv){
         for(float t:{0.f,.1f,.5f,.9f,.9999f,1.f}){auto p=BlendPose(from,to,t);CHECK(Finite(p.position)&&Finite(p.forward)&&Finite(p.up)&&Finite(p.right));CHECK(Near(Length(p.forward),1)&&Near(Length(p.up),1)&&Near(Length(p.right),1));CHECK(std::abs(Dot(p.forward,p.up))<1e-5f);CHECK(std::abs(Dot(p.forward,p.right))<1e-5f);CHECK(Dot(Cross(p.up,p.forward),p.right)*Dot(Cross(from.up,from.forward),from.right)>.99f);}
     }
     handskeleton::Library lib;CHECK(lib.Load(argv[1]));
-    handskeleton::Palette palette;lib.Evaluate(handanimation::Select(1,1,{false,false,false,false,false,false,0,1}),0,0,palette);
-    float minimum=100;int patch=0;
-    for(const auto& vertex:lib.vertices){const Vec v=Skin(vertex,palette);if(v.x>.065f&&v.x<.09f&&std::abs(v.z)<.015f){minimum=std::min(minimum,v.y);++patch;}}
-    CHECK(patch>10&&std::abs(minimum+kPalmUp)<.002f);
+    handskeleton::Palette palette{};lib.Evaluate(handanimation::Select(1,1,{false,false,false,false,false,false,0,1}),0,0,palette);
+    float maximum=-100;
+    for(const auto& vertex:lib.vertices)maximum=std::max(maximum,Skin(vertex,palette).y);
+    CHECK(maximum>0&&maximum<=-kPalmUp&&std::abs(maximum+kPalmUp)<.0005f);
     for(int h=0;h<2;++h){
         Visual v;v.point={0,0,0};v.fingers={1,0,0};v.mirrored=h==0;const auto p=AttachedPose(wheel,v);
         for(const auto& vertex:lib.vertices){const Vec local=Skin(vertex,palette);

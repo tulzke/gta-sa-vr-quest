@@ -43,11 +43,13 @@ inline Pose Tracked(const xr::HandPose& hand,int index){
     return pose;
 }
 
-// OpenPalm canonical centre is (0.080,-0.026,0) metres. The skeletal
-// shader applies the Y-up conversion, then model(pos - .055 * forward).
-// Central palm vertices in hands.glb lie within 2 mm of this contact patch.
-inline constexpr float kPalmForward=.080f-.055f,kPalmUp=.026f;
-inline Vec PalmPoint(const Pose& pose){return pose.position+pose.forward*kPalmForward+pose.up*kPalmUp;}
+// Authored Grip curls toward canonical +Y, which the skeletal model maps to
+// -up: +up is the BACK of the hand. Use the palm-heel contact plane, padded
+// to OpenPalm's +Y extent (39.72 mm), to keep the mesh outside the button.
+// The shader applies its Y-up conversion before model(pos-.055*forward).
+inline constexpr float kPalmForward=.045f-.055f,kPalmUp=-.040f,kPalmRight=.011f;
+inline Vec PalmNormal(const Pose& pose){return pose.up*-1.f;}
+inline Vec PalmPoint(const Pose& pose){return pose.position+pose.forward*kPalmForward+pose.up*kPalmUp+pose.right*kPalmRight;}
 
 struct Frame {
     Vec center{},right{},up{},normal{}; // normal points INTO the wheel
@@ -71,10 +73,10 @@ inline constexpr float kPress=.005f,kUnpress=.01f,kDeepRelease=.04f,kTransition=
 inline Pose AttachedPose(const Frame& frame,const Visual& visual){
     Pose p;
     if(!frame.Valid()||!Finite(visual.point)||!Finite(visual.fingers))return p;
-    p.up=frame.normal;
+    p.up=frame.normal*-1.f;
     p.forward=Unit(frame.right*visual.fingers.x+frame.up*visual.fingers.y);
     p.right=Unit(Cross(p.up,p.forward))*(visual.mirrored?-1.f:1.f);
-    p.position=frame.World(visual.point)-p.forward*kPalmForward-p.up*kPalmUp;
+    p.position=frame.World(visual.point)-p.forward*kPalmForward-p.up*kPalmUp-p.right*kPalmRight;
     p.valid=Length(p.forward)>.5f;return p;
 }
 
@@ -116,7 +118,7 @@ struct HandState {
         const float distance=std::hypot(outside,palm.z);
         const bool near=distance<=kAttach&&palm.z>=-.005f;
         if(!visual.attached&&!near)armed=true;
-        if(!visual.attached&&armed&&near&&grip<=.30f&&Dot(tracked.up,frame.normal)>=.5f){
+        if(!visual.attached&&armed&&near&&grip<=.30f&&Dot(PalmNormal(tracked),frame.normal)>=.5f){
             visual.attached=true;armed=false;
             const float scale=radial>radius?radius/radial:1.f;
             visual.point={palm.x*scale,palm.y*scale,std::max(0.f,palm.z)};
