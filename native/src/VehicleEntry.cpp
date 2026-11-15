@@ -68,8 +68,6 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
  void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
  void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
  const bool editing=driving::GetVehicleDebugMode()!=0;
- const int element=driving::VehicleEditTarget();
- if(editHand>=0&&element!=editElement)EndEdit();
  if(!editing&&editHand>=0)EndEdit();
  float o[3]{},f[3]{};
  const bool valid=usable&&epoch==trackingEpoch&&now-last<.15&&frameLtm&&canOpen&&healthy&&ped&&pad&&
@@ -91,7 +89,31 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
  bool editFresh[2]{};
  for(int h=0;h<2;++h){if(!editing||!hands[h].valid)editLatch[h]=true;else if(hands[h].trigger<.35f)editLatch[h]=false;else if(hands[h].trigger>.55f&&!editLatch[h]){editLatch[h]=true;editFresh[h]=true;}}
  void* bestCar=nullptr;int bestSeat=-1,bestIcon=-1;std::uint8_t bestGeneration{};Vec point{};float bestDirection=-1;float bestDistance=100;
- bool editContinued=false,bestEmergency=false;
+ bool editContinued=false,bestEmergency=false,editUsed=false;
+ struct EditCandidate {void* car{};int model{},index{},element{},hand{};std::uint8_t gen{};Vec start{},base{};float distance=.23f;} candidate;
+ auto editPoint=[&](void* car,const Basis& basis,int model,int index,int element,std::uint8_t gen,Vec base,Vec correction){
+  Vec local=base+correction;
+  if(!editing)return local;
+  for(int h=0;h<2;++h){
+   float w[3]{};if(!hands[h].valid||!std::isfinite(hands[h].trigger)||(occupied&(1u<<h))||!vrcam::TrackingPointToWorld(hands[h].gripPos,w))continue;
+   const Vec hand=basis.Local({w[0],w[1],w[2]});if(!Finite(hand))continue;
+   const float distance=Length(hand-local);
+   if(editHand<0&&!editUsed&&editFresh[h]&&distance<candidate.distance)
+    candidate={car,model,index,element,h,gen,hand,correction,distance};
+   if(editHand!=h||editModel!=model||editSeat!=index||editElement!=element||target!=car||generation!=gen)continue;
+   editContinued=editUsed=true;claimed=1u<<h;
+   Vec value=editBase+hand-editStart;if(element==2)value.z=0;
+   const float c[]{value.x,value.y,value.z};
+   if(element==0)driving::SetEntryCalibration(model,index,c);
+   else driving::SetExitCalibration(model,index,element==2,c);
+   float applied[3]{};
+   if(element==0)driving::GetEntryCalibration(model,index,applied);
+   else driving::GetExitCalibration(model,index,element==2,applied);
+   local=base+Vec{applied[0],applied[1],applied[2]};
+   if(hands[h].trigger<.35f)EndEdit();
+  }
+  return local;
+ };
  auto offer=[&](void* car,int seat,Vec p,int iconType,std::uint8_t gen,bool emergency){
   if(icons.count>=icons.kCapacity)return;
   Marker m{p,forward,{0,0,1}};m.seatIcon=iconType;
@@ -114,7 +136,6 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
   void* matrix=Read<void*>(car,0x18);if(!matrix)continue;
   Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
   if(!b.Valid()||(!seated&&Length(eye-b.position)>4.5f))continue;
-  if(element!=0&&editing&&(appearance==2||model==471||vehicleaccess::Find(model)))continue;
   if(appearance==2||model==471){
    if(!seated&&!canOpen(car,ped))continue;
    if(!seated&&(b.up.z<.94f||Length(speed)>.02f))continue;
@@ -132,18 +153,8 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
     Vec p=b.Point(local);
     if(!exit&&Length(p-eye)>1.8f)continue;
     if(exit)actionable=vehicleexit::Check(car,seat,p)==vehicleexit::Mode::Normal;
-    if(!exit&&editing&&element==0){
-     for(int h=0;h<2;++h){
-      float w[3]{};if(!hands[h].valid||!vrcam::TrackingPointToWorld(hands[h].gripPos,w))continue;
-      Vec hand=b.Local({w[0],w[1],w[2]});if(!Finite(hand)||(occupied&(1u<<h)))continue;
-      if(editHand<0&&!(occupied&(1u<<h))&&editFresh[h]&&Length(hand-local)<.23f){editHand=h;editElement=element;editModel=model;editSeat=index;editStart=hand;editBase={correction[0],correction[1],correction[2]};target=car;generation=flags[slot];}
-      if(editHand==h&&editModel==model&&editSeat==index&&target==car&&generation==flags[slot]){
-       editContinued=true;claimed=1u<<h;Vec value=editBase+hand-editStart;
-       const float c[]={value.x,value.y,value.z};driving::SetEntryCalibration(model,index,c);
-       p=b.Point(local+(value-Vec{correction[0],correction[1],correction[2]}));
-       if(hands[h].trigger<.35f)EndEdit();
-      }
-     }
+    if(!exit&&editing){
+     local=editPoint(car,b,model,index,0,flags[slot],local-Vec{correction[0],correction[1],correction[2]},Vec{correction[0],correction[1],correction[2]});p=b.Point(local);
     }
     if(!exit&&!ClearExit(eye,p,car))actionable=false;
     if(!editing&&!actionable)continue;
@@ -206,31 +217,20 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
    const Vec hinge=b.Local(Read<Vec>(doorMatrix,0x30));if(!Finite(hinge))continue;
    const float side=(index==0||index==2)?-1.f:1.f;
    if(!seated&&!vehicleaccess::LockAllows(car,index+2,canOpen(car,ped)))continue;
-   if(editing&&element!=0){
-    if(Length(speed)>.01f||(!seated&&Dot(eye-b.position,b.right)*side<.2f))continue;
-    float correction[3]{};driving::GetExitCalibration(model,index,element==2,correction);
-    const Vec base{hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f};
-    Vec local=base+Vec{correction[0],correction[1],correction[2]};
-    if(Length(b.Point(local)-eye)>2.5f)continue;
-    for(int h=0;h<2;++h){
-     float w[3]{};if(!hands[h].valid||!std::isfinite(hands[h].trigger)||(occupied&(1u<<h))||!vrcam::TrackingPointToWorld(hands[h].gripPos,w))continue;
-     const Vec hand=b.Local({w[0],w[1],w[2]});if(!Finite(hand))continue;
-     if(editHand<0&&editFresh[h]&&Length(hand-local)<.23f){
-      editHand=h;editElement=element;editModel=model;editSeat=index;editStart=hand;editBase={correction[0],correction[1],correction[2]};target=car;generation=flags[slot];
-      xr::TriggerHaptic(h,.25f,0,30);
-     }
-     if(editHand==h&&editModel==model&&editSeat==index&&target==car&&generation==flags[slot]){
-      editContinued=true;claimed=1u<<h;
-      Vec value=editBase+hand-editStart;if(element==2)value.z=0;
-      const float c[]{value.x,value.y,value.z};driving::SetExitCalibration(model,index,element==2,c);
-      driving::GetExitCalibration(model,index,element==2,correction);local=base+Vec{correction[0],correction[1],correction[2]};
-      if(hands[h].trigger<.35f)EndEdit();
-     }
+   if(editing&&Length(speed)<=.01f&&(seated||Dot(eye-b.position,b.right)*side>=.2f)){
+    // Exit icon and placement crosshair are distinct nearby handles. The latter
+    // sits 35cm higher as a reachable proxy; its smaller twin shows the real goal.
+    const Vec exitBase{hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f};
+    for(int element=1;element<=2;++element){
+     float correction[3]{};driving::GetExitCalibration(model,index,element==2,correction);
+     const Vec base=exitBase+Vec{0,0,element==2?.35f:0.f};
+     Vec local=base+Vec{correction[0],correction[1],correction[2]};
+     if(Length(b.Point(local)-eye)>2.5f)continue;
+     local=editPoint(car,b,model,index,element,flags[slot],base,Vec{correction[0],correction[1],correction[2]});
+     Vec destination{};const bool clear=element!=2||vehicleexit::PlacementPreview(car,seat,destination);
+     if(element==2&&Finite(destination)&&icons.count<icons.kCapacity){Marker m{destination,forward,{0,0,1}};m.seatIcon=4;m.scale=.65f;m.exitBlocked=!clear;icons.markers[icons.count++]=m;}
+     if(icons.count<icons.kCapacity){Marker m{b.Point(local),forward,{0,0,1}};m.seatIcon=element==2?4:3;m.exitBlocked=!clear;m.held=editHand>=0&&editSeat==index&&editElement==element;icons.markers[icons.count++]=m;}
     }
-    Vec destination{};const bool clear=element!=2||vehicleexit::PlacementPreview(car,seat,destination);
-    if(element==2&&Finite(destination)&&icons.count<icons.kCapacity){Marker m{destination,forward,{0,0,1}};m.seatIcon=3;m.scale=.65f;m.exitBlocked=!clear;icons.markers[icons.count++]=m;}
-    if(icons.count<icons.kCapacity){Marker m{b.Point(local),forward,{0,0,1}};m.seatIcon=3;m.exitBlocked=!clear;m.held=editHand>=0&&editSeat==index;icons.markers[icons.count++]=m;}
-    continue;
    }
    float correction[3]{};driving::GetEntryCalibration(model,index,correction);
    Vec local={hinge.x*.5f+correction[0],hinge.y-.35f+correction[1],hinge.z+.2f+correction[2]};
@@ -240,17 +240,8 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
     if(Length(eye-b.Point({hinge.x,hinge.y-.35f,hinge.z}))>1.5f)actionable=false;
    }
    if(!exit&&Length(p-eye)>2.5f)continue;
-   if(editing&&element==0){
-    for(int h=0;h<2;++h){
-     float w[3]{};if(!hands[h].valid||!vrcam::TrackingPointToWorld(hands[h].gripPos,w))continue;
-     Vec hand=b.Local({w[0],w[1],w[2]});if(!Finite(hand)||(occupied&(1u<<h)))continue;
-     if(editHand<0&&!(occupied&(1u<<h))&&editFresh[h]&&Length(hand-local)<.23f){editHand=h;editElement=element;editModel=model;editSeat=index;editStart=hand;editBase={correction[0],correction[1],correction[2]};target=car;generation=flags[slot];}
-     if(editHand==h&&editModel==model&&editSeat==index&&target==car&&generation==flags[slot]){
-      editContinued=true;claimed=1u<<h;
-      Vec value=editBase+hand-editStart;const float c[]={value.x,value.y,value.z};driving::SetEntryCalibration(model,index,c);p=b.Point(local+(value-Vec{correction[0],correction[1],correction[2]}));
-      if(hands[h].trigger<.35f)EndEdit();
-     }
-    }
+   if(editing){
+    local=editPoint(car,b,model,index,0,flags[slot],local-Vec{correction[0],correction[1],correction[2]},Vec{correction[0],correction[1],correction[2]});p=b.Point(local);
    }
    if(exit){
     if(editing&&icons.count<icons.kCapacity){Marker calibration{p,forward,{0,0,1}};calibration.seatIcon=seat<0?1:2;icons.markers[icons.count++]=calibration;}
@@ -261,12 +252,25 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
     actionable=mode!=vehicleexit::Mode::Unavailable;
    }
    if(!actionable&&(!editing||exit))continue;
-   if(actionable)offer(car,exit?3:seat,p,exit?3:(seat<0?1:2),flags[slot],emergency);
+   if(actionable){
+    const int previousCount=icons.count;
+    offer(car,exit?3:seat,p,exit?3:(seat<0?1:2),flags[slot],emergency);
+    if(editing&&exit&&Length(speed)<=.01f&&icons.count>previousCount){
+     for(int i=0;i<previousCount;++i)if(icons.markers[i].seatIcon==3&&Length(icons.markers[i].position-p)<.001f){
+      icons.markers[i].progress=icons.markers[previousCount].progress;if(bestIcon==previousCount)bestIcon=i;--icons.count;break;
+     }
+    }
+   }
    else if(icons.count<icons.kCapacity){Marker m{p,forward,{0,0,1}};m.seatIcon=seat<0?1:2;icons.markers[icons.count++]=m;}
   }
  }
  if(editHand>=0&&!editContinued)EndEdit();
- if(editing&&element!=0){started=0;released=false;visible=icons.count>0;return;}
+ if(editHand<0&&!editUsed&&candidate.car){
+  editHand=candidate.hand;editElement=candidate.element;editModel=candidate.model;editSeat=candidate.index;
+  editStart=candidate.start;editBase=candidate.base;target=candidate.car;generation=candidate.gen;
+  claimed=1u<<editHand;editUsed=true;xr::TriggerHaptic(editHand,.25f,0,30);
+ }
+ if(editUsed){started=0;released=false;visible=icons.count>0;return;}
  if(editHand>=0){started=0;visible=icons.count>0;return;}
  if(editing&&occupied){target=nullptr;started=0;released=false;return;}
  if(!released||!bestCar){target=nullptr;started=0;return;}

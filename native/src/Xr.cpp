@@ -7883,8 +7883,6 @@ void BuildDrivingMenu() {
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET MIRROR POSITION");break;
             case driving::MENU_PASSENGER_RESET:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET PASSENGER VIEW / REAR PAIR");break;
-            case driving::MENU_VEHICLE_EDIT_TARGET:
-                std::snprintf(rows[row],sizeof(rows[row]),"VEHICLE EDIT < %s >",driving::VehicleEditTargetName());break;
             case driving::MENU_REAR_MIRROR_FOV:
                 std::snprintf(rows[row],sizeof(rows[row]),"MIRROR FIELD OF VIEW < %d DEG >",driving::RearMirrorFov());
                 break;
@@ -10356,6 +10354,7 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
                 draw({point(x,y),point(x+dx,y),point(x,y+dy),point(x,y+dy),point(x+dx,y),point(x+dx,y+dy)},.85f);
             };
             if(marker.seatIcon==1){draw(ring(.075f,.009f,64),.85f);bar(-.067f,-.005f,.134f,.01f);bar(-.005f,-.067f,.01f,.067f);}
+            else if(marker.seatIcon==4) {draw(ring(.055f,.009f,64),.85f);bar(-.085f,-.005f,.17f,.01f);bar(-.005f,-.085f,.01f,.17f);}
             else if(marker.seatIcon==3) {bar(-.07f,-.07f,.012f,.14f);bar(-.07f,.058f,.07f,.012f);bar(-.07f,-.07f,.07f,.012f);bar(-.025f,-.006f,.1f,.012f);bar(.05f,-.025f,.012f,.05f);}
             else {bar(-.04f,-.025f,.018f,.09f);bar(-.04f,-.04f,.09f,.018f);bar(.032f,-.075f,.018f,.05f);}
             continue;

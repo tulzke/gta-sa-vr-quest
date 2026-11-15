@@ -177,7 +177,7 @@ enum MenuItem {
     , MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z,
     MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
-    MENU_MIRROR_RESET_POSE, MENU_VEHICLE_EDIT_TARGET, MENU_PASSENGER_RESET
+    MENU_MIRROR_RESET_POSE, MENU_PASSENGER_RESET
 };
 
 bool RearMirrorEnabled();
@@ -192,9 +192,6 @@ void GetRearMirrorCalibration(int model, int out[12]);
 void SetRearMirrorCalibration(int model, const int values[12]);
 void SetRearMirrorCameraCalibration(int model,const int values[12]);
 void ResetRearMirrorSurface();
-int VehicleEditTarget(); // 0 all existing handles, 1 exit marker, 2 exit placement
-void CycleVehicleEditTarget(int direction);
-const char* VehicleEditTargetName();
 bool GetPassengerView(int model,int seat,int mode,float out[3]); // vehicle-local metres
 void SetPassengerView(int model,int seat,int mode,const float value[3]);
 void ResetPassengerView();

@@ -45,10 +45,10 @@ turning the key, operating the radio, or holding a climbing pipe. Use the
 | Steering-wheel size | Keep the first editing trigger held, bring the other hand near the rim, and press its trigger. Move the hands apart or together to change the radius. |
 | Steering-wheel tilt | Begin the two-hand edit with the hands arranged mainly above and below one another. Tilt the line between them forward/backward to change wheel pitch. Release the second trigger to return to moving the wheel. |
 | Driver seating/view position | Grab the neutral eye-position marker and move it in three axes. The marker previews the change; the camera position is applied when the trigger is released. This adjusts the driving viewpoint, rather than moving the vehicle's seat mesh. |
-| Passenger seating/view position | With VEHICLE EDIT set to ALL, sit in the desired passenger seat and drag its neutral eye marker with a free hand's trigger. Apply on release. Front passenger settings are independent; either rear seat configures both rear seats, mirrored across the car's centre plane. |
+| Passenger seating/view position | Sit in the desired passenger seat and drag its neutral eye marker with a free hand's trigger. Apply on release. Front passenger settings are independent; either rear seat configures both rear seats, mirrored across the car's centre plane. |
 | Boarding and seat-switch markers | Grab a seat/steering-wheel icon used for boarding or switching seats and move it. These interaction targets are separate from the seated viewpoint; moving one does not adjust the other. |
-| Exit interaction marker | Select VEHICLE SETTINGS → CARS → VEHICLE EDIT → EXIT MARKER, then close the menu. Drag the exit icon near the desired door, outside a stationary car or from the occupied seat. This changes the icon only. |
-| Exit placement | Select VEHICLE EDIT → EXIT POSITION and drag the door-side proxy horizontally. The smaller exit icon shows the requested standing root position; red means that ground, body clearance, or the short path is blocked. Adjustments are limited to 50 cm per horizontal axis. Height comes from the surface and the game retains final collision correction. Return VEHICLE EDIT to ALL, or turn VEHICLE DEBUG off, before testing a normal exit. |
+| Exit interaction marker | With VEHICLE DEBUG on, drag the exit-arrow icon near the desired door, outside a stationary car or from the occupied seat. This changes the icon only; all other editing handles remain available. |
+| Exit placement | Drag the crosshair 35 cm above the exit-arrow base horizontally. The smaller crosshair shows the requested standing root position; red means that ground, body clearance, or the short path is blocked. Adjustments are limited to 50 cm per horizontal axis. Height comes from the surface and the game retains final collision correction. No object-type mode switch is needed; normal boarding and exit remain available when no marker is held. |
 | Door grab points | Grab the door-handle marker and move it. Outside and inside grab points have separate calibration. |
 | Interior door-panel grab areas | Move the corner handles to adjust the panel's bounds and depth placement. The side handles adjust its thickness. These change the interaction volume, rather than the door mesh. |
 | Ignition key | Grab the key itself with the trigger, then move and rotate the controller to set its position and orientation. Grip operates the ignition instead. |
@@ -59,6 +59,9 @@ turning the key, operating the radio, or holding a climbing pipe. Use the
 | Motorcycle handlebar grip points | On supported bikes, move the individual grip targets with the trigger. They can be adjusted from the rider's position, or outside an unoccupied bike. |
 
 Available handles depend on vehicle type, model, view, and player position.
+VEHICLE DEBUG is the single editor switch. Boarding targets, exit-arrow icons
+and exit-placement crosshairs are shown together. A fresh trigger selects the
+nearest of these handles and keeps that selection until release.
 Passenger-view and exit editors support the existing front/right and rear
 left/right seats of ordinary cars. They do not extend the supported seat
 catalogue of buses, bikes, boats, aircraft, or special open vehicles. Passenger

@@ -525,7 +525,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         !(g.CTimer_m_UserPause&&*g.CTimer_m_UserPause)&&
         !(g.CTimer_m_CodePause&&*g.CTimer_m_CodePause);
     g_epoch=epoch;
-    const int editMode=driving::VehicleEditTarget()==0?driving::GetVehicleDebugMode():0;
+    const int editMode=driving::GetVehicleDebugMode();
     if(editMode!=g_editMode) { Reset();g_editMode=editMode; }
     bool fresh[2]{}, editFresh[2]{};
     for (int h=0;h<2;++h) {

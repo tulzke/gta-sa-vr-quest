@@ -1509,8 +1509,6 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::ResetRearMirrorSurface();
             } else if (item==savr::driving::MENU_PASSENGER_RESET && enter) {
                 savr::driving::ResetPassengerView();
-            } else if (item==savr::driving::MENU_VEHICLE_EDIT_TARGET && (enter||step)) {
-                savr::driving::CycleVehicleEditTarget(step?step:1);
             } else if (item==savr::driving::MENU_REAR_MIRROR_FOV && step) {
                 savr::driving::AdjustRearMirrorFov(step);
             } else if (item>=savr::driving::MENU_IGNITION_X &&

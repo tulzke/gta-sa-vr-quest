@@ -60,7 +60,6 @@ void SetBikeGripCalibration(int,int grip,const float in[3]){std::copy_n(in,3,bik
 int debugMode{},saves{};
 std::map<int,std::array<float,24>> corrections;
 int GetVehicleDebugMode() {return debugMode;}
-int VehicleEditTarget(){return 0;}
 int passengerWrites{};float passengerTarget[3]{};int passengerSeat=-1;
 void SetPassengerView(int,int seat,int,const float value[3]){++passengerWrites;passengerSeat=seat;std::copy_n(value,3,passengerTarget);}
 std::map<int,std::array<float,48>> panelCorrections;

@@ -275,7 +275,6 @@ double g_bicycleTriggerPreviousTime{};
 std::atomic<int> g_vehicleDebugMode{};
 std::atomic<int> g_rearMirrorQuality{1};
 std::atomic<int> g_rearMirrorFov{80};
-std::atomic<int> g_vehicleEditTarget{0};
 struct ModelCalibration {
     int door[4][2][3]{};
     int doorPanel[4][2][6]{};
@@ -3694,7 +3693,7 @@ constexpr int kDefaultBikeItems[] = {
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
-    MENU_VEHICLE_EDIT_TARGET, MENU_PASSENGER_RESET,
+    MENU_PASSENGER_RESET,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3716,7 +3715,7 @@ constexpr int kImmersiveBikeItems[] = {
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
-    MENU_VEHICLE_EDIT_TARGET, MENU_PASSENGER_RESET,
+    MENU_PASSENGER_RESET,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3813,9 +3812,6 @@ void AdjustRearMirrorFov(int direction) {
     g_rearMirrorFov.store(std::clamp(g_rearMirrorFov.load()+(direction<0?-5:5),40,120));
     Save();
 }
-int VehicleEditTarget(){return g_vehicleEditTarget.load();}
-void CycleVehicleEditTarget(int direction){g_vehicleEditTarget.store((VehicleEditTarget()+(direction<0?2:1))%3);ResetInteraction();}
-const char* VehicleEditTargetName(){static const char* names[]={"ALL","EXIT MARKER","EXIT POSITION"};return names[VehicleEditTarget()];}
 void ResetRearMirrorSurface(){
     const int model=GetActiveVehicleModelId();if(model<400||model>611)return;
     {std::lock_guard<std::mutex> lock(g_modelMutex);g_modelCalibration[model].mirrorManual=false;}
