@@ -167,8 +167,7 @@ int main(){
  for(float degrees:{-180.f,-60.f,-30.f,-5.f,0.f,5.f,30.f,60.f,180.f}){
   physical=degrees*radians;Model(481);OnBmxProcessControl(bike);
   const float lean=Read(bike,kLeanOffset);
-  CHECK(std::abs(lean)<=10.f*radians+1e-6f);
-  CHECK(std::abs(lean-std::clamp(physical*.25f,-10.f*radians,10.f*radians))<1e-6f);
+  CHECK(std::abs(lean-physical*.50f)<1e-6f);
  }
  physical=.37f;
  // Actual production sprint/accelerate hooks inside the production wrapper.
@@ -220,7 +219,7 @@ int main(){
  BuildTrampoline(allocation,0x12340000,0x56780000,0x9abc0000);
  FILE* file=std::fopen("trampoline.bin","wb");CHECK(file);
  CHECK(std::fwrite(allocation,1,kTrampolineBytes,file)==kTrampolineBytes);std::fclose(file);
- std::puts("PASS: 1440 animation samples, lean limit/smoothing, R2 sprint/drive at 72/90/120 Hz, scope and installer failures");
+ std::puts("PASS: 1440 animation samples, 50% lean without cap, smoothing, R2 sprint/drive at 72/90/120 Hz, scope and installer failures");
 }
 '''
 test = OUT / 'bicycle-sway.cpp'

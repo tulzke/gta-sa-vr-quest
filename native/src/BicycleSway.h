@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -14,8 +13,7 @@ constexpr std::size_t kLeanOffset=0x838, kFrameSwayOffset=0xa20;
 constexpr std::size_t kResumeOffset=24, kTrampolineBytes=72;
 
 inline float ComfortableLean(float lean) {
-    constexpr float limit=10.0f*3.14159265358979323846f/180.0f;
-    return std::clamp(lean*.25f,-limit,limit);
+    return lean*.50f;
 }
 
 inline bool Eligible(void* bike,void* playerVehicle,bool driver,bool stereo,int model) {
