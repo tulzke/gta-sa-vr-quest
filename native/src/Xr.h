@@ -1,5 +1,6 @@
 #pragma once
 #include "RecoilModel.h"
+#include "TrackingFrame.h"
 #include "ReloadHint.h"
 
 #include <jni.h>
@@ -93,23 +94,10 @@ void PublishRadioText(const char* text);
 // Per-hand tracked pose for rendering VR hands. grip drives the hand model; aim
 // gives the pointing axis. Poses are in the session LOCAL space (same as the head
 // pose), so the game thread recenters + converts them exactly like the head.
-struct HandPose {
-    bool  valid{false};
-    bool  aimValid{false};
-    float gripPos[3]{};
-    float gripOri[4]{0, 0, 0, 1};   // x,y,z,w
-    float aimPos[3]{};
-    float aimOri[4]{0, 0, 0, 1};
-    float grip{};                   // squeeze [0,1]
-    float trigger{};                // trigger [0,1]
-    bool wristAnchorValid{};
-    float wristGripPos[3]{}; // tracked wrist position before a visual grip override
-    bool ledgeGrip{}; // fixed palm/fingers with a tracked wrist
-    bool climbGrip{};              // render-only conventional hand frame
-    float climbRight[3]{},climbForward[3]{},climbUp[3]{};
-};
 // Copy out both hands' poses (index 0 = left, 1 = right). Safe every frame.
 void GetHandPoses(HandPose out[2]);
+// Latest atomic publication, or the sample pinned by ScopedTrackingFrame.
+TrackingSnapshot CaptureTrackingSnapshot();
 // Atomic head/hands sample: all poses belong to the same tracking epoch.
 bool GetTrackingSnapshot(float headPosition[3], float headOrientation[4],
                          HandPose hands[2], std::uint64_t* epoch);

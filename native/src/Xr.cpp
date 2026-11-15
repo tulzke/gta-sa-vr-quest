@@ -152,6 +152,8 @@ float          g_eyeFovXDeg = 90.0f;   // sane default until views are located
 XrPosef        g_renderHeadPose{};      // pose the game rendered the last frame at
 bool           g_renderHeadPoseValid = false;
 HandPose       g_handPose[2]{};         // per-hand tracked poses (guarded by g_headPoseMutex)
+std::uint64_t g_trackingSequence{};
+XrTime g_trackingDisplayTime{};
 
 // --- stereo eye-texture bridge (see Xr.h) ------------------------------------
 struct EyeBuffer {
@@ -5247,21 +5249,47 @@ void PublishRadioText(const char* text) {
     ++g_hudTextState.revision;
 }
 
-void GetHandPoses(HandPose out[2]) {
+TrackingSnapshot CaptureTrackingSnapshot() {
+    if (const auto* frame = ScopedTrackingFrame::Current()) return *frame;
     std::lock_guard<std::mutex> lock(g_headPoseMutex);
-    out[0] = g_headPoseValid?g_handPose[0]:HandPose{};
-    out[1] = g_headPoseValid?g_handPose[1]:HandPose{};
+    TrackingSnapshot out{};
+    out.valid = g_headPoseValid;
+    out.epoch = g_trackingRecovery.epoch;
+    out.sequence = g_trackingSequence;
+    out.displayTime = g_trackingDisplayTime;
+    if (!out.valid) return out;
+    out.headPosition[0]=g_headPose.position.x;
+    out.headPosition[1]=g_headPose.position.y;
+    out.headPosition[2]=g_headPose.position.z;
+    out.headOrientation[0]=g_headPose.orientation.x;
+    out.headOrientation[1]=g_headPose.orientation.y;
+    out.headOrientation[2]=g_headPose.orientation.z;
+    out.headOrientation[3]=g_headPose.orientation.w;
+    for (int e=0;e<2;++e) {
+        out.eyePosition[e][0]=g_eyePose[e].position.x;
+        out.eyePosition[e][1]=g_eyePose[e].position.y;
+        out.eyePosition[e][2]=g_eyePose[e].position.z;
+        out.eyeOrientation[e][0]=g_eyePose[e].orientation.x;
+        out.eyeOrientation[e][1]=g_eyePose[e].orientation.y;
+        out.eyeOrientation[e][2]=g_eyePose[e].orientation.z;
+        out.eyeOrientation[e][3]=g_eyePose[e].orientation.w;
+        out.hands[e]=g_handPose[e];
+    }
+    return out;
+}
+
+void GetHandPoses(HandPose out[2]) {
+    const auto sample = CaptureTrackingSnapshot();
+    out[0]=sample.hands[0]; out[1]=sample.hands[1];
 }
 
 bool GetTrackingSnapshot(float p[3], float q[4], HandPose hands[2], std::uint64_t* epoch) {
-    std::lock_guard<std::mutex> lock(g_headPoseMutex);
-    if (epoch) *epoch = g_trackingRecovery.epoch;
-    hands[0] = g_headPoseValid ? g_handPose[0] : HandPose{};
-    hands[1] = g_headPoseValid ? g_handPose[1] : HandPose{};
-    if (!g_headPoseValid) return false;
-    p[0]=g_headPose.position.x; p[1]=g_headPose.position.y; p[2]=g_headPose.position.z;
-    q[0]=g_headPose.orientation.x; q[1]=g_headPose.orientation.y;
-    q[2]=g_headPose.orientation.z; q[3]=g_headPose.orientation.w;
+    const auto sample = CaptureTrackingSnapshot();
+    if (epoch) *epoch=sample.epoch;
+    hands[0]=sample.hands[0]; hands[1]=sample.hands[1];
+    if (!sample.valid) return false;
+    std::copy_n(sample.headPosition,3,p);
+    std::copy_n(sample.headOrientation,4,q);
     return true;
 }
 
@@ -5269,18 +5297,11 @@ bool GetHeadPose(float positionOut[3], float orientationOut[4]) {
     return GetHeadPose(positionOut,orientationOut,nullptr);
 }
 bool GetHeadPose(float positionOut[3], float orientationOut[4], std::uint64_t* epoch) {
-    std::lock_guard<std::mutex> lock(g_headPoseMutex);
-    if(epoch)*epoch=g_trackingRecovery.epoch;
-    if (!g_headPoseValid) {
-        return false;
-    }
-    positionOut[0] = g_headPose.position.x;
-    positionOut[1] = g_headPose.position.y;
-    positionOut[2] = g_headPose.position.z;
-    orientationOut[0] = g_headPose.orientation.x;
-    orientationOut[1] = g_headPose.orientation.y;
-    orientationOut[2] = g_headPose.orientation.z;
-    orientationOut[3] = g_headPose.orientation.w;
+    const auto sample = CaptureTrackingSnapshot();
+    if (epoch) *epoch=sample.epoch;
+    if (!sample.valid) return false;
+    std::copy_n(sample.headPosition,3,positionOut);
+    std::copy_n(sample.headOrientation,4,orientationOut);
     return true;
 }
 
@@ -5290,18 +5311,11 @@ float RecommendedGameFovXDegrees() {
 }
 
 bool GetEyePoses(float positionOut[2][3], float orientationOut[2][4]) {
-    std::lock_guard<std::mutex> lock(g_headPoseMutex);
-    if (!g_headPoseValid) {
-        return false;
-    }
+    const auto sample = CaptureTrackingSnapshot();
+    if (!sample.valid) return false;
     for (int e = 0; e < 2; ++e) {
-        positionOut[e][0] = g_eyePose[e].position.x;
-        positionOut[e][1] = g_eyePose[e].position.y;
-        positionOut[e][2] = g_eyePose[e].position.z;
-        orientationOut[e][0] = g_eyePose[e].orientation.x;
-        orientationOut[e][1] = g_eyePose[e].orientation.y;
-        orientationOut[e][2] = g_eyePose[e].orientation.z;
-        orientationOut[e][3] = g_eyePose[e].orientation.w;
+        std::copy_n(sample.eyePosition[e],3,positionOut[e]);
+        std::copy_n(sample.eyeOrientation[e],4,orientationOut[e]);
     }
     return true;
 }
@@ -13199,6 +13213,8 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
         std::lock_guard<std::mutex> lock(g_headPoseMutex);
         // One publication: readers cannot combine the new head origin with
         // controllers still expressed in the previous LOCAL reference space.
+        ++g_trackingSequence;
+        g_trackingDisplayTime=frameState.predictedDisplayTime;
         if(publishTrackingPose) {
             g_headPose=nextHead;g_eyePose[0]=nextEyes[0];g_eyePose[1]=nextEyes[1];
             g_handPose[0]=hp[0];g_handPose[1]=hp[1];g_headPoseValid=true;

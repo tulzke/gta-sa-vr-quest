@@ -2308,7 +2308,15 @@ void OnDrawFrame(JNIEnv* env, jclass clazz, jfloat deltaTime) {
         ? (frameT0 - g_prevGameFrameStartMs) : 0.0;   // full game-frame period
     g_prevGameFrameStartMs = frameT0;
     ApplyVrWorldLodScale();
-    g.implOnDrawFrame(env, clazz, deltaTime);
+    {
+        // Input/ownership, room movement, camera, weapons and both stereo eyes
+        // must consume one head/controller publication. Updating input after
+        // rendering left the next frame's hands older than its head camera.
+        const auto tracking = xr::CaptureTrackingSnapshot();
+        const xr::ScopedTrackingFrame trackingFrame(tracking);
+        if (g_inlineReady) SendInputToGame(env, clazz);
+        g.implOnDrawFrame(env, clazz, deltaTime);
+    }
     // A normal stereo frame consumes the profile at the large RenderScene
     // entry.  Limiter/menu callbacks may never reach it, so close the scope
     // here to keep later pacing or JNI work out of engine_pre attribution.
@@ -2373,8 +2381,6 @@ void OnDrawFrame(JNIEnv* env, jclass clazz, jfloat deltaTime) {
         submitTelemetry();
         return;
     }
-
-    SendInputToGame(env, clazz);
 
     // The engine may have recreated its surface/context; adopt whatever it left
     // current — we are on its thread, so these handles are exactly right.
