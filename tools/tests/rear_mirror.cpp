@@ -176,7 +176,41 @@ int main() {
     r::visible=true;r::raster=road.atomic.data();r::Render(camera.data(),reinterpret_cast<std::uintptr_t>(&head));
     CHECK(camera==originalCamera);CHECK(std::memcmp(&head,&originalHead,sizeof(head))==0);
     CHECK(screen[2]==1920&&screen[3]==1080);CHECK(fogState.start==originalFog.start&&fogState.end==originalFog.end);
-    const auto savedStates=states;r::DrawSurface();CHECK(states==savedStates);
+    // Capture the actual textured quad, excluding its untextured border.
+    // The rear camera's local left points along the car's right at zero
+    // calibration. Its image must place that side on the mirror's +right,
+    // with the top kept on +up. This contract stays surface-local on rotation.
+    static std::vector<SkyBackdropVertex> mirrorVertices;
+    g.RwIm3DTransform=[](void* v,unsigned count,void*,unsigned)->void* {
+        if(states[1]==reinterpret_cast<std::uintptr_t>(r::raster)) {
+            const auto* vertices=static_cast<const SkyBackdropVertex*>(v);
+            mirrorVertices.insert(mirrorVertices.end(),vertices,vertices+count);
+        }
+        return v;
+    };
+    const auto savedStates=states;
+    for(int pitch : {-35,0,40})for(int yaw : {-45,0,60})for(int roll : {-30,0,180}) {
+        const int calibration[]={100,200,300,pitch,yaw,roll};
+        r::surface=r::Pose(basis,calibration);
+        const auto savedRear=r::rear;
+        mirrorVertices.clear();r::DrawSurface();
+        CHECK(states==savedStates&&mirrorVertices.size()==4);
+        CHECK(std::memcmp(&r::rear,&savedRear,sizeof(savedRear))==0);
+        const V3 center=r::surface.pos+r::surface.forward*.001f;
+        unsigned corners=0;
+        for(const auto& vertex:mirrorVertices) {
+            const V3 delta=vertex.position-center;
+            const float horizontal=Dot(delta,r::surface.right)/HalfWidth;
+            const float vertical=Dot(delta,r::surface.up)/HalfHeight;
+            CHECK(std::fabs(std::fabs(horizontal)-1.f)<.001f);
+            CHECK(std::fabs(std::fabs(vertical)-1.f)<.001f);
+            CHECK(std::fabs(Dot(delta,r::surface.forward))<.001f);
+            CHECK(vertex.u==(horizontal>0.f?1.f:0.f));
+            CHECK(vertex.v==(vertical>0.f?0.f:1.f));
+            corners|=1u<<((horizontal>0.f?1:0)+(vertical>0.f?2:0));
+        }
+        CHECK(corners==15);
+    }
     // Two sectors pointing at the same road yield one render candidate. The
     // collector does not touch the entity's retail visibility scan stamp.
     std::array<void*,2> node{road.e.data(),nullptr};
@@ -187,5 +221,5 @@ int main() {
     // Disabled/third-person paths cannot reuse a stale visible surface.
     driving::enabled=false;CHECK(!r::Prepare(head)&&!r::visible);
     driving::enabled=true;driving::third=true;r::visible=true;CHECK(!r::Prepare(head)&&!r::visible);
-    std::puts("rear mirror: frustum, LOD/fallback, request cap, bounds, pose, camera/state restoration PASS");
+    std::puts("rear mirror: frustum, LOD/fallback, request cap, bounds, pose, local image orientation, camera/state restoration PASS");
 }

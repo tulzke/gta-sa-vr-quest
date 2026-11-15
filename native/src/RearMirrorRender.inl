@@ -306,10 +306,12 @@ void DrawSurface() {
         SkyBackdropVertex vertices[4];
         for(int i=0;i<4;++i) {
             const float x=(i==0||i==3)?-1.f:1.f,y=i<2?1.f:-1.f;
-            // Back-facing camera's image is horizontally reflected for mirror
-            // behaviour. Camera-texture V follows RenderWare's native raster.
+            // Rear-camera left points along the car's right at zero calibration.
+            // Increasing U along surface.right gives mirror behaviour; reversing
+            // U here instead produces an ordinary rear-camera display. Keep V
+            // in the native raster orientation so the image stays upright.
             vertices[i]={center+surface.right*(x*w)+surface.up*(y*h),{},color,
-                x<0?1.f:0.f,y>0?0.f:1.f};
+                x<0?0.f:1.f,y>0?0.f:1.f};
         }
         unsigned short indices[]={0,1,2,0,2,3};
         g.RwRenderStateSet(1,texture);
