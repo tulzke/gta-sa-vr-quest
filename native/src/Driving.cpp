@@ -280,7 +280,7 @@ struct ModelCalibration {
     int doorPanel[4][2][6]{};
     int climb[2][12]{};
     int entry[4][3]{};
-    int exitMarker[4][3]{},exitPlacement[4][3]{};
+    int exitMarker[4][3]{};
     float passengerView[2][MODE_COUNT][3]{}; // front right / canonical rear left, cm
     bool passengerViewSet[2][MODE_COUNT]{};
     unsigned passengerViewMask[2][MODE_COUNT]{};
@@ -584,7 +584,6 @@ void Save() {
                     std::fprintf(file,"PassengerView.%d.%d.%d.%d=%.3f\n",model,group,mode,axis,calibration.passengerView[group][mode][axis]);
             for(int index=0;index<4;++index)for(int axis=0;axis<3;++axis){
                 std::fprintf(file,"ExitMarker.%d.%d.%d=%d\n",model,index,axis,calibration.exitMarker[index][axis]);
-                if(axis<2)std::fprintf(file,"ExitPlacement.%d.%d.%d=%d\n",model,index,axis,calibration.exitPlacement[index][axis]);
             }
             for(int side=0;side<2;++side) for(int a=6;a<12;++a)
                 std::fprintf(file,"Climb.%d.%d.%d=%d\n",model,side,a,calibration.climb[side][a]);
@@ -861,11 +860,9 @@ void Load() {
                     continue;
                 }
                 if(std::sscanf(line,"RearMirrorManual.%d=%d",&model,&value)==2&&model>=400&&model<=611){g_modelCalibration[model].mirrorManual=value!=0;continue;}
-                bool exitPlacement=false;
-                if((std::sscanf(line,"ExitMarker.%d.%d.%d=%d",&model,&door,&axis,&value)==4 ||
-                    (exitPlacement=true,std::sscanf(line,"ExitPlacement.%d.%d.%d=%d",&model,&door,&axis,&value)==4))&&
-                   model>=400&&model<=611&&door>=0&&door<4&&axis>=0&&axis<(exitPlacement?2:3)){
-                    auto& c=g_modelCalibration[model];(exitPlacement?c.exitPlacement:c.exitMarker)[door][axis]=std::clamp(value,exitPlacement?-50:-100,exitPlacement?50:100);continue;
+                if(std::sscanf(line,"ExitMarker.%d.%d.%d=%d",&model,&door,&axis,&value)==4 &&
+                   model>=400&&model<=611&&door>=0&&door<4&&axis>=0&&axis<3){
+                    g_modelCalibration[model].exitMarker[door][axis]=std::clamp(value,-100,100);continue;
                 }
                 if(std::sscanf(line,"EntryCalib.%d.%d.%d=%d",&model,&door,&axis,&value)==4 &&
                    model>=400&&model<=611&&door>=0&&door<4&&axis>=0&&axis<3) {
@@ -3841,17 +3838,16 @@ void ResetPassengerView(){
     {std::lock_guard<std::mutex> lock(g_modelMutex);g_modelCalibration[model].passengerViewSet[seat==0?0:1][mode]=false;}
     Save();ResetInteraction();
 }
-void GetExitCalibration(int model,int index,bool placement,float out[3]){
+void GetExitMarkerCalibration(int model,int index,float out[3]){
     std::fill_n(out,3,0.f);if(index<0||index>3)return;
     std::lock_guard<std::mutex> lock(g_modelMutex);const auto it=g_modelCalibration.find(model);if(it==g_modelCalibration.end())return;
-    const auto& values=placement?it->second.exitPlacement:it->second.exitMarker;
-    for(int a=0;a<(placement?2:3);++a)out[a]=values[index][a]*.01f;
+    for(int a=0;a<3;++a)out[a]=it->second.exitMarker[index][a]*.01f;
 }
-void SetExitCalibration(int model,int index,bool placement,const float value[3]){
+void SetExitMarkerCalibration(int model,int index,const float value[3]){
     if(model<400||model>611||index<0||index>3)return;
     for(int a=0;a<3;++a)if(!std::isfinite(value[a]))return;
-    std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];auto& values=placement?c.exitPlacement:c.exitMarker;
-    for(int a=0;a<(placement?2:3);++a)values[index][a]=std::lround(std::clamp(value[a],placement?-.5f:-1.f,placement?.5f:1.f)*100.f);
+    std::lock_guard<std::mutex> lock(g_modelMutex);auto& values=g_modelCalibration[model].exitMarker;
+    for(int a=0;a<3;++a)values[index][a]=std::lround(std::clamp(value[a],-1.f,1.f)*100.f);
 }
 void GetRearMirrorCalibration(int model,int out[12]) {
     EnsureInit();

@@ -14,11 +14,10 @@ namespace savr {
 GameSymbols g{};
 namespace passengerreaction { void Update(bool){} }
 namespace xr { struct HandPose {bool valid{};float trigger{},gripPos[3]{};};HandPose handPoses[2]{};void GetHandPoses(HandPose* out){out[0]=handPoses[0];out[1]=handPoses[1];} struct InputState {float leftStick[2]{},rightStick[2]{};};InputState input;void GetInput(InputState& out){out=input;}void TriggerHaptic(int,float,float,float){} }
-namespace driving { int debug{},saves{};float calibration[4][3]{};int GetVehicleDebugMode(){return debug;} float exitCal[2][4][3]{};void GetExitCalibration(int,int i,bool p,float* out){std::copy_n(exitCal[p][i],3,out);}void SetExitCalibration(int,int i,bool p,const float* v){std::copy_n(v,3,exitCal[p][i]);}void SaveDebugCalibration(){++saves;} void GetEntryCalibration(int,int seat,float* out){for(int i=0;i<3;++i)out[i]=calibration[seat][i];}void SetEntryCalibration(int,int seat,const float* in){for(int i=0;i<3;++i)calibration[seat][i]=in[i];} }
+namespace driving { int debug{},saves{};float calibration[4][3]{};int GetVehicleDebugMode(){return debug;} float exitCal[4][3]{};void GetExitMarkerCalibration(int,int i,float* out){std::copy_n(exitCal[i],3,out);}void SetExitMarkerCalibration(int,int i,const float* v){std::copy_n(v,3,exitCal[i]);}void SaveDebugCalibration(){++saves;} void GetEntryCalibration(int,int seat,float* out){for(int i=0;i<3;++i)out[i]=calibration[seat][i];}void SetEntryCalibration(int,int seat,const float* in){for(int i=0;i<3;++i)calibration[seat][i]=in[i];} }
 namespace locomotion { void MapGameplaySticks(float x,float y,float,float,float* mx,float* my,float*,float*){*mx=x;*my=y;} }
 namespace vrcam { int exits{};void RequestVehicleExit(){++exits;}bool TrackingPointToWorld(const float* in,float* out){for(int i=0;i<3;++i)out[i]=in[i];return true;} bool GetHeadWorldRay(float* o,float* f){o[0]=eyeX;o[1]=eyeY;o[2]=.6f;f[0]=0;f[1]=1;f[2]=0;return true;} }
 namespace vehicleexit {
- bool PlacementPreview(void*,int,vehicledoors::Vec& out){out={1,0,1};return true;}
  bool emergencyAvailable{},lastEmergency{},nativeAllowed=true;
  Mode Check(void* car,int seat,vehicledoors::Vec){
   if(!nativeAllowed)return Mode::Unavailable;
@@ -80,7 +79,7 @@ int main(){
  Put(cars,0x5a0,static_cast<void*>(nullptr));blockedLeft=blockedRight=false;
  // Debug handles remain editable when native exit is unavailable, without enabling it.
  driving::debug=1;xr::input.leftStick[0]=0;Tick();
- CHECK(started==0);bool exitHandle=false,placementHandle=false;for(int i=0;i<icons.count;++i){exitHandle|=icons.markers[i].seatIcon==3;placementHandle|=icons.markers[i].seatIcon==4;}CHECK(exitHandle&&placementHandle);
+ CHECK(started==0);bool exitHandle=false,placementHandle=false;for(int i=0;i<icons.count;++i){exitHandle|=icons.markers[i].seatIcon==3;placementHandle|=icons.markers[i].seatIcon==4;}CHECK(exitHandle&&!placementHandle);
  driving::debug=0;
  // A closed, blocked doorway offers the same hold for a native emergency exit.
  vehicleexit::emergencyAvailable=true;xr::input.leftStick[0]=0;Tick();xr::input.leftStick[0]=1;
@@ -204,20 +203,17 @@ int main(){
  xr::handPoses[0].valid=true;xr::handPoses[0].trigger=0;
  const Vec proxy{-1.45f,0,.75f};std::memcpy(xr::handPoses[0].gripPos,&proxy,12);for(int i=0;i<3;++i)Tick();
  xr::handPoses[0].trigger=1;Tick();CHECK(editHand==0&&editElement==1&&ClaimedHands()==1);
- xr::handPoses[0].gripPos[0]+=.1f;Tick();CHECK(std::abs(driving::exitCal[0][0][0]-.1f)<1e-4f);
+ xr::handPoses[0].gripPos[0]+=.1f;Tick();CHECK(std::abs(driving::exitCal[0][0]-.1f)<1e-4f);
  const int saved=driving::saves;xr::handPoses[0].trigger=0;Tick();CHECK(editHand<0&&driving::saves==saved+1&&started==0);
- const Vec placementProxy=proxy+Vec{0,0,.35f};std::memcpy(xr::handPoses[0].gripPos,&placementProxy,12);Tick();xr::handPoses[0].trigger=1;Tick();CHECK(editHand==0&&editElement==2);
- xr::handPoses[0].gripPos[1]+=.15f;xr::handPoses[0].gripPos[2]-=.2f;Tick();CHECK(editElement==2);CHECK(std::abs(driving::exitCal[1][0][1]-.15f)<1e-4f&&driving::exitCal[1][0][2]==0);
+ // Dragging the visible exit icon changes all three axes, without extra proxies.
+ Vec icon=proxy+Vec{.1f,0,0};std::memcpy(xr::handPoses[0].gripPos,&icon,12);Tick();xr::handPoses[0].trigger=1;Tick();CHECK(editElement==1);
+ xr::handPoses[0].gripPos[1]+=.15f;xr::handPoses[0].gripPos[2]+=.2f;Tick();
+ CHECK(std::abs(driving::exitCal[0][1]-.15f)<1e-4f&&std::abs(driving::exitCal[0][2]-.2f)<1e-4f);
  flags[0]++;Tick();CHECK(editHand<0&&ClaimedHands()==0);
- // Closest handle wins even when its sibling is also within the grab radius.
- xr::handPoses[0].trigger=0;Tick();Vec overlap=proxy+Vec{0,0,.18f};std::memcpy(xr::handPoses[0].gripPos,&overlap,12);
- // Move placement back to its default, so 18cm is closer to the 35cm proxy.
- std::fill_n(driving::exitCal[1][0],3,0.f);xr::handPoses[0].trigger=1;Tick();CHECK(editHand==0&&editElement==2);
  xr::handPoses[0].trigger=0;Tick();
- // All three handle types are present in the same debug frame.
- bool entryShown=false,exitShown=false,placementShown=false;
- for(int i=0;i<icons.count;++i){entryShown|=icons.markers[i].seatIcon==1;exitShown|=icons.markers[i].seatIcon==3;placementShown|=icons.markers[i].seatIcon==4;}
- CHECK(entryShown&&exitShown&&placementShown);
+ bool entryShown=false,exitShown=false;
+ for(int i=0;i<icons.count;++i){entryShown|=icons.markers[i].seatIcon==1;exitShown|=icons.markers[i].seatIcon==3;CHECK(icons.markers[i].seatIcon!=4);}
+ CHECK(entryShown&&exitShown);
  // External ownership prevents an editor grab even on the exact handle.
  xr::handPoses[0].trigger=0;Tick();std::memcpy(xr::handPoses[0].gripPos,&proxy,12);xr::handPoses[0].trigger=1;testNow+=.1;Update(true,1,1);CHECK(editHand<0);
  // Holding a weapon still permits normal boarding outside the editor.

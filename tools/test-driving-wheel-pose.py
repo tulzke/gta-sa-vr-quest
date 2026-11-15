@@ -236,11 +236,10 @@ int main() {
         CHECK(GetPassengerView(411,1,MODE_IMMERSIVE,out)&&Near(out[0],-.6f)&&Near(out[1],-.8f));
         float bad[]{0,0,std::numeric_limits<float>::quiet_NaN()};SetPassengerView(411,1,MODE_IMMERSIVE,bad);
         CHECK(GetPassengerView(411,1,MODE_IMMERSIVE,out)&&Near(out[2],1.3f));
-        const float delta[]{.3f,-.2f,.9f};SetExitCalibration(411,0,true,delta);
-        GetExitCalibration(411,0,true,out);CHECK(Near(out[0],.3f)&&Near(out[1],-.2f)&&out[2]==0);
-        GetExitCalibration(411,1,true,out);CHECK(out[0]==0&&out[1]==0);
-        const float large[]{2,-2,2};SetExitCalibration(411,0,true,large);GetExitCalibration(411,0,true,out);CHECK(Near(out[0],.5f)&&Near(out[1],-.5f));
-        SetExitCalibration(411,0,false,delta);GetExitCalibration(411,0,false,out);CHECK(Near(out[2],.9f));
+        const float delta[]{.3f,-.2f,.9f};SetExitMarkerCalibration(411,0,delta);
+        GetExitMarkerCalibration(411,0,out);CHECK(Near(out[0],.3f)&&Near(out[1],-.2f)&&Near(out[2],.9f));
+        GetExitMarkerCalibration(411,1,out);CHECK(out[0]==0&&out[1]==0&&out[2]==0);
+        const float large[]{2,-2,2};SetExitMarkerCalibration(411,0,large);GetExitMarkerCalibration(411,0,out);CHECK(Near(out[0],1.f)&&Near(out[1],-1.f)&&Near(out[2],1.f));
         int mirror[12]{};GetRearMirrorCalibration(411,mirror);CHECK(mirror[0]==-15);
         auto& c=g_modelCalibration[411];c.mirrorDefaultValid=true;c.mirrorDefault[0]=-17;c.mirrorDefault[1]=50;c.mirrorDefault[2]=125;
         GetRearMirrorCalibration(411,mirror);CHECK(mirror[0]==-17&&mirror[1]==50&&mirror[2]==125);
@@ -250,7 +249,8 @@ int main() {
         FILE* file=std::tmpfile();CHECK(file);WriteVehicleLines(file,411,c);std::rewind(file);g_modelCalibration.clear();char line[128];
         while(std::fgets(line,sizeof(line),file))ReadVehicleLine(line);std::fclose(file);
         CHECK(GetPassengerView(411,2,MODE_IMMERSIVE,out)&&Near(out[0],.6f)&&Near(out[1],-.8f));
-        GetExitCalibration(411,0,true,out);CHECK(Near(out[0],.5f)&&out[2]==0);
+        GetExitMarkerCalibration(411,0,out);CHECK(Near(out[0],1.f)&&Near(out[2],1.f));
+        ReadVehicleLine("ExitPlacement.411.0.0=50");GetExitMarkerCalibration(411,0,out);CHECK(Near(out[0],1.f));
         GetRearMirrorCalibration(411,mirror);CHECK(mirror[0]==22&&g_modelCalibration[411].mirrorManual);
         ReadVehicleLine("RearMirrorCalib.412.0=0");CHECK(g_modelCalibration[412].mirrorManual);
         ReadVehicleLine("PassengerView.413.1.1.2=120");CHECK(!GetPassengerView(413,1,1,out));
@@ -273,11 +273,13 @@ def main():
     math = SOURCE[SOURCE.index("struct V3 {"):SOURCE.index("double MonotonicSeconds()")]
     math += function("V3 RotateAroundAxis(")
     pose = SOURCE[SOURCE.index("struct ModelCalibration {"):SOURCE.index("float ClampField(")]
+    # The pose slice also includes unrelated runtime mechanism state.
+    pose = pose.replace("liftlever::State g_liftLever;", "")
     accessors = function("float ClampModelSeat(") + function("void GetDoorCalibration(") + function("void SetDoorCalibration(") + function("void SetDebugPosition(")
     accessors += function("float GetWheelCalibrationValue(")
     accessors += function("void AdjustWheelCalibrationValue(")
     accessors += function("void ResetVehiclePreset(")
-    for signature in ("bool GetPassengerView(","void SetPassengerView(","void GetExitCalibration(","void SetExitCalibration(","void GetRearMirrorCalibration(","void SetRearMirrorCalibration(","void SetRearMirrorCameraCalibration("):
+    for signature in ("bool GetPassengerView(","void SetPassengerView(","void GetExitMarkerCalibration(","void SetExitMarkerCalibration(","void GetRearMirrorCalibration(","void SetRearMirrorCalibration(","void SetRearMirrorCameraCalibration("):
         accessors += function(signature)
     save_start = SOURCE.index("            for (int field = 0; field < WHEEL_CAL_FIELD_COUNT; ++field) {")
     save_end = SOURCE.index("\n        }", save_start)

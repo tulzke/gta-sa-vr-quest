@@ -10334,7 +10334,7 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
             using vehicledoors::Vec;
             const Vec r=vehicledoors::Cross(marker.direction,marker.up),u=marker.up;
             const auto draw=[&](const std::vector<Vec>& v,float alpha){
-                glUniform4f(g_markerColLoc,1.f,marker.exitBlocked?.12f:(.86f+.14f*marker.highlight),marker.exitBlocked?.08f:(.08f+.82f*marker.highlight),alpha);
+                glUniform4f(g_markerColLoc,1.f,.86f+.14f*marker.highlight,.08f+.82f*marker.highlight,alpha);
                 glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(Vec),v.data(),GL_DYNAMIC_DRAW);
                 glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()));
             };
@@ -10354,7 +10354,6 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
                 draw({point(x,y),point(x+dx,y),point(x,y+dy),point(x,y+dy),point(x+dx,y),point(x+dx,y+dy)},.85f);
             };
             if(marker.seatIcon==1){draw(ring(.075f,.009f,64),.85f);bar(-.067f,-.005f,.134f,.01f);bar(-.005f,-.067f,.01f,.067f);}
-            else if(marker.seatIcon==4) {draw(ring(.055f,.009f,64),.85f);bar(-.085f,-.005f,.17f,.01f);bar(-.005f,-.085f,.01f,.17f);}
             else if(marker.seatIcon==3) {bar(-.07f,-.07f,.012f,.14f);bar(-.07f,.058f,.07f,.012f);bar(-.07f,-.07f,.07f,.012f);bar(-.025f,-.006f,.1f,.012f);bar(.05f,-.025f,.012f,.05f);}
             else {bar(-.04f,-.025f,.018f,.09f);bar(-.04f,-.04f,.09f,.018f);bar(.032f,-.075f,.018f,.05f);}
             continue;

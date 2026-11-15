@@ -102,13 +102,13 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
     candidate={car,model,index,element,h,gen,hand,correction,distance};
    if(editHand!=h||editModel!=model||editSeat!=index||editElement!=element||target!=car||generation!=gen)continue;
    editContinued=editUsed=true;claimed=1u<<h;
-   Vec value=editBase+hand-editStart;if(element==2)value.z=0;
+   Vec value=editBase+hand-editStart;
    const float c[]{value.x,value.y,value.z};
    if(element==0)driving::SetEntryCalibration(model,index,c);
-   else driving::SetExitCalibration(model,index,element==2,c);
+   else driving::SetExitMarkerCalibration(model,index,c);
    float applied[3]{};
    if(element==0)driving::GetEntryCalibration(model,index,applied);
-   else driving::GetExitCalibration(model,index,element==2,applied);
+   else driving::GetExitMarkerCalibration(model,index,applied);
    local=base+Vec{applied[0],applied[1],applied[2]};
    if(hands[h].trigger<.35f)EndEdit();
   }
@@ -218,18 +218,12 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
    const float side=(index==0||index==2)?-1.f:1.f;
    if(!seated&&!vehicleaccess::LockAllows(car,index+2,canOpen(car,ped)))continue;
    if(editing&&Length(speed)<=.01f&&(seated||Dot(eye-b.position,b.right)*side>=.2f)){
-    // Exit icon and placement crosshair are distinct nearby handles. The latter
-    // sits 35cm higher as a reachable proxy; its smaller twin shows the real goal.
-    const Vec exitBase{hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f};
-    for(int element=1;element<=2;++element){
-     float correction[3]{};driving::GetExitCalibration(model,index,element==2,correction);
-     const Vec base=exitBase+Vec{0,0,element==2?.35f:0.f};
-     Vec local=base+Vec{correction[0],correction[1],correction[2]};
-     if(Length(b.Point(local)-eye)>2.5f)continue;
-     local=editPoint(car,b,model,index,element,flags[slot],base,Vec{correction[0],correction[1],correction[2]});
-     Vec destination{};const bool clear=element!=2||vehicleexit::PlacementPreview(car,seat,destination);
-     if(element==2&&Finite(destination)&&icons.count<icons.kCapacity){Marker m{destination,forward,{0,0,1}};m.seatIcon=4;m.scale=.65f;m.exitBlocked=!clear;icons.markers[icons.count++]=m;}
-     if(icons.count<icons.kCapacity){Marker m{b.Point(local),forward,{0,0,1}};m.seatIcon=element==2?4:3;m.exitBlocked=!clear;m.held=editHand>=0&&editSeat==index&&editElement==element;icons.markers[icons.count++]=m;}
+    float correction[3]{};driving::GetExitMarkerCalibration(model,index,correction);
+    const Vec base{hinge.x+side*.45f,hinge.y-.35f,hinge.z+.35f};
+    Vec local=base+Vec{correction[0],correction[1],correction[2]};
+    if(Length(b.Point(local)-eye)<=2.5f){
+     local=editPoint(car,b,model,index,1,flags[slot],base,Vec{correction[0],correction[1],correction[2]});
+     if(icons.count<icons.kCapacity){Marker m{b.Point(local),forward,{0,0,1}};m.seatIcon=3;m.held=editHand>=0&&editSeat==index&&editElement==1;icons.markers[icons.count++]=m;}
     }
    }
    float correction[3]{};driving::GetEntryCalibration(model,index,correction);
@@ -245,7 +239,7 @@ void Update(bool usable,std::uint64_t epoch,unsigned occupied){
    }
    if(exit){
     if(editing&&icons.count<icons.kCapacity){Marker calibration{p,forward,{0,0,1}};calibration.seatIcon=seat<0?1:2;icons.markers[icons.count++]=calibration;}
-    float exitCorrection[3]{};driving::GetExitCalibration(model,index,false,exitCorrection);
+    float exitCorrection[3]{};driving::GetExitMarkerCalibration(model,index,exitCorrection);
     p=b.Point({hinge.x+side*.45f+exitCorrection[0],hinge.y-.35f+exitCorrection[1],hinge.z+.35f+exitCorrection[2]});
     const auto mode=vehicleexit::Check(car,currentSeat,p);
     emergency=mode==vehicleexit::Mode::Emergency;

@@ -195,8 +195,8 @@ void ResetRearMirrorSurface();
 bool GetPassengerView(int model,int seat,int mode,float out[3]); // vehicle-local metres
 void SetPassengerView(int model,int seat,int mode,const float value[3]);
 void ResetPassengerView();
-void GetExitCalibration(int model,int index,bool placement,float out[3]);
-void SetExitCalibration(int model,int index,bool placement,const float value[3]);
+void GetExitMarkerCalibration(int model,int index,float out[3]);
+void SetExitMarkerCalibration(int model,int index,const float value[3]);
 
 bool GetIgnitionFrame(void* vehicle,bool bike,float out[12]);
 void SetIgnitionPose(int model,bool bike,const float pose[12]);
