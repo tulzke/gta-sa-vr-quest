@@ -306,13 +306,10 @@ void DrawSurface() {
         SkyBackdropVertex vertices[4];
         for(int i=0;i<4;++i) {
             const float x=(i==0||i==3)?-1.f:1.f,y=i<2?1.f:-1.f;
-            // Rear-camera left points along the car's right at zero calibration.
-            // Increasing U along surface.right gives mirror behaviour; reversing
-            // U here instead produces an ordinary rear-camera display. The
-            // rear-camera target needs V=1 on surface.up to stay upright;
-            // V=0 at the top required rolling the surface over in calibration.
+            // Restore the original horizontal sampling for mirror behaviour.
+            // Keep the corrected vertical sampling: V=1 on surface.up.
             vertices[i]={center+surface.right*(x*w)+surface.up*(y*h),{},color,
-                x<0?0.f:1.f,y>0?1.f:0.f};
+                x<0?1.f:0.f,y>0?1.f:0.f};
         }
         unsigned short indices[]={0,1,2,0,2,3};
         g.RwRenderStateSet(1,texture);

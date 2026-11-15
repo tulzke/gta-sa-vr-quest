@@ -177,9 +177,8 @@ int main() {
     CHECK(camera==originalCamera);CHECK(std::memcmp(&head,&originalHead,sizeof(head))==0);
     CHECK(screen[2]==1920&&screen[3]==1080);CHECK(fogState.start==originalFog.start&&fogState.end==originalFog.end);
     // Capture the actual textured quad, excluding its untextured border.
-    // The rear camera's local left points along the car's right at zero
-    // calibration. Its image must place that side on the mirror's +right,
-    // with the raster's V=1 edge on +up (Quest camera target orientation).
+    // Keep the original horizontal sampling (U=0 on +right) and the corrected
+    // vertical sampling (V=1 on +up) after Quest feedback.
     // This contract stays surface-local on rotation.
     static std::vector<SkyBackdropVertex> mirrorVertices;
     g.RwIm3DTransform=[](void* v,unsigned count,void*,unsigned)->void* {
@@ -206,7 +205,7 @@ int main() {
             CHECK(std::fabs(std::fabs(horizontal)-1.f)<.001f);
             CHECK(std::fabs(std::fabs(vertical)-1.f)<.001f);
             CHECK(std::fabs(Dot(delta,r::surface.forward))<.001f);
-            CHECK(vertex.u==(horizontal>0.f?1.f:0.f));
+            CHECK(vertex.u==(horizontal>0.f?0.f:1.f));
             CHECK(vertex.v==(vertical>0.f?1.f:0.f));
             corners|=1u<<((horizontal>0.f?1:0)+(vertical>0.f?2:0));
         }
