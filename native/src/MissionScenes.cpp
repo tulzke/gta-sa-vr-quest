@@ -8,6 +8,8 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
+#include <chrono>
+#include <cstdarg>
 #include <dlfcn.h>
 namespace savr::missionscenes {
 namespace {
@@ -56,6 +58,91 @@ struct Script {
         return current>=begin && current<begin+42218?static_cast<int>(current-begin):-1;
     }
 } mansion,burning;
+// SWEET5's phone scene stages CJ in Seville at IP 1527, then returns him
+// to Grove Street at 3103. Observe its dialogue gates; never advance them.
+Script sweet;
+std::uint8_t* missionLocals{};
+void* audioEngine{};
+unsigned char (*audioLoading)(void*,unsigned char){};
+bool (*audioFinished)(void*,unsigned char){};
+int (*audioEvent)(void*,unsigned char){};
+void* (*getPed)(int){};
+bool (*pedTalking)(void*){};
+constexpr char kSweetLog[]="/sdcard/Android/data/com.rockstargames.gtasa/files/vr_sweet5.log";
+constexpr char kSweetPrevious[]="/sdcard/Android/data/com.rockstargames.gtasa/files/vr_sweet5.previous.log";
+double SweetNow() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+void SweetTrace(const char* format,...) {
+    char line[1024]{};
+    va_list args;va_start(args,format);std::vsnprintf(line,sizeof(line),format,args);va_end(args);
+    LOGI("[sweet5] %s",line);
+    if(FILE* f=std::fopen(kSweetLog,"a")) {
+        // Bound persistent evidence even if the headset sits in the scene.
+        if(std::fseek(f,0,SEEK_END)==0 && std::ftell(f)>=512*1024) {
+            std::fclose(f);std::rename(kSweetLog,kSweetPrevious);f=std::fopen(kSweetLog,"w");
+        }
+        if(f) {
+            std::fprintf(f,"game=%u mono=%.3f %s\n",
+                g.CTimer_m_snTimeInMilliseconds?*g.CTimer_m_snTimeInMilliseconds:0,SweetNow(),line);
+            std::fclose(f);
+        }
+    }
+}
+void TraceSweet(void* s) {
+    static bool present=false;
+    static int lastStage=-1,lastScene=-1,lastLine=-1,lastAudio=-1;
+    static double last=0;
+    if(!s) {
+        if(present)SweetTrace("END");
+        present=false;sweet.Check(nullptr,15739,0x66d80caau);return;
+    }
+    if(!present || s!=sweet.thread || Read<std::uint8_t*>(s,0x18)!=sweet.base) {
+        std::rename(kSweetLog,kSweetPrevious);
+        lastStage=lastScene=lastLine=lastAudio=-1;last=0;
+        SweetTrace("BEGIN v1 locals=%d audio=%d/%d/%d ped=%d/%d",
+            missionLocals!=nullptr,audioEngine&&audioLoading,audioEngine&&audioFinished,
+            audioEngine&&audioEvent,getPed!=nullptr,pedTalking!=nullptr);
+    }
+    present=true;
+    if(!sweet.Check(s,15739,0x66d80caau)) {
+        if(last==0){SweetTrace("UNSUPPORTED BYTECODE expected=66d80caa");last=SweetNow();}
+        return;
+    }
+    if(!missionLocals)return;
+    auto local=[](unsigned i){return Read<int>(missionLocals,i*4);};
+    const int stage=local(135),scene=local(156),line=local(360),audio=local(363);
+    if(stage>1 && stage==lastStage)return;
+    const bool changed=stage!=lastStage||scene!=lastScene||line!=lastLine||audio!=lastAudio;
+    const double now=SweetNow();
+    // Sample the opening through its return to gameplay. Wall time keeps the
+    // heartbeat alive when a pause or a stopped game timer is the actual gate.
+    if(!changed && (stage!=1 || now-last<2.0))return;
+    last=now;lastStage=stage;lastScene=scene;lastLine=line;lastAudio=audio;
+    const int ip=sweet.Ip();
+    SweetTrace("STATE ip=%d stage=%d scene=%d line=%d audio_phase=%d timer=%d scene_due=%d audio_due=%d next=%d remaining=%d buffers=%d/%d slot=%d speech_gate=%d speaker=%d",
+        ip>=0&&ip<15739?ip:-1,stage,scene,line,audio,local(40),local(43),local(364),
+        local(361),local(362),local(357),local(358),local(359),local(412),local(414));
+    const auto pos=g.FindPlayerCoors?g.FindPlayerCoors(-1):GameSymbols::Vec3{};
+    void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
+    SweetTrace("WORLD pos=%.3f/%.3f/%.3f controls=%d wide=%d fade=%d cutscene=%d pause=%d/%d",
+        pos.x,pos.y,pos.z,pad?Read<std::uint16_t>(pad,0x110):-1,
+        g.TheCamera?Read<std::uint8_t>(g.TheCamera,0x43):-1,
+        g.TheCamera&&g.CCamera_GetScreenFadeStatus?g.CCamera_GetScreenFadeStatus(g.TheCamera):-1,
+        g.CCutsceneMgr_ms_running?*g.CCutsceneMgr_ms_running:-1,
+        g.CTimer_m_UserPause?*g.CTimer_m_UserPause:-1,g.CTimer_m_CodePause?*g.CTimer_m_CodePause:-1);
+    // SCM slots 1/2 map to native slots 0/1 (03D0/03D2 subtract one).
+    for(unsigned char slot=0;slot<2;++slot)
+        SweetTrace("AUDIO slot=%d event=%d loading=%d finished=%d",slot+1,
+            audioEngine&&audioEvent?audioEvent(audioEngine,slot):-1,
+            audioEngine&&audioLoading?audioLoading(audioEngine,slot):-1,
+            audioEngine&&audioFinished?audioFinished(audioEngine,slot):-1);
+    for(unsigned i:{83u,51u,414u}) {
+        const int handle=local(i);void* ped=getPed&&handle>=0?getPed(handle):nullptr;
+        SweetTrace("ACTOR local=%u handle=%d exists=%d talking=%d",i,handle,ped!=nullptr,
+            ped&&pedTalking?pedTalking(ped):-1);
+    }
+}
 int lastPhase{},attempts{};
 void TraceKingMarker(void* cat) {
     auto* space=static_cast<unsigned char*>(g.CTheScripts_ScriptSpace);
@@ -170,17 +257,25 @@ void Install(void* h) {
     suspendTimer=reinterpret_cast<decltype(suspendTimer)>(dlsym(h,"_ZN6CTimer7SuspendEv"));
     resumeTimer=reinterpret_cast<decltype(resumeTimer)>(dlsym(h,"_ZN6CTimer6ResumeEv"));
     canStartMission=reinterpret_cast<decltype(canStartMission)>(dlsym(h,"_ZN10CPlayerPed21CanPlayerStartMissionEv"));
+    missionLocals=static_cast<std::uint8_t*>(dlsym(h,"_ZN11CTheScripts31LocalVariablesForCurrentMissionE"));
+    audioEngine=dlsym(h,"AudioEngine");
+    audioLoading=reinterpret_cast<decltype(audioLoading)>(dlsym(h,"_ZN12CAudioEngine28GetMissionAudioLoadingStatusEh"));
+    audioFinished=reinterpret_cast<decltype(audioFinished)>(dlsym(h,"_ZN12CAudioEngine28IsMissionAudioSampleFinishedEh"));
+    audioEvent=reinterpret_cast<decltype(audioEvent)>(dlsym(h,"_ZN12CAudioEngine20GetMissionAudioEventEh"));
+    getPed=reinterpret_cast<decltype(getPed)>(dlsym(h,"_ZN6CPools6GetPedEi"));
+    pedTalking=reinterpret_cast<decltype(pedTalking)>(dlsym(h,"_ZN4CPed13GetPedTalkingEv"));
     Trace("INSTALLED",scripts!=nullptr,loadAll!=nullptr,animIndex!=nullptr);
     Trace("KING DIAG V2",canStartMission!=nullptr,g.FindPlayerCoors!=nullptr,g.CTheScripts_ScriptSpace!=nullptr);
 }
 bool Theater(){return theater.load(std::memory_order_relaxed);}
 void Update() {
     if(!scripts)return;
-    void* m=nullptr;void* b=nullptr;void* cat=nullptr;unsigned count=0;
+    void* m=nullptr;void* b=nullptr;void* cat=nullptr;void* sw=nullptr;unsigned count=0;
     for(void* s=*scripts;s && count++<128;) {
         if(Name(s,"strap2"))m=s;
         if(Name(s,"crash1"))b=s;
         if(Name(s,"cat",false))cat=s;
+        if(Name(s,"sweet5"))sw=s;
         void* next=Read<void*>(s);if(next==s)break;s=next;
     }
     const bool verified=mansion.Check(m,10840,0x5861cb0cu);
@@ -189,5 +284,6 @@ void Update() {
     burning.Check(b,42218,0xfc3eeacfu);
     ServiceBurning();
     TraceKingMarker(cat);
+    TraceSweet(sw);
 }
 }
