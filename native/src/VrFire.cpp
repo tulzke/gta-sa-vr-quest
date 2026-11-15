@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <ctime>
 #include <cstring>
+#include <mutex>
 
 namespace savr::vrfire {
 namespace {
@@ -55,6 +56,8 @@ bool g_detonatorReleaseRequired[2]{true, true};
 std::uint32_t g_directNextFireMs[2]{};
 int g_directWeaponType[2]{-1, -1};
 arcadereload::Gesture g_reloadGestures[2];
+reloadhint::Tracker g_reloadHints;
+std::mutex g_reloadHintMutex;
 
 constexpr std::uint32_t kWeaponUpdatePrologue[4] = {
     0xA9BB7BFD, 0xA90167FA, 0xA9025FF8, 0xA90357F6,
@@ -262,6 +265,26 @@ void ResetDirectTrigger() {
         g_directWeaponType[hand] = -1;
         g_detonatorReleaseRequired[hand] = true;
         g_reloadGestures[hand].Reset();
+    }
+}
+
+void UpdateReloadHints(void* ped,bool blocked) {
+    xr::HandPose hands[2]{};float head[3]{},orientation[4]{};std::uint64_t epoch{};
+    const bool vehicleBlocked=!blocked && ped && g.FindPlayerVehicle && g.FindPlayerVehicle(-1,false) &&
+        !driving::VehicleWeaponsImmersive() && !IsScriptedWeaponCamera();
+    const bool usable=!blocked && !vehicleBlocked && ped && g_installed.load(std::memory_order_acquire) &&
+        g.CTimer_m_snTimeInMilliseconds && PlayerFireEnabled() && xr::IsSessionFocused() &&
+        physicalweapon::GetInteractionTrackingSnapshot(head,orientation,hands,&epoch);
+    std::lock_guard<std::mutex> lock(g_reloadHintMutex);
+    if (!usable) {g_reloadHints.Reset();return;}
+    const unsigned now=*g.CTimer_m_snTimeInMilliseconds;
+    for(int h=0;h<2;++h) {
+        const int slot=physicalweapon::HeldSlot(h);
+        const int type=pairedweapon::Valid(slot)?pairedweapon::Type(ped,slot):0;
+        const bool waiting=pairedweapon::Valid(slot) && hands[h].valid && hands[h].aimValid &&
+            !physicalweapon::IsPrimaryDetached(h) && arcadereload::Manual(type) &&
+            pairedweapon::Clip(ped,slot)==0 && pairedweapon::Available(ped,slot)>0;
+        g_reloadHints.Step(h,slot,type,arcadereload::ModeForWeapon(type),waiting,now,epoch);
     }
 }
 
@@ -1065,7 +1088,7 @@ void Update(bool blocked) {
     // The active slot is engine context only. Restore it after each hand so
     // simultaneous fire never performs SetCurrentWeaponSlot model/task changes.
     auto* ped = g.FindPlayerPed ? static_cast<std::uint8_t*>(g.FindPlayerPed(-1)) : nullptr;
-    if (blocked || !ped) { ResetDirectTrigger(); return; }
+    if (blocked || !ped) { ResetDirectTrigger(); UpdateReloadHints(ped,true); return; }
     auto& active = *reinterpret_cast<std::int8_t*>(ped + kPedActiveSlotOffset);
     const auto saved = active;
     for (int hand = 0; hand < 2; ++hand) {
@@ -1089,9 +1112,15 @@ void Update(bool blocked) {
         g_directHand = -1;
         active = saved;
     }
+    UpdateReloadHints(ped,false);
 }
 
 int DirectFiringHand() { return g_directHand; }
+
+void GetReloadHints(reloadhint::Requests& out) {
+    std::lock_guard<std::mutex> lock(g_reloadHintMutex);
+    out=g_reloadHints.requests;
+}
 
 bool Install() {
     if (g_installed.load(std::memory_order_acquire)) return true;

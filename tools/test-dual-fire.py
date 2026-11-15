@@ -23,11 +23,16 @@ PRELUDE=r"""
 #include <cstring>
 #include <ctime>
 #include <iterator>
+#include <mutex>
+#include "ReloadHint.h"
 #include "PhysicalGunCycle.h"
 #include "PairedWeapons.h"
 namespace pairedweapon=savr::pairedweapon;
 namespace arcadereload=savr::arcadereload;
 arcadereload::Gesture g_reloadGestures[2];
+namespace reloadhint=savr::reloadhint;
+reloadhint::Tracker g_reloadHints;
+std::mutex g_reloadHintMutex;
 thread_local int g_directHand=-1;
 namespace vrfire {int DirectFiringHand(){return g_directHand;}}
 using savr::vrfire::AdvancePhysicalGun;
@@ -149,7 +154,7 @@ def compile_run(source, name):
 def main():
     names=["PlayerFireEnabled","SupportedHitscan","AreaEffectWeapon","SupportedDirectFire",
            "AutomaticHitscan","PhysicalFireIntervalMs","PhysicalWeaponInfo","MagazineCapacity",
-           "OnWeaponUpdate","PhysicalReloadDuration","CorrectPhysicalReload","UpdateReloadGesture","ResetDirectTrigger","DetonatorTriggerReady",
+           "OnWeaponUpdate","PhysicalReloadDuration","CorrectPhysicalReload","UpdateReloadGesture","ResetDirectTrigger","UpdateReloadHints","DetonatorTriggerReady",
            "GetPhysicalTrigger","UpdateHand","Update"]
     constants="\n".join(re.findall(r"^constexpr (?:std::uintptr_t|float) \w+ = .*?;",SOURCE,re.M))
     output=ROOT/"build/dual-fire-tests";output.mkdir(parents=True,exist_ok=True)

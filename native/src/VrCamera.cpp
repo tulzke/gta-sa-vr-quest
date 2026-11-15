@@ -8,6 +8,7 @@
 #include "JustBusiness.h"
 #include "VrCamera.h"
 #include "VrFire.h"
+#include "ReloadHintModel.h"
 #include "WeaponRecoil.h"
 
 #include "AircraftHlod.h"
@@ -2703,6 +2704,39 @@ void* WeaponModelClumpForSlot(int slot, int weaponType) {
     // Compatibility fallback for a build missing the optional clone/ref exports.
     // DrawWeaponClump saves/restores this template's frame synchronously.
     return source;
+}
+
+void PublishReloadHintVisuals(void* ped,unsigned renderedHands) {
+    struct Cache {void* clump{};int type{};std::shared_ptr<const reloadhint::Model> mesh;};
+    static Cache cache[kWeaponSlotCount];
+    reloadhint::VisualFrame frame;
+    reloadhint::Requests requests{};vrfire::GetReloadHints(requests);
+    xr::HandPose hands[2]{};float head[3]{},orientation[4]{};std::uint64_t epoch{};
+    if (ped && physicalweapon::GetInteractionTrackingSnapshot(head,orientation,hands,&epoch)) {
+        frame.epoch=epoch;
+        const bool both=requests[0].visible && requests[1].visible;
+        for(int h=0;h<2;++h) {
+            const auto& request=requests[h];const int slot=request.slot;
+            if (!(renderedHands&(1u<<h)) || !request.visible || request.epoch!=epoch || slot<=0 || slot>=kWeaponSlotCount ||
+                !hands[h].valid || !hands[h].aimValid || physicalweapon::HeldSlot(h)!=slot ||
+                WeaponTypeInSlot(ped,slot)!=request.type || pairedweapon::Clip(ped,slot)!=0 ||
+                pairedweapon::Available(ped,slot)==0) continue;
+            void* clump=WeaponModelClumpForSlot(slot,request.type);
+            if (!clump) continue;
+            auto& model=cache[slot];
+            if (model.clump!=clump || model.type!=request.type || !model.mesh) {
+                model={clump,request.type,reloadhint::CopyModel(clump,g.RpClumpForAllAtomics)};
+                if (model.mesh) LOGI("[vr.reload.hint] copied type=%d slot=%d verts=%zu triangles=%zu",
+                    request.type,slot,model.mesh->vertices.size()/3,model.mesh->indices.size()/3);
+            }
+            if (!model.mesh) continue;
+            frame.items[h].model=model.mesh;
+            frame.items[h].pose=reloadhint::BuildPose({head[0],head[1],head[2]},
+                {orientation[0],orientation[1],orientation[2],orientation[3]},h,both,
+                request.mode,request.phaseMs,model.mesh->extent);
+        }
+    }
+    xr::SetReloadHints(frame);
 }
 
 void SetMatBasis(RwMat& m, V3 right, V3 up, V3 at, V3 pos) {
@@ -21694,6 +21728,7 @@ void OnRenderScene(bool underwater) {
     }
     xr::SetHandWeaponTypes(renderedWeaponTypes[0],renderedWeaponTypes[1]);
     xr::SetTwoHandVisualState(twoHandVisualState);
+    PublishReloadHintVisuals(playerPed,renderedHeldMask);
     xr::SetWeaponHeldHands(renderedHeldMask,
                            preferredType != 0 && preferredHand >= 0 &&
                                    (renderedHeldMask & (1u << preferredHand)) != 0

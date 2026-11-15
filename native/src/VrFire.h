@@ -1,4 +1,5 @@
 #pragma once
+#include "ReloadHint.h"
 
 namespace savr::vrfire {
 
@@ -23,5 +24,8 @@ bool Install();
 void Update(bool blocked);
 // Synchronous native-shot context, -1 outside the two-hand firing loop.
 int DirectFiringHand();
+// Immutable request snapshot for the stereo producer. Meshes are copied from
+// the currently rendered weapon by VrCamera, never from an inventory icon.
+void GetReloadHints(reloadhint::Requests& out);
 
 } // namespace savr::vrfire

@@ -683,6 +683,8 @@ int g_stereoHandWeaponTypes[kStereoSets][2]{};
 unsigned g_stereoDebugPinchHands[kStereoSets]{};
 TwoHandVisualState g_twoHandVisualState{};
 TwoHandVisualState g_stereoTwoHandVisualState[kStereoSets]{};
+reloadhint::VisualFrame g_reloadHintFrame{};
+reloadhint::VisualFrame g_stereoReloadHintFrame[kStereoSets]{};
 // Scope state is captured beside the exact eye pixels it affected. The consumer
 // runs one ring slot behind, so reading the live state here would flash hands or
 // a reticle for one mismatched frame at optic entry/exit.
@@ -5865,6 +5867,11 @@ void SetWeaponGeometry(const float* verts, int numVerts,
     g_wpnObjIdx.assign(idx, idx + numIdx);
 }
 
+void SetReloadHints(const reloadhint::VisualFrame& frame) {
+    std::lock_guard<std::mutex> lock(g_headPoseMutex);
+    g_reloadHintFrame=frame;
+}
+
 // Which hand currently holds a rendered weapon (-1 = none). The GL hand mesh for
 // that hand is skipped only when the matching game depth cannot be attached.
 std::atomic<int> g_weaponHand{-1};
@@ -6318,6 +6325,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         g_stereoHandWeaponTypes[ws][1] = g_handWeaponTypes[1];
         g_stereoDebugPinchHands[ws] = debugPinchHands;
         g_stereoTwoHandVisualState[ws] = g_twoHandVisualState;
+        g_stereoReloadHintFrame[ws]=g_reloadHintFrame;
         // Capture markers with the eye textures containing their socket models.
         // The compositor reuses this immutable batch for both eyes.
         auto& markerFrame = g_stereoHolsterMarkers[ws];
@@ -12196,6 +12204,8 @@ void DrawWeaponForEye(const float* mvp) {
     if (!logged) { LOGI("[wpn] mesh drawn %d verts %d idx", g_wVc, g_wIc); logged = true; }
 }
 
+#include "ReloadHintRender.inl"
+
 // Draw the built hand meshes into the currently-bound swapchain framebuffer for
 // one eye. rp = the presented set's render pose; e = 0 left / 1 right.
 void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
@@ -12217,7 +12227,9 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const radialholster::Frames& bakedRadials,
                      unsigned int hudSourceTex, unsigned int pdaSourceTex, float pdaHeading,
                      const int handTypes[2], const holstermarker::Frame& ammoHolsters,
-                     const WeaponAmmoPose ammoPoses[2]) {
+                     const WeaponAmmoPose ammoPoses[2],
+                     const reloadhint::VisualFrame& reloadHints) {
+    const bool showReloadHints=reloadHints.Visible() && IsSessionFocused() && !IsMenuVisible();
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
     {
@@ -12247,7 +12259,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         (!trackedVisuals || (throwableTrajectory[0].count <= 1 &&
                              throwableTrajectory[1].count <= 1)) &&
         !chuteVisuals && !chuteRingVisual &&
-        !wristWanted &&
+        !wristWanted && !showReloadHints &&
         tracerCount <= 0 && objectiveMarkerCount <= 0 && bakedDoors.count<=0 && bakedNpcGrabs.count<=0 && bakedTestArea.count<=0 && !bakedRadials.Visible()) return;
 
     const float sign = (e == 0) ? -1.0f : 1.0f;
@@ -12434,6 +12446,14 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawWristPanelsForEye(mvp, bakedHands, bakedTwoHand, drivingWheel,
                               hudSourceTex, pdaSourceTex, pdaHeading, rp, weaponHandMask);
 
+    if (showReloadHints) {
+        float hintProjection[16],hintMvp[16];
+        MatPersp(hintProjection,g_stereoTanX.load(std::memory_order_relaxed),
+                 g_stereoTanY.load(std::memory_order_relaxed),nearZ,farZ);
+        MatMul(hintMvp,hintProjection,view);
+        DrawReloadHintsForEye(hintMvp,reloadHints,scope.active);
+    }
+
     glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
     glDisable(GL_DEPTH_TEST);
     glUseProgram(0);
@@ -12616,6 +12636,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     HandPose bakedHands[2]{};
     LaserRay bakedLaser[2]{};
     TwoHandVisualState bakedTwoHand{};
+    reloadhint::VisualFrame bakedReloadHints{};
     holstermarker::Frame bakedHolsters{};
     vehicledoors::MarkerFrame bakedDoors{};
     vehicledoors::MarkerFrame bakedNpcGrabs{};
@@ -12639,6 +12660,9 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedHands[1]  = g_stereoHandPose[set][1];
         for (int h = 0; h < 2; ++h) bakedLaser[h] = g_stereoLaserRay[set][h];
         bakedTwoHand   = g_stereoTwoHandVisualState[set];
+        bakedReloadHints=g_stereoReloadHintFrame[set];
+        if (!g_headPoseValid || bakedReloadHints.epoch!=g_trackingRecovery.epoch)
+            bakedReloadHints={};
         bakedHolsters = g_stereoHolsterMarkers[set];
         if (!bakedHolsters.Usable(g_headPoseValid, g_trackingRecovery.epoch)) bakedHolsters.count = 0;
         bakedNpcGrabs = g_stereoNpcGrabMarkers[set];
@@ -12816,7 +12840,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set]);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set], bakedReloadHints);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

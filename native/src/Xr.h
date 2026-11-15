@@ -1,5 +1,6 @@
 #pragma once
 #include "RecoilModel.h"
+#include "ReloadHint.h"
 
 #include <jni.h>
 
@@ -179,6 +180,7 @@ struct TwoHandVisualState {
 // after a support grip is released.  SetStereoEyeTextures snapshots it into the
 // exact ring slot containing that frame's pixels and tracked hands.
 void SetTwoHandVisualState(const TwoHandVisualState& state);
+void SetReloadHints(const reloadhint::VisualFrame& frame);
 
 // Latest head pose in the session's local space, as located by the compositor
 // for the frame it is presenting. Position is metres, orientation is an
