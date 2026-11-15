@@ -179,7 +179,8 @@ int main() {
     // Capture the actual textured quad, excluding its untextured border.
     // The rear camera's local left points along the car's right at zero
     // calibration. Its image must place that side on the mirror's +right,
-    // with the top kept on +up. This contract stays surface-local on rotation.
+    // with the raster's V=1 edge on +up (Quest camera target orientation).
+    // This contract stays surface-local on rotation.
     static std::vector<SkyBackdropVertex> mirrorVertices;
     g.RwIm3DTransform=[](void* v,unsigned count,void*,unsigned)->void* {
         if(states[1]==reinterpret_cast<std::uintptr_t>(r::raster)) {
@@ -206,7 +207,7 @@ int main() {
             CHECK(std::fabs(std::fabs(vertical)-1.f)<.001f);
             CHECK(std::fabs(Dot(delta,r::surface.forward))<.001f);
             CHECK(vertex.u==(horizontal>0.f?1.f:0.f));
-            CHECK(vertex.v==(vertical>0.f?0.f:1.f));
+            CHECK(vertex.v==(vertical>0.f?1.f:0.f));
             corners|=1u<<((horizontal>0.f?1:0)+(vertical>0.f?2:0));
         }
         CHECK(corners==15);

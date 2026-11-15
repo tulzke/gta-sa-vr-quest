@@ -308,10 +308,11 @@ void DrawSurface() {
             const float x=(i==0||i==3)?-1.f:1.f,y=i<2?1.f:-1.f;
             // Rear-camera left points along the car's right at zero calibration.
             // Increasing U along surface.right gives mirror behaviour; reversing
-            // U here instead produces an ordinary rear-camera display. Keep V
-            // in the native raster orientation so the image stays upright.
+            // U here instead produces an ordinary rear-camera display. The
+            // rear-camera target needs V=1 on surface.up to stay upright;
+            // V=0 at the top required rolling the surface over in calibration.
             vertices[i]={center+surface.right*(x*w)+surface.up*(y*h),{},color,
-                x<0?0.f:1.f,y>0?0.f:1.f};
+                x<0?0.f:1.f,y>0?1.f:0.f};
         }
         unsigned short indices[]={0,1,2,0,2,3};
         g.RwRenderStateSet(1,texture);
