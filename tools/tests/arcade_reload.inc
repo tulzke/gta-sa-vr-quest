@@ -30,14 +30,15 @@ int GestureRun(int mode,int fps,int path,float amplitude,float outDuration=.15f,
 arcadereload::Quat Compose(arcadereload::Quat a,arcadereload::Quat b) {
     return arcadereload::Delta(a,{-b.x,-b.y,-b.z,b.w});
 }
-int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0) {
+int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0,
+             float amplitude=.65f,double* firstEvent=nullptr) {
     using namespace arcadereload;
     Gesture gesture;int count=0;
     for(int i=0;i<fps*2;++i) {
         const double t=double(i)/fps;
         const float p=std::clamp(float((t-.02)/duration),0.f,1.f);
         Sample s;
-        float pitch=(kind==2 || kind==3 || kind==5)?0:-.65f*p;
+        float pitch=(kind==2 || kind==3 || kind==5)?0:-amplitude*p;
         if(kind==4)pitch=-pitch;
         const float yaw=1.1f+(kind==1 || kind==2 ? 1.2f*p : 0);
         const float roll=startRoll+(kind==1 || kind==3 ? 1.4f*p : 0);
@@ -49,7 +50,10 @@ int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0) {
             s.position={.18f*std::sin(p*1.2f),-.16f*std::sin(p*1.1f),.20f*(1-std::cos(p*1.2f))};
         }
         if(kind==2)s.position={.20f*std::sin(p),0,.20f*(1-std::cos(p))};
-        count+=gesture.Update(s,t,kind+1,DOWN_FLICK,1);
+        if (gesture.Update(s,t,kind+1,DOWN_FLICK,1)) {
+            if (!count && firstEvent) *firstEvent=t;
+            ++count;
+        }
     }
     return count;
 }
@@ -69,10 +73,15 @@ void ArcadeTests() {
         Check(GestureRun(TWIST,fps,2,.2f)==0,"small aim roll cannot reload");
         Check(GestureRun(TWIST,fps,1,-.7f)==0,"pitch cannot masquerade as barrel twist");
         Check(GestureRun(AUTOMATIC,fps,0,.12f)==0,"automatic mode ignores gestures");
-        Check(FlickRun(fps,0)==1,"downward wrist nod reloads without a return or long arming delay");
+        double eventTime=0;
+        Check(FlickRun(fps,0,.18f,0,.65f,&eventTime)==1,"short downward wrist snap and brake reload without a return");
+        Check(eventTime>=.20 && eventTime<=.30,"reload waits for the brake and confirms promptly after it");
         Check(FlickRun(fps,1)==1,"downward arc with simultaneous yaw and roll reloads once");
         Check(FlickRun(fps,1,.18f,1.1f)==1,"rolled starting grip and curved motion remain valid");
-        Check(FlickRun(fps,5)==1,"curved downward arm movement works without wrist rotation");
+        Check(FlickRun(fps,5)==0,"fast curved arm lowering without wrist rotation cannot reload");
+        Check(FlickRun(fps,0,.4f)==0,"ordinary gun lowering at the former trigger speed cannot reload");
+        Check(FlickRun(fps,1,.4f)==0,"ordinary lowering with arc, yaw and roll cannot reload");
+        Check(FlickRun(fps,0,.30f,0,1.5f)==0,"long fast angular sweep is not a short snap and stop");
         Check(FlickRun(fps,0,1.2f)==0,"slow wrist lowering cannot trigger downward flick");
         Check(FlickRun(fps,1,1.2f)==0,"slow curved holstering with rotations cannot trigger flick");
         Check(FlickRun(fps,2)==0,"sideways arc and yaw alone do not count as downward flick");
@@ -170,6 +179,8 @@ void ArcadeTests() {
     for(int i=0;i<6;++i)frame();
     const int nodPulses=xr::haptics[0];
     for(int i=1;i<=12;++i){Pose(0,0,0,-i*.05f);frame();}
+    Check(::Field(2,8)==1 && xr::haptics[0]==nodPulses,"downward motion alone waits for its stopping phase");
+    for(int i=0;i<7;++i)frame();
     Check(::Field(2,8)==17 && ::Field(2,4)==0,"down-only nod instantly reloads in the production firing loop");
     Check(xr::haptics[0]==nodPulses+1,"down-only nod gives exactly one short haptic confirmation");
     unsigned state=2,clip=0,deadline=tick+2000;
