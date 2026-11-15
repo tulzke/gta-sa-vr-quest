@@ -26,6 +26,8 @@ inline int ModeForWeapon(int type) {
     }
 }
 inline bool Manual(int type) { return ModeForWeapon(type)!=AUTOMATIC && type>=22 && type<=34; }
+inline constexpr float kDownFlickMinDrop=.21f; // 3x the original 7cm stroke
+inline constexpr float kDownFlickMinPitch=1.05f; // 3x the original 0.35rad alternative
 
 enum Sound { BOLT, MAGAZINE, SILENT, SOUND_COUNT };
 inline std::atomic<int> sound{BOLT};
@@ -125,8 +127,8 @@ struct Gesture {
                              .20f*(from.sample.barrel.y-barrel.y);
             const float pitchDrop=std::asin(std::clamp(from.sample.barrel.y,-1.f,1.f))-
                                   std::asin(std::clamp(barrel.y,-1.f,1.f));
-            if ((drop>=.07f && drop/seconds>=.40) ||
-                (pitchDrop>=.35f && pitchDrop/seconds>=1.5)) {
+            if ((drop>=kDownFlickMinDrop && drop/seconds>=.40) ||
+                (pitchDrop>=kDownFlickMinPitch && pitchDrop/seconds>=1.5)) {
                 complete=true;break;
             }
         }

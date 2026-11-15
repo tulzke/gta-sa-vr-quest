@@ -77,7 +77,7 @@ inline Pose BuildPose(Vec head,Quat orientation,int hand,bool both,int mode,unsi
     const Motion motion=Animation(mode,phaseMs);
     pose.barrel=Rotated(pose.barrel,pose.side,-motion.down);
     pose.top=Rotated(pose.top,pose.side,-motion.down);
-    pose.position=Add(pose.position,Scale(up,-motion.down*.10f));
+    pose.position=Add(pose.position,Scale(up,-motion.down*(mode==DOWN_FLICK?.30f:.10f)));
     pose.top=Rotated(pose.top,pose.barrel,sign*motion.roll);
     pose.side=Rotated(pose.side,pose.barrel,sign*motion.roll);
     return pose;

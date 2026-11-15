@@ -4,7 +4,7 @@ void SetPose(int hand,float y=0,float roll=0) {
 }
 void Frame() {tick+=10;Update(false);}
 void HoldStill() {for(int i=0;i<25;++i)Frame();}
-void Nod(int hand) {for(int i=1;i<=12;++i){SetPose(hand,-i*.01f);Frame();}}
+void Nod(int hand) {for(int i=1;i<=12;++i){SetPose(hand,-i*.03f);Frame();}}
 void Roll(int hand,bool back=false) {
     for(int i=1;i<=10;++i){SetPose(hand,0,(back?10-i:i)*.1f);Frame();}
 }

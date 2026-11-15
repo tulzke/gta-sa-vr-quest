@@ -30,14 +30,14 @@ int GestureRun(int mode,int fps,int path,float amplitude,float outDuration=.15f,
 arcadereload::Quat Compose(arcadereload::Quat a,arcadereload::Quat b) {
     return arcadereload::Delta(a,{-b.x,-b.y,-b.z,b.w});
 }
-int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0) {
+int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0,float amplitude=.65f,float travel=1.f) {
     using namespace arcadereload;
     Gesture gesture;int count=0;
     for(int i=0;i<fps*2;++i) {
         const double t=double(i)/fps;
         const float p=std::clamp(float((t-.02)/duration),0.f,1.f);
         Sample s;
-        float pitch=(kind==2 || kind==3 || kind==5)?0:-.65f*p;
+        float pitch=(kind==2 || kind==3 || kind==5)?0:-amplitude*p;
         if(kind==4)pitch=-pitch;
         const float yaw=1.1f+(kind==1 || kind==2 ? 1.2f*p : 0);
         const float roll=startRoll+(kind==1 || kind==3 ? 1.4f*p : 0);
@@ -46,7 +46,7 @@ int FlickRun(int fps,int kind,float duration=.18f,float startRoll=0) {
                                      {0,0,std::sin(roll*.5f),std::cos(roll*.5f)});
         s.barrel=Rotate(s.orientation,{0,0,-1});
         if(kind==1 || kind==5) {
-            s.position={.18f*std::sin(p*1.2f),-.16f*std::sin(p*1.1f),.20f*(1-std::cos(p*1.2f))};
+            s.position={travel*.18f*std::sin(p*1.2f),-travel*.16f*std::sin(p*1.1f),travel*.20f*(1-std::cos(p*1.2f))};
         }
         if(kind==2)s.position={.20f*std::sin(p),0,.20f*(1-std::cos(p))};
         count+=gesture.Update(s,t,kind+1,DOWN_FLICK,1);
@@ -69,10 +69,14 @@ void ArcadeTests() {
         Check(GestureRun(TWIST,fps,2,.2f)==0,"small aim roll cannot reload");
         Check(GestureRun(TWIST,fps,1,-.7f)==0,"pitch cannot masquerade as barrel twist");
         Check(GestureRun(AUTOMATIC,fps,0,.12f)==0,"automatic mode ignores gestures");
-        Check(FlickRun(fps,0)==1,"downward wrist nod reloads without a return or long arming delay");
+        Check(FlickRun(fps,0)==0,"old small wrist nod no longer bypasses the tripled amplitude");
+        Check(FlickRun(fps,0,.18f,0,1.15f)==1,"larger downward wrist nod reloads without return or braking");
         Check(FlickRun(fps,1)==1,"downward arc with simultaneous yaw and roll reloads once");
         Check(FlickRun(fps,1,.18f,1.1f)==1,"rolled starting grip and curved motion remain valid");
-        Check(FlickRun(fps,5)==1,"curved downward arm movement works without wrist rotation");
+        Check(FlickRun(fps,5)==0,"old short curved arm stroke is below the new distance");
+        Check(FlickRun(fps,5,.18f,0,.65f,2.f)==1,"longer curved arm stroke still works without wrist rotation");
+        Check(GestureRun(DOWN_FLICK,fps,0,.20f)==0,"twenty-centimetre stroke stays below the new threshold");
+        Check(GestureRun(DOWN_FLICK,fps,0,.23f)==1,"stroke above twenty-one centimetres reloads");
         Check(FlickRun(fps,0,1.2f)==0,"slow wrist lowering cannot trigger downward flick");
         Check(FlickRun(fps,1,1.2f)==0,"slow curved holstering with rotations cannot trigger flick");
         Check(FlickRun(fps,2)==0,"sideways arc and yaw alone do not count as downward flick");
