@@ -3,6 +3,7 @@
 #include "WatchLayout.h"
 #include "WatchInteraction.h"
 #include "RadarMapLayout.h"
+#include "RadarTextureLeases.h"
 #include "PlayerLife.h"
 #include "MissionHud.h"
 #include "Tbone.h"
@@ -20530,6 +20531,10 @@ bool PrepareMapRasterRing(void* (&rasters)[kEyeSets]) {
 
 #include "PdaRadar.inl"
 
+radarmap::TextureLeases g_mapTextureLeases;
+using ReleaseMapTextureFn=int(*)(void*);
+ReleaseMapTextureFn g_releaseMapTexture=nullptr;
+
 // CRadar's menu-map path draws the same texture database tiles as the HUD.
 // Coordinates follow the retail CRect HFA ABI: left, bottom, right, top.
 void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
@@ -20540,8 +20545,12 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
     if (!handle) return;
     static auto draw = reinterpret_cast<DrawTile>(dlsym(handle, "_ZN6CRadar19DrawRadarSectionMapEii5CRectf"));
     static auto request = reinterpret_cast<RequestTile>(dlsym(handle,"_ZN6CRadar17RequestMapSectionEii"));
+    static auto textures=reinterpret_cast<void**>(dlsym(handle,"gRadarTextures"));
+    if(!g_releaseMapTexture)g_releaseMapTexture=reinterpret_cast<ReleaseMapTextureFn>(dlsym(handle,"_Z16RwTextureDestroyP9RwTexture"));
     if (!draw || !request || reinterpret_cast<std::uintptr_t>(draw) != g.LoadBase + 0x51e360u ||
-        reinterpret_cast<std::uintptr_t>(request)!=g.LoadBase+0x51d810u) return;
+        reinterpret_cast<std::uintptr_t>(request)!=g.LoadBase+0x51d810u ||
+        reinterpret_cast<std::uintptr_t>(textures)!=g.LoadBase+0xa660a8u ||
+        reinterpret_cast<std::uintptr_t>(g_releaseMapTexture)!=g.LoadBase+0x76c974u) return;
     const auto player = g.FindPlayerCoors(-1);
     if (!std::isfinite(player.x) || !std::isfinite(player.y)) return;
     const float zoom=projection?hud::WatchMapZoom():1.f;
@@ -20557,9 +20566,13 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
     radarmap::VisibleTiles(player.x,player.y,zoom,[&](int x,int y,radarmap::Rect rect){
         // DrawRadarSectionMap silently skips missing textures. The stock HUD
         // only retains a 3x3 neighbourhood, smaller than the projection at .25x.
-        // RequestMapSection is idempotent for existing sections; stock streaming
-        // continues to own and release the references as the player moves.
+        // Hold an independent ref across frames: stock removal must not reset
+        // a far section back to its thumbnail while full data is in flight.
         request(x,y);
+        g_mapTextureLeases.Keep(y*12+x,textures[y*12+x],[](void* texture){
+            // Same ARM64 RwTexture::refCount used by RequestMapSection.
+            auto* refs=reinterpret_cast<int*>(static_cast<char*>(texture)+0x64);++*refs;
+        },[](void* texture){g_releaseMapTexture(texture);});
         draw(x,y,rect,1.0f);
     });
 
@@ -21385,6 +21398,7 @@ void OnRenderScene(bool underwater) {
     if (hudNeeded && !g_hudRaster[0]) closeEnginePreFinish();
     const bool hudReady=hudNeeded&&PrepareHudRasterRing();
     const bool mapNeeded=hudNeeded && (hud::ShouldRenderWristHud() || xr::HudCalibrationActive());
+    g_mapTextureLeases.Begin();
     const bool pdaNeeded=mapNeeded && ((g.FindPlayerVehicle&&g.FindPlayerVehicle(-1,false))||xr::HudCalibrationActive());
     const bool watchNeeded=mapNeeded && (hud::GetElementSettings(hud::WATCH).enabled||xr::HudCalibrationActive());
     if (pdaNeeded && !g_pdaRaster[0]) closeEnginePreFinish();
@@ -22275,6 +22289,7 @@ void OnRenderScene(bool underwater) {
     // `base` is the actual head-tracked game camera used for this stereo pair.
     // Its horizontal forward vector includes both body and physical head yaw.
     const float pdaHeading = std::atan2(-base.forward.x, base.forward.y);
+    if(g_releaseMapTexture)g_mapTextureLeases.Finish([](void* texture){g_releaseMapTexture(texture);});
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex, watchTex, projectionTex,
                              std::isfinite(pdaHeading) ? pdaHeading : 0.0f,
                              renderedNear, renderedFar,

@@ -52,3 +52,8 @@ if len(sys.argv)>1:
     for address,value in [(0x51e290,111),(0x51e294,137),(0x51e298,170)]:
         assert (struct.unpack_from('<I',retail,address)[0]>>5)&0xffff==value
     print('PASS retail radar section request and ocean colour fingerprints')
+    # RwTextureDestroy only calls CanUnloadTextureEntry at DB-only refCount 1.
+    for address,instruction in [(0x76c980,0xb9406408),(0x76c998,0x7100053f),
+                                (0x51d880,0xb9406408),(0x51d884,0x11000508)]:
+        assert struct.unpack_from('<I',retail,address)[0]==instruction,hex(address)
+    print('PASS retail RwTexture reference lifetime / cancellation fingerprints')

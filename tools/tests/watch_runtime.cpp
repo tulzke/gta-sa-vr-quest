@@ -5,6 +5,7 @@
 #include "WatchLayout.h"
 #include "WatchInteraction.h"
 #include "RadarMapLayout.h"
+#include "RadarTextureLeases.h"
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -147,6 +148,32 @@ int main(){
         CHECK(count>9); // larger than the stock retained 3x3 neighbourhood
         CHECK(radarmap::kSea[0]==111&&radarmap::kSea[1]==137&&radarmap::kSea[2]==170&&radarmap::kSea[3]==255);
     }
+    {
+        struct Texture{int refs=2,retains=0,releases=0;}; // database + stock radar
+        Texture far,near,replacement;
+        radarmap::TextureLeases leases;
+        const auto retain=[](void* raw){auto& t=*static_cast<Texture*>(raw);++t.refs;++t.retains;};
+        const auto release=[](void* raw){auto& t=*static_cast<Texture*>(raw);--t.refs;++t.releases;};
+        for(int frame=0;frame<100;++frame){
+            leases.Begin();leases.Keep(17,&far,retain,release);
+            leases.Keep(17,&far,retain,release); // both watch and projection
+            leases.Keep(18,&near,retain,release);leases.Finish(release);
+            CHECK(far.refs==3&&near.refs==3);
+            --far.refs;CHECK(far.refs>1); // stock far-section removal cannot cancel streaming
+            ++far.refs; // next RequestMapSection reacquires its stock reference
+        }
+        CHECK(far.retains==1&&near.retains==1&&far.releases==0);
+        leases.Begin();leases.Keep(18,&near,retain,release);leases.Finish(release);
+        CHECK(far.refs==2&&far.releases==1); // zoom/position removed the far tile
+        leases.Begin();leases.Keep(18,&replacement,retain,release);leases.Finish(release);
+        CHECK(near.refs==2&&replacement.refs==3);
+        leases.Begin();leases.Finish(release); // no HUD maps active
+        CHECK(replacement.refs==2&&replacement.releases==1);
+        leases.Finish(release);CHECK(replacement.releases==1);
+        leases.Keep(-1,&far,retain,release);leases.Keep(144,&far,retain,release);
+        leases.Keep(1,nullptr,retain,release);CHECK(far.retains==1);
+    }
+    std::puts("PASS retained far-tile streaming across 100 stock unload/reacquire cycles; shared map passes and balanced releases");
     std::puts("PASS complete wide-zoom tile coverage, all world edges/corners and retail sea background");
     std::puts("PASS watch GLB, hand-relative fit, current-max vitals, clipped-edge mission markers");
     std::puts("PASS projection touch debounce, occupied hand, recovery, animation, circular pins and actual animated index tip");
