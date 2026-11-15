@@ -18,22 +18,22 @@ static float Follow(int rate,float target) {
     return b.yaw;
 }
 int main() {
-    // Five seconds from entry, independent of hand motion or departure.
+    // One second from entry, independent of hand motion or departure.
     ReachIntent intent;
     for (int i=0; i<=2700; ++i) {
         const Vec p{0.04f*std::sin(float(i)/90*kPi),1,0};
-        CHECK(intent.Update(p,true,true,true,false,i/90.0)==(i<450));
+        CHECK(intent.Update(p,true,true,true,false,i/90.0)==(i<90));
     }
     // A socket moving out and back cannot restart a stationary hand's timer.
     intent={};
     for(int i=0;i<=900;++i)
-        CHECK(intent.Update({},true,(i%2)==0,(i%2)==0,false,i/90.0)==(i<450));
+        CHECK(intent.Update({},true,(i%2)==0,(i%2)==0,false,i/90.0)==(i<90));
     // A real departure arms another approach, without shortening the old pause.
     CHECK(!intent.Update({0,0.4f,0},true,false,false,false,10.01));
     CHECK(intent.Update({},true,true,true,false,10.02));
     // Unrelated button actions away from a socket cannot extend a pause.
     for(int i=1;i<=500;++i)
-        CHECK(intent.Update({0,0.4f,0},true,false,false,true,10.02+i/90.0)==(i<450));
+        CHECK(intent.Update({0,0.4f,0},true,false,false,true,10.02+i/90.0)==(i<90));
     CHECK(!intent.Update({},false,true,true,true,15.59));CHECK(!intent.valid);
     CHECK(!intent.Update({std::numeric_limits<float>::quiet_NaN(),0,0},true,true,true,true,15.6));
     CHECK(!intent.Update({},true,false,false,false,16));
@@ -45,14 +45,14 @@ int main() {
     for (int rate : {36,72,90}) {
         Body idleBody; ReachIntent idleHand,otherHand;
         idleBody.Update({},0,true,true,true,1,0,false,false,0);
-        for(int i=0;i<=rate*12;++i) {
+        for(int i=0;i<=rate*3;++i) {
             const double t=double(i)/rate;
-            const bool protect=idleHand.Update({},true,true,true,i==rate*4,t);
-            const bool other=otherHand.Update({},true,t>=6,t>=6,false,t);
+            const bool protect=idleHand.Update({},true,true,true,i==rate/2,t);
+            const bool other=otherHand.Update({},true,t>=1,t>=1,false,t);
             idleBody.Update({},Radians(90),true,true,true,1,0,protect||other,protect||other,t);
-            CHECK(idleBody.frozen==(t<11));
-            if(t<11) Close(idleBody.yaw,0);
-            else CHECK(idleBody.yaw<=Radians(90)*float(t-11+1.0/rate)+0.001f);
+            CHECK(idleBody.frozen==(t<2));
+            if(t<2) Close(idleBody.yaw,0);
+            else CHECK(idleBody.yaw<=Radians(90)*float(t-2+1.0/rate)+0.001f);
         }
         CHECK(idleBody.yaw>Radians(70));
     }

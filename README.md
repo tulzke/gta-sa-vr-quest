@@ -146,14 +146,14 @@ A held weapon leaves a ring with an inward chevron at its return socket.
 The global marker toggle and each socket's SHOW/HIDE/OFF setting control these
 hints; dropped weapons do not leave a return ring.
 
-Approaching a holster pauses its yaw for **5 seconds**. Each grip or trigger
+Approaching a holster pauses its yaw for **1 second**. Each grip or trigger
 press/release near the holster (or in its open radial menu) restarts that timer.
-Holding a button or moving a hand does not extend the pause. After five seconds
+Holding a button or moving a hand does not extend the pause. After one second
 without an interaction, the torso resumes its normal smooth turn, even if the
 hand remains nearby. Leaving and approaching again starts another pause; a
 socket moving past a stationary hand does not. Empty holsters follow the same
 rule. The old `body_reach_idle_ms` and `body_reach_motion_cm` settings are ignored
-and removed on the next settings save; the pause is always five seconds.
+and removed on the next settings save; the pause is always one second.
 
 - `RESET_VR_SETTINGS.bat` or `bash RESET_VR_SETTINGS.sh` restores default VR
   settings after confirmation, preserving saves and game assets.

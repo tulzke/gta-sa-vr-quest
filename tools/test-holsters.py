@@ -270,7 +270,7 @@ int main(){
     using namespace savr::holster;
     std::remove(kSettingsPath);Init();CHECK(!BodyFrameEnabled());
     // Retired movement/idle settings cannot restore unlimited pauses or alter
-    // the new five-second rule, and disappear on the next settings save.
+    // the one-second rule, and disappear on the next settings save.
     Write("body_frame 1\nbody_reach_idle_ms 0\nbody_reach_motion_cm 1\n");LoadSettings();
     CHECK(BodyFrameEnabled());SaveSettingsLocked();
     {char line[128];FILE* f=std::fopen(kSettingsPath,"r");CHECK(f);
@@ -383,33 +383,33 @@ void Reset(){
  gHands[0].pos={-.27f,-.58f,-.07f};
 }
 int main(){
- // Filled and empty sockets both start a five-second pause.
+ // Filled and empty sockets both start a one-second pause.
  for(int slot : {2,-1}){
-  Reset();slots[0]=slot;Through(499);CHECK(body.frozen);
-  Through(500);CHECK(!body.frozen&&body.yaw>0&&body.yaw<holsterbody::Radians(1));
+  Reset();slots[0]=slot;Through(99);CHECK(body.frozen);
+  Through(100);CHECK(!body.frozen&&body.yaw>0&&body.yaw<holsterbody::Radians(1));
  }
  // Each press/release edge refreshes; a held button never refreshes each tick.
  for(int action=0;action<4;++action){
   Reset();const bool trigger=action>=2,releasing=action%2;
   (trigger?gHands[0].trigger:gHands[0].grip)=releasing?.9f:0.f;
   (trigger?gRadialTriggerLatched[0]:gGripLatched[0])=releasing;
-  Through(399);(trigger?gHands[0].trigger:gHands[0].grip)=releasing?0.f:.9f;
-  Through(899);CHECK(body.frozen);Through(900);CHECK(!body.frozen);
+  Through(49);(trigger?gHands[0].trigger:gHands[0].grip)=releasing?0.f:.9f;
+  Through(149);CHECK(body.frozen);Through(150);CHECK(!body.frozen);
  }
  // Edges remain usable after expiry, and later edges replace the deadline.
- Reset();Through(510);CHECK(!body.frozen);gHands[0].grip=.9f;Through(511);CHECK(body.frozen);
- Through(700);gHands[0].trigger=.9f;Through(701);
- Through(1200);CHECK(body.frozen);Through(1201);CHECK(!body.frozen);
+ Reset();Through(110);CHECK(!body.frozen);gHands[0].grip=.9f;Through(111);CHECK(body.frozen);
+ Through(149);gHands[0].trigger=.9f;Through(150);
+ Through(249);CHECK(body.frozen);Through(250);CHECK(!body.frozen);
  // Releasing the trigger in an open wheel away from the belt is interaction.
- Reset();Through(400);gRadialMenus[0].open=true;gHands[0].trigger=.9f;Through(401);
- gHands[0].pos={10,0,0};Through(800);gHands[0].trigger=0;Through(801);
- Through(1300);CHECK(body.frozen);Through(1301);CHECK(!body.frozen);
+ Reset();Through(24);gRadialMenus[0].open=true;gHands[0].trigger=.9f;Through(25);
+ gHands[0].pos={10,0,0};Through(74);gHands[0].trigger=0;Through(75);
+ Through(174);CHECK(body.frozen);Through(175);CHECK(!body.frozen);
  // Moving away keeps the original deadline; unrelated buttons do not extend it.
- Reset();Through(100);gHands[0].pos={10,0,0};Through(399);gHands[0].trigger=.9f;
- Through(500);CHECK(!body.frozen);
+ Reset();Through(25);gHands[0].pos={10,0,0};Through(74);gHands[0].trigger=.9f;
+ Through(100);CHECK(!body.frozen);
  // A second hand has its own deadline; expiring the first cannot release it.
- Reset();Through(300);gHands[1].pos={.27f,-.58f,-.07f};Through(301);
- Through(800);CHECK(body.frozen);Through(801);CHECK(!body.frozen);
+ Reset();Through(49);gHands[1].pos={.27f,-.58f,-.07f};Through(50);
+ Through(149);CHECK(body.frozen);Through(150);CHECK(!body.frozen);
  // Ineligible hands/points cannot pause the belt.
  for(int reason=0;reason<8;++reason){
   Reset();
@@ -424,10 +424,10 @@ int main(){
   Through(0);CHECK(!body.frozen);
  }
  // Tracking/recenter invalidation discards a deadline, as does leaving BODY.
- Reset();Through(400);gReachIntent[0].Invalidate();gHands[0].pos={10,0,0};
- Through(401);CHECK(!body.frozen);
- Reset();Through(400);bodyEnabled=false;Through(401);CHECK(!body.frozen);
- std::puts("PASS: production reach/button wiring, five-second deadline, all button edges, hold, empty sockets, wheel, two hands, unrelated actions and gates");
+ Reset();Through(75);gReachIntent[0].Invalidate();gHands[0].pos={10,0,0};
+ Through(76);CHECK(!body.frozen);
+ Reset();Through(75);bodyEnabled=false;Through(76);CHECK(!body.frozen);
+ std::puts("PASS: production reach/button wiring, one-second deadline, all button edges, hold, empty sockets, wheel, two hands, unrelated actions and gates");
 }
 '''
 generated=OUT/'reach.cpp'

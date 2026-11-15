@@ -17,14 +17,14 @@ inline Vec Socket(Vec position, float yaw, float lateral, float vertical, float 
 }
 
 struct ReachIntent {
-    static constexpr double kPauseSeconds = 5.0;
+    static constexpr double kPauseSeconds = 1.0;
     Vec entryHand{};
     double lastInteraction{}, lastSample{};
     bool valid{}, active{}, armed{true};
 
     void Invalidate() { valid = active = false; armed = true; }
 
-    // A reach starts one five-second pause; only a button edge refreshes it.
+    // A reach starts a one-second pause; only a button edge refreshes it.
     // Movement can arm a new approach after leaving the outer zone, but never
     // extends a pause. Socket motion past a stationary hand cannot re-arm it.
     bool Update(Vec hand, bool usable, bool nearInner, bool nearOuter,
