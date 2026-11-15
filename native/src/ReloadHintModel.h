@@ -34,7 +34,7 @@ struct ModelReader {
         const auto* triangles=Read<unsigned char*>(geometry,0x38);
         const float* vertices=morph?Read<float*>(morph,0x18):nullptr;
         if (nv<=0 || nt<=0) return atomic;
-        if (nv>60000 || nt>200000 || self.mesh.vertices.size()/3+nv>65535 ||
+        if (nv>60000 || nt>200000 ||
             self.mesh.indices.size()/3+nt>300000 || !vertices || !triangles ||
             !morph || Read<void*>(morph,0)!=geometry) {self.failed=true;return atomic;}
         const void* frame=Read<void*>(atomic,8);
@@ -44,18 +44,25 @@ struct ModelReader {
             frame=Read<void*>(frame,8);
         }
         if (frame!=self.root) {self.failed=true;return atomic;}
-        const unsigned base=static_cast<unsigned>(self.mesh.vertices.size()/3);
-        for(int i=0;i<nv;++i) {
-            Vec p{vertices[i*3],vertices[i*3+1],vertices[i*3+2]};
-            for(int f=0;f<depth;++f)p=Transform(chain[f].data(),p);
-            if (!Finite(p)) {self.failed=true;return atomic;}
-            self.mesh.vertices.insert(self.mesh.vertices.end(),{p.x,p.y,p.z});
-        }
+        // HD country/sniper rifles contain unused vertices with garbage
+        // coordinates. Match the indexed draw: copy/validate only referenced
+        // vertices, so unused data cannot reject or distort the hint bounds.
+        std::vector<int> remap(nv,-1);
         for(int i=0;i<nt;++i) {
             const auto* t=triangles+i*8;
             const auto a=Read<unsigned short>(t,0),b=Read<unsigned short>(t,2),c=Read<unsigned short>(t,4);
-            if (a<nv && b<nv && c<nv) self.mesh.indices.insert(self.mesh.indices.end(),
-                {static_cast<unsigned short>(base+a),static_cast<unsigned short>(base+b),static_cast<unsigned short>(base+c)});
+            if (a>=nv || b>=nv || c>=nv) continue;
+            for(const auto index:{a,b,c}) {
+                auto& mapped=remap[index];
+                if (mapped<0) {
+                    Vec p{vertices[index*3],vertices[index*3+1],vertices[index*3+2]};
+                    for(int f=0;f<depth;++f)p=Transform(chain[f].data(),p);
+                    if (!Finite(p) || self.mesh.vertices.size()/3>=65535) {self.failed=true;return atomic;}
+                    mapped=static_cast<int>(self.mesh.vertices.size()/3);
+                    self.mesh.vertices.insert(self.mesh.vertices.end(),{p.x,p.y,p.z});
+                }
+                self.mesh.indices.push_back(static_cast<unsigned short>(mapped));
+            }
         }
         return atomic;
     }

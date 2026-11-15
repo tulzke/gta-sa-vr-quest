@@ -3,8 +3,8 @@ void ReloadHintRuntimeTests() {
     ResetDirectTrigger();pairedweapon::Reset();g_reloadHints.Reset();SetMode(DOWN_FLICK);SetSound(BOLT);
     Setup(0,2,22,0,40,34,2000,0x800);Setup(1,4,29,0,90,30,1300);
     triggers[0]=triggers[1]=0;SetPose(0);SetPose(1);tick=20000;Update(false);
-    tick=22999;Update(false);Check(!g_reloadHints.requests[0].visible,"production timer waits three seconds after empty magazine");
-    tick=23000;Update(false);
+    tick=21499;Update(false);Check(!g_reloadHints.requests[0].visible,"production timer waits 1.5 seconds after empty magazine");
+    tick=21500;Update(false);
     Check(g_reloadHints.requests[0].visible && g_reloadHints.requests[1].visible,"two empty guns show independent hints after timeout");
     Check(g_reloadHints.requests[0].type==22 && g_reloadHints.requests[0].mode==DOWN_FLICK &&
           g_reloadHints.requests[1].type==29 && g_reloadHints.requests[1].mode==TWIST,"hint carries the actual weapon type and fixed gesture");
@@ -30,4 +30,13 @@ void ReloadHintRuntimeTests() {
     g.FindPlayerVehicle=[](int,bool)->void*{return player;};Update(false);
     Check(!g_reloadHints.requests[1].visible,"vehicle mode with physical guns disabled does not display a reload gesture");
     g.FindPlayerVehicle=NoVehicle;
+    for(int type:{33,34}) {
+        ResetDirectTrigger();g_reloadHints.Reset();Setup(0,6,type,0,30,1,1200);held[1]=-1;
+        triggers[0]=triggers[1]=0;SetPose(0);tick+=5000;Update(false);
+        tick+=1499;Update(false);Check(!g_reloadHints.requests[0].visible,"rifle waits until the shortened delay expires");
+        ++tick;Update(false);
+        Check(g_reloadHints.requests[0].visible && g_reloadHints.requests[0].type==type &&
+              g_reloadHints.requests[0].mode==DOWN_FLICK,"both empty rifles request their own reload tutorial at 1500ms");
+        Nod(0);Check(Field(6,8)==1 && !g_reloadHints.requests[0].visible,"rifle reload hides the tutorial immediately");
+    }
 }

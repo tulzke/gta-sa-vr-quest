@@ -13,16 +13,16 @@ int main() {
     using namespace reloadhint;using namespace arcadereload;
     Tracker tracker;
     tracker.Step(0,2,22,DOWN_FLICK,true,100,1);
-    tracker.Step(0,2,22,DOWN_FLICK,true,3099,1);Check(!tracker.requests[0].visible,"no hint before three seconds");
-    tracker.Step(0,2,22,DOWN_FLICK,true,3100,1);Check(tracker.requests[0].visible && tracker.requests[0].phaseMs==0,"hint appears exactly at three seconds");
-    tracker.Step(0,2,22,DOWN_FLICK,true,4800,1);Check(tracker.requests[0].phaseMs==100,"animation loops while empty");
-    tracker.Step(1,4,29,TWIST,true,4800,1);Check(!tracker.requests[1].visible,"second hand has its own waiting timer");
-    tracker.Step(1,4,29,TWIST,true,7800,1);Check(tracker.requests[1].visible && tracker.requests[1].type==29 && tracker.requests[1].mode==TWIST,"second hint identifies its own model and gesture");
-    tracker.Step(0,2,22,DOWN_FLICK,false,7800,1);Check(!tracker.requests[0].visible && tracker.requests[1].visible,"reload hides only the relevant hand");
-    tracker.Step(1,5,30,TWIST,true,7801,1);Check(!tracker.requests[1].visible,"switching weapon resets timer");
-    tracker.Step(1,5,30,TWIST,true,10801,2);Check(!tracker.requests[1].visible,"tracking epoch resets timer");
+    tracker.Step(0,2,22,DOWN_FLICK,true,1599,1);Check(!tracker.requests[0].visible,"no hint before 1.5 seconds");
+    tracker.Step(0,2,22,DOWN_FLICK,true,1600,1);Check(tracker.requests[0].visible && tracker.requests[0].phaseMs==0,"hint appears exactly at 1.5 seconds");
+    tracker.Step(0,2,22,DOWN_FLICK,true,3300,1);Check(tracker.requests[0].phaseMs==100,"animation loops while empty");
+    tracker.Step(1,4,29,TWIST,true,3300,1);Check(!tracker.requests[1].visible,"second hand has its own waiting timer");
+    tracker.Step(1,4,29,TWIST,true,4800,1);Check(tracker.requests[1].visible && tracker.requests[1].type==29 && tracker.requests[1].mode==TWIST,"second hint identifies its own model and gesture");
+    tracker.Step(0,2,22,DOWN_FLICK,false,4800,1);Check(!tracker.requests[0].visible && tracker.requests[1].visible,"reload hides only the relevant hand");
+    tracker.Step(1,5,30,TWIST,true,4801,1);Check(!tracker.requests[1].visible,"switching weapon resets timer");
+    tracker.Step(1,5,30,TWIST,true,6301,2);Check(!tracker.requests[1].visible,"tracking epoch resets timer");
     tracker.Reset();Check(!tracker.requests[0].visible && !tracker.requests[1].visible,"menu/reset clears both hints");
-    tracker.Step(0,2,22,DOWN_FLICK,true,0xfffffff0u,3);tracker.Step(0,2,22,DOWN_FLICK,true,2984,3);
+    tracker.Step(0,2,22,DOWN_FLICK,true,0xfffffff0u,3);tracker.Step(0,2,22,DOWN_FLICK,true,1484,3);
     Check(tracker.requests[0].visible,"waiting timer supports native millisecond wrap");
     tracker.Step(0,2,22,AUTOMATIC,true,6000,3);Check(!tracker.requests[0].visible,"automatic weapons have no gesture tutorial");
     Check(kOpacity==.20f,"requested opacity is twenty percent");
@@ -110,7 +110,8 @@ int main() {
     }
 
     alignas(16) unsigned char clump[64]{},root[256]{},child[256]{},a[128]{},b[128]{},geometry[192]{},morph[64]{};
-    float vertices[]{0,0,0, .4f,0,0, 0,.2f,0};unsigned short triangles[]{0,1,2,0};
+    float vertices[]{0,0,0, .4f,0,0, 0,.2f,0, 5.819149e25f,.197f,0, 2163015.f,6.174235e16f,137.26f};
+    unsigned short triangles[]{0,1,2,0};
     Put<void*>(clump,8,root);Put<void*>(a,8,root);Put<void*>(b,8,child);Put<void*>(child,8,root);
     Put<void*>(a,0x30,geometry);Put<void*>(b,0x30,geometry);a[2]=b[2]=4;
     Put<int>(geometry,0x1c,3);Put<int>(geometry,0x18,1);Put<void*>(geometry,0x38,triangles);Put<void*>(geometry,0xa0,morph);
@@ -131,6 +132,12 @@ int main() {
     const Vec centerError=Add(center,Scale(expectedCenter,-1));
     Check(Dot(centerError,centerError)<.000001f,"expansion keeps an offset model center fixed instead of shifting the weapon");
     b[2]=0;mesh=CopyModel(clump,Iterate);Check(mesh && mesh->vertices.size()==9,"hidden atomics are not shown");
+    Put<int>(geometry,0x1c,5);mesh=CopyModel(clump,Iterate);
+    Check(mesh && mesh->vertices.size()==9 && mesh->extent<1,"unused garbage vertices in HD rifles cannot reject or enlarge the hint");
+    vertices[9]=std::nanf("");mesh=CopyModel(clump,Iterate);
+    Check(mesh && mesh->vertices.size()==9,"nonfinite unused vertices are never read or copied");
+    triangles[2]=3;Check(!CopyModel(clump,Iterate),"nonfinite referenced vertex still rejects unsafe geometry");
+    triangles[2]=2;Put<int>(geometry,0x1c,3);
     vertices[0]=std::nanf("");Check(!CopyModel(clump,Iterate),"invalid vertices are rejected");vertices[0]=0;
     Put<int>(geometry,0x1c,60001);Check(!CopyModel(clump,Iterate),"oversized geometry is rejected before reading");Put<int>(geometry,0x1c,3);
     b[2]=4;Put<void*>(child,8,child);Check(!CopyModel(clump,Iterate),"invalid frame chain cannot loop indefinitely");
