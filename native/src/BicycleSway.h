@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +13,11 @@ constexpr std::uintptr_t kBaseCallAddress=0x810530;
 constexpr std::size_t kLeanOffset=0x838, kFrameSwayOffset=0xa20;
 constexpr std::size_t kResumeOffset=24, kTrampolineBytes=72;
 
+inline float ComfortableLean(float lean) {
+    constexpr float limit=10.0f*3.14159265358979323846f/180.0f;
+    return std::clamp(lean*.25f,-limit,limit);
+}
+
 inline bool Eligible(void* bike,void* playerVehicle,bool driver,bool stereo,int model) {
     return bike&&bike==playerVehicle&&driver&&stereo&&
         (model==481||model==509||model==510);
@@ -19,7 +25,8 @@ inline bool Eligible(void* bike,void* playerVehicle,bool driver,bool stereo,int 
 
 // The whole retail control function still runs. Capture the physical lean at
 // the return from CBike, before CBmx adds its animation, then restore exactly
-// that sample. No angle subtraction, render matrix writes or delayed filters.
+// a comfortable fraction of that sample. No render-time matrix swaps. The
+// native smoothed lean at +0x83c and the physical entity basis remain intact.
 struct Frame { void* bike{}; float baseLean{}; bool captured{}; };
 inline thread_local Frame* current{};
 
@@ -43,7 +50,8 @@ public:
         if (!frame_.bike||!frame_.captured) return;
         auto* bytes=static_cast<char*>(frame_.bike);
         const float zero=0.0f;
-        std::memcpy(bytes+kLeanOffset,&frame_.baseLean,sizeof(float));
+        const float lean=ComfortableLean(frame_.baseLean);
+        std::memcpy(bytes+kLeanOffset,&lean,sizeof(float));
         std::memcpy(bytes+kFrameSwayOffset,&zero,sizeof(float));
     }
 };

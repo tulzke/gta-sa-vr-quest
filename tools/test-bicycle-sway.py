@@ -29,7 +29,10 @@ def function(signature):
 prefix = r'''
 #define _CRT_SECURE_NO_WARNINGS
 #include "BicycleSway.h"
+#include "BicyclePedal.h"
 #include <array>
+#include <atomic>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -46,7 +49,29 @@ void* FindPed(int){return &pedObject;}
 bool IsDriver(void* v,void* p){return v==vehicle&&p==&pedObject&&isDriver;}
 struct {std::uintptr_t LoadBase{};void*(*FindPlayerVehicle)(int,bool)=FindVehicle;
 void*(*FindPlayerPed)(int)=FindPed;bool(*CVehicle_IsDriver)(void*,void*)=IsDriver;}g;
-namespace vrcam {bool IsStereoActive(){return stereo;}}
+namespace vrcam {bool IsStereoActive(){return stereo;}bool IsCrouched(){return false;}}
+namespace xr {struct InputState{float triggers[2]{};}input;void GetInput(InputState& out){out=input;}}
+std::atomic<bool> g_inputBlocked{};
+bool VrGameplayInputAllowed(){return stereo&&!g_inputBlocked;}
+double clockTime=1.;double MonotonicSeconds(){return clockTime;}
+thread_local bicyclepedal::State g_bicyclePedal;
+namespace combat {bool IsBlocking(){return false;}}
+namespace locomotion {bool RunEnabled(){return false;}}
+bool HasPlayerVehicle(){return vehicle!=nullptr;}
+int GetVehicleDebugMode(){return 0;}
+void* GetControlledVehicle(){return vehicle;}
+void* GetRemoteControlledVehicle(){return nullptr;}
+int GetActiveVehicleAppearance(){return 2;}
+constexpr int MODE_IMMERSIVE=1,BICYCLE_MOTION=0,BIKE_ACCEL_HOLD_TRIGGER=0;
+int ModeForAppearance(int){return MODE_IMMERSIVE;}
+bool IsBicycleModel(int id){return id==481||id==509||id==510;}
+bool EngineOn(void*){return true;}
+std::mutex g_stateMutex;
+std::atomic<int> g_activeVehicleModel{481},g_bicycleMode{1},g_activeBikeAccelerator{0};
+float g_bicyclePedalPulse{},g_bikeThrottle{};
+int OriginalAccelerate(void*){return 7;}auto g_origAccelerate=OriginalAccelerate;
+bool OriginalSprint(void*,int){return true;}auto g_origSprint=OriginalSprint;
+bool OriginalSprintJustDown(void*){return true;}auto g_origSprintJustDown=OriginalSprintJustDown;
 using BmxControlFn=void(*)(void*);
 BmxControlFn g_origBmxControl{};
 constexpr int PROT_READ=1,PROT_WRITE=2,PROT_EXEC=4,MAP_PRIVATE=2,MAP_ANONYMOUS=32,_SC_PAGESIZE=30;
@@ -65,13 +90,21 @@ void Model(int id){std::uint16_t m=static_cast<std::uint16_t>(id);std::memcpy(bi
 '''
 
 code = prefix + '\n'.join(function(sig) for sig in (
+    'int OnGetAccelerate(', 'bool OnGetSprint(', 'bool OnSprintJustDown(',
     'void CaptureBicycleBaseLean(', 'void OnBmxProcessControl(',
     'void InstallBicycleSwayHook(')) + r'''
 float physical=.37f,phase{},weight{};int branch{},baseCalls{},tailCalls{};
 bool sample=true,nested{};
+bool checkPedal{},heldResult{},tapResult{};int driveResult{};
 void Retail(void* p){
+ if(checkPedal&&p==bike){
+  driveResult=OnGetAccelerate(nullptr);heldResult=OnGetSprint(nullptr,1);tapResult=OnSprintJustDown(nullptr);
+  CHECK(OnSprintJustDown(nullptr)==tapResult); // polling never consumes an edge
+  CHECK(!OnGetSprint(nullptr,0)); // bicycle sprint type only
+ }
  ++baseCalls;
  Write(p,bicyclesway::kLeanOffset,physical);
+ Write(p,0x83c,physical); // native smoothing state must keep full lean
  Write(p,0x600,.21f); // base steering survives the wrapper
  if(sample)CaptureBicycleBaseLean(p); // actual trampoline callback position
  if(nested&&p==bike){OnBmxProcessControl(npc);CHECK(bicyclesway::current->bike==bike);}
@@ -95,8 +128,9 @@ int main(){
   phase=phaseIndex*.31f;weight=w*.15f;branch=anim;
   Write(bike,kFrameSwayOffset,.6f);
   OnBmxProcessControl(bike);
-  CHECK(Read(bike,kLeanOffset)==physical&&Read(bike,kFrameSwayOffset)==0);
+  CHECK(Read(bike,kLeanOffset)==ComfortableLean(physical)&&Read(bike,kFrameSwayOffset)==0);
   CHECK(Read(bike,0x600)==.21f&&Read(bike,0x940)==1.23f);
+  CHECK(Read(bike,0x83c)==physical);
   CHECK(current==nullptr);
  }
  CHECK(baseCalls==tailCalls);
@@ -120,7 +154,7 @@ int main(){
  physical=std::numeric_limits<float>::quiet_NaN();
  OnBmxProcessControl(bike);CHECK(std::isnan(Read(bike,kLeanOffset)));physical=.37f;
  nested=true;Write(npc,kFrameSwayOffset,.6f);OnBmxProcessControl(bike);nested=false;
- CHECK(Read(bike,kLeanOffset)==physical&&Read(bike,kFrameSwayOffset)==0);
+ CHECK(Read(bike,kLeanOffset)==ComfortableLean(physical)&&Read(bike,kFrameSwayOffset)==0);
  CHECK(Read(npc,kLeanOffset)==physical+weight*std::sin(phase));
  CHECK(Read(npc,kFrameSwayOffset)==.6f*.95f&&current==nullptr);
  {Scope outer(bike);CaptureBaseLean(bike);
@@ -129,6 +163,46 @@ int main(){
   std::thread thread([]{CHECK(current==nullptr);Scope scope(npc);CHECK(current->bike==npc);});thread.join();
   CHECK(current->bike==bike);outer.Finish();}
  CHECK(current==nullptr);
+ constexpr float radians=3.14159265358979323846f/180.f;
+ for(float degrees:{-180.f,-60.f,-30.f,-5.f,0.f,5.f,30.f,60.f,180.f}){
+  physical=degrees*radians;Model(481);OnBmxProcessControl(bike);
+  const float lean=Read(bike,kLeanOffset);
+  CHECK(std::abs(lean)<=10.f*radians+1e-6f);
+  CHECK(std::abs(lean-std::clamp(physical*.25f,-10.f*radians,10.f*radians))<1e-6f);
+ }
+ physical=.37f;
+ // Actual production sprint/accelerate hooks inside the production wrapper.
+ checkPedal=true;g_bicyclePedal.Reset();xr::input.triggers[1]=0;clockTime=10;
+ OnBmxProcessControl(bike);CHECK(!heldResult&&!tapResult&&driveResult==0);
+ xr::input.triggers[1]=1;clockTime+=.01;OnBmxProcessControl(bike);
+ CHECK(heldResult&&tapResult&&driveResult==255);
+ clockTime+=.01;OnBmxProcessControl(bike);CHECK(heldResult&&!tapResult&&driveResult==255);
+ xr::input.triggers[1]=0;clockTime+=.01;OnBmxProcessControl(bike);
+ CHECK(!heldResult&&!tapResult&&driveResult==255);
+ for(int i=0;i<22;++i){clockTime+=.01;OnBmxProcessControl(bike);}
+ CHECK(driveResult==0); // release eventually coasts
+ xr::input.triggers[1]=1;clockTime+=.01;OnBmxProcessControl(bike);CHECK(tapResult);
+ clockTime+=1;OnBmxProcessControl(bike);CHECK(!tapResult&&heldResult); // tracking/pause stall
+ CHECK(!OnSprintJustDown(nullptr)&&!OnGetSprint(nullptr,1)); // scope does not leak
+ // Four taps/s retain ordinary drive through release and add one native edge
+ // per tap at different headset update rates. Holding adds only one edge.
+ for(int fps:{72,90,120}){
+  g_bicyclePedal.Reset();xr::input.triggers[1]=0;clockTime+=1;OnBmxProcessControl(bike);
+  int edges=0;
+  for(int frame=0;frame<fps*4;++frame){
+   xr::input.triggers[1]=(frame%(fps/4))<(fps/8)?1.f:0.f;
+   clockTime+=1./fps;OnBmxProcessControl(bike);edges+=tapResult;
+   CHECK(driveResult==255);
+  }
+  CHECK(edges>=16&&edges<=17);
+ }
+ // Blocked controls, NPCs and non-bicycles cannot produce R2 sprint taps.
+ g_inputBlocked=true;clockTime+=.01;OnBmxProcessControl(bike);CHECK(!heldResult&&!tapResult);g_inputBlocked=false;
+ Model(522);clockTime+=.01;OnBmxProcessControl(bike);CHECK(!heldResult&&!tapResult);Model(481);
+ isDriver=false;clockTime+=.01;OnBmxProcessControl(bike);CHECK(!heldResult&&!tapResult);isDriver=true;
+ g_bicycleMode=0;g_bicyclePedalPulse=.8f;clockTime+=.01;OnBmxProcessControl(bike);
+ CHECK(!heldResult&&!tapResult&&driveResult==204);g_bicycleMode=1;
+ checkPedal=false;
  // Fail-closed signatures and installer: no partially installed experiment.
  alignas(16) unsigned char retail[0x1b8];FillRetail(retail);
  CHECK(MatchesRetail(retail));
@@ -146,7 +220,7 @@ int main(){
  BuildTrampoline(allocation,0x12340000,0x56780000,0x9abc0000);
  FILE* file=std::fopen("trampoline.bin","wb");CHECK(file);
  CHECK(std::fwrite(allocation,1,kTrampolineBytes,file)==kTrampolineBytes);std::fclose(file);
- std::puts("PASS: 1440 animation samples, production wrapper, nesting/TLS, exclusions and installer failure paths");
+ std::puts("PASS: 1440 animation samples, lean limit/smoothing, R2 sprint/drive at 72/90/120 Hz, scope and installer failures");
 }
 '''
 test = OUT / 'bicycle-sway.cpp'
@@ -202,3 +276,13 @@ if len(sys.argv) > 1:
     assert at(0x6be2bc) == 0x9405489d
     assert 0x6be2bc + ((at(0x6be2bc) & 0x3ffffff) << 2) == 0x810530
     print(f'PASS: {len(signatures)} retail instructions and original base-control BL target')
+    # CBmx asks for sprint type 1; native energy receives taps and held state.
+    assert at(0x6beba0) == 0x52800021  # MOV W1,#1
+    for address, target in ((0x6beba4, 0x804210), (0x5bd624, 0x803d40), (0x5bd664, 0x803d30)):
+        word = at(address)
+        assert word >> 26 == 0b100101
+        displacement = word & 0x3ffffff
+        if displacement & (1 << 25):
+            displacement -= 1 << 26
+        assert address + displacement * 4 == target
+    print('PASS: retail CBmx sprint type and native SprintJustDown/GetSprint call sites')

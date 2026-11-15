@@ -20,6 +20,7 @@ code=r'''
 #include "Symbols.h"
 #include "TrackingRecovery.h"
 #include "VehicleCabin.h"
+#include "BicyclePedal.h"
 #include <limits>
 #define LOGI(...) ((void)0)
 #define LOGW(...) ((void)0)
@@ -32,6 +33,7 @@ namespace vrcam {bool stereo=true,crouched=false;bool IsStereoActive(){return st
 namespace combat {bool blocking=false;bool IsBlocking(){return blocking;}}
 namespace driving {
 std::atomic<bool> g_inputBlocked{};bool vehicle=false;int fallbackCalls=0;
+bool VrGameplayInputAllowed(){return !g_inputBlocked;}
 bool HasPlayerVehicle(){return vehicle;}
 bool Original(void*,int){++fallbackCalls;return true;}
 auto g_origSprint=Original;

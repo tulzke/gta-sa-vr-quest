@@ -8,6 +8,7 @@
 #include "VehicleEntry.h"
 #include "BikeSteering.h"
 #include "BicycleSway.h"
+#include "BicyclePedal.h"
 #include "WheelReturn.h"
 #include "QuadHandlebar.h"
 #include "MissionComfort.h"
@@ -2633,6 +2634,7 @@ int OnGetAccelerate(void* pad) {
     if(GetVehicleDebugMode()) return 0;
     if (VrGameplayInputAllowed()&&GetControlledVehicle()) {
         xr::InputState input{}; xr::GetInput(input);
+        if (bicyclepedal::current.active) return bicyclepedal::current.accelerate;
         const int appearance=GetRemoteControlledVehicle()?0:GetActiveVehicleAppearance();
         void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
         if (vehicle && (appearance==1 || appearance==2) && g.FindPlayerPed &&
@@ -2801,6 +2803,10 @@ int OnGetHandBrake(void* pad) {
 }
 bool OnGetSprint(void* pad,int sprintType) {
     if (vrcam::IsStereoActive()) {
+        // CBmx::ProcessAI calls ControlButtonSprint(type=1). Only its scoped
+        // player update may use R2; vehicle/on-foot sprint stays independent.
+        if (bicyclepedal::current.active&&sprintType==1)
+            return VrGameplayInputAllowed()&&bicyclepedal::current.held;
         if (g_inputBlocked.load(std::memory_order_acquire)||HasPlayerVehicle())
             return false;
         // Mobile GetSprint bypasses the Java/new-pad Cross state entirely.
@@ -2811,6 +2817,8 @@ bool OnGetSprint(void* pad,int sprintType) {
     return g_origSprint?g_origSprint(pad,sprintType):false;
 }
 bool OnSprintJustDown(void* pad) {
+    if (vrcam::IsStereoActive()&&bicyclepedal::current.active)
+        return VrGameplayInputAllowed()&&bicyclepedal::current.justPressed;
     // ControlButtonSprint polls this BEFORE GetSprint. Its retail body reads
     // IsReleased(168/31), which the R2/L2 dialogue bridge can answer. Every
     // trigger release then adds sprint energy even with the L3 toggle off.
@@ -2879,6 +2887,7 @@ void* InstallVerifiedTrampoline(void* target,void* replacement,
 
 using BmxControlFn=void(*)(void*);
 BmxControlFn g_origBmxControl{};
+thread_local bicyclepedal::State g_bicyclePedal;
 
 void CaptureBicycleBaseLean(void* bike) {
     bicyclesway::CaptureBaseLean(bike);
@@ -2896,6 +2905,16 @@ void OnBmxProcessControl(void* bike) {
     // Push an inactive scope too: nested NPC updates must not sample the
     // enclosing player's bicycle or leak its baseline into another object.
     bicyclesway::Scope scope(active?bike:nullptr);
+    bicyclepedal::Input pedal{};
+    const bool r2Pedals=ModeForAppearance(2)!=MODE_IMMERSIVE||
+        g_bicycleMode.load(std::memory_order_acquire)!=BICYCLE_MOTION;
+    if (active&&VrGameplayInputAllowed()&&r2Pedals) {
+        xr::InputState input{}; xr::GetInput(input);
+        pedal=g_bicyclePedal.Update(bike,input.triggers[1],MonotonicSeconds());
+    } else if (bike==playerVehicle) {
+        g_bicyclePedal.Reset();
+    }
+    bicyclepedal::Scope pedalScope(pedal);
     g_origBmxControl(bike);
     scope.Finish();
 }
