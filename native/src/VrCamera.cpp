@@ -2,6 +2,7 @@
 #include "PdaBlipVisibility.h"
 #include "WatchLayout.h"
 #include "WatchInteraction.h"
+#include "RadarMapLayout.h"
 #include "PlayerLife.h"
 #include "MissionHud.h"
 #include "Tbone.h"
@@ -20532,18 +20533,18 @@ bool PrepareMapRasterRing(void* (&rasters)[kEyeSets]) {
 // CRadar's menu-map path draws the same texture database tiles as the HUD.
 // Coordinates follow the retail CRect HFA ABI: left, bottom, right, top.
 void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
-    struct Rect { float left, bottom, right, top; };
-    using DrawTile = void (*)(int,int,Rect,float);
+    using DrawTile = void (*)(int,int,radarmap::Rect,float);
+    using RequestTile = void (*)(int,int);
     if (!g.LoadBase || !g.FindPlayerPed || !g.FindPlayerPed(-1) || !g.FindPlayerCoors) return;
     static void* handle = dlopen("libGame.so", RTLD_NOLOAD | RTLD_NOW);
     if (!handle) return;
     static auto draw = reinterpret_cast<DrawTile>(dlsym(handle, "_ZN6CRadar19DrawRadarSectionMapEii5CRectf"));
-    if (!draw || reinterpret_cast<std::uintptr_t>(draw) != g.LoadBase + 0x51e360u) return;
+    static auto request = reinterpret_cast<RequestTile>(dlsym(handle,"_ZN6CRadar17RequestMapSectionEii"));
+    if (!draw || !request || reinterpret_cast<std::uintptr_t>(draw) != g.LoadBase + 0x51e360u ||
+        reinterpret_cast<std::uintptr_t>(request)!=g.LoadBase+0x51d810u) return;
     const auto player = g.FindPlayerCoors(-1);
     if (!std::isfinite(player.x) || !std::isfinite(player.y)) return;
-    // Height covers 300 world units, width 480: equal metres per pixel.
     const float zoom=projection?hud::WatchMapZoom():1.f;
-    const float scale = 400.0f / 300.0f * zoom;
     if (g.RwRenderStateSet) {
         g.RwRenderStateSet(6,reinterpret_cast<void*>(0));
         g.RwRenderStateSet(8,reinterpret_cast<void*>(0));
@@ -20553,14 +20554,14 @@ void RenderPdaMap(float heading,bool watch=false,bool projection=false) {
         g.RwRenderStateSet(14,reinterpret_cast<void*>(0));
         g.RwRenderStateSet(20,reinterpret_cast<void*>(1));
     }
-    for (int y=0;y<12;++y) for (int x=0;x<12;++x) {
-        const float left=400.0f+(x*500.0f-3000.0f-player.x)*scale;
-        const float top=400.0f+(player.y-(3000.0f-y*500.0f))*scale;
-        const float size=500.0f*scale;
-        if (left>=800 || left+size<=0 || top>=800 || top+size<=0) continue;
-        constexpr float overlap=0.5f;
-        draw(x,y,{left-overlap,top+size+overlap,left+size+overlap,top-overlap},1.0f);
-    }
+    radarmap::VisibleTiles(player.x,player.y,zoom,[&](int x,int y,radarmap::Rect rect){
+        // DrawRadarSectionMap silently skips missing textures. The stock HUD
+        // only retains a 3x3 neighbourhood, smaller than the projection at .25x.
+        // RequestMapSection is idempotent for existing sections; stock streaming
+        // continues to own and release the references as the player moves.
+        request(x,y);
+        draw(x,y,rect,1.0f);
+    });
 
     DrawPdaRadarOverlay(handle,player,heading,watch,projection,zoom);
 }
@@ -22215,7 +22216,7 @@ void OnRenderScene(bool underwater) {
             WriteCam(camU,base);
             if (g.CCamera_CalculateDerivedValues) g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
             g_origCopy(g.TheCamera,false);
-            unsigned char background[4]={12,26,38,255};
+            unsigned char background[4]={radarmap::kSea[0],radarmap::kSea[1],radarmap::kSea[2],radarmap::kSea[3]};
             if (g.RwCameraClear) g.RwCameraClear(sc,background,1|2|4);
             g.RwCameraBeginUpdate(sc);
             RenderPdaMap(std::atan2(-base.forward.x,base.forward.y),map==1,map==2);

@@ -191,7 +191,9 @@ void UpdateWatchFrame(const HandPose hp[2],const TwoHandVisualState& twoHand,
         vdot(sliderTip,readingRight),vdot(sliderTip,readingUp),vdot(sliderTip,normal),hud::WatchMapZoom());
     if(g_watchZoomSlider.dragging)hud::SetWatchMapZoom(g_watchZoomSlider.zoom,false);
     if(ended)hud::SetWatchMapZoom(hud::WatchMapZoom(),true);
-    g_watchProjection.Update(g_watchFrameValid&&!calibrating,epoch,wrist,available&&!g_watchZoomSlider.dragging,
+    // A scale drag is still this UI's valid pointing hand, not tracking/context
+    // loss. The two contact planes are 20 cm apart, so hits cannot overlap.
+    g_watchProjection.Update(g_watchFrameValid&&!calibrating,epoch,wrist,available,
         hp[other].trigger,radial,depth,radius,dt);
     g_watchProjectionNeeded.store(g_watchProjection.Needed(),std::memory_order_relaxed);
     // Reserve only this free hand's trigger near the dial. Keep the reservation

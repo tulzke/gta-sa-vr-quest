@@ -46,3 +46,9 @@ if len(sys.argv)>1:
         assert instruction&0xffc00000==0x3d400000,hex(address)
         assert (instruction>>10)&0xfff==offset,(hex(address),hex(instruction))
     print('PASS retail current health/armour maximum load fingerprints')
+    # Section request is an idempotent null-check, then synchronous DB lookup.
+    assert struct.unpack_from('<I',retail,0x51d854)[0]==0xb50001c8
+    # DrawRadarSection's out-of-world colour, immediately before CRGBA ctor.
+    for address,value in [(0x51e290,111),(0x51e294,137),(0x51e298,170)]:
+        assert (struct.unpack_from('<I',retail,address)[0]>>5)&0xffff==value
+    print('PASS retail radar section request and ocean colour fingerprints')

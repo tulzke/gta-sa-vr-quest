@@ -19,7 +19,11 @@ struct ZoomSlider {
         if(!enabled||trigger<.30f){ended=dragging;dragging=false;requireRelease=!enabled;}
         if(touching&&!requireRelease&&trigger>=.65f&&!dragging)dragging=true;
         if(dragging){
-            if(std::abs(x)>.065f||std::abs(z)>.065f){dragging=false;requireRelease=true;ended=true;}
+            if(std::abs(x)>.065f||std::abs(z)>.065f||std::abs(y)>kSliderHalfHeight+.065f){
+                // A physical leave/re-entry is a new touch even while Point
+                // stays held. Context loss above still requires a release.
+                dragging=false;requireRelease=false;ended=true;
+            }
             else zoom=kZoomMin+(kZoomMax-kZoomMin)*std::clamp((y+kSliderHalfHeight)/(2*kSliderHalfHeight),0.f,1.f);
         }else zoom=current;
         return ended;

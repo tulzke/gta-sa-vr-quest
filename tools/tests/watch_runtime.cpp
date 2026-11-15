@@ -4,6 +4,7 @@
 #include "WatchModel.cpp"
 #include "WatchLayout.h"
 #include "WatchInteraction.h"
+#include "RadarMapLayout.h"
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -84,8 +85,24 @@ int main(){
         slider.Update(true,1,0,-.1f,0,slider.zoom);CHECK(slider.zoom==.25f);
         CHECK(slider.Update(true,0,0,0,0,slider.zoom)&&!slider.dragging);
         slider.Update(true,1,0,0,0,1);CHECK(slider.dragging);
+        CHECK(slider.Update(true,1,0,0,.10f,slider.zoom)&&!slider.dragging);
+        CHECK(!slider.Update(true,1,0,0,0,slider.zoom)&&slider.dragging); // re-touch, trigger never released
+        CHECK(slider.Update(true,1,0,.20f,0,slider.zoom)&&!slider.dragging);
+        CHECK(!slider.Update(true,1,0,0,0,slider.zoom)&&slider.dragging);
         CHECK(slider.Update(false,1,0,0,0,slider.zoom)&&!slider.dragging&&!slider.touching);
         CHECK(!slider.Update(true,1,0,0,0,1)&&!slider.dragging);
+    }
+    {
+        watchhud::Projection map;watchhud::ZoomSlider scale;
+        map.Update(true,1,0,true,0,1,1,.023f,.02f);
+        map.Update(true,1,0,true,0,1,1,.023f,.02f);
+        CHECK(map.Update(true,1,0,true,1,0,.005f,.023f,.02f)&&map.open);
+        scale.Update(true,0,0,0,0,1);
+        scale.Update(true,1,0,0,0,1);CHECK(scale.dragging);
+        // Match the renderer: a drag remains an available pointing hand.
+        CHECK(!map.Update(true,1,0,true,1,0,.20f,.023f,.02f));
+        CHECK(scale.Update(true,1,.10f,0,0,1)&&!scale.dragging);
+        CHECK(map.Update(true,1,0,true,1,0,.005f,.023f,.02f)&&!map.open);
     }
     {
         handskeleton::Library hand;CHECK(hand.Load(HAND_FILE)&&hand.indexTipJoint>=0);
@@ -103,6 +120,34 @@ int main(){
         }
         CHECK(std::hypot(first[0]-last[0],first[1]-last[1],first[2]-last[2])>.005f);
     }
+    {
+        // Real tile enumerator: no gaps north of the player at wide zoom,
+        // and no wrapped/clamped terrain outside the 6000x6000 game map.
+        struct Tile{int x,y;radarmap::Rect rect;};
+        for(float px:{-3500.f,-2999.f,0.f,2750.f,3500.f})
+        for(float py:{-3500.f,-2999.f,-1500.f,0.f,2999.f,3500.f})
+        for(float zoom:{.25f,.5f,1.f,2.f}){
+            std::vector<Tile> tiles;
+            radarmap::VisibleTiles(px,py,zoom,[&](int x,int y,radarmap::Rect r){
+                CHECK(x>=0&&x<12&&y>=0&&y<12);tiles.push_back({x,y,r});
+            });
+            CHECK(tiles.size()<=144);
+            for(int y=7;y<800;y+=23)for(int x=7;x<800;x+=23){
+                const float wx=px+(x-400)/(400.f/300.f*zoom),wy=py-(y-400)/(400.f/300.f*zoom);
+                bool covered=false;
+                for(const auto& tile:tiles)if(x>=tile.rect.left&&x<=tile.rect.right&&y>=tile.rect.top&&y<=tile.rect.bottom)covered=true;
+                const bool land=wx>-3000&&wx<3000&&wy>-3000&&wy<3000;
+                // Half-pixel tile overlap can cover at most 1.5 world units at .25x.
+                const bool farSea=wx<-3002||wx>3002||wy<-3002||wy>3002;
+                CHECK(!land||covered);CHECK(!farSea||!covered);
+            }
+        }
+        int count=0;
+        radarmap::VisibleTiles(0,0,.25f,[&](int,int,radarmap::Rect){++count;});
+        CHECK(count>9); // larger than the stock retained 3x3 neighbourhood
+        CHECK(radarmap::kSea[0]==111&&radarmap::kSea[1]==137&&radarmap::kSea[2]==170&&radarmap::kSea[3]==255);
+    }
+    std::puts("PASS complete wide-zoom tile coverage, all world edges/corners and retail sea background");
     std::puts("PASS watch GLB, hand-relative fit, current-max vitals, clipped-edge mission markers");
     std::puts("PASS projection touch debounce, occupied hand, recovery, animation, circular pins and actual animated index tip");
 }
