@@ -261,8 +261,7 @@ bool VehicleSidearmWeaponType(int type){return type==22;}
 '''+globals_text
 settings_production='\n'.join(function(sig,holsters) for sig in (
     'bool ValidPoint(', 'bool SelectableSlot(', 'void AssignPointSlotLocked(', 'int PointCount()', 'int PointSlot(', 'int FindPointForSlot(', 'const char* SlotName(', 'bool SetPointSlot(', 'void LoadSettings(',
-    'void SaveSettingsLocked(', 'void Init()', 'bool BodyFrameEnabled()', 'void SetBodyFrameEnabled(',
-    'float BodyReachIdleSeconds()', 'float BodyReachMotionMetres()'))
+    'void SaveSettingsLocked(', 'void Init()', 'bool BodyFrameEnabled()', 'void SetBodyFrameEnabled('))
 settings_production+='\n'+function('bool PairAllowed(')+'\n'+function('bool RadialUnavailable(')
 settings_tests=r'''
 void Write(const char* text){FILE* f=std::fopen(kSettingsPath,"w");CHECK(f);std::fputs(text,f);std::fclose(f);}
@@ -270,17 +269,15 @@ void Write(const char* text){FILE* f=std::fopen(kSettingsPath,"w");CHECK(f);std:
 int main(){
     using namespace savr::holster;
     std::remove(kSettingsPath);Init();CHECK(!BodyFrameEnabled());
-    CHECK(std::abs(BodyReachIdleSeconds()-1.2f)<0.001f);CHECK(std::abs(BodyReachMotionMetres()-0.03f)<0.001f);
-    Write("body_reach_idle_ms 3400\nbody_reach_motion_cm 5\n");LoadSettings();SaveSettingsLocked();
-    gBodyReachIdleMs=0;gBodyReachMotionCm=1;LoadSettings();
-    CHECK(gBodyReachIdleMs==3400&&gBodyReachMotionCm==5);
-    Write("body_reach_idle_ms 99999\nbody_reach_motion_cm 0\n");LoadSettings();
-    CHECK(gBodyReachIdleMs==10000&&gBodyReachMotionCm==1);
-    Write("body_reach_idle_ms -1\nbody_reach_motion_cm 99\n");LoadSettings();
-    CHECK(gBodyReachIdleMs==0&&gBodyReachMotionCm==20);
+    // Retired movement/idle settings cannot restore unlimited pauses or alter
+    // the new five-second rule, and disappear on the next settings save.
+    Write("body_frame 1\nbody_reach_idle_ms 0\nbody_reach_motion_cm 1\n");LoadSettings();
+    CHECK(BodyFrameEnabled());SaveSettingsLocked();
+    {char line[128];FILE* f=std::fopen(kSettingsPath,"r");CHECK(f);
+     while(std::fgets(line,sizeof(line),f)) CHECK(std::strstr(line,"body_reach_")==nullptr);
+     std::fclose(f);}
     Write("grip_markers 0\ngrab_radius_cm 23\ngrip_lock 1\nvisible 0 0\np 0 4\n");
     LoadSettings();CHECK(!BodyFrameEnabled());CHECK(!gGripMarkersEnabled);CHECK(gGrabRadiusCm==23);CHECK(gGripLockEnabled);CHECK(gPointState[0]==1);
-    CHECK(gBodyReachIdleMs==1200&&gBodyReachMotionCm==3);
     SetBodyFrameEnabled(true);CHECK(BodyFrameEnabled());
     gBodyFrameEnabled=false;LoadSettings();CHECK(BodyFrameEnabled());CHECK(gPointState[0]==1&&gGrabRadiusCm==23);
     SetBodyFrameEnabled(false);gBodyFrameEnabled=true;LoadSettings();CHECK(!BodyFrameEnabled());
@@ -315,3 +312,124 @@ int main(){
 generated=OUT/'settings.cpp'
 generated.write_text(settings_prefix+settings_production+settings_tests,encoding='utf8')
 compile_run(generated,'holster-settings')
+
+# Exercise the production proximity/timer wiring and both production button
+# latch loops. Rendering/inventory/hand poses are mocked; timer and torso are real.
+reach_begin = physical.index('    // Test reach against last tick\'s socket')
+reach_end = physical.index('    float anchors[holster::POINT_COUNT][3]{};', reach_begin)
+reach = physical[reach_begin:reach_end]
+trigger_begin = physical.index('    const bool radialUsable =', reach_end)
+trigger_end = physical.index('    unsigned int radialHandledHands = 0;', trigger_begin)
+trigger_latches = physical[trigger_begin:trigger_end]
+grip_latches = function('for (int hand = 0; hand < kHandCount; ++hand) {\n        if (interactionsBlocked)')
+reach_prefix = r'''
+#include "HolsterBody.h"
+#include "RadialHolsterMenu.h"
+#include <cstdio>
+#include <cstdlib>
+using namespace savr;
+#define CHECK(x) do {if(!(x)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
+struct V3 {float x{},y{},z{};};
+struct Hand {bool valid{true};V3 pos;float grip{},trigger{};} gHands[2];
+V3 GripPosition(const Hand& h){return h.pos;}
+float Distance(V3 a,V3 b){return std::sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z));}
+constexpr int kHandCount=2;
+'''+constants+'\n'+next(line for line in physical.splitlines() if line.startswith('constexpr float kGripBlockedLatch '))+r'''
+holsterbody::ReachIntent gReachIntent[2];holsterbody::Body body;
+radialholster::Menu gRadialMenus[2];
+int gHeldSlot[2]{-1,-1},slots[2]{2,4};
+bool gGripLatched[2]{},gRadialTriggerLatched[2]{};
+bool interactionsBlocked{},inVehicle{},vehicleImmersive{},headValid=true,bodyEnabled=true,ground=true,focused=true;
+bool grabbable[2]{true,true},support[2]{};
+unsigned doorHands{},basketballHands{};
+struct {bool grabbed[2]{},ignitionGrabbed[2]{},radioGrabbed[2]{};}seatWheel;
+float headPosition[3]{},headOrientation[4]{0,0,0,1};std::uint64_t trackingEpoch=1;
+bool ValidSlot(int s){return s>=0&&s<26;}
+bool IsSupportHandLocked(int h){return support[h];}
+namespace savr::holster {
+int PointCount(){return 2;}int PointSlot(int p){return slots[p];}
+bool PointGrabbable(int p){return grabbable[p];}bool BodyFrameEnabled(){return bodyEnabled;}
+float GrabRadiusMetres(){return .18f;}
+}
+namespace savr::basketball {unsigned HeldHandMask(){return basketballHands;}}
+namespace savr::xr {bool IsSessionFocused(){return focused;}}
+namespace savr::vrcam {
+bool GroundWalkControlsActive(){return ground;}
+bool GetHolsterAnchorTracking(int p,float out[3]){
+    if(!body.valid)return false;
+    const auto socket=holsterbody::Socket(body.position,body.yaw,p==0?-.27f:.27f,-.58f,.07f);
+    out[0]=socket.x;out[1]=socket.y;out[2]=socket.z;return true;
+}
+void UpdateHolsterBodyTracking(const float*,const float*,bool valid,std::uint64_t epoch,
+                               bool allowed,bool inner,bool outer,double now){
+    body.Update({},holsterbody::Radians(90),valid,true,allowed&&bodyEnabled,epoch,0,inner,outer,now);
+}
+}
+int frame;
+void Tick(int tick){const double now=tick/100.0;
+'''
+reach_tests = r'''
+}
+void Through(int tick){while(frame<tick)Tick(++frame);}
+void Reset(){
+ body={};body.Update({},0,true,true,true,1,0,false,false,0);frame=-1;
+ interactionsBlocked=inVehicle=vehicleImmersive=false;headValid=bodyEnabled=ground=focused=true;
+ doorHands=basketballHands=0;slots[0]=2;slots[1]=4;seatWheel={};
+ for(int h=0;h<2;++h){
+  gReachIntent[h]={};gRadialMenus[h]={};gHeldSlot[h]=-1;
+  gGripLatched[h]=gRadialTriggerLatched[h]=false;grabbable[h]=true;support[h]=false;
+  gHands[h]={};gHands[h].pos={10,0,0};
+ }
+ gHands[0].pos={-.27f,-.58f,-.07f};
+}
+int main(){
+ // Filled and empty sockets both start a five-second pause.
+ for(int slot : {2,-1}){
+  Reset();slots[0]=slot;Through(499);CHECK(body.frozen);
+  Through(500);CHECK(!body.frozen&&body.yaw>0&&body.yaw<holsterbody::Radians(1));
+ }
+ // Each press/release edge refreshes; a held button never refreshes each tick.
+ for(int action=0;action<4;++action){
+  Reset();const bool trigger=action>=2,releasing=action%2;
+  (trigger?gHands[0].trigger:gHands[0].grip)=releasing?.9f:0.f;
+  (trigger?gRadialTriggerLatched[0]:gGripLatched[0])=releasing;
+  Through(399);(trigger?gHands[0].trigger:gHands[0].grip)=releasing?0.f:.9f;
+  Through(899);CHECK(body.frozen);Through(900);CHECK(!body.frozen);
+ }
+ // Edges remain usable after expiry, and later edges replace the deadline.
+ Reset();Through(510);CHECK(!body.frozen);gHands[0].grip=.9f;Through(511);CHECK(body.frozen);
+ Through(700);gHands[0].trigger=.9f;Through(701);
+ Through(1200);CHECK(body.frozen);Through(1201);CHECK(!body.frozen);
+ // Releasing the trigger in an open wheel away from the belt is interaction.
+ Reset();Through(400);gRadialMenus[0].open=true;gHands[0].trigger=.9f;Through(401);
+ gHands[0].pos={10,0,0};Through(800);gHands[0].trigger=0;Through(801);
+ Through(1300);CHECK(body.frozen);Through(1301);CHECK(!body.frozen);
+ // Moving away keeps the original deadline; unrelated buttons do not extend it.
+ Reset();Through(100);gHands[0].pos={10,0,0};Through(399);gHands[0].trigger=.9f;
+ Through(500);CHECK(!body.frozen);
+ // A second hand has its own deadline; expiring the first cannot release it.
+ Reset();Through(300);gHands[1].pos={.27f,-.58f,-.07f};Through(301);
+ Through(800);CHECK(body.frozen);Through(801);CHECK(!body.frozen);
+ // Ineligible hands/points cannot pause the belt.
+ for(int reason=0;reason<8;++reason){
+  Reset();
+  if(reason==0)grabbable[0]=false;
+  if(reason==1)support[0]=true;
+  if(reason==2)doorHands=1;
+  if(reason==3)basketballHands=1;
+  if(reason==4)gHands[0].valid=false;
+  if(reason==5)bodyEnabled=false;
+  if(reason==6)inVehicle=true;
+  if(reason==7)focused=false;
+  Through(0);CHECK(!body.frozen);
+ }
+ // Tracking/recenter invalidation discards a deadline, as does leaving BODY.
+ Reset();Through(400);gReachIntent[0].Invalidate();gHands[0].pos={10,0,0};
+ Through(401);CHECK(!body.frozen);
+ Reset();Through(400);bodyEnabled=false;Through(401);CHECK(!body.frozen);
+ std::puts("PASS: production reach/button wiring, five-second deadline, all button edges, hold, empty sockets, wheel, two hands, unrelated actions and gates");
+}
+'''
+generated=OUT/'reach.cpp'
+generated.write_text(reach_prefix+reach+trigger_latches+grip_latches+reach_tests,encoding='utf8')
+compile_run(generated,'holster-reach')

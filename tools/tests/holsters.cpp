@@ -18,35 +18,44 @@ static float Follow(int rate,float target) {
     return b.yaw;
 }
 int main() {
-    // A resting hand stops suppressing yaw. Socket motion alone cannot re-arm it.
+    // Five seconds from entry, independent of hand motion or departure.
     ReachIntent intent;
-    for (int i=0; i<90; ++i)
-        CHECK(intent.Update({0,1,0},true,true,false,i/90.0,1.2f,0.03f));
-    for (int i=90; i<=120; ++i)
-        intent.Update({0,1,0},true,true,false,i/90.0,1.2f,0.03f);
-    CHECK(intent.idle);
-    for(int i=121;i<=180;++i)
-        CHECK(!intent.Update({0,1,0},true,(i%2)==0,false,i/90.0,1.2f,0.03f));
-    CHECK(!intent.Update({0.01f,1,0},true,true,false,2.01,1.2f,0.03f)); // small jitter
-    CHECK(intent.Update({0.04f,1,0},true,true,false,2.02,1.2f,0.03f)); // a real reach
-    for(int i=1;i<=120;++i) intent.Update({0.04f,1,0},true,true,false,2.02+i/90.0,1.2f,0.03f);
-    CHECK(intent.idle);
-    CHECK(intent.Update({0.04f,1,0},true,true,true,3.36,1.2f,0.03f)); // squeeze/release action
-    ReachIntent otherHand;
-    CHECK(otherHand.Update({0,1,0},true,true,false,0,0,0.03f));
-    for(int i=1;i<=900;++i) CHECK(otherHand.Update({0,1,0},true,true,false,i/90.0,0,0.03f));
-    CHECK(!otherHand.idle); // zero opts out, even after ten seconds
-    CHECK(!intent.Update({},false,true,false,3.37,1.2f,0.03f));CHECK(!intent.valid);
-    // Feed the production reach intent into the production torso algorithm.
-    Body idleBody; ReachIntent idleHand;
-    idleBody.Update({},0,true,true,true,1,0,false,false,0);
-    for(int i=1;i<=270;++i) {
-        const double t=i/90.0;
-        const bool protect=idleHand.Update({},true,true,false,t,1.2f,0.03f);
-        idleBody.Update({},Radians(90),true,true,true,1,0,protect,protect,t);
-        if(t<1.2) Close(idleBody.yaw,0);
+    for (int i=0; i<=2700; ++i) {
+        const Vec p{0.04f*std::sin(float(i)/90*kPi),1,0};
+        CHECK(intent.Update(p,true,true,true,false,i/90.0)==(i<450));
     }
-    CHECK(idleBody.yaw>Radians(70) && !idleBody.frozen);
+    // A socket moving out and back cannot restart a stationary hand's timer.
+    intent={};
+    for(int i=0;i<=900;++i)
+        CHECK(intent.Update({},true,(i%2)==0,(i%2)==0,false,i/90.0)==(i<450));
+    // A real departure arms another approach, without shortening the old pause.
+    CHECK(!intent.Update({0,0.4f,0},true,false,false,false,10.01));
+    CHECK(intent.Update({},true,true,true,false,10.02));
+    // Unrelated button actions away from a socket cannot extend a pause.
+    for(int i=1;i<=500;++i)
+        CHECK(intent.Update({0,0.4f,0},true,false,false,true,10.02+i/90.0)==(i<450));
+    CHECK(!intent.Update({},false,true,true,true,15.59));CHECK(!intent.valid);
+    CHECK(!intent.Update({std::numeric_limits<float>::quiet_NaN(),0,0},true,true,true,true,15.6));
+    CHECK(!intent.Update({},true,false,false,false,16));
+    CHECK(!intent.Update({},true,false,false,false,15)); // clock rewind resets
+    CHECK(!intent.Update({},true,false,false,false,std::numeric_limits<double>::infinity()));
+
+    // Production timer + torso: exact deadline, button refresh and smooth yaw
+    // at different input rates. Both hands contribute independent deadlines.
+    for (int rate : {36,72,90}) {
+        Body idleBody; ReachIntent idleHand,otherHand;
+        idleBody.Update({},0,true,true,true,1,0,false,false,0);
+        for(int i=0;i<=rate*12;++i) {
+            const double t=double(i)/rate;
+            const bool protect=idleHand.Update({},true,true,true,i==rate*4,t);
+            const bool other=otherHand.Update({},true,t>=6,t>=6,false,t);
+            idleBody.Update({},Radians(90),true,true,true,1,0,protect||other,protect||other,t);
+            CHECK(idleBody.frozen==(t<11));
+            if(t<11) Close(idleBody.yaw,0);
+            else CHECK(idleBody.yaw<=Radians(90)*float(t-11+1.0/rate)+0.001f);
+        }
+        CHECK(idleBody.yaw>Radians(70));
+    }
     Body b; Sample(b,0,0);
     for(int i=1;i<=180;++i) Sample(b,Radians(15),i/90.0);
     Close(b.yaw,0); // an ordinary look does not turn the torso
@@ -75,9 +84,9 @@ int main() {
     Close(b.yaw,0);CHECK(b.frozen);
     b.Update({2,1,3},Radians(90),true,true,true,1,0,false,true,1.01);
     CHECK(b.frozen);Close(b.position.x,2);Close(b.position.y,1);
-    for(int i=1;i<=10;++i) Sample(b,Radians(90),1.01+i/90.0,false,false);
-    CHECK(b.frozen);Close(b.yaw,0);
-    for(int i=11;i<=45;++i) Sample(b,Radians(90),1.01+i/90.0,false,false);
+    Sample(b,Radians(90),1.02,false,false);
+    CHECK(!b.frozen && b.yaw>0); // no extra exit delay after the deadline
+    for(int i=1;i<=45;++i) Sample(b,Radians(90),1.02+i/90.0,false,false);
     CHECK(!b.frozen && b.yaw>0);
     // Tracking gaps, epoch changes, recenter and mode changes initialise once.
     Sample(b,Radians(-90),5);Close(b.yaw,Radians(-90));

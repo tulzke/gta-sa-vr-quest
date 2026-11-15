@@ -1015,7 +1015,6 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     bool nearInner = interactionsBlocked, nearOuter = interactionsBlocked;
     bool handNearInner[kHandCount]{}, handNearOuter[kHandCount]{};
     const bool bodyAllowed = !inVehicle && vrcam::GroundWalkControlsActive();
-    const std::uint32_t previousOccupied = OccupiedSlotMaskLocked();
     for (int point=0; point<holster::PointCount(); ++point) {
         float previous[3]{};
         if (!vrcam::GetHolsterAnchorTracking(point, previous)) continue;
@@ -1024,9 +1023,9 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             if (!gHands[hand].valid || IsSupportHandLocked(hand) ||
                 (vehicleImmersive && (seatWheel.grabbed[hand] || seatWheel.ignitionGrabbed[hand] || seatWheel.radioGrabbed[hand]))) continue;
             const bool returning = ValidSlot(gHeldSlot[hand]) && gHeldSlot[hand] == slot;
-            const bool drawing = !ValidSlot(gHeldSlot[hand]) && holster::PointGrabbable(point) &&
-                OwnedConfiguredSlot(ped, slot) && (previousOccupied & (1u << slot)) == 0;
-            if (!returning && !drawing) continue;
+            // Empty sockets also accept the trigger-driven loadout wheel.
+            const bool configuring = !ValidSlot(gHeldSlot[hand]) && holster::PointGrabbable(point);
+            if (!returning && !configuring) continue;
             const float reach = returning ? kHolsterReturnRadius : holster::GrabRadiusMetres();
             const float distance = Distance(GripPosition(gHands[hand]), {previous[0],previous[1],previous[2]});
             handNearInner[hand] |= distance <= reach + 0.08f;
@@ -1035,15 +1034,18 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     }
     for (int hand=0; hand<kHandCount; ++hand) {
         const bool usable = headValid && gHands[hand].valid && bodyAllowed &&
-            holster::BodyFrameEnabled() && !interactionsBlocked && !IsSupportHandLocked(hand);
+            holster::BodyFrameEnabled() && xr::IsSessionFocused() && !interactionsBlocked && !IsSupportHandLocked(hand) &&
+            !((doorHands | basketball::HeldHandMask()) & (1u << hand));
         const bool gripAction = (gHands[hand].grip >= kGripClose && !gGripLatched[hand]) ||
                                 (gHands[hand].grip <= kGripOpen && gGripLatched[hand]);
+        const bool triggerAction = (gHands[hand].trigger >= radialholster::kTriggerPress && !gRadialTriggerLatched[hand]) ||
+                                   (gHands[hand].trigger <= radialholster::kTriggerRelease && gRadialTriggerLatched[hand]);
         const V3 p = GripPosition(gHands[hand]);
         const bool protect = gReachIntent[hand].Update({p.x,p.y,p.z}, usable,
-            handNearOuter[hand], gripAction, now,
-            holster::BodyReachIdleSeconds(), holster::BodyReachMotionMetres());
-        nearInner |= protect && handNearInner[hand];
-        nearOuter |= protect && handNearOuter[hand];
+            handNearInner[hand], handNearOuter[hand] || gRadialMenus[hand].open,
+            gripAction || triggerAction, now);
+        nearInner |= protect;
+        nearOuter |= protect;
     }
     vrcam::UpdateHolsterBodyTracking(headPosition, headOrientation, headValid, trackingEpoch,
         bodyAllowed, nearInner, nearOuter, now);

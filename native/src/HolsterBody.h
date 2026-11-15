@@ -17,28 +17,30 @@ inline Vec Socket(Vec position, float yaw, float lateral, float vertical, float 
 }
 
 struct ReachIntent {
-    Vec motionOrigin{};
-    double lastMotion{}, lastSample{};
-    bool valid{}, idle{};
+    static constexpr double kPauseSeconds = 5.0;
+    Vec entryHand{};
+    double lastInteraction{}, lastSample{};
+    bool valid{}, active{}, armed{true};
 
-    void Invalidate() { valid = idle = false; }
+    void Invalidate() { valid = active = false; armed = true; }
 
-    // Observe actual controller movement, never socket movement. Once idle, a
-    // hand stays idle even if a turning socket leaves and re-enters its reach.
-    bool Update(Vec hand, bool usable, bool near, bool gripAction, double now,
-                float idleSeconds, float motionMetres) {
+    // A reach starts one five-second pause; only a button edge refreshes it.
+    // Movement can arm a new approach after leaving the outer zone, but never
+    // extends a pause. Socket motion past a stationary hand cannot re-arm it.
+    bool Update(Vec hand, bool usable, bool nearInner, bool nearOuter,
+                bool interaction, double now) {
         if (!usable || !Finite(hand) || !std::isfinite(now)) { Invalidate(); return false; }
         if (!valid || now < lastSample || now - lastSample > 0.25) {
-            valid = true; idle = false; motionOrigin = hand; lastMotion = now;
+            Invalidate(); valid = true;
         }
         lastSample = now;
-        const float dx = hand.x - motionOrigin.x, dy = hand.y - motionOrigin.y, dz = hand.z - motionOrigin.z;
-        if (gripAction || dx*dx + dy*dy + dz*dz >= motionMetres*motionMetres) {
-            motionOrigin = hand; lastMotion = now; idle = false;
+        const float dx = hand.x - entryHand.x, dy = hand.y - entryHand.y, dz = hand.z - entryHand.z;
+        if (!nearOuter && dx*dx + dy*dy + dz*dz >= 0.03f*0.03f) armed = true;
+        if ((nearInner && armed) || (nearOuter && interaction)) {
+            entryHand = hand; lastInteraction = now; active = true; armed = false;
         }
-        if (idleSeconds <= 0) { idle = false; return true; }
-        if (near && now - lastMotion >= idleSeconds) idle = true;
-        return !idle;
+        if (active && now - lastInteraction >= kPauseSeconds) active = false;
+        return active;
     }
 };
 
@@ -48,11 +50,11 @@ struct Body {
     Vec position{};
     float yaw{};
     bool valid{}, following{}, frozen{}, bodyMode{};
-    double lastTime{}, dwell{}, exitTime{};
+    double lastTime{}, dwell{};
     int dwellSide{};
     std::uint64_t epoch{}, resetSerial{}, frame{};
 
-    void Invalidate() { valid = false; following = frozen = false; dwell = exitTime = 0; dwellSide = 0; }
+    void Invalidate() { valid = false; following = frozen = false; dwell = 0; dwellSide = 0; }
 
     void Update(Vec targetPosition, float targetYaw, bool usable, bool yawReliable,
                 bool useBody, std::uint64_t trackingEpoch, std::uint64_t reset,
@@ -73,11 +75,8 @@ struct Body {
             yaw = Wrap(targetYaw); valid = true;
         }
         if (!useBody) { yaw = Wrap(targetYaw); frozen = following = false; return; }
-        if (nearInner) { frozen = true; exitTime = 0; }
-        else if (frozen) {
-            exitTime = nearOuter ? 0.0 : exitTime + dt;
-            if (exitTime >= 0.2) { frozen = false; exitTime = 0; }
-        }
+        // The caller owns the pause deadline; do not add an exit delay to it.
+        frozen = nearInner || (frozen && nearOuter);
         if (frozen || !yawReliable || restart) {
             following = false; dwell = 0; dwellSide = 0; return;
         }
