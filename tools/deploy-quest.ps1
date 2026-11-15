@@ -11,6 +11,7 @@ param(
     [switch]$BuildOnly,
     [switch]$NoBackup,
     [switch]$Developer,
+    [switch]$Audio48k,
     [switch]$Full
 )
 $ErrorActionPreference = 'Stop'
@@ -56,6 +57,9 @@ function Backup-UserFiles {
 }
 
 try {
+    if ($Full -and $Audio48k) {
+        throw '-Audio48k is an incremental test-build option; do not combine it with -Full.'
+    }
     if ($Full) {
         # Explicit full mode uses the established validating builder/installer.
         if (!$GamePackage) { $GamePackage = Join-Path $SeedBuild 'out' }
@@ -110,7 +114,7 @@ try {
         $env:TEMP=$temp; $env:TMP=$temp
         Write-Host 'Building code and loader...'
         & (Join-Path $PSScriptRoot 'build.ps1') -AndroidSdk $cfg.AndroidSdk -JavaHome $cfg.JavaHome `
-            -OpenXrLoader $cfg.OpenXrLoader -BuildRoot $BuildRoot -Developer:$Developer *> $log
+            -OpenXrLoader $cfg.OpenXrLoader -BuildRoot $BuildRoot -Developer:$Developer -Audio48k:$Audio48k *> $log
     } finally { $env:TEMP=$oldTemp; $env:TMP=$oldTmp }
 
     # Reuse the installed-compatible manifests/engine. Rewrite only our code;

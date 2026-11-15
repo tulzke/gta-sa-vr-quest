@@ -3,11 +3,52 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import re
+import struct
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/audio-diagnostics-tests'
 OUT.mkdir(parents=True, exist_ok=True)
 source = (ROOT / 'native/src/AudioDiagnostics.cpp').read_text(encoding='utf8')
+
+# Check the guard against the actual retail engine used for local deployment.
+# This catches version/offset errors independently of the host AL mocks below.
+apk = ROOT / 'build/quest-deploy/template/split_config.arm64_v8a.apk'
+if apk.exists():
+    with zipfile.ZipFile(apk) as z:
+        elf = z.read('lib/arm64-v8a/libGame.so')
+    assert elf[:6] == b'\x7fELF\x02\x01', 'Expected little-endian ELF64'
+    shoff = struct.unpack_from('<Q', elf, 40)[0]
+    shsize, shnum = struct.unpack_from('<HH', elf, 58)
+    sections = [struct.unpack_from('<IIQQQQIIQQ', elf, shoff+i*shsize) for i in range(shnum)]
+    symbol = b'_ZN16CAEAudioHardware18InitOpenALListenerEv'
+    function = None
+    for section in sections:
+        if section[1] != 11:  # SHT_DYNSYM
+            continue
+        names_section = sections[section[6]]
+        names = elf[names_section[4]:names_section[4]+names_section[5]]
+        for off in range(section[4], section[4]+section[5], section[9]):
+            name, _, _, _, value, _ = struct.unpack_from('<IBBHQQ', elf, off)
+            if names[name:].split(b'\0', 1)[0] == symbol:
+                function = value
+    assert function is not None, 'Retail audio initializer missing'
+    phoff = struct.unpack_from('<Q', elf, 32)[0]
+    phsize, phnum = struct.unpack_from('<HH', elf, 54)
+    address = function + 0x24
+    offset = None
+    for i in range(phnum):
+        kind, _, start, vaddr, _, size, _, _ = struct.unpack_from('<IIQQQQQQ', elf, phoff+i*phsize)
+        if kind == 1 and vaddr <= address and address+16 <= vaddr+size:
+            offset = start + address-vaddr
+    assert offset is not None
+    header = (ROOT/'native/src/AudioOutputRate.h').read_text(encoding='utf8')
+    guard = re.search(r'kRetailAttributes\{([^}]+)', header).group(1)
+    expected = tuple(int(x, 16) for x in re.findall(r'0x([0-9a-f]+)u', guard))
+    assert struct.unpack_from('<4I', elf, offset) == expected, 'Retail context attribute fingerprint mismatch'
+    assert (expected[1] >> 5) & 0xffff == 22050
+    print('Retail ELF: symbol, context attribute fingerprint and original 22050 Hz verified')
 
 def replace_function(text, signature, replacement):
     start = text.index(signature)
@@ -38,6 +79,7 @@ int CaptureClose(FILE* file) {
 }
 namespace std { int CaptureClose(FILE* f) { return ::CaptureClose(f); } }
 #define fclose CaptureClose
+#define LOGE(...) ((void)0)
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::exit(1); } } while (false)
 '''
 tests = r'''
@@ -63,10 +105,24 @@ void SourceFloat(unsigned id, int param, float* out) {
 }
 void BufferInt(unsigned, int param, int* out) { *out = param == 0x2001 ? 44100 : 16; }
 int main() {
+    using namespace savr::audiodiag::outputrate;
+    CHECK(!Matches(nullptr));
+    auto words = kRetailAttributes;
+    CHECK(Matches(words.data()));
+    for (unsigned i = 0; i < words.size(); ++i) {
+        words = kRetailAttributes; words[i] ^= 1;
+        CHECK(!Matches(words.data()));
+    }
+    CHECK(((k48kInstruction >> 5) & 0xffff) == 48000);
+    CHECK((k48kInstruction & ~0x1fffe0u) == (kRetailAttributes[1] & ~0x1fffe0u));
+    PrepareGameAudio(nullptr);
+    CHECK(output.find("OUTPUT_RATE requested=22050 patch=0 rx_restored=1 status=stock") != std::string::npos);
+    output.clear();
     api = {Context, Device, DeviceInt, String, Listener, IsSource, SourceInt, SourceFloat, BufferInt, true};
     Tick(true, true, false, false);
     CHECK(queries == 1024);
     CHECK(output.find("frequency=22050") != std::string::npos);
+    CHECK(output.find("requested_hz=22050 rate_patch=0 rx_restored=1 rate_match=1") != std::string::npos);
     CHECK(output.find("sources=2 playing=1 stopped=1 streaming=1 drained=1 nonfinite=1") != std::string::npos);
     CHECK(output.find("queued=3 processed=3") != std::string::npos);
     CHECK(output.find("hz=44100") != std::string::npos);

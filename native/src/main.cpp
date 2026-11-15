@@ -2611,6 +2611,7 @@ void* WaitForGameLibrary(void*) {
     if (!ResolveGameSymbols(handle)) {
         return nullptr;
     }
+    audiodiag::PrepareGameAudio(handle);
     const std::uintptr_t drawOffset = g.LoadBase
         ? reinterpret_cast<std::uintptr_t>(g.implOnDrawFrame) - g.LoadBase : 0u;
     const bool knownRetail211 = drawOffset == 0x7d28d4u;

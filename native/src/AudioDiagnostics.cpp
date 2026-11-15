@@ -1,6 +1,9 @@
 #include "AudioDiagnostics.h"
+#include "AudioOutputRate.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -8,6 +11,9 @@
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef SAVR_EXPERIMENTAL_AUDIO_48KHZ
+#include <sys/mman.h>
+#endif
 
 #include "Log.h"
 
@@ -33,6 +39,8 @@ struct Api {
 double lastFrame{}, lastSample{}, maxGap{};
 unsigned frames{}, gaps{};
 bool configured{};
+std::atomic<bool> outputRatePatched{false};
+std::atomic<bool> outputRateRxRestored{true};
 
 double Now() {
     timespec ts{};
@@ -87,6 +95,57 @@ void Configure() {
     }
 }
 
+void PrepareGameAudio(void* gameHandle) {
+    const char* status = "stock";
+    int failure = 0;
+#ifdef SAVR_EXPERIMENTAL_AUDIO_48KHZ
+    status = "symbol_missing";
+    auto* init = static_cast<std::uint8_t*>(
+        dlsym(gameHandle, "_ZN16CAEAudioHardware18InitOpenALListenerEv"));
+    if (init) {
+        auto* words = reinterpret_cast<std::uint32_t*>(init + outputrate::kAttributeOffset);
+        status = "fingerprint_mismatch";
+        if (outputrate::Matches(words)) {
+            // Do not claim to change an already running context. Installation
+            // normally happens before the game's JNI/frame entry points bind.
+            const bool resolved = Resolve();
+            status = resolved ? "context_already_running" : "api_unavailable";
+            if (resolved && !api.context()) {
+                const long page = sysconf(_SC_PAGESIZE);
+                status = "invalid_page_size";
+                if (page > 0) {
+                    auto* instruction = words + 1;
+                    const auto address = reinterpret_cast<std::uintptr_t>(instruction);
+                    const auto start = address & ~(static_cast<std::uintptr_t>(page) - 1);
+                    status = "write_protection_failed";
+                    if (!mprotect(reinterpret_cast<void*>(start), page,
+                                  PROT_READ | PROT_WRITE | PROT_EXEC)) {
+                        __atomic_store_n(instruction, outputrate::k48kInstruction, __ATOMIC_RELEASE);
+                        __builtin___clear_cache(reinterpret_cast<char*>(instruction),
+                                                reinterpret_cast<char*>(instruction + 1));
+                        outputRatePatched.store(true);
+                        const bool restored = !mprotect(reinterpret_cast<void*>(start), page,
+                                                        PROT_READ | PROT_EXEC);
+                        outputRateRxRestored.store(restored);
+                        status = restored ? "patched" : "patched_rx_restore_failed";
+                        if (!restored) failure = errno;
+                    } else failure = errno;
+                }
+            }
+        }
+    }
+#else
+    (void)gameHandle;
+#endif
+    if (FILE* log = Open()) {
+        std::fprintf(log, "OUTPUT_RATE requested=%d patch=%d rx_restored=%d status=%s errno=%d\n",
+            outputrate::kRequestedHz, outputRatePatched.load(), outputRateRxRestored.load(), status, failure);
+        std::fclose(log);
+    }
+    if (outputrate::kRequestedHz == 48000 && (!outputRatePatched.load() || !outputRateRxRestored.load()))
+        LOGE("[audio.rate] requested=48000 status=%s errno=%d", status, failure);
+}
+
 void Tick(bool focused, bool stereo, bool menu, bool paused) {
     const double now = Now();
     if (lastFrame) {
@@ -119,8 +178,9 @@ void Tick(bool focused, bool stereo, bool menu, bool paused) {
     api.deviceInt(dev, 0x1009, 1, &sync);      // ALC_SYNC
     float listenerGain{};
     api.listener(0x100a, &listenerGain);       // AL_GAIN
-    std::fprintf(log, "context=%p device=%p frequency=%d refresh=%d sync=%d listener_gain=%.5g\n",
-        ctx, dev, frequency, refresh, sync, listenerGain);
+    std::fprintf(log, "context=%p device=%p frequency=%d refresh=%d sync=%d listener_gain=%.5g requested_hz=%d rate_patch=%d rx_restored=%d rate_match=%d\n",
+        ctx, dev, frequency, refresh, sync, listenerGain, outputrate::kRequestedHz,
+        outputRatePatched.load(), outputRateRxRestored.load(), frequency == outputrate::kRequestedHz);
     static void* describedContext{};
     if (describedContext != ctx) {
         describedContext = ctx;
