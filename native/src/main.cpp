@@ -1,5 +1,6 @@
 #include "WeaponCalibrationMenu.h"
 #include "ArcadeReload.h"
+#include "WatchLayout.h"
 #include "VehicleEntry.h"
 #include "Tbone.h"
 #include "BeachDance.h"
@@ -968,9 +969,16 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         std::memcpy(&watchArmour, static_cast<const char*>(watchPed) + 0x6b4, sizeof(float));
     }
     int watchMoney=-1;
-    if (watchPed && g.CWorld_Players && g.CWorld_PlayerInFocus && *g.CWorld_PlayerInFocus<2)
-        std::memcpy(&watchMoney,static_cast<const char*>(g.CWorld_Players)+
-                    *g.CWorld_PlayerInFocus*0x1d8+0xf0,sizeof(watchMoney));
+    if (watchPed && g.CWorld_Players && g.CWorld_PlayerInFocus && *g.CWorld_PlayerInFocus<2) {
+        const auto* info=static_cast<const unsigned char*>(g.CWorld_Players)+*g.CWorld_PlayerInFocus*0x1d8;
+        void* infoPed=nullptr;std::memcpy(&infoPed,info,sizeof(infoPed));
+        if(infoPed==watchPed) {
+            std::memcpy(&watchMoney,info+0xf0,sizeof(watchMoney));
+            // Retail health/armour HUD reads current maxima at these offsets.
+            watchHealth=savr::watchhud::Fraction(watchHealth,info[0x18b]);
+            watchArmour=savr::watchhud::Fraction(watchArmour,info[0x18c]);
+        } else watchHealth=watchArmour=-1;
+    } else watchHealth=watchArmour=-1;
     xr::PublishWatch(clockHours && watchPed ? *clockHours : -1,
                      clockMinutes && watchPed ? *clockMinutes : -1,
                      watchHealth, watchArmour, watchMoney);
@@ -1751,6 +1759,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::hud::ToggleDeviceHand(element);
             } else if (hudWristSel==8&&(step||enter) && element==savr::hud::RADAR) {
                 savr::hud::TogglePdaPortrait();
+            } else if (hudWristSel==8&&(step||enter) && element==savr::hud::WATCH) {
+                savr::hud::ToggleWatchInside();
             } else if (hudWristSel==9&&enter) {
                 menuPage=PG_HUD;
             }

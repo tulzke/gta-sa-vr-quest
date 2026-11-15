@@ -59,7 +59,17 @@ set(RADIO_KNOB_RGBA "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/knob.rg
 configure_file(src/RadioAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" @ONLY)
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" PROPERTY OBJECT_DEPENDS "${RADIO_BASE_MESH};${RADIO_KNOB_MESH};${RADIO_BASE_RGBA};${RADIO_KNOB_RGBA}")
 
+set(WATCH_GLB "${CMAKE_CURRENT_SOURCE_DIR}/../assets/watches/watches.glb")
+set(WATCH_ATTRIBUTION "${CMAKE_CURRENT_SOURCE_DIR}/../assets/watches/ATTRIBUTION.md")
+file(READ "${WATCH_GLB}" WATCH_MAGIC LIMIT 4 HEX)
+if(NOT WATCH_MAGIC STREQUAL "676c5446")
+    message(FATAL_ERROR "Missing watch GLB data; run git lfs pull")
+endif()
+configure_file(src/WatchAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S" @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S" PROPERTY OBJECT_DEPENDS "${WATCH_GLB};${WATCH_ATTRIBUTION}")
+
 add_library(savr SHARED
+    "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/NpcHintSprites.S"
     "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S"
     src/main.cpp
@@ -76,6 +86,7 @@ add_library(savr SHARED
     src/WeaponRecoil.cpp
     src/Xr.cpp
     src/HandSkeleton.cpp
+    src/WatchModel.cpp
     src/Cheats.cpp
     src/HudSettings.cpp
     src/Hydraulics.cpp

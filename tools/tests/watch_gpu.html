@@ -1,0 +1,57 @@
+<!doctype html><meta charset="utf-8">
+<style>body{margin:12px;background:#202832;color:#eee;font:15px sans-serif}canvas{display:block}pre{white-space:pre-wrap}</style>
+<pre id="result">RUNNING</pre><canvas id="canvas" width="1050" height="730"></canvas>
+<script>
+const vertexSource=__VS__,fragmentSource=__FS__,positions=__POINTS__,uvs=__UV__,indices=__INDICES__;
+try {
+ const gl=canvas.getContext('webgl2',{preserveDrawingBuffer:true,antialias:false});if(!gl)throw Error('WebGL2 unavailable');
+ function shader(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;}
+ const program=gl.createProgram();gl.attachShader(program,shader(gl.VERTEX_SHADER,vertexSource));gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fragmentSource));gl.linkProgram(program);
+ if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));gl.useProgram(program);
+ const location=n=>gl.getUniformLocation(program,n),identity=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
+ const vertices=[];for(let i=0;i<uvs.length/2;i++)vertices.push(uvs[i*2]*2-1,0,uvs[i*2+1]*2-1,0,1,0,uvs[i*2],uvs[i*2+1]);
+ const vao=gl.createVertexArray();gl.bindVertexArray(vao);const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW);
+ for(let i=0;i<3;i++)gl.enableVertexAttribArray(i);gl.vertexAttribPointer(0,3,gl.FLOAT,false,32,0);gl.vertexAttribPointer(1,3,gl.FLOAT,false,32,12);gl.vertexAttribPointer(2,2,gl.FLOAT,false,32,24);
+ const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
+ for(let unit=0;unit<3;unit++){
+  gl.activeTexture(gl.TEXTURE0+unit);const texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,texture);
+  const rgba=new Uint8Array(64*64*4);for(let y=0;y<64;y++)for(let x=0;x<64;x++){const i=(y*64+x)*4,road=x%13<2||y%13<2;rgba.set(road?[115,140,111,255]:[30,90,43,255],i);}
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,64,64,0,gl.RGBA,gl.UNSIGNED_BYTE,rgba);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+ }
+ gl.uniform1i(location('uColor'),0);gl.uniform1i(location('uMetal'),1);gl.uniform1i(location('uMap'),2);
+ gl.uniform1i(location('uDisplay'),1);gl.uniform1i(location('uHasMap'),1);gl.uniform1i(location('uHasColor'),0);gl.uniform1i(location('uHasMetal'),0);gl.uniform1i(location('uMirrorFace'),0);
+ gl.uniform1f(location('uOpacity'),1);gl.uniformMatrix4fv(location('uMVP'),false,identity);gl.uniformMatrix4fv(location('uModel'),false,identity);
+ gl.uniform4f(location('uColorFactor'),1,1,1,1);gl.uniform2f(location('uMaterial'),0,1);
+ gl.clearColor(.125,.157,.196,1);gl.clear(gl.COLOR_BUFFER_BIT);
+ const states=[[.75,.5,3,35240,0],[1,1,6,99999999,.7],[0,0,0,0,0],[-1,-1,2,-1,0],[.3,.1,1,9999999,2.1],[.5,.75,4,12345678,4.2]];
+ const pixel=(u,v)=>{const out=new Uint8Array(4);gl.readPixels(Math.floor(u*340)+5,Math.floor((1-v)*340)+380,1,1,gl.RGBA,gl.UNSIGNED_BYTE,out);return out;};
+ for(let i=0;i<states.length;i++){
+  const s=states[i];gl.viewport((i%3)*350+5,380-Math.floor(i/3)*360,340,340);
+  gl.uniform4f(location('uWatch'),14,28,s[0],s[1]);gl.uniform1i(location('uMoney'),s[3]);gl.uniform1i(location('uWanted'),s[2]);gl.uniform1f(location('uHeading'),s[4]);gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);
+  if(i===0){
+   const health=pixel(.04,.5),armor=pixel(.96,.5),map=pixel(.48,.4),above=pixel(.48,.215),below=pixel(.48,.70);
+   if(!(health[0]>health[1]*2))throw Error('Health arc missing '+health);
+   if(!(armor[0]>100&&Math.abs(armor[0]-armor[1])<20))throw Error('Grey armour arc missing '+armor);
+   if(!(map[1]>map[0]))throw Error('Map missing '+map);
+   if(!(above[0]<20&&below[0]<20))throw Error('Map crosses straight cuts '+above+' '+below);
+  }
+ }
+ // A reflected hand basis must not mirror the time, money or map texture.
+ const drawPair=(mirror)=>{
+  gl.viewport(5,380,340,340);gl.enable(gl.SCISSOR_TEST);gl.scissor(5,380,340,340);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.SCISSOR_TEST);
+  const model=identity.slice();if(mirror)model[0]=-1;
+  gl.uniformMatrix4fv(location('uModel'),false,model);gl.uniform1i(location('uMirrorFace'),mirror);
+  gl.uniform4f(location('uWatch'),14,28,.75,.5);gl.uniform1i(location('uMoney'),35240);gl.uniform1i(location('uWanted'),3);gl.uniform1f(location('uHeading'),0);
+  gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);
+  const pixels=new Uint8Array(340*340*4);gl.readPixels(5,380,340,340,gl.RGBA,gl.UNSIGNED_BYTE,pixels);return pixels;
+ };
+ const standard=drawPair(false),mirrored=drawPair(true);
+ let differences=0;for(let i=0;i<standard.length;i++)if(Math.abs(standard[i]-mirrored[i])>2)differences++;
+ // The authored dial polygon is not perfectly symmetric at its edge.
+ if(differences>standard.length*.015)throw Error('Reflected hand mirrored the face: '+differences);
+ drawPair(false);
+ if(gl.getError()!==gl.NO_ERROR)throw Error('GL error');
+ result.textContent='PASS GPU: actual GLB dial; six HUD states; clipped map; red health / grey armour; reflected-hand readability';
+ document.title='PASS WATCH';
+} catch(error){result.textContent='FAIL '+error.stack;document.title='FAIL WATCH';}
+</script>

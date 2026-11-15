@@ -126,6 +126,8 @@ int DeviceHand(int element);
 void ToggleDeviceHand(int element);
 bool PdaPortrait();
 void TogglePdaPortrait();
+bool WatchInside();
+void ToggleWatchInside();
 
 // Single predicate for the renderer.  Keeping the master switch separate from
 // the preset matches reference Quest build and allows CLASSIC placement to stay selected while

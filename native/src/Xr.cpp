@@ -8,6 +8,9 @@
 #include "TheaterScreen.h"
 #include "HandAnimation.h"
 #include "HandSkeleton.h"
+#include "WatchModel.h"
+#include "WatchLayout.h"
+#include "WatchShaders.h"
 #include "ReloadHintHand.h"
 #include "VehicleDoors.h"
 
@@ -281,6 +284,8 @@ std::atomic<unsigned int> g_stereoEyeDepth[kStereoSets][2] = {};
 std::atomic<unsigned int> g_eyeFoveationAttemptedTex[kStereoSets][2] = {};
 std::atomic<unsigned int> g_stereoHudTex[kStereoSets] = {};
 std::atomic<unsigned int> g_stereoPdaTex[kStereoSets] = {};
+std::atomic<unsigned int> g_stereoWatchTex[kStereoSets] = {};
+watchhud::Readout g_stereoWatchReadout[kStereoSets]{};
 std::atomic<float> g_stereoPdaHeading[kStereoSets] = {};
 std::atomic<float>        g_stereoEyeNear[kStereoSets][2] = {};
 std::atomic<float>        g_stereoEyeFar[kStereoSets][2] = {};
@@ -5610,6 +5615,7 @@ void ResetStereoEyeTextures() {
             0, std::memory_order_relaxed);
         g_stereoHudTex[set].store(0, std::memory_order_relaxed);
         g_stereoPdaTex[set].store(0, std::memory_order_relaxed);
+        g_stereoWatchTex[set].store(0, std::memory_order_relaxed);
         g_stereoUnderWaterness[set].store(0.0f, std::memory_order_relaxed);
         g_stereoWaterDepth[set].store(0.0f, std::memory_order_relaxed);
         clearMobileColor[set] = true;
@@ -6234,6 +6240,7 @@ bool WaitStereoProducerFenceForCandidate(int set, int generation) {
 void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           const unsigned int* hudTex,
                           const unsigned int* pdaTex,
+                          const unsigned int* watchTex,
                           float pdaHeading,
                           const float* nearZ, const float* farZ,
                           int seq, int width, int height) {
@@ -6268,6 +6275,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     g_stereoHudTex[ws].store(hudTex ? hudTex[ws] : 0,
                               std::memory_order_relaxed);
     g_stereoPdaTex[ws].store(pdaTex ? pdaTex[ws] : 0, std::memory_order_relaxed);
+    g_stereoWatchTex[ws].store(watchTex ? watchTex[ws] : 0, std::memory_order_relaxed);
     g_stereoPdaHeading[ws].store(pdaHeading, std::memory_order_relaxed);
     g_stereoEyeNear[ws][0].store(nearZ ? nearZ[0] : 0.05f, std::memory_order_relaxed);
     g_stereoEyeNear[ws][1].store(nearZ ? nearZ[1] : 0.05f, std::memory_order_relaxed);
@@ -6316,6 +6324,9 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     {
         std::lock_guard<std::mutex> lock(g_headPoseMutex);
         g_stereoRenderPose[ws]      = g_renderHeadPose;
+        g_stereoWatchReadout[ws]={g_watchTime.load(std::memory_order_relaxed),
+            g_watchMoney.load(std::memory_order_relaxed),g_watchWanted.load(std::memory_order_relaxed),
+            g_watchHealth.load(std::memory_order_relaxed),g_watchArmour.load(std::memory_order_relaxed)};
         g_stereoRenderPoseValid[ws] = g_renderHeadPoseValid;
         g_stereoHandPose[ws][0] = g_renderedHandPoseValid
             ? g_renderedHandPose[0] : g_handPose[0];
@@ -8317,6 +8328,8 @@ void BuildHudMenu() {
         else std::snprintf(rows[7],sizeof(rows[7]),"HAND - FIXED");
         if (element==hud::RADAR)
             std::snprintf(rows[8],sizeof(rows[8]),"PDA ORIENTATION   < %s >",hud::PdaPortrait()?"PORTRAIT":"LANDSCAPE");
+        else if(element==hud::WATCH)
+            std::snprintf(rows[8],sizeof(rows[8]),"WRIST SIDE   < %s >",hud::WatchInside()?"INSIDE":"OUTSIDE");
         else std::snprintf(rows[8],sizeof(rows[8]),"ORIENTATION - NOT APPLICABLE");
         std::snprintf(rows[9],sizeof(rows[9]),"BACK");
         rowCount=10;
@@ -8925,7 +8938,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
     static radio::HandAttachment radioHands[2];
     if (!drivingWheel.trackedHandsEnabled) {
         for (auto& attachment:radioHands) attachment.Reset();
-        return;
+        if(!hud::ShouldRenderWristHud()&&!g_hudActive.load(std::memory_order_relaxed))return;
     }
     EnsureHandAssets();
     for (int hand = 0; hand < 2; ++hand) {
@@ -9683,10 +9696,6 @@ void EnsureWristProgram() {
                      "if((m&1)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.55,.1))); if((m&2)!=0) v=max(v,seg(p,vec2(.55,.1),vec2(.55,.5))); if((m&4)!=0) v=max(v,seg(p,vec2(.55,.5),vec2(.55,.9))); if((m&8)!=0) v=max(v,seg(p,vec2(.15,.9),vec2(.55,.9))); if((m&16)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.15,.9))); if((m&32)!=0) v=max(v,seg(p,vec2(.15,.1),vec2(.15,.5))); if((m&64)!=0) v=max(v,seg(p,vec2(.15,.5),vec2(.55,.5))); return v; }\n"
                      "void main(){\n"
                      "if(uMode==4){int na=uAmmo.x>=1000?4:3,nb=uAmmo.y>=1000?4:3;float x=vUV.x*(float(na+nb)+.6);bool left=x<float(na);float gx=left?x:x-float(na)-.6;int count=left?na:nb;int i=int(floor(gx));float ink=0.0;if(gx>=0.0&&i<count){int k=count-i-1,v=left?uAmmo.x:uAmmo.y;int div=k==3?1000:k==2?100:k==1?10:1;ink=ammoDigit(vec2(fract(gx),vUV.y),(v/div)%10);}o=vec4((left?vec3(1.0):vec3(.55))*ink,mix(uAmmoBackdrop,1.0,ink)*uOpacity);return;}\n"
-                     "  if(uMode==1){ vec2 p=vUV-vec2(.5); float r=length(p); if(r>.49) discard; vec3 col=vec3(.045,.055,.065); if(r>.455) col=vec3(.28,.30,.32); float angle=mod(atan(p.x,-p.y)+6.2831853,6.2831853)/6.2831853;\n"
-                     "  if(r>.375 && r<.415) { col=vec3(.16,.035,.035); if(uWatch.z>=0.0 && angle<clamp(uWatch.z/100.0,0.0,1.0)) col=vec3(.9,.08,.08); if(uWatch.z>100.0 && angle<clamp((uWatch.z-100.0)/100.0,0.0,1.0)) col=vec3(.40,.01,.01); }\n"
-                     "  if(r>.425 && r<.455) { col=vec3(.12); if(uWatch.w>=0.0 && angle<clamp(uWatch.w/100.0,0.0,1.0)) col=vec3(.75); if(uWatch.w>100.0 && angle<clamp((uWatch.w-100.0)/100.0,0.0,1.0)) col=vec3(.32); }\n"
-                     "  vec2 tq=vec2((vUV.x-.22)*(5.0/.56),(vUV.y-.405)/.18); int ti=int(floor(tq.x)); int h=int(uWatch.x), m=int(uWatch.y), tg=-1; if(ti==0&&h>=0)tg=1+h/10; if(ti==1&&h>=0)tg=1+h%10; if(ti==2&&h>=0)tg=11; if(ti==3&&m>=0)tg=1+m/10; if(ti==4&&m>=0)tg=1+m%10; float ink=watchGlyph(vec2(fract(tq.x),tq.y),tg); vec2 mq=vec2((vUV.x-.21)*(9.0/.58),(vUV.y-.285)/.115); int mi=int(floor(mq.x)),mg=-1; if(uMoney>=0&&mi==0)mg=0; if(uMoney>=0&&mi>=1&&mi<=8){int k=8-mi; int divisor=k==7?10000000:k==6?1000000:k==5?100000:k==4?10000:k==3?1000:k==2?100:k==1?10:1; mg=1+(uMoney/divisor)%10;} float cash=watchGlyph(vec2(fract(mq.x),mq.y),mg); col=mix(col,vec3(.95),ink); col=mix(col,vec3(.33,1.0,.35),cash); if(uWanted>0){for(int j=0;j<6;++j){vec2 z=vUV-vec2(.26+.096*float(j),.70); float a=atan(z.x,-z.y); float t=abs(fract((a+3.14159265)/6.2831853*5.0)*2.0-1.0); float bound=mix(.016,.036,t); float star=1.0-smoothstep(bound-.001,bound+.001,length(z)); col=mix(col,j<uWanted?vec3(1.0,.8,.25):vec3(.18),star);}} o=vec4(col,uOpacity); return; }\n"
                      "  if(uMode==2){ o=vec4(.055,.065,.07,uOpacity); return; }\n"
                      "  if(uMode==3){ vec2 p=vUV-vec2(.5); vec2 dims=mix(vec2(.8,.5),vec2(.5,.8),uPortrait); vec2 q=p*dims; float c=cos(uHeading), s=sin(uHeading); vec2 uv=vec2(.5)+vec2(c*q.x+s*q.y,-s*q.x+c*q.y); o=vec4(texture(uTex,uv).rgb,uOpacity); return; }\n"
                      "  vec4 c = texture(uTex, vUV);\n"
@@ -9888,104 +9897,7 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
 // then follows the VISIBLE hand: the two-hand grip rotates the primary hand
 // and snaps the support hand onto the weapon, and the panel must ride the
 // hand the player sees, not the raw controller (VC rule).
-bool BuildHandPanelAnchor(const HandPose& hp, int hand,
-                          const TwoHandVisualState& twoHand,
-                          XrVector3f& base, XrVector3f& alongAxis,
-                          XrVector3f& acrossAxis, XrVector3f& liftAxis,
-                          XrVector3f& right, XrVector3f& up,
-                          XrVector3f& normal) {
-    if (!hp.valid) return false;
-    const XrQuaternionf q{hp.gripOri[0], hp.gripOri[1], hp.gripOri[2],
-                          hp.gripOri[3]};
-    const float* wrist=hp.wristAnchorValid?hp.wristGripPos:hp.gripPos;
-    XrVector3f origin{wrist[0],wrist[1],wrist[2]};
-    // OpenXR grip axes: +Z runs back towards the wrist, +Y stands away from
-    // the palm, +X is the palm normal (mirrored between hands). The right
-    // hand takes the left frame with side and palm-up flipped — two flips
-    // keep it right-handed and land the panel on the matching side of that
-    // arm. This is the shipped Vice City wrist rule, ported verbatim.
-    XrVector3f side   = QuatRotate(q, {1, 0, 0});
-    XrVector3f palmUp = QuatRotate(q, {0, 1, 0});
-    XrVector3f backward = QuatRotate(q, {0, 0, 1});
-    const float handSign = (hand == 1) ? -1.0f : 1.0f;
-    side = vscale(side, handSign);
-    palmUp = vscale(palmUp, handSign);
-
-    if (!hp.wristAnchorValid && TwoHandStateUsable(twoHand)) {
-        if (hand == twoHand.primaryHand && twoHand.primaryAttached) {
-            // Same pivot/axis correction the baked weapon and hand mesh use.
-            origin   = TwoHandRotatePoint(twoHand, origin);
-            side     = vnorm(TwoHandRotateVector(twoHand, side));
-            palmUp   = vnorm(TwoHandRotateVector(twoHand, palmUp));
-            backward = vnorm(TwoHandRotateVector(twoHand, backward));
-        } else if (hand == twoHand.supportHand) {
-            if (twoHand.supportAnchorValid &&
-                std::isfinite(twoHand.supportAnchor[0]) &&
-                std::isfinite(twoHand.supportAnchor[1]) &&
-                std::isfinite(twoHand.supportAnchor[2])) {
-                origin = TwoHandRotatePoint(twoHand,
-                    {twoHand.supportAnchor[0], twoHand.supportAnchor[1],
-                     twoHand.supportAnchor[2]});
-            }
-            if (twoHand.supportBasisValid) {
-                // Transform the original grip axes through the same visual
-                // hand frames as BuildHandFrames. Substituting anatomical
-                // axes directly changes the panel's calibrated wrist frame.
-                const XrQuaternionf aq{hp.aimOri[0], hp.aimOri[1],
-                                       hp.aimOri[2], hp.aimOri[3]};
-                const XrVector3f gripRight = vnorm(QuatRotate(q, {1, 0, 0}));
-                const XrVector3f gripUp = vnorm(QuatRotate(q, {0, 1, 0}));
-                const XrVector3f gripForward = vnorm(QuatRotate(q, {0, 0, -1}));
-                const XrVector3f aimForward = vnorm(QuatRotate(aq, {0, 0, -1}));
-                const XrVector3f fromForward = vnorm(
-                    vdot(aimForward, aimForward) > 0.1f ? aimForward : gripUp);
-                XrVector3f fromUp = vscale(gripRight, hand == 1 ? 1.0f : -1.0f);
-                fromUp = vsub(fromUp, vscale(fromForward, vdot(fromUp, fromForward)));
-                if (vdot(fromUp, fromUp) < 0.0001f)
-                    fromUp = vscale(gripRight, hand == 1 ? 1.0f : -1.0f);
-                fromUp = vnorm(fromUp);
-                XrVector3f fromRight = vnorm(vcross(fromUp, fromForward));
-                if (vdot(fromRight, gripForward) < 0.0f) fromRight = vscale(fromRight, -1.0f);
-                XrVector3f toRight = vnorm(TwoHandRotateVector(twoHand,
-                    {twoHand.supportRight[0], twoHand.supportRight[1], twoHand.supportRight[2]}));
-                if (hand == 0) toRight = vscale(toRight, -1.0f);
-                const XrVector3f toUp = vnorm(TwoHandRotateVector(twoHand,
-                    {twoHand.supportUp[0], twoHand.supportUp[1], twoHand.supportUp[2]}));
-                const XrVector3f toForward = vnorm(TwoHandRotateVector(twoHand,
-                    {twoHand.supportForward[0], twoHand.supportForward[1], twoHand.supportForward[2]}));
-                const auto mapAxis = [&](XrVector3f axis) {
-                    return vadd(vadd(vscale(toRight, vdot(axis, fromRight)),
-                                     vscale(toUp, vdot(axis, fromUp))),
-                                vscale(toForward, vdot(axis, fromForward)));
-                };
-                side = mapAxis(side);
-                palmUp = mapAxis(palmUp);
-                backward = mapAxis(backward);
-            }
-        }
-    }
-
-    // Underside face — a watch turned to the inner wrist. VC ships both the
-    // map and the status readout there.
-    const auto& kick=twoHand.weaponRecoil[hand];
-    const auto rv=[](XrVector3f v){return recoil::Vec{v.x,v.y,v.z};};
-    const auto xv=[](recoil::Vec v){return XrVector3f{v.x,v.y,v.z};};
-    origin=xv(kick.Point(rv(origin)));
-    side=xv(kick.Vector(rv(side)));
-    palmUp=xv(kick.Vector(rv(palmUp)));
-    backward=xv(kick.Vector(rv(backward)));
-    constexpr float faceSign = -1.0f;
-    right = vscale(side, faceSign);
-    up = vscale(backward, -1.0f);           // twelve o'clock to the fingers
-    normal = vscale(palmUp, faceSign);
-    base = vadd(origin,
-        vadd(vscale(backward, kWristPanelBack),
-             vscale(palmUp, faceSign * kWristPanelLift)));
-    alongAxis = backward;
-    acrossAxis = right;
-    liftAxis = vscale(palmUp, faceSign);
-    return true;
-}
+#include "WatchRenderer.inl"
 
 // Dashboard map offset from the steering-wheel centre before calibration.
 constexpr float kDashPanelAcrossMetres = -0.32f;
@@ -10000,8 +9912,8 @@ constexpr float kDashPanelUpMetres = 0.12f;
 void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            const TwoHandVisualState& twoHand,
                            const driving::WheelVisualState& drivingWheel,
-                           unsigned int hudTex, unsigned int pdaTex, float pdaHeading, const XrPosef& rp,
-                           unsigned int weaponHandMask) {
+                           unsigned int hudTex, unsigned int pdaTex, unsigned int watchTex, float pdaHeading, const XrPosef& rp,
+                           unsigned int weaponHandMask,const watchhud::Readout& watchData) {
     const bool calibrating = g_hudActive.load(std::memory_order_relaxed);
     if (!hudTex || (!hud::ShouldRenderWristHud() && !calibrating)) return;
     EnsureWristProgram();
@@ -10063,34 +9975,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            kDashGazeRange, pdaTex, pdaHeading);
         }
     }
-    {
-        // Per-panel slot selection: normal wrist, one-hand weapon grip,
-        // Each panel follows its own visible hand. Calibration page 4 forces
-        // the weapon slot so it can be tuned without holding a gun.
-        const int hudMenuPage = g_hudPage.load(std::memory_order_relaxed);
-        for (int panel = 0; panel < 3; ++panel) {
-            glBindTexture(GL_TEXTURE_2D, hudTex);
-            if (panel == 0 && (drivingWheel.active || drivingWheel.dashAnchorValid)) continue;
-            int slot = hud::WRIST_SLOT_HAND;
-            const int anchorHand = panel == 1 ? 1 : hud::DeviceHand(panelElements[panel]);
-            if (calibrating && hudMenuPage == 4) {
-                slot = hud::WRIST_SLOT_WEAPON;
-            } else if ((weaponHandMask & (1u << anchorHand)) != 0 &&
-                       !(TwoHandStateUsable(twoHand) && anchorHand == twoHand.supportHand)) {
-                slot = hud::WRIST_SLOT_WEAPON;
-            }
-            XrVector3f base, alongAxis, acrossAxis, liftAxis, right, up,
-                normal;
-            if (!BuildHandPanelAnchor(hands[anchorHand], anchorHand, twoHand,
-                                      base, alongAxis, acrossAxis, liftAxis,
-                                      right, up, normal)) continue;
-            if (panel == 1) base = vadd(base, vscale(alongAxis, 0.15f));
-            DrawWristPanel(panelElements[panel], panel == 0 ? 0 : 1, calibrating,
-                           slot, -1, base,
-                           alongAxis, acrossAxis, liftAxis,
-                           right, up, normal, rp, kWristGazeRange, pdaTex, pdaHeading);
-        }
-    }
+    DrawWatchForEye(mvp,rp,watchTex,pdaHeading,weaponHandMask,twoHand,calibrating,watchData);
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glDepthMask(GL_TRUE);
@@ -10099,7 +9984,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
     static bool logged = false;
     if (!logged) {
         logged = true;
-        LOGI("[wrist] panels active (radar=LEFT/dash-left, status=RIGHT)");
+        LOGI("[wrist] watch GLB + vehicle PDA active");
     }
 }
 
@@ -12235,10 +12120,10 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const vehicledoors::MarkerFrame& bakedNpcGrabs,
                      const vehicledoors::MarkerFrame& bakedTestArea,
                      const radialholster::Frames& bakedRadials,
-                     unsigned int hudSourceTex, unsigned int pdaSourceTex, float pdaHeading,
+                     unsigned int hudSourceTex, unsigned int pdaSourceTex, unsigned int watchSourceTex, float pdaHeading,
                      const int handTypes[2], const holstermarker::Frame& ammoHolsters,
                      const WeaponAmmoPose ammoPoses[2],
-                     const reloadhint::VisualFrame& reloadHints) {
+                     const reloadhint::VisualFrame& reloadHints,const watchhud::Readout& watchData) {
     const bool showReloadHints=reloadHints.Visible() && IsSessionFocused() && !IsMenuVisible();
     const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
@@ -12454,7 +12339,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // depth pass (arm/weapon occlude the panel).
     if (wristWanted)
         DrawWristPanelsForEye(mvp, bakedHands, bakedTwoHand, drivingWheel,
-                              hudSourceTex, pdaSourceTex, pdaHeading, rp, weaponHandMask);
+                              hudSourceTex, pdaSourceTex, watchSourceTex, pdaHeading, rp, weaponHandMask,watchData);
 
     if (showReloadHints) {
         float hintProjection[16],hintMvp[16];
@@ -12664,6 +12549,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     MobileColorState mobileColor{};
     ThrowableTrajectory throwableTrajectory[2]{};
     unsigned int bakedWeaponHandMask = 0;
+    watchhud::Readout bakedWatch{};
     float bakedPinchAmounts[2]{};
     int bakedHandWeaponTypes[2]{};
     unsigned bakedDebugPinchHands{};
@@ -12671,6 +12557,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     {
         std::lock_guard<std::mutex> lock(g_headPoseMutex);
         haveRenderPose = g_stereoRenderPoseValid[set];
+        bakedWatch=g_stereoWatchReadout[set];
         rp             = g_stereoRenderPose[set];
         bakedHands[0]  = g_stereoHandPose[set][0];   // pose the weapon was baked with
         bakedHands[1]  = g_stereoHandPose[set][1];
@@ -12860,7 +12747,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
             bakedScope, drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set], bakedReloadHints);
+            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoWatchTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set], bakedReloadHints,bakedWatch);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease

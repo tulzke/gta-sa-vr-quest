@@ -25,6 +25,7 @@ std::atomic<bool> g_gazeAutoHide{true};
 std::atomic<int>  g_objectiveMarkerMode{OBJECTIVE_ORIGINAL};
 std::atomic<int> g_pdaHand{1}, g_watchHand{0};
 std::atomic<bool> g_pdaPortrait{false};
+std::atomic<bool> g_watchInside{false};
 std::once_flag    g_initOnce;
 std::mutex        g_saveMutex;
 
@@ -76,11 +77,9 @@ const char* const kDashModelFieldKeys[WRIST_FIELD_COUNT] = {
     "PitchDeg", "YawDeg", "RollDeg", "ScaleTenths"
 };
 constexpr int kWristFieldDefaults[WRIST_FIELD_COUNT] = {0, 0, 0, 0, 0, 0, 10};
-// Vehicle-dash defaults calibrated in the field (Turismo cockpit; user
-// request): radar low-left of the wheel, health bar low-right. Saved settings
-// and per-model overrides still win over these.
+// PDA sits slightly left of the wheel. Saved per-model placements still win.
 constexpr int kDashRadarDefaults[WRIST_FIELD_COUNT] =
-    {0, 149, -163, 0, 5, 0, 26};
+    {0, 140, -60, 0, 5, 0, 10};
 constexpr int kDashHealthDefaults[WRIST_FIELD_COUNT] =
     {0, -47, -169, 0, 0, 0, 23};
 
@@ -204,6 +203,8 @@ void Load() {
                 g_pdaHand.store(value == 1);
             else if (std::sscanf(line, "WatchHand=%d", &value) == 1)
                 g_watchHand.store(value == 1);
+            else if (std::sscanf(line, "WatchInside=%d", &value) == 1)
+                g_watchInside.store(value != 0);
             else if (std::sscanf(line, "PdaPortrait=%d", &value) == 1)
                 g_pdaPortrait.store(value != 0);
             else {
@@ -307,6 +308,7 @@ void Save() {
                      g_objectiveMarkerMode.load(std::memory_order_acquire));
         std::fprintf(file, "PdaHand=%d\nWatchHand=%d\nPdaPortrait=%d\n",
                      g_pdaHand.load(), g_watchHand.load(), int(g_pdaPortrait.load()));
+        std::fprintf(file,"WatchInside=%d\n",int(g_watchInside.load()));
         for (int element = 0; element < ELEMENT_COUNT; ++element) {
             for (int field = 0; field < ELEMENT_FIELD_COUNT; ++field)
                 std::fprintf(file, "Hud.%s.%s=%d\n",
@@ -392,6 +394,8 @@ void ToggleDeviceHand(int element) {
     Save();
 }
 bool PdaPortrait() { EnsureLoaded(); return g_pdaPortrait.load(); }
+bool WatchInside() { EnsureLoaded(); return g_watchInside.load(); }
+void ToggleWatchInside() { EnsureLoaded();g_watchInside.store(!g_watchInside.load());Save(); }
 void TogglePdaPortrait() { EnsureLoaded(); g_pdaPortrait.store(!g_pdaPortrait.load()); Save(); }
 
 bool ShouldRenderClassicHud() {

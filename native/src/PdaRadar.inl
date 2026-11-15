@@ -1,6 +1,6 @@
 // Game-thread PDA overlay. Reads radar data without changing frontend/HUD state.
 // Retail ARM64 trace layout: 250 entries, 48 bytes each; see task 33 ABI notes.
-void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float heading) {
+void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float heading, bool watch) {
     struct Rect { float left,bottom,right,top; };
     using Quad = void (*)(void*,float,float,float,float,float,float,float,float,const void*);
     using PoolLookup = void* (*)(int);
@@ -34,7 +34,10 @@ void DrawPdaRadarOverlay(void* handle, const GameSymbols::Vec3& player, float he
         const float sx=dx*pixelsPerMetre, sy=-dy*pixelsPerMetre;
         float vx=c*sx-s*sy, vy=s*sx+c*sy;
         float opacity=1.0f;
-        if (pin) {
+        if(watch) {
+            if(pin)watchhud::Pin(vx,vy);
+            else opacity=watchhud::LocalOpacity(vx,vy);
+        } else if (pin) {
             const float edge=std::max(1.0f,std::max(std::abs(vx)/halfX,std::abs(vy)/halfY));
             vx/=edge; vy/=edge;
         } else {

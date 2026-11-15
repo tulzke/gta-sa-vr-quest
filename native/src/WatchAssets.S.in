@@ -1,0 +1,14 @@
+    .section .rodata.savr_watch,"a",@progbits
+    .balign 16
+    .global savr_watch_glb
+    .hidden savr_watch_glb
+savr_watch_glb:
+    .incbin "@WATCH_GLB@"
+    .global savr_watch_glb_end
+    .hidden savr_watch_glb_end
+savr_watch_glb_end:
+    .global savr_watch_attribution
+    .hidden savr_watch_attribution
+savr_watch_attribution:
+    .incbin "@WATCH_ATTRIBUTION@"
+    .byte 0
