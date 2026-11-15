@@ -22,6 +22,7 @@
 #include "Log.h"
 #include "Melee.h"
 #include "Combat.h"
+#include "WantedFeedback.h"
 #include "MissionControls.h"
 #include "Catalyst.h"
 #include "MenuNavigation.h"
@@ -2012,6 +2013,9 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             if (g.CTimer_m_CodePause) *g.CTimer_m_CodePause = false;
         }
     }
+
+    // World feedback follows gameplay, not weapon/hand interaction ownership.
+    savr::wantedfeedback::Update(inGameplay && !anyMenu);
 
     // The left stick drives the menu, not the player, while a menu is up.
     vrcam::SetInputBlocked(anyMenu);

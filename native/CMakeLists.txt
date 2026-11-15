@@ -103,6 +103,7 @@ add_library(savr SHARED
     src/NpcGrab.cpp
     src/Melee.cpp
     src/Combat.cpp
+    src/WantedFeedback.cpp
     src/MissionControls.cpp
     src/Catalyst.cpp
     src/JustBusiness.cpp

@@ -2,6 +2,7 @@
 #include "ArcadeReload.h"
 #include "Xr.h"
 #include "Combat.h"
+#include "PeripheralFeedback.h"
 #include "NpcGrabVisual.h"
 #include "TrackingRecovery.h"
 #include "TheaterScreen.h"
@@ -10245,11 +10246,11 @@ void DrawScopeOverlay(int width, int height,
 
 // Head-centred peripheral feedback; sampled once per stereo pair. No world
 // texture, camera motion or depth writes, and the centre remains transparent.
-GLuint g_combatProg=0,g_combatVao=0;
-GLint g_combatParams=-1;
-void DrawCombatHalo(int width,int height,float tanX,float tanY,const combat::Feedback& fx) {
-    if (fx.damage<=0 && fx.block<=0) return;
-    if (!g_combatProg) {
+GLuint g_haloProg=0,g_haloVao=0;
+GLint g_haloParams=-1,g_haloColor=-1;
+void DrawPeripheralHalo(int width,int height,float tanX,float tanY,const peripheral::Halo& fx) {
+    if (!fx.Active()) return;
+    if (!g_haloProg) {
         const char* vs=R"(#version 300 es
 out vec2 p;
 void main(){
@@ -10258,39 +10259,43 @@ void main(){
 })";
         const char* fs=R"(#version 300 es
 precision highp float;
-in vec2 p; uniform vec4 uParams; out vec4 o;
+in vec2 p; uniform vec4 uParams; uniform vec4 uColor; out vec4 o;
 void main(){
-    float r=length(p*uParams.zw)/max(.1,min(uParams.z,uParams.w));
-    float red=uParams.x*smoothstep(.48,1.12,r);
-    float block=uParams.y*smoothstep(.45,.90,r)*(1.0-.5*red);
-    float total=red+block;
-    vec3 color=(vec3(1.0,.025,.015)*red+vec3(.55)*block)/max(total,.0001);
-    o=vec4(color,clamp(red*.55+block*.42,0.0,.65));
+    float r=length(p*uParams.xy)/max(.1,min(uParams.x,uParams.y));
+    o=vec4(uColor.rgb,clamp(uColor.a*smoothstep(uParams.z,uParams.w,r),0.0,.65));
 })";
         const GLuint v=CompileHandShader(GL_VERTEX_SHADER,vs),f=CompileHandShader(GL_FRAGMENT_SHADER,fs);
-        g_combatProg=glCreateProgram();glAttachShader(g_combatProg,v);glAttachShader(g_combatProg,f);
-        glLinkProgram(g_combatProg);glDeleteShader(v);glDeleteShader(f);
-        GLint linked{};glGetProgramiv(g_combatProg,GL_LINK_STATUS,&linked);
+        g_haloProg=glCreateProgram();glAttachShader(g_haloProg,v);glAttachShader(g_haloProg,f);
+        glLinkProgram(g_haloProg);glDeleteShader(v);glDeleteShader(f);
+        GLint linked{};glGetProgramiv(g_haloProg,GL_LINK_STATUS,&linked);
         if (!linked) {
-            LOGE("[combat] halo shader link failed");
-            glDeleteProgram(g_combatProg);g_combatProg=0;return;
+            LOGE("[feedback] halo shader link failed");
+            glDeleteProgram(g_haloProg);g_haloProg=0;return;
         }
-        g_combatParams=glGetUniformLocation(g_combatProg,"uParams");
-        glGenVertexArrays(1,&g_combatVao);
+        g_haloParams=glGetUniformLocation(g_haloProg,"uParams");
+        g_haloColor=glGetUniformLocation(g_haloProg,"uColor");
+        glGenVertexArrays(1,&g_haloVao);
     }
     GLint program{},vao{};
     glGetIntegerv(GL_CURRENT_PROGRAM,&program);glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&vao);
+    GLint srcRgb{},dstRgb{},srcAlpha{},dstAlpha{},equationRgb{},equationAlpha{};
+    glGetIntegerv(GL_BLEND_SRC_RGB,&srcRgb);glGetIntegerv(GL_BLEND_DST_RGB,&dstRgb);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA,&srcAlpha);glGetIntegerv(GL_BLEND_DST_ALPHA,&dstAlpha);
+    glGetIntegerv(GL_BLEND_EQUATION_RGB,&equationRgb);glGetIntegerv(GL_BLEND_EQUATION_ALPHA,&equationAlpha);
     GLboolean depthMask{},colorMask[4]{};
     glGetBooleanv(GL_DEPTH_WRITEMASK,&depthMask);glGetBooleanv(GL_COLOR_WRITEMASK,colorMask);
     glDisable(GL_DEPTH_TEST);glDisable(GL_CULL_FACE);glDisable(GL_SCISSOR_TEST);
     glDisable(GL_STENCIL_TEST);glDisable(GL_RASTERIZER_DISCARD);
     glDepthMask(GL_FALSE);glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
     glEnable(GL_BLEND);glBlendEquation(GL_FUNC_ADD);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-    glViewport(0,0,width,height);glUseProgram(g_combatProg);glBindVertexArray(g_combatVao);
-    glUniform4f(g_combatParams,fx.damage,fx.block,tanX,tanY);
+    glViewport(0,0,width,height);glUseProgram(g_haloProg);glBindVertexArray(g_haloVao);
+    glUniform4f(g_haloParams,tanX,tanY,fx.inner,fx.outer);
+    glUniform4f(g_haloColor,fx.red,fx.green,fx.blue,fx.opacity);
     glDrawArrays(GL_TRIANGLES,0,3);
     glBindVertexArray(static_cast<GLuint>(vao));glUseProgram(static_cast<GLuint>(program));
     glDepthMask(depthMask);glColorMask(colorMask[0],colorMask[1],colorMask[2],colorMask[3]);
+    glBlendEquationSeparate(equationRgb,equationAlpha);
+    glBlendFuncSeparate(srcRgb,dstRgb,srcAlpha,dstAlpha);
     glDisable(GL_BLEND);
 }
 
@@ -12700,8 +12705,12 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     }
     const combat::Feedback combatFx=IsSessionFocused() && !IsMenuVisible()
         ? combat::GetFeedback() : combat::Feedback{};
+    const auto wantedFx=wantedfeedback::GetFeedback(
+        IsSessionFocused() && !IsMenuVisible() && g_headPoseValid,
+        g_trackingRecovery.epoch);
+    const auto haloFx=peripheral::Select(combatFx,wantedFx);
     const bool shaderCopyMayRun = fxaaStats.requested ||
-        underWaterness > 0.001f || mobileColor.mode != 0 || combatFx.damage>0 || combatFx.block>0;
+        underWaterness > 0.001f || mobileColor.mode != 0 || haloFx.Active();
     // Submit projection layers with their recorded render pose; use theater until that pose is available.
     if (!haveRenderPose) {
         outcome = perf::StereoProjectionOutcome::MissingPose;
@@ -12886,7 +12895,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             }
         }
         DrawScopeOverlay(chain.width, chain.height, bakedScope);
-        DrawCombatHalo(chain.width,chain.height,tanX,tanY,combatFx);
+        DrawPeripheralHalo(chain.width,chain.height,tanX,tanY,haloFx);
         EndXrGpuStage(overlayGpuTimer);
         RecordXrCpuStage(e, XrCpuStage::OverlaySubmit, overlayWallStartMs,
                          overlayCpuStartMs);
