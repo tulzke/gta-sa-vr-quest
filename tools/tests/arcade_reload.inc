@@ -100,4 +100,14 @@ void ArcadeTests() {
     s.orientation.w=std::nanf("");
     Check(!interrupted.Update(s,1.8,11,DOWN_UP,2) && !interrupted.valid,"invalid tracking clears history");
 
+    SetNodDistanceCm(7);SetNodAngleDegrees(20);
+    Check(FlickRun(90,0)==1 && GestureRun(DOWN_FLICK,90,0,.12f)==1,"temporary tuning can restore original nod amplitudes immediately");
+    SetNodDistanceCm(14);SetNodAngleDegrees(60);
+    Check(GestureRun(DOWN_FLICK,90,0,.12f)==0 && GestureRun(DOWN_FLICK,90,0,.16f)==1,"distance tuning changes the actual stroke threshold");
+    SetNodDistanceCm(60);SetNodAngleDegrees(45);
+    Check(FlickRun(90,0,.18f,0,.9f)==1,"angular tuning works independently of distance");
+    SetNodAngleDegrees(60);
+    Check(FlickRun(90,0,.18f,0,.9f)==0,"raising angle threshold rejects the same short rotation");
+    SetNodDistanceCm(kDefaultNodCm);SetNodAngleDegrees(kDefaultNodDegrees);
+
 }

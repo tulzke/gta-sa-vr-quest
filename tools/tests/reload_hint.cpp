@@ -43,6 +43,19 @@ int main() {
         }
         Check(recognized>=1,"tutorial motion is recognized by the actual assigned gesture detector");
     }
+    for(int cm:{7,21,40,60})for(int degrees:{20,60}) {
+        SetNodDistanceCm(cm);SetNodAngleDegrees(degrees);Gesture gesture;int recognized=0;
+        const Pose base=BuildPose({}, {},1,false,DOWN_FLICK,0,.5f);
+        for(int i=0;i<144;++i) {
+            const double time=i/72.;const unsigned ms=static_cast<unsigned>(time*1000);
+            const auto pose=BuildPose({}, {},1,false,DOWN_FLICK,ms,.5f);
+            const auto motion=Animation(DOWN_FLICK,ms);const float sine=std::sin(-motion.down*.5f);
+            Sample sample{pose.position,pose.barrel,{base.side.x*sine,base.side.y*sine,base.side.z*sine,std::cos(motion.down*.5f)}};
+            recognized+=gesture.Update(sample,time,1,DOWN_FLICK,1);
+        }
+        Check(recognized>=1,"tutorial adapts to temporary distance and angle tuning");
+    }
+    SetNodDistanceCm(kDefaultNodCm);SetNodAngleDegrees(kDefaultNodDegrees);
     const auto left=BuildPose({0,1.7f,0},{},0,true,DOWN_FLICK,0,1.f);
     const auto right=BuildPose({0,1.7f,0},{},1,true,TWIST,0,1.f);
     Check(left.position.x<0 && right.position.x>0 && left.position.z<0,"two copies sit separately in front of the player");

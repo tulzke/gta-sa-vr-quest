@@ -142,6 +142,15 @@ int main(){
  Init();assert(RecoilLevel()==1 && PhysicalRecoilLevel()==savr::recoil::kDefaultRecoilLevel);
  assert(savr::arcadereload::GetMode()==savr::arcadereload::DOWN_UP);
  assert(savr::arcadereload::GetSound()==savr::arcadereload::BOLT);
+ assert(savr::arcadereload::NodDistanceCm()==21 && savr::arcadereload::NodAngleDegrees()==60);
+ SetReloadNodDistance(14);SetReloadNodAngle(35);Init();
+ assert(savr::arcadereload::NodDistanceCm()==14 && savr::arcadereload::NodAngleDegrees()==35);
+ assert(RecoilLevel()==1 && savr::arcadereload::GetSound()==savr::arcadereload::BOLT);
+ SetReloadNodDistance(-10);SetReloadNodAngle(500);Init();
+ assert(savr::arcadereload::NodDistanceCm()==1 && savr::arcadereload::NodAngleDegrees()==75);
+ SetReloadNodDistance(500);SetReloadNodAngle(-10);Init();
+ assert(savr::arcadereload::NodDistanceCm()==60 && savr::arcadereload::NodAngleDegrees()==5);
+ ResetReloadNodTuning();Init();assert(savr::arcadereload::NodDistanceCm()==21 && savr::arcadereload::NodAngleDegrees()==60);
  SetReloadSound(savr::arcadereload::MAGAZINE);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::MAGAZINE);
  CycleReloadSound(1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::SILENT);
  CycleReloadSound(1);Init();assert(savr::arcadereload::GetSound()==savr::arcadereload::BOLT);

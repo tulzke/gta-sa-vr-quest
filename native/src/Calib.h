@@ -116,6 +116,10 @@ void CycleReloadMode(int direction);  // wraps and persists immediately
 void SetReloadMode(int mode);         // persists immediately
 void CycleReloadSound(int direction);
 void SetReloadSound(int sound);       // persists immediately
+// Temporary downward-nod amplitude tuning, persisted in vr_calib.ini.
+void SetReloadNodDistance(int centimetres);
+void SetReloadNodAngle(int degrees);
+void ResetReloadNodTuning();
 
 // Controller recoil kick per shot. Level 0..3 (OFF/LOW/MEDIUM/HIGH).
 int RecoilLevel();
