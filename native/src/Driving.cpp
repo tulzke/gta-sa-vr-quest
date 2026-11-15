@@ -9,6 +9,7 @@
 #include "BikeSteering.h"
 #include "BicycleSway.h"
 #include "BicyclePedal.h"
+#include "BikePitchFeedback.h"
 #include "WheelReturn.h"
 #include "QuadHandlebar.h"
 #include "MissionComfort.h"
@@ -2744,8 +2745,8 @@ int OnGetSteeringUpDown(void* pad) {
             // CBike negates this pad query before applying m_fLeanInput. VC's
             // immersive lean uses -1 for raised hands (wheelie), hence this
             // sign.
-            const float lean=std::clamp(g_bikeLean,-1.0f,1.0f);
-            return static_cast<int>(-(g_bikeBlockWheelie.load()?std::max(0.0f,lean):lean)*128.0f);
+            const float lean=bikepitch::EffectiveLean(g_bikeLean,g_bikeBlockWheelie.load());
+            return static_cast<int>(-lean*128.0f);
         }
         if (appearance==5&&!GetRemoteControlledVehicle()&&
             ModeForAppearance(5)==MODE_IMMERSIVE) {
@@ -4745,6 +4746,18 @@ bool CabinVisualContext() {
     return true;
 }
 
+void PublishBikePitchFeedback(bool enabled) {
+    static bikepitch::Feedback feedback;
+    const bool active=enabled&&VrGameplayInputAllowed()&&CabinVisualContext()&&
+        g_visual.active&&g_visual.bike&&g_visual.grabbed[0]&&g_visual.grabbed[1]&&
+        GetActivePlayerBike()&&ModeForAppearance(2)==MODE_IMMERSIVE;
+    const float lean=active?bikepitch::EffectiveLean(g_bikeLean,g_bikeBlockWheelie.load()):0.f;
+    g_visual.bikePitchVisual=bikepitch::WristAngle(lean);
+    const auto cue=feedback.Update(lean,MonotonicSeconds());
+    if (cue.send) for (int hand=0;hand<2;++hand)
+        xr::TriggerHaptic(hand,cue.amplitude,cue.frequency,cue.durationMs);
+}
+
 void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     g_liftAxis.store(0,std::memory_order_release);
     auto input=rawInput;
@@ -4875,6 +4888,10 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     }
     g_activeBikeAccelerator.store(activeAccelerator,std::memory_order_release);
     std::lock_guard<std::mutex> lock(g_stateMutex);
+    struct BikePitchFeedbackOnExit {
+        bool enabled;
+        ~BikePitchFeedbackOnExit() { PublishBikePitchFeedback(enabled); }
+    } bikePitchFeedbackOnExit{gameplay&&!blocked};
     struct PinchPublishOnExit {
         ~PinchPublishOnExit() { PublishIgnitionPinch(g_visual); }
     } pinchPublishOnExit;

@@ -8870,6 +8870,23 @@ bool TwoHandStateUsable(const TwoHandVisualState& state) {
            std::isfinite(axis.z) && vdot(axis, axis) >= 0.000001f;
 }
 
+void ApplyBikePitchWrist(const driving::WheelVisualState& wheel,int hand,
+                        XrVector3f& right,XrVector3f& up,XrVector3f& forward) {
+    if (!wheel.active||!wheel.bike||hand<0||hand>1||!wheel.grabbed[hand]||
+        !std::isfinite(wheel.bikePitchVisual)||wheel.bikePitchVisual==0.f) return;
+    // Use the same physical bar axis for both hands, including the turned
+    // heading. Mirrored hand-local axes would reverse the cue on one wrist.
+    const XrVector3f bar=RotateAroundAxis(
+        {wheel.right[0],wheel.right[1],wheel.right[2]},
+        {wheel.normal[0],wheel.normal[1],wheel.normal[2]},wheel.physicalAngle);
+    const float lengthSquared=vdot(bar,bar);
+    if (!std::isfinite(lengthSquared)||lengthSquared<.25f) return;
+    const XrVector3f axis=vnorm(bar);
+    right=RotateAroundAxis(right,axis,wheel.bikePitchVisual);
+    up=RotateAroundAxis(up,axis,wheel.bikePitchVisual);
+    forward=RotateAroundAxis(forward,axis,wheel.bikePitchVisual);
+}
+
 XrVector3f TwoHandRotateVector(const TwoHandVisualState& state,
                                XrVector3f vector) {
     return RotateAroundAxis(vector,
@@ -9119,6 +9136,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
                 right = vnorm(vcross(up, forward));
                 if (hand == 0) right = vscale(right, -1.0f);
             }
+            ApplyBikePitchWrist(drivingWheel,hand,right,up,forward);
             const float wheelGrip=drivingWheel.bike?grip:
                 std::max(grip,0.90f);
             grip = wheelGrip;

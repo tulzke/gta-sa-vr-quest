@@ -29,6 +29,10 @@ def function(name):
 PRELUDE = r"""
 #include "MissionComfort.h"
 #include "VehicleLiftLever.h"
+#include "BicyclePedal.h"
+#include "BikePitchFeedback.h"
+namespace bicyclepedal=savr::bicyclepedal;
+namespace bikepitch=savr::bikepitch;
 namespace liftlever=savr::liftlever;
 namespace missioncomfort=savr::missioncomfort;
 #include <algorithm>

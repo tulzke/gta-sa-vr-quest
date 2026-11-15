@@ -116,6 +116,9 @@ struct WheelVisualState {
     // Visual-only motorcycle throttle twist, normalized to the current
     // vehicle's handling top speed. It never feeds the accelerator query.
     float throttleVisual{};
+    // Visual wrist cue for the effective forward/backward riding command.
+    // Radians around the turned handlebar axis; zero while the gesture is off.
+    float bikePitchVisual{};
     float handlePosition[2][3]{};
     float handleRight[2][3]{};
     float handleUp[2][3]{};
