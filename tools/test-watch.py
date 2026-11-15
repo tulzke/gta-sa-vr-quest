@@ -23,6 +23,7 @@ int main(){
     {std::ofstream file("watch-settings.ini");file<<"WatchHand=1\nWatchInside=1\nWatchMapZoomPercent=75\nHud.Watch.WristRollDeg=35\n";}
     Init();assert(DeviceHand(WATCH)==1&&WatchInside());
     assert(WatchMapZoom()==.75f);
+    SetWatchMapZoom(.25f,true);FlushWatchSettings();assert(WatchMapZoom()==.25f);
     SetWatchMapZoom(1.4f,true);FlushWatchSettings();
     assert(std::abs(WatchMapZoom()-1.4f)<.001f);
     assert(GetWristSettings(WATCH,WRIST_SLOT_HAND,-1).rollDeg==35);

@@ -205,13 +205,15 @@ void UpdateWatchFrame(const HandPose hp[2],const TwoHandVisualState& twoHand,
     g_watchTriggerUntil[other].store(claimed?now+150000000:0,std::memory_order_relaxed);
 }
 #include "WatchEffects.inl"
-void DrawWatchForEye(const float* mvp,const XrPosef& rp,unsigned int mapTexture,unsigned int projectionTexture,float heading,
-                     bool calibrating,const watchhud::Readout& readout) {
+void DrawWatchForEye(const float* mvp,unsigned int mapTexture,unsigned int projectionTexture,float heading,
+                     const watchhud::Readout& readout) {
     if(!g_watchFrameValid)return;
     WatchGlBindings bindings;
     const auto& model=g_watchFrameModel;
     const auto centre=WatchNative(g_watchModel.centre);
-    const float opacity=calibrating?1.f:WristPanelGazeOpacity(rp,WatchPoint(model,centre),kWristGazeRange);
+    // The watch is worn geometry: use the hand's visibility, without HUD
+    // distance/gaze fading when the player extends or turns their arm.
+    const float opacity=1.f;
     glUseProgram(g_watchProgram);
     glUniformMatrix4fv(g_watchUniforms[WATCH_MVP],1,GL_FALSE,mvp);glUniformMatrix4fv(g_watchUniforms[WATCH_MODEL],1,GL_FALSE,model.data());
     const XrVector3f x{model[0],model[1],model[2]},y{model[4],model[5],model[6]},z{model[8],model[9],model[10]};

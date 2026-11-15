@@ -31,19 +31,22 @@ void DrawWatchEffect(const handskeleton::Mat& model,float amount,bool slider) {
             vertex(point(a,false),a,0);vertex(point(b,true),b,1);vertex(point(a,true),a,1);
         }
     }else{
+        const bool highlighted=g_watchZoomSlider.touching||g_watchZoomSlider.dragging;
+        const float highlight=highlighted?1.f:0.f;
         const auto centre=vadd(top,vscale(right,watchhud::kSliderAcross));
         const auto point=[&](float x,float y){return vadd(centre,vadd(vscale(right,x*amount),vscale(up,y*amount)));};
         const auto rect=[&](float x,float y,float hx,float hy){
-            vertex(point(x-hx,y-hy),0,0);vertex(point(x+hx,y-hy),0,0);vertex(point(x+hx,y+hy),0,0);
-            vertex(point(x-hx,y-hy),0,0);vertex(point(x+hx,y+hy),0,0);vertex(point(x-hx,y+hy),0,0);
+            vertex(point(x-hx,y-hy),0,highlight);vertex(point(x+hx,y-hy),0,highlight);vertex(point(x+hx,y+hy),0,highlight);
+            vertex(point(x-hx,y-hy),0,highlight);vertex(point(x+hx,y+hy),0,highlight);vertex(point(x-hx,y+hy),0,highlight);
         };
-        rect(0,0,.0008f,watchhud::kSliderHalfHeight);
+        rect(0,0,highlighted?.0014f:.0008f,watchhud::kSliderHalfHeight);
         for(int i=0;i<5;++i)rect(0,-watchhud::kSliderHalfHeight+i*watchhud::kSliderHalfHeight*.5f,.003f,.0006f);
         const float y=-watchhud::kSliderHalfHeight+2*watchhud::kSliderHalfHeight*
             ((hud::WatchMapZoom()-watchhud::kZoomMin)/(watchhud::kZoomMax-watchhud::kZoomMin));
+        const float knobRadius=highlighted?.008f:.006f;
         for(int i=0;i<24;++i){const float a=i*6.2831853f/24,b=(i+1)*6.2831853f/24;
-            vertex(point(0,y),1,0);vertex(point(.006f*std::cos(a),y+.006f*std::sin(a)),1,0);
-            vertex(point(.006f*std::cos(b),y+.006f*std::sin(b)),1,0);
+            vertex(point(0,y),1,highlight);vertex(point(knobRadius*std::cos(a),y+knobRadius*std::sin(a)),1,highlight);
+            vertex(point(knobRadius*std::cos(b),y+knobRadius*std::sin(b)),1,highlight);
         }
     }
     const auto identity=handskeleton::Identity();

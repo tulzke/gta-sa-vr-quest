@@ -9980,7 +9980,7 @@ void DrawWristPanelsForEye(const float* mvp, const HandPose hands[2],
                            kDashGazeRange, pdaTex, pdaHeading);
         }
     }
-    DrawWatchForEye(mvp,rp,watchTex,projectionTex,pdaHeading,calibrating,watchData);
+    DrawWatchForEye(mvp,watchTex,projectionTex,pdaHeading,watchData);
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glDepthMask(GL_TRUE);

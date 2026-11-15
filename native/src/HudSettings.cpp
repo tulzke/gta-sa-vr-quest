@@ -1,5 +1,6 @@
 #include "HudSettings.h"
 #include "MenuPrecision.h"
+#include "WatchInteraction.h"
 
 #include "Log.h"
 
@@ -208,7 +209,7 @@ void Load() {
             else if (std::sscanf(line, "WatchInside=%d", &value) == 1)
                 g_watchInside.store(value != 0);
             else if (std::sscanf(line, "WatchMapZoomPercent=%d", &value) == 1)
-                g_watchZoomPercent.store(std::clamp(value,50,200));
+                g_watchZoomPercent.store(std::clamp(value,int(watchhud::kZoomMin*100),int(watchhud::kZoomMax*100)));
             else if (std::sscanf(line, "PdaPortrait=%d", &value) == 1)
                 g_pdaPortrait.store(value != 0);
             else {
@@ -403,7 +404,7 @@ bool WatchInside() { EnsureLoaded(); return g_watchInside.load(); }
 float WatchMapZoom(){EnsureLoaded();return g_watchZoomPercent.load()*.01f;}
 void SetWatchMapZoom(float zoom,bool persist){
     EnsureLoaded();
-    if(std::isfinite(zoom))g_watchZoomPercent.store(static_cast<int>(std::round(std::clamp(zoom,.5f,2.f)*100.f)));
+    if(std::isfinite(zoom))g_watchZoomPercent.store(static_cast<int>(std::round(std::clamp(zoom,watchhud::kZoomMin,watchhud::kZoomMax)*100.f)));
     if(persist)g_watchZoomSave.store(true,std::memory_order_release);
 }
 void FlushWatchSettings(){if(g_watchZoomSave.exchange(false,std::memory_order_acq_rel))Save();}

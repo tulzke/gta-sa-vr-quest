@@ -5,17 +5,19 @@
 
 namespace savr::watchhud {
 constexpr float kProjectionHeight=.20f, kProjectionDiameter=.20f;
-constexpr float kZoomMin=.5f,kZoomMax=2.f;
+// 640 raster pixels / (400/300 pixels per metre * .25) = 1920 m
+// across the projection at its widest view (roughly half Los Santos).
+constexpr float kZoomMin=.25f,kZoomMax=2.f;
 constexpr float kSliderAcross=.125f,kSliderHalfHeight=.045f;
 struct ZoomSlider {
-    bool dragging=false,requireRelease=true;
+    bool dragging=false,requireRelease=true,touching=false;
     float zoom=1.f;
     // x/y/z are relative to the scale rail in the projection's reading basis.
     bool Update(bool enabled,float trigger,float x,float y,float z,float current) {
         bool ended=false;
+        touching=enabled&&std::abs(x)<.018f&&std::abs(y)<=kSliderHalfHeight+.012f&&std::abs(z)<.020f;
         if(!enabled||trigger<.30f){ended=dragging;dragging=false;requireRelease=!enabled;}
-        if(enabled&&!requireRelease&&trigger>=.65f&& !dragging &&
-           std::abs(x)<.018f&&std::abs(y)<=kSliderHalfHeight+.012f&&std::abs(z)<.020f)dragging=true;
+        if(touching&&!requireRelease&&trigger>=.65f&&!dragging)dragging=true;
         if(dragging){
             if(std::abs(x)>.065f||std::abs(z)>.065f){dragging=false;requireRelease=true;ended=true;}
             else zoom=kZoomMin+(kZoomMax-kZoomMin)*std::clamp((y+kSliderHalfHeight)/(2*kSliderHalfHeight),0.f,1.f);

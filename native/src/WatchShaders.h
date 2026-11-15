@@ -43,7 +43,7 @@ void main(){
             float pulse=pow(.5+.5*cos((vUV.y-uTime*.32)*18.849556),48.0);
             float fade=sin(clamp(vUV.y,0.0,1.0)*3.14159265);
             o=vec4(.18,.78,1.0,uOpacity*(.018+.13*meridian+.38*pulse)*fade);
-        }else o=vec4(mix(vec3(.55,.62,.65),vec3(.18,.78,1.0),vUV.x),uOpacity);
+        }else o=vec4(mix(mix(vec3(.55,.62,.65),vec3(.18,.78,1.0),vUV.x),vec3(.65,.95,1.0),vUV.y),uOpacity);
         return;
     }
     if(!uDisplay){

@@ -82,8 +82,16 @@ try {
  for(let i=0;i<t0.length;i+=4){if(t0[i+3]>0&&t0[i+3]<160)translucent++;if(Math.abs(t0[i+3]-t1[i+3])>8)moving++;}
  if(translucent<5000||moving<1000)throw Error('Cone animation missing '+translucent+'/'+moving);
  effect(.4,true);
+ // Actual slider shader switches to a brighter colour on index contact.
+ gl.uniform1i(location('uEffect'),2);
+ function rail(highlight){const mesh=cone.slice();for(let i=7;i<mesh.length;i+=8)mesh[i]=highlight;
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mesh),gl.STATIC_DRAW);return effect(0,false);}
+ const idleRail=rail(0),hotRail=rail(1);let brighter=0;
+ for(let i=0;i<hotRail.length;i+=4)if(hotRail[i]>idleRail[i]+20)brighter++;
+ if(brighter<5000)throw Error('Slider contact highlight missing '+brighter);
+ gl.uniform1i(location('uEffect'),1);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(cone),gl.STATIC_DRAW);effect(.4,true);
  if(gl.getError()!==gl.NO_ERROR)throw Error('GL error');
- result.textContent='PASS GPU: GLB dial; clipped map; vitals; reflected-hand readability; map alpha 50%; translucent animated cone';
+ result.textContent='PASS GPU: GLB dial; clipped map; vitals; reflected-hand readability; map alpha 50%; animated cone; slider contact highlight';
  document.title='PASS WATCH';
 } catch(error){result.textContent='FAIL '+error.stack;document.title='FAIL WATCH';}
 </script>

@@ -75,16 +75,16 @@ int main(){
     }
     {
         watchhud::ZoomSlider slider;
-        CHECK(!slider.Update(true,1,0,0,0,1)&&!slider.dragging);
+        CHECK(!slider.Update(true,1,0,0,0,1)&&!slider.dragging&&slider.touching);
         CHECK(!slider.Update(true,0,0,0,0,1));
-        CHECK(!slider.Update(true,1,.10f,0,0,1)&&!slider.dragging);
+        CHECK(!slider.Update(true,1,.10f,0,0,1)&&!slider.dragging&&!slider.touching);
         CHECK(!slider.Update(true,1,0,0,0,1)&&slider.dragging);
-        CHECK(std::abs(slider.zoom-1.25f)<.001f);
+        CHECK(std::abs(slider.zoom-1.125f)<.001f);
         slider.Update(true,1,0,.1f,0,slider.zoom);CHECK(slider.zoom==2);
-        slider.Update(true,1,0,-.1f,0,slider.zoom);CHECK(slider.zoom==.5f);
+        slider.Update(true,1,0,-.1f,0,slider.zoom);CHECK(slider.zoom==.25f);
         CHECK(slider.Update(true,0,0,0,0,slider.zoom)&&!slider.dragging);
         slider.Update(true,1,0,0,0,1);CHECK(slider.dragging);
-        CHECK(slider.Update(false,1,0,0,0,slider.zoom)&&!slider.dragging);
+        CHECK(slider.Update(false,1,0,0,0,slider.zoom)&&!slider.dragging&&!slider.touching);
         CHECK(!slider.Update(true,1,0,0,0,1)&&!slider.dragging);
     }
     {
