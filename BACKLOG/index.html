@@ -23,11 +23,6 @@
     </header>
 
     <section id="load-message" class="notice" role="status" hidden></section>
-    <div id="file-loader" class="notice" hidden>
-      <p>Для открытия двойным щелчком выберите <strong>index.json</strong> из этой папки.
-        Или запустите <code>node tools/backlog-server.mjs</code> из корня проекта — данные загрузятся автоматически.</p>
-      <label class="file-label">Открыть JSON <input id="json-file" type="file" accept=".json,application/json"></label>
-    </div>
     <noscript><p class="notice">Для загрузки индекса и фильтров нужен JavaScript. <a href="BACKLOG.md">Открыть Markdown-индекс</a>.</p></noscript>
 
     <div id="workspace" class="workspace" hidden>
@@ -61,7 +56,7 @@
       </main>
     </div>
 
-    <footer><span>Категории и приоритеты: <a href="index.json">index.json</a> · <a href="README.md">Как вести индекс</a></span><a href="BACKLOG.md">Старый Markdown-индекс ↗</a></footer>
+    <footer><span>Категории и приоритеты: <a href="backlog.js">BACKLOG_DATA в backlog.js</a> · <a href="README.md">Как вести индекс</a></span><a href="BACKLOG.md">Старый Markdown-индекс ↗</a></footer>
   </div>
 </body>
 </html>

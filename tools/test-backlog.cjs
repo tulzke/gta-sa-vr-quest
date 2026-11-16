@@ -2,15 +2,13 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
-const { once } = require('node:events');
-const { validateIndex, selectTasks } = require('../BACKLOG/backlog.js');
+const vm = require('node:vm');
+const { BACKLOG_DATA: data, validateIndex, selectTasks } = require('../BACKLOG/backlog.js');
 
 const root = path.join(__dirname, '../BACKLOG');
-const data = JSON.parse(fs.readFileSync(path.join(root, 'index.json'), 'utf8'));
 const clone = () => structuredClone(data);
 
-test('JSON preserves every legacy entry, status and Markdown target', () => {
+test('BACKLOG_DATA preserves every legacy entry, status and Markdown target', () => {
   validateIndex(data);
   const legacy = [...fs.readFileSync(path.join(root, 'BACKLOG.md'), 'utf8').matchAll(/^(\d+)\\\. (.+)$/gm)];
   assert.ok(legacy.length > 0);
@@ -38,7 +36,7 @@ test('invalid references, duplicate ids, priority/status and unsafe paths fail c
   ]) {
     const invalid = clone();
     mutate(invalid);
-    assert.throws(() => validateIndex(invalid), /index.json/);
+    assert.throws(() => validateIndex(invalid), /BACKLOG_DATA/);
   }
 });
 
@@ -69,36 +67,37 @@ test('search, multiple category membership and status filter compose', () => {
   assert.equal(selectTasks(sample, { category: 'unknown' }).length, 0);
 });
 
-test('local server loads the page/JSON/Markdown and rejects writes and outside files', { timeout: 10000 }, async () => {
-  const child = spawn(process.execPath, [path.join(__dirname, 'backlog-server.mjs'), '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
-  try {
-    const url = await new Promise((resolve, reject) => {
-      let output = '';
-      child.stdout.on('data', (chunk) => {
-        output += chunk;
-        const match = output.match(/http:\/\/127\.0\.0\.1:\d+\//);
-        if (match) resolve(match[0]);
-      });
-      child.once('error', reject);
-      child.once('exit', (code) => reject(new Error(`Server exited: ${code}`)));
-    });
-    const page = await fetch(url);
-    assert.equal(page.status, 200);
-    assert.match(await page.text(), /lang="ru"/);
-    const json = await fetch(`${url}index.json`);
-    assert.equal(json.status, 200);
-    assert.deepEqual(await json.json(), data);
-    const markdown = await fetch(`${url}${data.tasks[0].file}`);
-    assert.match(markdown.headers.get('content-type'), /text\/plain; charset=utf-8/);
-    assert.equal(await markdown.text(), fs.readFileSync(path.join(root, data.tasks[0].file), 'utf8'));
-    assert.equal((await fetch(`${url}index.json`, { method: 'PUT', body: '{}' })).status, 405);
-    assert.equal((await fetch(`${url}..%2f.git%2fconfig`)).status, 404);
-    assert.equal((await fetch(`${url}..%5cREADME.md`)).status, 404);
-    assert.equal((await fetch(`${url}%ZZ`)).status, 400);
-    assert.equal((await fetch(`${url}missing.md`)).status, 404);
-  } finally {
-    const stopped = once(child, 'exit');
-    child.kill();
-    await stopped;
+test('classic script starts from BACKLOG_DATA and builds the page without file or network APIs', () => {
+  // Minimal DOM surface: execute the real browser entry point, not a separate loader.
+  class Element {
+    constructor() { this.children = []; this.dataset = {}; this.listeners = {}; this.attributes = {}; this.hidden = true; }
+    append(...nodes) { this.children.push(...nodes.flatMap((node) => node.fragment ? node.children : [node])); }
+    replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+    get lastChild() { return this.children.at(-1); }
+    addEventListener(event, callback) { this.listeners[event] = callback; }
+    setAttribute(key, value) { this.attributes[key] = value; }
   }
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(([, id]) => [id, new Element()]));
+  const context = vm.createContext({
+    document: {
+      getElementById: (id) => elements.get(id) ?? null,
+      createElement: () => new Element(),
+      createDocumentFragment: () => Object.assign(new Element(), { fragment: true }),
+    },
+    // No fetch, FileReader, location or CommonJS module: just a classic browser script.
+  });
+  assert.match(html, /<script src="backlog\.js" defer><\/script>/);
+  vm.runInContext(fs.readFileSync(path.join(root, 'backlog.js'), 'utf8'), context);
+  const get = (id) => elements.get(id);
+  assert.equal(get('workspace').hidden, false);
+  assert.equal(get('load-message').hidden, true);
+  assert.equal(get('total').textContent, data.tasks.length);
+  assert.equal(get('task-list').children.length, data.tasks.length);
+  assert.equal(get('task-list').children[0].children[1].children[0].href, data.tasks[0].file);
+  get('search').listeners.input({ target: { value: '09 руль' } });
+  assert.equal(get('task-list').children.length, 0);
+  assert.equal(get('empty').hidden, false);
+  get('reset').listeners.click();
+  assert.equal(get('task-list').children.length, data.tasks.length);
 });
