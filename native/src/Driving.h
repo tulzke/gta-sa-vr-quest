@@ -130,6 +130,10 @@ struct WheelVisualState {
     std::uint64_t radioGrabId[2]{};
     float radioCenter[3]{}, radioRight[3]{}, radioUp[3]{}, radioNormal[3]{};
     float radioAngle{};
+    int radioStation{-1};
+    void* radioVehicle{};
+    bool radioLabelBikeFrame{},radioLocalPoseValid{};
+    float radioLocalPose[12]{};
     bool ignitionVisible{};
     bool ignitionGrabbed[2]{};
     bool ignitionReverseGrip[2]{};

@@ -680,6 +680,7 @@ struct GameSymbols {
     bool  (*CPad_NextStationJustUp)(void* pad);
     bool  (*CPad_LastStationJustUp)(void* pad);
     signed char (*CAudioEngine_GetCurrentRadioStationID)(void* audioEngine);
+    void* (*CAEVehicleAudioEntity_StaticGetPlayerVehicleAudioSettingsForRadio)();
     // Mobile SA's enter/exit query polls the touch ENTER_CAR widget rather than
     // CControllerState.ButtonTriangle. Hooking this exact exported query lets
     // Touch Y behave like Vice City's Triangle without synthesising screen taps.

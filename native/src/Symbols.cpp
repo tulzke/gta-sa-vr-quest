@@ -381,6 +381,7 @@ bool ResolveGameSymbols(void* handle) {
         {"_ZN4CPad17NextStationJustUpEv",                                        reinterpret_cast<void**>(&g.CPad_NextStationJustUp),                 false},
         {"_ZN4CPad17LastStationJustUpEv",                                        reinterpret_cast<void**>(&g.CPad_LastStationJustUp),                 false},
         {"_ZN12CAudioEngine24GetCurrentRadioStationIDEv",                        reinterpret_cast<void**>(&g.CAudioEngine_GetCurrentRadioStationID),  false},
+        {"_ZN21CAEVehicleAudioEntity43StaticGetPlayerVehicleAudioSettingsForRadioEv", reinterpret_cast<void**>(&g.CAEVehicleAudioEntity_StaticGetPlayerVehicleAudioSettingsForRadio), false},
         {"_ZN4CPad19ExitVehicleJustDownEbP8CVehiclebRK7CVector",                  reinterpret_cast<void**>(&g.CPad_ExitVehicleJustDown),              false},
         {"_ZN4CPad9GetWeaponEP4CPedb",                                           reinterpret_cast<void**>(&g.CPad_GetWeapon),                       false},
         {"Scene",                                                                reinterpret_cast<void**>(&g.Scene),                                 true },

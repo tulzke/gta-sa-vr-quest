@@ -31,6 +31,7 @@
 #include "Driving.h"
 #include "VehicleHorn.h"
 #include "RadioHandAttachment.h"
+#include "RadioLabel.h"
 #include "VehicleTestArea.h"
 #include "VehicleClimbGeometry.h"
 #include "FrameTarget.h"
@@ -111,7 +112,6 @@ struct HudTextState {
     std::u16string help;
     std::u16string big;
     std::u16string timers;
-    std::u16string radio;
     int bigStyle{};
     std::uint64_t revision{};
 };
@@ -4200,10 +4200,6 @@ bool DrawHudComposite(GLuint sourceTexture,int targetWidth,int targetHeight,
     }
     std::u16string bigText=textState.big;
     std::u16string timerText=textState.timers;
-    if (!textState.radio.empty()) {
-        if (!timerText.empty()) timerText.append(u"\n");
-        timerText.append(textState.radio);
-    }
     // While the HUD menu is open, live mission text is usually absent, which
     // made the text layers impossible to place. Substitute sample strings
     // so their boxes are always visible during calibration; the revision
@@ -5249,19 +5245,6 @@ void PublishWeaponSlotHud(const int types[26], const int clips[26], const int to
         const auto total=static_cast<std::uint64_t>(std::clamp(totals[slot],0,99999));
         g_ammoSlotHud[slot].store(valid ? (1ull<<63)|(clip<<32)|total : 0,std::memory_order_relaxed);
     }
-}
-
-void PublishRadioText(const char* text) {
-    std::u16string next;
-    if (text) {
-        for (const char* c = text; *c != '\0' && next.size() < 64; ++c)
-            next.push_back(static_cast<char16_t>(
-                static_cast<unsigned char>(*c)));
-    }
-    std::lock_guard<std::mutex> lock(g_hudTextMutex);
-    if (g_hudTextState.radio == next) return;
-    g_hudTextState.radio = std::move(next);
-    ++g_hudTextState.revision;
 }
 
 TrackingSnapshot CaptureTrackingSnapshot() {
@@ -11258,6 +11241,8 @@ void DrawDrivingBoxes(const float* mvp, const float* vertices, int vertexCount,
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
+#include "RadioLabelRender.inl"
+
 extern "C" {
 extern const unsigned char savr_radio_base_mesh[],savr_radio_base_mesh_end[];
 extern const unsigned char savr_radio_knob_mesh[],savr_radio_knob_mesh_end[];
@@ -12238,6 +12223,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         (!trackedVisuals || g_wVc <= 0) &&
         (!trackedVisuals || !(laser[0].valid || laser[1].valid)) &&
         (!trackedVisuals || !drivingWheel.active) &&
+        !drivingWheel.radioVisible &&
         (!trackedVisuals || (throwableTrajectory[0].count <= 1 &&
                              throwableTrajectory[1].count <= 1)) &&
         !chuteVisuals && !chuteRingVisual &&
@@ -12385,6 +12371,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawWeaponForEye(mvp);     // active weapon mesh pinned to the hand (Stage 1)
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
+    if(usingGameDepth && !scope.active)DrawRadioLabel(mvp,drivingWheel);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,false,true);
     if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,true);

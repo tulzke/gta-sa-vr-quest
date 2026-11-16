@@ -88,9 +88,6 @@ struct WeaponAmmoPose {
 };
 void SetWeaponAmmoPose(int hand, const WeaponAmmoPose& pose);
 void PublishWeaponSlotHud(const int types[26], const int clips[26], const int totals[26]);
-// Transient radio-station line, shown in the TIMERS text layer while the
-// station changes (empty string clears it).
-void PublishRadioText(const char* text);
 
 // Per-hand tracked pose for rendering VR hands. grip drives the hand model; aim
 // gives the pointing axis. Poses are in the session LOCAL space (same as the head

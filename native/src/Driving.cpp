@@ -15,6 +15,7 @@
 #include "MissionComfort.h"
 #include "IgnitionState.h"
 #include "RadioKnobState.h"
+#include "RadioLabel.h"
 #include "CockpitSelection.h"
 #include "VehicleLiftLever.h"
 #include "VehicleNitro.h"
@@ -211,9 +212,6 @@ std::atomic<int> g_activeBikeAccelerator{BIKE_ACCEL_HOLD_TRIGGER};
 std::atomic<bool> g_radioButtonDown{false};
 std::atomic<bool> g_radioChangeJustPressed{false};
 std::atomic<bool> g_radioPrevJustPressed{false};
-// Station-name toast (player request: visible radio navigation).
-double g_radioToastUntil = 0.0;
-int    g_radioLastStation = -999;
 
 std::mutex g_stateMutex;
 WheelVisualState g_visual{};
@@ -2231,9 +2229,11 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
 void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
                      const xr::InputState& input, const xr::HandPose poses[2],
                      unsigned occupied, bool preview=false, bool probe=false) {
-    if (!vehicle || IsBicycleModel(visual.modelId) || !g.FindPlayerPed ||
+    visual.radioVisible=false;visual.radioStation=radio::kUnknownStation;
+    if (!radio::VehicleHasTunableRadio(vehicle) || IsBicycleModel(visual.modelId) || !g.FindPlayerPed ||
         !g.CVehicle_IsDriver || !g.CVehicle_IsDriver(vehicle,g.FindPlayerPed(-1))) {
-        g_radioKnob.Reset(); g_radioKnobHand=-1; return;
+        g_radioKnob.Reset(); g_radioKnobHand=-1;
+        g_radioKnobNext.store(0);g_radioKnobPrev.store(0);return;
     }
     V3 right{visual.right[0],visual.right[1],visual.right[2]};
     V3 up{visual.up[0],visual.up[1],visual.up[2]};
@@ -2262,9 +2262,40 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
     }
     if (ignition::FlipFaceNormal(Dot(Cross(right,up),normal))) normal=normal*-1.0f;
     visual.radioVisible=true;
+    visual.radioVehicle=vehicle;
+    visual.radioLabelBikeFrame=visual.bike&&!poseSet;
+    visual.radioStation=radio::kUnknownStation;
+    // The global engine may still belong to the previous car during boarding.
+    // Match its bound settings to this vehicle before publishing a station.
+    if(!probe && g.AudioEngine && g.CAudioEngine_GetCurrentRadioStationID &&
+       g.CAEVehicleAudioEntity_StaticGetPlayerVehicleAudioSettingsForRadio &&
+       g.CAEVehicleAudioEntity_StaticGetPlayerVehicleAudioSettingsForRadio()==radio::VehicleRadioSettings(vehicle)) {
+        const int station=g.CAudioEngine_GetCurrentRadioStationID(g.AudioEngine);
+        if(*radio::StationName(station))visual.radioStation=station;
+    }
     const V3 vectors[4]{center,right,up,normal};
     float* fields[4]{visual.radioCenter,visual.radioRight,visual.radioUp,visual.radioNormal};
     for (int i=0;i<4;++i) { fields[i][0]=vectors[i].x; fields[i][1]=vectors[i].y; fields[i][2]=vectors[i].z; }
+    // Store the whole assembly in vehicle space, then reproject after this
+    // frame's camera update. The label and knob always use the same late pose.
+    visual.radioLocalPoseValid=false;
+    V3 vr{},vf{},vu{},vp{};
+    if(!probe && ReadIgnitionFrame(vehicle,visual.bike,&vr,&vf,&vu,&vp)) {
+        V3 world[4]{};bool valid=true;
+        for(int i=0;i<4;++i) {
+            const V3 p=i?center+vectors[i]:center;
+            const float in[3]{p.x,p.y,p.z};float out[3]{};
+            if(!vrcam::TrackingPointToWorld(in,out)){valid=false;break;}
+            world[i]={out[0],out[1],out[2]};
+        }
+        if(valid) {
+            for(int i=0;i<4;++i) {
+                const V3 p=world[i]-(i?world[0]:vp);
+                visual.radioLocalPose[i*3]=Dot(p,vr);visual.radioLocalPose[i*3+1]=Dot(p,vf);visual.radioLocalPose[i*3+2]=Dot(p,vu);
+            }
+            visual.radioLocalPoseValid=true;
+        }
+    }
     if (preview) { if (!probe) { g_radioKnob.Reset(); g_radioKnobHand=-1; } return; }
     if (g_radioKnobVehicle!=vehicle) {
         g_radioKnobVehicle=vehicle; g_radioKnob.Reset(); g_radioKnobHand=-1;
@@ -2303,6 +2334,27 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
             visual.radioGrabId[hand]=g_radioGrabSequence;
             visual.radioAngle=g_radioKnob.angle/deg;
         }
+    }
+}
+
+void RefreshRadioTracking(WheelVisualState& visual) {
+    if(!visual.radioVisible)return;
+    void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+    if(vehicle!=visual.radioVehicle || !visual.radioLocalPoseValid ||
+       !radio::VehicleHasTunableRadio(vehicle)) {visual.radioVisible=false;return;}
+    V3 vr{},vf{},vu{},vp{};
+    if(!ReadIgnitionFrame(vehicle,visual.bike,&vr,&vf,&vu,&vp)){visual.radioVisible=false;return;}
+    V3 points[4]{};
+    const auto* local=visual.radioLocalPose;
+    const V3 center=vp+vr*local[0]+vf*local[1]+vu*local[2];
+    for(int i=0;i<4;++i) {
+        const V3 point=i?center+vr*local[i*3]+vf*local[i*3+1]+vu*local[i*3+2]:center;
+        if(!WorldPointToTracking(point,&points[i])){visual.radioVisible=false;return;}
+    }
+    float* fields[]{visual.radioCenter,visual.radioRight,visual.radioUp,visual.radioNormal};
+    for(int i=0;i<4;++i) {
+        const V3 p=i?Normalized(points[i]-points[0]):points[0];
+        fields[i][0]=p.x;fields[i][1]=p.y;fields[i][2]=p.z;
     }
 }
 
@@ -4866,7 +4918,7 @@ void ToggleMotionSteeringHand() {
 
 bool CabinVisualContext() {
     if (!vrcam::IsStereoActive()||ThirdPersonViewActive()||
-        GetRemoteControlledVehicle()||!HasPlayerVehicle()) return false;
+        GetRemoteControlledVehicle()||!HasPlayerVehicle()||vrfire::IsScriptedWeaponCamera()) return false;
     if (g.CCutsceneMgr_ms_running&&*g.CCutsceneMgr_ms_running) return false;
     if (g.TheCamera&&*(static_cast<const std::uint8_t*>(g.TheCamera)+0x43)) return false;
     if (g.PlayerIsEnteringCar&&g.PlayerIsEnteringCar()) return false;
@@ -4924,50 +4976,6 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         g_radioKnobNext.store(0); g_radioKnobPrev.store(0);
     }
 
-    // Visible radio navigation (player request): show the station name in
-    // the TIMERS text layer for 3 s whenever the station changes.
-    {
-        static const char* const kStationNames[] = {
-            "RADIO OFF",           // 0 (unused placeholder)
-            "PLAYBACK FM",         // 1
-            "K-ROSE",              // 2
-            "K-DST",               // 3
-            "BOUNCE FM",           // 4
-            "SF-UR",               // 5
-            "RADIO LOS SANTOS",    // 6
-            "RADIO X",             // 7
-            "CSR 103.9",           // 8
-            "K-JAH WEST",          // 9
-            "MASTER SOUNDS 98.3",  // 10
-            "WCTR",                // 11
-            "USER TRACKS",         // 12
-        };
-        double toastNow = 0.0;
-        {
-            timespec ts{};
-            clock_gettime(CLOCK_MONOTONIC, &ts);
-            toastNow = ts.tv_sec + ts.tv_nsec * 1e-9;
-        }
-        int station = -999;
-        if (radioAllowed && g.AudioEngine &&
-            g.CAudioEngine_GetCurrentRadioStationID) {
-            station = g.CAudioEngine_GetCurrentRadioStationID(g.AudioEngine);
-        }
-        if (station != g_radioLastStation) {
-            if (g_radioLastStation != -999 && station >= 0)
-                g_radioToastUntil = toastNow + 3.0;
-            g_radioLastStation = station;
-        }
-        if (g_radioToastUntil > toastNow && station >= 0) {
-            const char* name = (station >= 1 && station <= 12)
-                ? kStationNames[station] : "RADIO OFF";
-            char line[64];
-            std::snprintf(line, sizeof(line), "RADIO: %s", name);
-            xr::PublishRadioText(line);
-        } else {
-            xr::PublishRadioText("");
-        }
-    }
     const int appearance=GetActiveVehicleAppearance();
     const int activeType=appearance==1?VEHICLE_CAR:
                          appearance==2?VEHICLE_BIKE:
@@ -5561,6 +5569,7 @@ void ResetTracking() { std::lock_guard<std::mutex> lock(g_stateMutex); ClearInte
 void RefreshVisualTracking() {
     std::lock_guard<std::mutex> lock(g_stateMutex);
     if (!CabinVisualContext()) { ClearInteractionLocked(); return; }
+    RefreshRadioTracking(g_visual);
     if(g_visual.liftVisible) {
         void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
         if(!BuildLiftTracking(g_visual,vehicle)){g_liftLever.Reset();g_liftAxis.store(0,std::memory_order_release);}
@@ -5591,7 +5600,11 @@ bool GetWheelVisualState(WheelVisualState* out) {
     // A script may change scene/vehicle after UpdateInput. Do not publish the
     // previous cabin into the new eye frame, even when simulation is paused.
     if (!CabinVisualContext()) { ClearInteractionLocked(); *out={}; return false; }
-    *out=g_visual; return out->active;
+    *out=g_visual;
+    if(out->radioVisible && (!g.FindPlayerVehicle || out->radioVehicle!=g.FindPlayerVehicle(-1,false))) {
+        out->radioVisible=false;out->radioStation=radio::kUnknownStation;
+    }
+    return out->active;
 }
 bool GetGrabbedHandVisual(int hand,float position[3],float right[3],float up[3],float forward[3]) {
     if (hand<0||hand>1||!position||!right||!up||!forward) return false;
