@@ -7,7 +7,7 @@
 namespace savr::hydrocontrol {
 constexpr float kRad=.017453292519943295f,kTravel=22.f*kRad,kReach=.055f;
 constexpr float kModelScale=2.f,kNeutral=.011f,kEngage=.020f,kInputLimit=.026f;
-constexpr float kCenterPlay=3.f*kRad;
+constexpr float kCenterPlay=9.f*kRad;
 // The fixed wrist sits behind/above the sphere. Its arc is longer than the
 // sphere centre's arc; require a full hand stroke before the detent engages.
 constexpr float kHandStroke=2.f;
@@ -32,8 +32,12 @@ inline float Dot(Point a,Point b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 struct InputFrame {
     Point pivot{},right{1,0,0},forward{0,1,0},up{0,0,1};float scale{1.f};
     Point Local(Point p)const{p=(p-pivot)*(1.f/scale);return {Dot(p,right),Dot(p,forward),Dot(p,up)};}
-    Point World(Point p)const{return pivot+(right*p.x+forward*p.y+up*p.z)*scale;}
+    Point Vector(Point p)const{return right*p.x+forward*p.y+up*p.z;}
+    Point World(Point p)const{return pivot+Vector(p)*scale;}
 };
+inline InputFrame MountedFrame(Point root,Point right,Point forward,Point up,float scale){
+    InputFrame frame{root,right,forward,up,scale};frame.pivot=frame.World({-.032f,.008f,.018f});return frame;
+}
 // Swing about a horizontal axis; x/y are the tilt vector in radians.
 inline Point Swing(Point p,float x,float y){
     const float a=std::hypot(x,y);if(a<1e-7f)return p;
@@ -74,7 +78,7 @@ struct Button {
 };
 struct State {
     int owner{-1},slot{};bool down[2]{true,true},four{},changed{},recenterVisual{};
-    Point offset{};float visualX{},visualY{},aimX{},aimY{};
+    Point grabOffset{};float visualX{},visualY{},aimX{},aimY{};
     InputFrame grabFrame{};std::uint64_t inputEpoch{};
     Button button[2];
     void Reset(){*this=State{};}
@@ -85,25 +89,26 @@ struct State {
         const int previous=slot;
         if(owner>=0){const auto& hand=h[owner];
             if(!hand.valid||!hand.available||!Finite(hand.point)||!std::isfinite(hand.grip)||
-               hand.grip<=.30f||Distance(hand.point-offset,visualX,visualY)>.18f){
+               hand.grip<=.30f||Distance(hand.point-grabOffset,visualX,visualY)>.18f){
                 owner=-1;slot=0;aimX=aimY=0;down[0]=down[1]=true;}}
         if(owner<0){
             int best=-1;float distance=.055f;
             for(int i=0;i<2;++i){const auto& hand=h[i];const float d=Distance(hand.point,visualX,visualY);
                 if(hand.valid&&hand.available&&Finite(hand.point)&&std::isfinite(hand.grip)&&!down[i]&&hand.grip>=.65f&&d<distance){best=i;distance=d;}}
-            if(best>=0){owner=best;offset=h[best].point-Grip(visualX,visualY);}
+            if(best>=0){owner=best;grabOffset=h[best].point-Grip(visualX,visualY);}
         }
         if(owner>=0){
-            Point p=h[owner].point-offset;
+            // One immutable origin for this entire grip. Returning to neutral
+            // or exceeding the gate must never move the physical centre.
+            Point p=h[owner].point-grabOffset;
             p.x/=kHandStroke;p.y/=kHandStroke;
             float radius=std::hypot(p.x,p.y);
-            // There is no physical stop on a controller. Discard outward
-            // overtravel at the gate so a short pull back can reach neutral.
-            // Vertical wrist motion does not change the planar command.
+            // Clamp only the evaluated position, never the grab origin.
+            // Zones share this coordinate frame; vertical wrist motion does
+            // not change the planar command.
             if(radius>kInputLimit){const float factor=kInputLimit/radius;
-                offset.x+=p.x*(1.f-factor)*kHandStroke;offset.y+=p.y*(1.f-factor)*kHandStroke;
                 p.x*=factor;p.y*=factor;radius=kInputLimit;}
-            if(slot&&radius<=kNeutral){slot=0;offset=h[owner].point-Grip(0,0);p=Grip(0,0);radius=0;}
+            if(slot&&radius<=kNeutral)slot=0;
             else if(!slot&&radius>=kEngage)slot=Nearest(p.x,p.y,four);
             const float visualPerMetre=kTravel/(kReach*std::sin(kTravel));
             const Point d=Direction(slot);

@@ -1,9 +1,15 @@
 #pragma once
 #include "HandRenderFrame.h"
+#include "VehicleHydraulics.h"
 #include "VehicleHydraulicsHandConfig.h"
 #include <algorithm>
 
 namespace savr::hydrocontrol {
+inline radio::HandFrame GripFrame(const InputFrame& pivot,float x,float y){
+    const auto vec=[](Point p){return radio::HandVector{p.x,p.y,p.z};};
+    return {vec(pivot.World(Grip(x,y))),vec(pivot.Vector(Swing({1,0,0},x,y))),
+        vec(pivot.Vector(Swing({0,1,0},x,y))),vec(pivot.Vector(Swing({0,0,1},x,y)))};
+}
 inline radio::HandPose FixedGrip(const radio::HandFrame& ball,int hand,float radius,const hydrohand::Fit& fit={}){
     const auto r=ball.right,f=ball.up,u=ball.normal;
     // Same mirrored Grip mesh axes as the calibrated lift lever. Its opening

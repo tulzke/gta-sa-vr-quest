@@ -9085,15 +9085,10 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             }
         }
         if(hydroHand){
-            const radio::HandVector base{drivingWheel.hydroCenter[0],drivingWheel.hydroCenter[1],drivingWheel.hydroCenter[2]};
-            const auto transform=[&](hydrocontrol::Point p){return radio::HandVector{
-                drivingWheel.hydroRight[0]*p.x+drivingWheel.hydroForward[0]*p.y+drivingWheel.hydroUp[0]*p.z,
-                drivingWheel.hydroRight[1]*p.x+drivingWheel.hydroForward[1]*p.y+drivingWheel.hydroUp[1]*p.z,
-                drivingWheel.hydroRight[2]*p.x+drivingWheel.hydroForward[2]*p.y+drivingWheel.hydroUp[2]*p.z};};
-            const float x=drivingWheel.hydroX,y=drivingWheel.hydroY;
-            const auto p=hydrocontrol::Grip(x,y)+hydrocontrol::Point{-.032f,.008f,.018f};
-            const radio::HandFrame frame{base+transform(p)*drivingWheel.hydroScale,transform(hydrocontrol::Swing({1,0,0},x,y)),
-                transform(hydrocontrol::Swing({0,1,0},x,y)),transform(hydrocontrol::Swing({0,0,1},x,y))};
+            const auto point=[](const float v[3]){return hydrocontrol::Point{v[0],v[1],v[2]};};
+            const auto pivot=hydrocontrol::MountedFrame(point(drivingWheel.hydroCenter),point(drivingWheel.hydroRight),
+                point(drivingWheel.hydroForward),point(drivingWheel.hydroUp),drivingWheel.hydroScale);
+            const auto frame=hydrocontrol::GripFrame(pivot,drivingWheel.hydroX,drivingWheel.hydroY);
             const auto pinned=hydroHands[hand].Grab(frame,hand,.0225f*drivingWheel.hydroScale,hydrohand::Get(hand));
             pos={pinned.position.x,pinned.position.y,pinned.position.z};right={pinned.right.x,pinned.right.y,pinned.right.z};
             up={pinned.up.x,pinned.up.y,pinned.up.z};forward={pinned.forward.x,pinned.forward.y,pinned.forward.z};grip=1.f;trig=0.f;

@@ -102,25 +102,35 @@ void Buttons(){
     std::puts("PASS MODE repeats: 20 short withdrawals, one click per poke; unarmed contact has no fake cap travel");
 }
 void SpringReturn(){
-    for(int hand=0;hand<2;++hand)for(bool four:{false,true})for(int slot=1;slot<=8;++slot){
+    for(int hand=0;hand<2;++hand)for(bool four:{false,true}){
         State s;InputFrame frame{{.3f,.2f,-.1f},{1,0,0},{0,1,0},{0,0,1},kModelScale};
-        Hand h[2]{};h[hand]={frame.World(Grip(0,0)),{},0,true,true};
+        Hand h[2]{};h[hand]={frame.World(Grip(0,0)+Point{.017f,-.012f,.006f}),{},0,true,true};
         s.StepTracked(h,frame,.02f,true,four,1);h[hand].grip=1;s.StepTracked(h,frame,.02f,true,four,1);
-        const auto d=Direction(slot);const auto origin=h[hand].point;
-        const auto correct=[&]{return four?s.slot>0&&s.slot%2==1&&Dot(Direction(s.slot),d)>.7f:s.slot==slot;};
-        // No physical stop: overshoot the visible gate by 20 cm at 2x size.
-        h[hand].point=origin+d*.24f;s.StepTracked(h,frame,.02f,true,four,1);
-        CHECK(s.owner==hand&&correct());
-        // The wider hand stroke scales both activation and return travel.
-        h[hand].point=h[hand].point-d*.064f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);
-        for(int i=0;i<12;++i)s.StepTracked(h,frame,.02f,true,four,1);
-        CHECK(s.slot==0&&std::hypot(s.visualX,s.visualY)<1e-6f);
-        // A vertical wrist shift must neither latch a side nor break a grab.
-        h[hand].point.z+=.06f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);
-        h[hand].point=h[hand].point+d*.084f;s.StepTracked(h,frame,.02f,true,four,1);
-        CHECK(s.owner==hand&&correct());
+        const auto origin=h[hand].point,grab=s.grabOffset;
+        const auto unchanged=[&]{CHECK(Length(s.grabOffset-grab)<1e-7f);CHECK(Length(s.grabFrame.pivot-frame.pivot)<1e-7f);};
+        const auto ball=GripFrame(frame,s.visualX,s.visualY);
+        const savr::radio::HandPose tracked{{origin.x,origin.y,origin.z},{1,0,0},{0,1,0},{0,0,1}};
+        savr::hydrocontrol::HandAttachment attachment;const auto initial=attachment.Grab(ball,hand,.045f);
+        for(int cycle=0;cycle<128;++cycle){const int slot=cycle%8+1;const auto d=Direction(slot);
+            const auto correct=[&]{return four?s.slot>0&&s.slot%2==1&&Dot(Direction(s.slot),d)>.7f:s.slot==slot;};
+            h[hand].point=origin+d*.24f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&correct());unchanged();
+            // Returning a short distance from overtravel is NOT a new centre.
+            h[hand].point=origin+d*.176f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&correct());unchanged();
+            // Neutral is always the same physical zone, including its edge.
+            h[hand].point=origin+d*.04f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);unchanged();
+            h[hand].point=origin;
+            for(int i=0;i<8;++i)s.StepTracked(h,frame,.02f,true,four,1);
+            CHECK(s.owner==hand&&s.slot==0&&std::hypot(s.visualX,s.visualY)<1e-6f);unchanged();
+            const auto final=attachment.Grab(GripFrame(frame,s.visualX,s.visualY),hand,.045f);
+            CHECK(savr::radio::Dot(final.position-initial.position,final.position-initial.position)<1e-10f);
+        }
+        h[hand].point.z+=.06f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);unchanged();
+        h[hand].point=origin;h[hand].grip=0;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==-1);
+        const auto released=attachment.Free(tracked,.02f);CHECK(savr::radio::Dot(released.position-initial.position,released.position-initial.position)<1e-10f);
+        for(int i=0;i<12;++i)attachment.Free(tracked,.02f);
+        const auto free=attachment.Free(tracked,.02f);CHECK(savr::radio::Dot(free.position-tracked.position,free.position-tracked.position)<1e-10f);
     }
-    std::puts("PASS 2x spring return: both hands/eight detents and mission; 24 cm overshoot returns with 6.4 cm pullback; vertical motion ignored");
+    std::puts("PASS fixed coordinate zones: 128 mixed cycles/overtravel per hand and mission mode; immutable centre/offset; same hand pose and release as initial grab");
 }
 void HandTravel(){
     for(int hand=0;hand<2;++hand)for(int slot=1;slot<=8;++slot){
@@ -131,12 +141,27 @@ void HandTravel(){
         for(float metres:{.005f,.01f,.02f,.04f,.055f,.079f}){
             h[hand].point=start+d*metres;s.StepTracked(h,frame,.02f,true,false,3);
             CHECK(s.owner==hand&&s.slot==0&&!s.changed&&Length(s.Command())==0);
-            CHECK(std::hypot(s.visualX,s.visualY)>.01f&&std::hypot(s.visualX,s.visualY)<=kCenterPlay+1e-6f);}
+            CHECK(std::hypot(s.visualX,s.visualY)>.01f&&std::hypot(s.visualX,s.visualY)<=kCenterPlay+1e-6f);
+            if(metres>=.04f)CHECK(std::abs(std::hypot(s.visualX,s.visualY)-9.f*kRad)<1e-5f);}
         h[hand].point=start;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.slot==0&&std::hypot(s.visualX,s.visualY)<1e-6f);
         h[hand].point=start+d*.082f;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.slot==slot);
     }
-    std::puts("PASS neutral free play: continuous shaft/hand pose within 3 degrees with zero command and no clicks; returns to centre");
+    std::puts("PASS neutral free play: continuous shaft/hand pose within 9 degrees with zero command and no clicks; returns to centre");
     std::puts("PASS measured hand travel: no activation at 5-79 mm, engagement at 82 mm at default 200%, both hands/eight rays");
+}
+void SharedCoordinates(){
+    const Point root{.4f,-.2f,.7f};
+    const auto r=Swing({1,0,0},.3f,-.2f),f=Swing({0,1,0},.3f,-.2f),u=Swing({0,0,1},.3f,-.2f);
+    for(float scale:{.8f,2.f,4.f})for(int slot=0;slot<=8;++slot){
+        const auto pivot=MountedFrame(root,r,f,u,scale);const auto d=Direction(slot);
+        const float x=d.x*kTravel,y=d.y*kTravel;
+        Vertex ball{};ball.position[2]=kReach;ball.role=1;ball=Model::Deform(ball,x,y,0);
+        const Point mesh=root+(r*ball.position[0]+f*ball.position[1]+u*ball.position[2])*scale;
+        const auto frame=GripFrame(pivot,x,y);
+        CHECK(Length(mesh-Point{frame.center.x,frame.center.y,frame.center.z})<1e-6f);
+        CHECK(Length(pivot.Local(pivot.World(Grip(x,y)))-Grip(x,y))<1e-6f);
+    }
+    std::puts("PASS shared coordinates: mesh, hand anchor and input frame coincide under all detents, rotated mount and 80/200/400 percent scale");
 }
 void MovingCockpit(){
     for(int hand=0;hand<2;++hand)for(int slot=1;slot<=8;++slot){
@@ -307,4 +332,4 @@ void HandConfig(){
     savr::hydrohand::SetPreview(false);CHECK(savr::hydrohand::PreviewHand()==-1);
     std::puts("PASS hand config: separate left/right offsets and rotations; round trip/replace/reset; invalid data/save failure; rotations around grip opening; preview exit");
 }
-int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();HandTravel();SpringReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);HandConfig();}
+int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();HandTravel();SpringReturn();SharedCoordinates();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);HandConfig();}

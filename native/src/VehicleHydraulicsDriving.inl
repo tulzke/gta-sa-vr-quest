@@ -46,7 +46,7 @@ hydrocontrol::InputFrame HydroInputFrame(const WheelVisualState& v){
     const hydrocontrol::Point r{v.hydroRight[0],v.hydroRight[1],v.hydroRight[2]},
         f{v.hydroForward[0],v.hydroForward[1],v.hydroForward[2]},u{v.hydroUp[0],v.hydroUp[1],v.hydroUp[2]},
         c{v.hydroCenter[0],v.hydroCenter[1],v.hydroCenter[2]};
-    return {c+(r*-.032f+f*.008f+u*.018f)*v.hydroScale,r,f,u,v.hydroScale};
+    return hydrocontrol::MountedFrame(c,r,f,u,v.hydroScale);
 }
 hydrocontrol::Point HydroButtonPoint(const WheelVisualState& v,const xr::HandPose& h,int hand){
     // Full Point pose from the actual hand GLB, independent of the current
