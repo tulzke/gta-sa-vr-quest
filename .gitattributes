@@ -8,6 +8,8 @@
 /assets/vehicle-lift-lever/*.blend -text
 /assets/vehicle-lift-lever/*.glb -text
 /assets/vehicle-lift-lever/*.mesh -text
+/assets/nitro-lever/*.blend filter=lfs diff=lfs merge=lfs -text
+/assets/nitro-lever/*.glb filter=lfs diff=lfs merge=lfs -text
 /assets/watches/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/vrhands/skeletal/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/vrhands/source/*.blend filter=lfs diff=lfs merge=lfs -text
