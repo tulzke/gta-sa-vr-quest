@@ -3,7 +3,7 @@
 // ============================================================================
 // НАЧАЛО ДАННЫХ БЭКЛОГА — агентам редактировать BACKLOG_DATA в этом блоке.
 // Это единственный источник задач, категорий, приоритетов и статусов страницы.
-// Формат полей: BACKLOG/README.md. После правки просто обновите index.html.
+// Формат: BACKLOG/README.md; план и приоритеты: AGENTS.md. Обновите index.html.
 // ============================================================================
 const BACKLOG_DATA = {
   "version": 1,
@@ -13,8 +13,20 @@ const BACKLOG_DATA = {
       "title": "Управление транспортом"
     },
     {
+      "id": "vehicle-calibration",
+      "title": "Настройка транспорта"
+    },
+    {
       "id": "vehicle-content",
-      "title": "Транспорт и интерьеры"
+      "title": "Модели и интерьеры транспорта"
+    },
+    {
+      "id": "story",
+      "title": "Сюжет: проверка проходимости"
+    },
+    {
+      "id": "missions",
+      "title": "Задания и взаимодействия с миром"
     },
     {
       "id": "weapons",
@@ -29,10 +41,6 @@ const BACKLOG_DATA = {
       "title": "HUD и интерфейс"
     },
     {
-      "id": "missions",
-      "title": "Миссии и мир"
-    },
-    {
       "id": "audio",
       "title": "Звук"
     },
@@ -43,6 +51,10 @@ const BACKLOG_DATA = {
     {
       "id": "tooling",
       "title": "Инструменты"
+    },
+    {
+      "id": "bugs",
+      "title": "Ошибки и регрессии"
     }
   ],
   "tasks": [
@@ -51,10 +63,11 @@ const BACKLOG_DATA = {
       "title": "Проверка положения руля на всех моделях автомобилей",
       "file": "09-proverka-polozheniya-rulya-na-modelyakh-avtomobiley.md",
       "categories": [
+        "vehicle-calibration",
         "vehicle-controls",
-        "vehicle-content"
+        "tooling"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -64,7 +77,7 @@ const BACKLOG_DATA = {
       "categories": [
         "weapons"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -72,9 +85,10 @@ const BACKLOG_DATA = {
       "title": "Корректировка дефолтных углов оружия",
       "file": "27-korrektirovka-defoltnykh-uglov-oruzhiya.md",
       "categories": [
-        "weapons"
+        "weapons",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -84,7 +98,7 @@ const BACKLOG_DATA = {
       "categories": [
         "vehicle-controls"
       ],
-      "priority": "none",
+      "priority": "critical",
       "status": "in_progress"
     },
     {
@@ -94,7 +108,7 @@ const BACKLOG_DATA = {
       "categories": [
         "player"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -105,7 +119,7 @@ const BACKLOG_DATA = {
         "vehicle-controls",
         "player"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -113,10 +127,10 @@ const BACKLOG_DATA = {
       "title": "Убрать тень CJ",
       "file": "39-ubrat-ten-cj.md",
       "categories": [
-        "player",
-        "graphics"
+        "graphics",
+        "player"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -126,7 +140,7 @@ const BACKLOG_DATA = {
       "categories": [
         "weapons"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -137,7 +151,7 @@ const BACKLOG_DATA = {
         "player",
         "missions"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -145,10 +159,11 @@ const BACKLOG_DATA = {
       "title": "Отдельный тестовый спавнер мотоциклов",
       "file": "44-otdelnyy-testovyy-spavner-mototsiklov.md",
       "categories": [
-        "vehicle-content",
+        "vehicle-calibration",
+        "vehicle-controls",
         "tooling"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -159,7 +174,7 @@ const BACKLOG_DATA = {
         "vehicle-controls",
         "player"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -167,10 +182,10 @@ const BACKLOG_DATA = {
       "title": "Исследовать скрытие окон в машине",
       "file": "49-skrytie-okon-v-mashine.md",
       "categories": [
-        "vehicle-controls",
-        "vehicle-content"
+        "vehicle-content",
+        "graphics"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -179,9 +194,10 @@ const BACKLOG_DATA = {
       "file": "50-drive-by-iz-okna.md",
       "categories": [
         "vehicle-controls",
-        "weapons"
+        "weapons",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -189,9 +205,10 @@ const BACKLOG_DATA = {
       "title": "Поведение хоумиз при стрельбе и розыске в машине",
       "file": "51-khoumiz-strelba-i-rozysk-v-mashine.md",
       "categories": [
+        "vehicle-controls",
         "missions"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -200,9 +217,10 @@ const BACKLOG_DATA = {
       "file": "57-posadka-i-ugon-lodok.md",
       "categories": [
         "vehicle-controls",
-        "vehicle-content"
+        "player",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -211,9 +229,10 @@ const BACKLOG_DATA = {
       "file": "62-lestnitsa-dozera.md",
       "categories": [
         "vehicle-controls",
-        "vehicle-content"
+        "player",
+        "story"
       ],
-      "priority": "none",
+      "priority": "critical",
       "status": "open"
     },
     {
@@ -221,9 +240,10 @@ const BACKLOG_DATA = {
       "title": "Исправить ухудшение звука",
       "file": "68-ispravit-ukhudshenie-zvuka.md",
       "categories": [
-        "audio"
+        "audio",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "in_progress"
     },
     {
@@ -233,7 +253,7 @@ const BACKLOG_DATA = {
       "categories": [
         "weapons"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -241,10 +261,11 @@ const BACKLOG_DATA = {
       "title": "Перекраска машины без передачи управления VR-камерой",
       "file": "74-perekraska-bez-peredachi-vr-kamery.md",
       "categories": [
-        "missions",
-        "graphics"
+        "vehicle-controls",
+        "graphics",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -253,9 +274,10 @@ const BACKLOG_DATA = {
       "file": "75-nastroyka-schetchika-patronov-dlya-kazhdogo-oruzhiya.md",
       "categories": [
         "weapons",
-        "hud"
+        "hud",
+        "tooling"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -263,9 +285,10 @@ const BACKLOG_DATA = {
       "title": "Пространственная настройка элементов HUD",
       "file": "77-prostranstvennaya-nastroyka-elementov-hud.md",
       "categories": [
-        "hud"
+        "hud",
+        "tooling"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -274,9 +297,10 @@ const BACKLOG_DATA = {
       "file": "79-ubrat-zerkalirovanie-modeli-oruzhiya.md",
       "categories": [
         "weapons",
-        "graphics"
+        "graphics",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -284,9 +308,10 @@ const BACKLOG_DATA = {
       "title": "Исправить открытие двери при медленном движении руки",
       "file": "81-medlennoe-otkrytie-dveri.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "critical",
       "status": "open"
     },
     {
@@ -295,9 +320,10 @@ const BACKLOG_DATA = {
       "file": "82-skrytie-vr-elementov-pri-chuzhoy-kamere.md",
       "categories": [
         "hud",
-        "graphics"
+        "graphics",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -306,9 +332,9 @@ const BACKLOG_DATA = {
       "file": "83-zaderzhka-padeniya-npc-v-boyu.md",
       "categories": [
         "weapons",
-        "player"
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -316,10 +342,11 @@ const BACKLOG_DATA = {
       "title": "Настройка угла наклона автомобильного радара через дебаг-меню",
       "file": "84-naklon-avtomobilnogo-radara.md",
       "categories": [
+        "vehicle-calibration",
         "hud",
         "tooling"
       ],
-      "priority": "none",
+      "priority": "critical",
       "status": "open"
     },
     {
@@ -328,10 +355,10 @@ const BACKLOG_DATA = {
       "file": "85-skrytie-krutilki-na-transporte-bez-radio.md",
       "categories": [
         "vehicle-controls",
-        "hud",
-        "audio"
+        "audio",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "critical",
       "status": "open"
     },
     {
@@ -340,9 +367,11 @@ const BACKLOG_DATA = {
       "file": "86-kamera-i-strelba-pri-sbivanii-cj.md",
       "categories": [
         "player",
-        "graphics"
+        "weapons",
+        "graphics",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -350,10 +379,11 @@ const BACKLOG_DATA = {
       "title": "Спринт с одноручным оружием в двух руках или двумя оружиями",
       "file": "87-sprint-s-oruzhiem-v-obeikh-rukakh.md",
       "categories": [
+        "player",
         "weapons",
-        "player"
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -363,7 +393,7 @@ const BACKLOG_DATA = {
       "categories": [
         "player"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -371,9 +401,10 @@ const BACKLOG_DATA = {
       "title": "Настройка подбора оружия с земли без ложных срабатываний",
       "file": "89-nastroyka-podbora-oruzhiya-s-zemli.md",
       "categories": [
-        "weapons"
+        "weapons",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -381,9 +412,10 @@ const BACKLOG_DATA = {
       "title": "Физика и коллизии бросаемого оружия",
       "file": "90-fizika-i-kollizii-brosaemogo-oruzhiya.md",
       "categories": [
-        "weapons"
+        "weapons",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -392,9 +424,10 @@ const BACKLOG_DATA = {
       "file": "91-poza-cj-i-kolliziya-urona-po-hmd.md",
       "categories": [
         "player",
+        "weapons",
         "graphics"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -402,9 +435,10 @@ const BACKLOG_DATA = {
       "title": "Рассинхрон руля и направления колеса на двухколёсном транспорте",
       "file": "92-rassinkhron-rulya-na-dvukhkolesnom-transporte.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -413,9 +447,9 @@ const BACKLOG_DATA = {
       "file": "93-ne-srabatyvaet-zhest-bloka.md",
       "categories": [
         "weapons",
-        "player"
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -423,10 +457,9 @@ const BACKLOG_DATA = {
       "title": "Наклон вперёд/назад на квадроцикле с вибрацией и позой кистей",
       "file": "94-naklon-vpered-nazad-na-kvadrotsikle.md",
       "categories": [
-        "vehicle-controls",
-        "player"
+        "vehicle-controls"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -436,9 +469,10 @@ const BACKLOG_DATA = {
       "categories": [
         "player",
         "graphics",
-        "tooling"
+        "tooling",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -446,10 +480,10 @@ const BACKLOG_DATA = {
       "title": "Заменить модель ключа зажигания на созданную в Blender",
       "file": "96-model-klyucha-zazhiganiya-v-blender.md",
       "categories": [
-        "vehicle-controls",
-        "vehicle-content"
+        "vehicle-content",
+        "vehicle-controls"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -458,10 +492,9 @@ const BACKLOG_DATA = {
       "file": "97-ratsiya-dlya-sluzhebnykh-missiy.md",
       "categories": [
         "vehicle-controls",
-        "missions",
-        "audio"
+        "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "in_progress"
     },
     {
@@ -472,7 +505,7 @@ const BACKLOG_DATA = {
         "vehicle-controls",
         "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -484,7 +517,7 @@ const BACKLOG_DATA = {
         "hud",
         "audio"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "in_progress"
     },
     {
@@ -494,7 +527,7 @@ const BACKLOG_DATA = {
       "categories": [
         "vehicle-controls"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -503,9 +536,11 @@ const BACKLOG_DATA = {
       "file": "101-fotoapparat-ekran-i-sokhranenie-snimkov.md",
       "categories": [
         "weapons",
-        "hud"
+        "hud",
+        "missions",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -513,9 +548,10 @@ const BACKLOG_DATA = {
       "title": "Иммерсивные автоматы с газировкой и снеками",
       "file": "102-immersivnye-torgovye-avtomaty.md",
       "categories": [
+        "player",
         "missions"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -525,7 +561,7 @@ const BACKLOG_DATA = {
       "categories": [
         "hud"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -533,9 +569,10 @@ const BACKLOG_DATA = {
       "title": "Разделы проекции часов и статистика игрока",
       "file": "104-razdely-proektsii-chasov-i-statistika.md",
       "categories": [
-        "hud"
+        "hud",
+        "player"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -543,9 +580,11 @@ const BACKLOG_DATA = {
       "title": "Исправить прозрачность иконок здоровья и брони на часах",
       "file": "105-alfa-ikonok-zdorovya-i-broni-chasov.md",
       "categories": [
-        "hud"
+        "hud",
+        "graphics",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "low",
       "status": "open"
     },
     {
@@ -554,9 +593,10 @@ const BACKLOG_DATA = {
       "file": "106-ne-rabotaet-avtomobilnyy-signal.md",
       "categories": [
         "vehicle-controls",
-        "audio"
+        "audio",
+        "bugs"
       ],
-      "priority": "none",
+      "priority": "critical",
       "status": "open"
     },
     {
@@ -568,7 +608,7 @@ const BACKLOG_DATA = {
         "hud",
         "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -576,9 +616,11 @@ const BACKLOG_DATA = {
       "title": "Интерьеры спецтехники и наземного транспорта",
       "file": "108-interiery-spetstekhniki-i-nazemnogo-transporta.md",
       "categories": [
-        "vehicle-content"
+        "vehicle-content",
+        "vehicle-calibration",
+        "story"
       ],
-      "priority": "none",
+      "priority": "critical",
       "status": "open"
     },
     {
@@ -586,9 +628,10 @@ const BACKLOG_DATA = {
       "title": "Проверка и создание интерьеров авиации",
       "file": "109-interiery-aviatsii.md",
       "categories": [
-        "vehicle-content"
+        "vehicle-content",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -596,9 +639,10 @@ const BACKLOG_DATA = {
       "title": "Рычаг управления кузовом Dumper",
       "file": "110-rychag-kuzova-dumper.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -608,7 +652,7 @@ const BACKLOG_DATA = {
       "categories": [
         "vehicle-controls"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -618,7 +662,7 @@ const BACKLOG_DATA = {
       "categories": [
         "vehicle-controls"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -627,9 +671,11 @@ const BACKLOG_DATA = {
       "file": "113-upravlenie-vodometami-firetruck-i-swat.md",
       "categories": [
         "vehicle-controls",
-        "weapons"
+        "weapons",
+        "missions",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -640,7 +686,7 @@ const BACKLOG_DATA = {
         "vehicle-controls",
         "audio"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -648,9 +694,11 @@ const BACKLOG_DATA = {
       "title": "Ночные кражи на Boxburg: запуск и погрузка добычи",
       "file": "115-nochnye-krazhi-boxburg.md",
       "categories": [
-        "missions"
+        "vehicle-controls",
+        "missions",
+        "player"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -658,10 +706,11 @@ const BACKLOG_DATA = {
       "title": "Кабина локомотива и задания Freight Train",
       "file": "116-lokomotivy-i-freight-train.md",
       "categories": [
+        "vehicle-controls",
         "vehicle-content",
         "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -669,9 +718,10 @@ const BACKLOG_DATA = {
       "title": "Курьерские задания: броски пакетов с двухколёсного транспорта",
       "file": "117-kuryerskie-zadaniya-i-pakety.md",
       "categories": [
+        "vehicle-controls",
         "missions"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -679,9 +729,10 @@ const BACKLOG_DATA = {
       "title": "Дым Stuntplane и распыление Cropduster",
       "file": "118-dym-i-raspylenie-samoletov.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "graphics"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -692,7 +743,7 @@ const BACKLOG_DATA = {
         "vehicle-controls",
         "player"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -703,7 +754,7 @@ const BACKLOG_DATA = {
         "vehicle-controls",
         "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -711,9 +762,10 @@ const BACKLOG_DATA = {
       "title": "Физическое управление четырьмя колёсами Monster",
       "file": "121-podrulivanie-monster.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -721,9 +773,11 @@ const BACKLOG_DATA = {
       "title": "Сцепление и буксировка прицепов",
       "file": "122-stseplenie-i-buksirovka-pritsepov.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "missions",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -731,9 +785,10 @@ const BACKLOG_DATA = {
       "title": "Управление грузовой рампой Andromada",
       "file": "123-gruzovaya-rampa-andromada.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -741,9 +796,10 @@ const BACKLOG_DATA = {
       "title": "Управление прожектором Police Maverick",
       "file": "124-prozhektor-police-maverick.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "graphics"
       ],
-      "priority": "none",
+      "priority": "medium",
       "status": "open"
     },
     {
@@ -751,9 +807,11 @@ const BACKLOG_DATA = {
       "title": "Физическое управление магнитной подвеской Leviathan",
       "file": "125-magnitnaya-podveska-leviathan.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "missions",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -761,9 +819,10 @@ const BACKLOG_DATA = {
       "title": "Физическое управление кранами",
       "file": "126-fizicheskoe-upravlenie-kranami.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -771,9 +830,11 @@ const BACKLOG_DATA = {
       "title": "Иммерсивный пульт управления RC-техникой",
       "file": "127-pult-upravleniya-rc-tekhnikoy.md",
       "categories": [
-        "vehicle-controls"
+        "vehicle-controls",
+        "missions",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -782,9 +843,10 @@ const BACKLOG_DATA = {
       "file": "128-spetsialnye-organy-upravleniya-aviatsii.md",
       "categories": [
         "vehicle-controls",
-        "weapons"
+        "weapons",
+        "story"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -793,9 +855,10 @@ const BACKLOG_DATA = {
       "file": "129-fizicheskoe-upravlenie-bashney-rhino.md",
       "categories": [
         "vehicle-controls",
-        "weapons"
+        "weapons",
+        "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     },
     {
@@ -803,9 +866,10 @@ const BACKLOG_DATA = {
       "title": "Служебные задания на HPV1000, Rhino и Hunter",
       "file": "130-sluzhebnye-zadaniya-hpv1000-rhino-hunter.md",
       "categories": [
+        "vehicle-controls",
         "missions"
       ],
-      "priority": "none",
+      "priority": "high",
       "status": "open"
     }
   ]

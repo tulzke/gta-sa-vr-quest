@@ -94,7 +94,7 @@ test('classic script starts from BACKLOG_DATA and builds the page without file o
   assert.equal(get('load-message').hidden, true);
   assert.equal(get('total').textContent, data.tasks.length);
   assert.equal(get('task-list').children.length, data.tasks.length);
-  assert.equal(get('task-list').children[0].children[1].children[0].href, data.tasks[0].file);
+  assert.equal(get('task-list').children[0].children[1].children[0].href, selectTasks(data)[0].file);
   get('search').listeners.input({ target: { value: '09 руль' } });
   assert.equal(get('task-list').children.length, 0);
   assert.equal(get('empty').hidden, false);
