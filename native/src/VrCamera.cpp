@@ -5127,7 +5127,7 @@ void OnUpdatePads() {
         // hydraulics values - and those same hooks own the Hydra nozzles and the
         // tank turret - besides stranding the rhythm arrow on screen.
         hydraulics::SetStick(false, 0.0f, 0.0f);
-        xr::SetBeatArrow(0, 0);
+        xr::SetRhythmHud({});
         return;   // only drive the pad in gameplay, and not while a menu is up
     }
     void* pad = g.CPad_GetPad(0);
@@ -5141,9 +5141,7 @@ void OnUpdatePads() {
         for (const int index : {0,1,2,3,8,9,10,11,14,16,17}) ns[index]=0;
         g_vrEnterExitJustDown.store(false,std::memory_order_release);
         hydraulics::SetStick(false,0,0);
-        int beatMs=0;
-        const int beat=hydraulics::PollBeat(&beatMs);
-        xr::SetBeatArrow(beat,beatMs);
+        xr::SetRhythmHud(hydraulics::GetRhythmFrame());
         return;
     }
     if (vrfire::IsScriptedWeaponCamera() || catalyst::Active()) {
@@ -5182,7 +5180,7 @@ void OnUpdatePads() {
     // separately), so it computes its own pad and returns.
     if (jetpack::IsActive()) {
         hydraulics::SetStick(false, 0.0f, 0.0f);   // never latch across the belt
-        xr::SetBeatArrow(0, 0);
+        xr::SetRhythmHud({});
         jetpack::WritePad(ns, in, CurrentLocalHeadYaw());
         ApplyJetpackThrust();   // realistic-mode vectored hand thrust (physics)
         return;
@@ -5387,10 +5385,9 @@ void OnUpdatePads() {
         const bool physicalHydraulics=driving::GetPhysicalHydraulics(&hydroX,&hydroY);
         if(physicalHydraulics)hydroActive=true;
         hydraulics::SetStick(hydroActive, hydroX, hydroY,physicalHydraulics);
-        // Rhythm prompt: publish the next required direction so the compositor
-        // can draw an arrow (the stock SCM arrows never reach the VR eyes).
-        int beatMs = 0;
-        xr::SetBeatArrow(hydraulics::PollBeat(&beatMs), beatMs);
+        // Publish a coherent native timeline: no script/audio calls on the
+        // compositor thread, and no second animation clock for hit timing.
+        xr::SetRhythmHud(hydraulics::GetRhythmFrame());
         if (hydroActive) {
             static unsigned int hydroLog = 0;
             if ((++hydroLog % 120u) == 1u)

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <dlfcn.h>
+#include <mutex>
 
 #include "Log.h"
 #include "Symbols.h"
@@ -59,7 +60,7 @@ constexpr int kBeatIndexOff    = 0xA8;   // tBeatInfo::BeatNumber (the graded be
 // LOWGAME grades a beat as PERFECT only within 126 ms of it; anything later in
 // the beat period is "Early" (the countdown never goes negative), which is what
 // made every beat BAD while the stick was simply held.
-constexpr int kHitWindowMs     = 126;
+constexpr int kHitWindowMs     = rhythm::kHitWindowMs;
 
 // A fresh flick or physical detent change answers a beat. Holding a position
 // cannot answer later beats; answers reach the game only inside the hit window.
@@ -70,6 +71,8 @@ Flick g_flick;
 // another thread can catch it blank.
 std::atomic<int> g_curBeatKey{0};
 std::atomic<int> g_curBeatMs{0};
+std::mutex g_rhythmMutex;
+rhythm::Frame g_rhythmFrame;
 
 // LOWGAME script globals, decoded from mainV1.scm. CTheScripts::ScriptSpace is
 // already resolved in Symbols; globals live at ScriptSpace + index*4.
@@ -93,7 +96,7 @@ bool DanceActive() {
     if (running != logged) {
         logged = running;
         LOGI("[hydraulics] LOWGAME $1025=%d -> dance=%s (space=%p)", running,
-             running != 0 ? "ACTIVE (live stick suppressed)" : "off",
+             running != 0 ? "ACTIVE (separate scoring input)" : "off",
              g.CTheScripts_ScriptSpace);
     }
     return running != 0;
@@ -163,6 +166,11 @@ int PollBeat(int* msUntilOut) {
     return dir;
 }
 
+rhythm::Frame GetRhythmFrame(){
+    std::lock_guard<std::mutex> lock(g_rhythmMutex);
+    return g_rhythmFrame;
+}
+
 void SetStick(bool active, float x, float y, bool directChanges) {
     g_stickX.store(active ? x : 0.0f, std::memory_order_relaxed);
     g_stickY.store(active ? y : 0.0f, std::memory_order_relaxed);
@@ -178,6 +186,8 @@ void SetStick(bool active, float x, float y, bool directChanges) {
     }
     g_curBeatKey.store(beatKey, std::memory_order_relaxed);
     g_curBeatMs.store(beatMs, std::memory_order_relaxed);
+    {std::lock_guard<std::mutex> lock(g_rhythmMutex);
+        g_rhythmFrame=rhythm::Decode(g_beatInfo,DanceActive()||beachdance::Active());}
 
     g_flick.Step(active,x,y,beatIdx,directChanges);
 
@@ -205,10 +215,9 @@ int ScoringDirection() {
 bool IsActive() { return g_active.load(std::memory_order_acquire); }
 bool DanceRunning() { return DanceActive(); }
 
-// HydraulicControl uses live stick input; LOWGAME receives a cardinal snap
-// on the beat. The minigame takes priority while a beat track is playing.
-int AxisLeftRight() {
-    if (DanceActive()) {
+// Physics receives live input even between beats; script grading is isolated.
+int AxisLeftRight(bool liveControl) {
+    if (!liveControl&&DanceActive()) {
         const int dir = ScoringDirection();
         return dir == 3 ? -127 : (dir == 4 ? 127 : 0);
     }
@@ -216,8 +225,8 @@ int AxisLeftRight() {
 }
 // Negated: the VR stick is up-positive, and upDown<0 is what lifts the FRONT
 // (and is also what the script decodes as UP against its (0,-1) reference).
-int AxisUpDown() {
-    if (DanceActive()) {
+int AxisUpDown(bool liveControl) {
+    if (!liveControl&&DanceActive()) {
         const int dir = ScoringDirection();
         return dir == 1 ? -127 : (dir == 2 ? 127 : 0);
     }

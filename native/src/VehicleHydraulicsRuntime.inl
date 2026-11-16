@@ -15,6 +15,7 @@ void OnHydraulicBeat(void* hardware,void* output){
 }
 thread_local bool g_hydraulicHornScope{};
 thread_local bool g_hydraulicHornDelivered{};
+thread_local void* g_hydraulicControlVehicle{};
 bool OnHydraulicHorn(void* pad){
     if(g_hydraulicHornScope){
         if(g_hydraulicHornDelivered||!g_hydroToggle.load(std::memory_order_acquire))return false;
@@ -33,7 +34,8 @@ void OnHydraulicControl(void* vehicle){
     const bool saved=g_hydraulicHornScope,savedDelivered=g_hydraulicHornDelivered;
     g_hydraulicHornScope=managed||physical;g_hydraulicHornDelivered=false;
     const auto high=[&]{return *reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0xa88)>=500;};
-    const bool before=high();g_originalHydraulicControl(vehicle);
+    const bool before=high();void* savedVehicle=g_hydraulicControlVehicle;
+    g_hydraulicControlVehicle=vehicle;g_originalHydraulicControl(vehicle);g_hydraulicControlVehicle=savedVehicle;
     // A pad query is not an acknowledgement. Keep the event until the
     // original hydraulic routine actually changes LOW/HIGH.
     if(g_hydraulicHornScope&&g_hydraulicHornDelivered&&high()!=before)g_hydroToggle.store(false,std::memory_order_release);

@@ -3215,8 +3215,8 @@ int OnGetCarGunUpDown(void* pad, int ignoreDucking, void* vehicle,
     // right stick into the suspension control. CAutomobile::HydraulicControl
     // reads exactly this accessor, so answering here bypasses the touch/input
     // -type gate entirely. Ground-only, so it can never fight the aircraft case.
-    if (savr::hydraulics::IsActive())
-        return savr::hydraulics::AxisUpDown();
+    if (savr::hydraulics::IsActive()&&(!g_hydraulicControlVehicle||g_hydraulicControlVehicle==GetControlledVehicle()))
+        return savr::hydraulics::AxisUpDown(g_hydraulicControlVehicle!=nullptr);
     if (VehicleRightStickActive()) {
         xr::InputState input{}; xr::GetInput(input);
         float moveX=0.0f,moveY=0.0f,turnX=0.0f,turnY=0.0f;
@@ -3233,8 +3233,8 @@ int OnGetCarGunUpDown(void* pad, int ignoreDucking, void* vehicle,
 
 int OnGetCarGunLeftRight(void* pad, int ignoreDucking, int useSecondary) {
     if (savr::beachdance::Active()) return savr::beachdance::AxisLeftRight();
-    if (savr::hydraulics::IsActive())
-        return savr::hydraulics::AxisLeftRight();
+    if (savr::hydraulics::IsActive()&&(!g_hydraulicControlVehicle||g_hydraulicControlVehicle==GetControlledVehicle()))
+        return savr::hydraulics::AxisLeftRight(g_hydraulicControlVehicle!=nullptr);
     if (VehicleRightStickActive()) {
         xr::InputState input{}; xr::GetInput(input);
         float moveX=0.0f,moveY=0.0f,turnX=0.0f,turnY=0.0f;

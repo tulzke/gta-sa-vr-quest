@@ -618,8 +618,9 @@ std::atomic<int>      g_drivingCalibHand{0};
 std::atomic<bool>     g_locomotionActive{false}; // movement/turning submenu
 std::atomic<int>      g_locomotionSel{0};
 std::atomic<bool> g_packageHint{false};
-std::atomic<int>      g_beatDir{0};              // rhythm prompt: 0/1U/2D/3L/4R
-std::atomic<int>      g_beatMs{0};
+std::mutex g_rhythmHudMutex;
+rhythm::Frame g_rhythmHud;
+std::uint64_t g_rhythmHudTimeNs{};
 std::atomic<bool>     g_jetpackMenuActive{false}; // jetpack settings submenu
 std::atomic<int>      g_jetpackSel{0};
 std::atomic<bool>     g_basketballActive{false};
@@ -5523,9 +5524,9 @@ void SetLocomotionMenu(bool active, int selection) {
 
 void SetPackageHint(bool visible) { g_packageHint.store(visible,std::memory_order_relaxed); }
 
-void SetBeatArrow(int dir, int msUntil) {
-    g_beatDir.store(dir, std::memory_order_relaxed);
-    g_beatMs.store(msUntil, std::memory_order_relaxed);
+void SetRhythmHud(const rhythm::Frame& frame) {
+    std::lock_guard<std::mutex> lock(g_rhythmHudMutex);
+    g_rhythmHud=frame;g_rhythmHudTimeNs=MonotonicNowNs();
 }
 
 void SetJetpackMenu(bool active, int selection) {
@@ -11006,71 +11007,7 @@ void DrawIronGloves(const float* mvp, const HandPose bakedHands[2]) {
     if (blendWas) glEnable(GL_BLEND);
 }
 
-// Rhythm minigame (lowrider dance) direction prompt. The stock arrows are SCM
-// DRAW_SPRITE rectangles: they are issued into the HUD capture, but no HUD
-// element samples that band AND script sprites are baked in OS_ScreenGet* pixel
-// space (not RsGlobal), so they land squeezed in a corner of the raster. Drawing
-// our own head-locked arrow sidesteps both problems and works in CLASSIC and
-// IMMERSIVE alike.
-void DrawBeatArrow(const float* mvp, const XrPosef& head) {
-    const int dir = g_beatDir.load(std::memory_order_relaxed);
-    if (dir <= 0) return;
-    const int ms = g_beatMs.load(std::memory_order_relaxed);
-    EnsureMarkerProgram();
-
-    const XrVector3f fwd   = QuatRotate(head.orientation, {0.f, 0.f, -1.f});
-    const XrVector3f right = QuatRotate(head.orientation, {1.f, 0.f, 0.f});
-    const XrVector3f up    = QuatRotate(head.orientation, {0.f, 1.f, 0.f});
-    // Slightly below the line of sight, but high enough to clear the mission
-    // feedback text ("BAD!"/"GOOD!") that the game prints lower down.
-    const XrVector3f centre = vadd(vadd(XrVector3f{head.position.x,
-                                                   head.position.y,
-                                                   head.position.z},
-                                       vscale(fwd, 1.8f)),
-                                   vscale(up, -0.14f));
-    XrVector3f point{}, side{};
-    switch (dir) {
-        case 1: point = up;                     side = right; break;
-        case 2: point = vscale(up, -1.f);       side = right; break;
-        case 3: point = vscale(right, -1.f);    side = up;    break;
-        default: point = right;                 side = up;    break;
-    }
-    // A rhythm game needs a PRECISE "now" cue, not a slow fade: the arrow grows
-    // as the beat approaches and snaps to a bright white flash on the beat
-    // itself, so the player can hit the window instead of guessing.
-    const float msf = static_cast<float>(ms);
-    const float approach = std::clamp(1.0f - msf / 1200.0f, 0.f, 1.f);
-    const bool  onBeat = msf < 126.0f;   // exactly LOWGAME's PERFECT window
-    const float grow = onBeat ? 1.45f : (0.85f + 0.35f * approach);
-    const float kLen = 0.20f * grow, kHalf = 0.13f * grow, kTail = 0.05f * grow;
-    const XrVector3f tip  = vadd(centre, vscale(point, kLen));
-    const XrVector3f base = vadd(centre, vscale(point, -kTail));
-    const XrVector3f b1   = vadd(base, vscale(side,  kHalf));
-    const XrVector3f b2   = vadd(base, vscale(side, -kHalf));
-    const float verts[9] = {tip.x, tip.y, tip.z, b1.x, b1.y, b1.z,
-                            b2.x, b2.y, b2.z};
-    const float t = approach;
-
-    const GLboolean depthWas = glIsEnabled(GL_DEPTH_TEST);
-    glDisable(GL_DEPTH_TEST);            // always readable, never occluded
-    glUseProgram(g_markerProg);
-    glUniformMatrix4fv(g_markerMvpLoc, 1, GL_FALSE, mvp);
-    if (onBeat)
-        glUniform4f(g_markerColLoc, 1.0f, 1.0f, 1.0f, 1.0f);        // HIT NOW
-    else
-        glUniform4f(g_markerColLoc, 0.15f + 0.10f * t, 0.85f,
-                    1.0f - 0.55f * t, 1.0f);
-    glBindBuffer(GL_ARRAY_BUFFER, g_markerVbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float),
-                          reinterpret_cast<void*>(0));
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    glDisableVertexAttribArray(0);
-    glUseProgram(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    if (depthWas) glEnable(GL_DEPTH_TEST);
-}
+#include "RhythmHudRender.inl"
 
 // Parachute brake toggles: two small handles and their riser straps while the
 // canopy is open. Orange when free, green while that hand pulls it.
@@ -12480,7 +12417,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     if (chuteRingVisual)
         DrawParachuteDeployRing(mvp);
     DrawBulletTracers(mvp, eyePos, tracers, tracerCount); // original-SA short streak, same stereo depth
-    DrawBeatArrow(mvp, rp);                // lowrider/dance rhythm prompt
+    DrawRhythmHud(mvp, rp);                // native rhythm timeline, both eyes
     DrawJetpackTurbines(mvp, bakedHands);  // REALISTIC jetpack: turbines replace the hands
     DrawIronGloves(mvp, bakedHands);       // IRONMAN jetpack: repulsor gauntlets replace the hands
     DrawJetpackThrusters(mvp, bakedHands); // vectored jetpack: fire from each hand's nozzle/palm

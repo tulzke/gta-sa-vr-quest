@@ -35,7 +35,7 @@ void* InstallVerifiedTrampoline(void*,void*,const std::uint32_t*,const char*){re
 int hornCalls{},toggleCalls{},controlCalls{};bool queryHorn=true,acceptToggle=true;
 bool OriginalHorn(void*){++hornCalls;return true;}
 void OriginalControl(void* vehicle){
-    ++controlCalls;if(!queryHorn)return;
+    CHECK(g_hydraulicControlVehicle==vehicle);++controlCalls;if(!queryHorn)return;
     if(OnHydraulicHorn(nullptr)&&acceptToggle){++toggleCalls;
         auto& timer=*reinterpret_cast<std::uint16_t*>(static_cast<char*>(vehicle)+0xa88);timer=timer>=500?60:500;}
     if(g_hydraulicHornScope)CHECK(!OnHydraulicHorn(nullptr)); // one edge per native call
@@ -286,7 +286,7 @@ void Runtime(){
     CHECK(!HydraulicsCompatible(567)&&!HydraulicsCompatible(399));
     g_originalHydraulicHorn=OriginalHorn;g_originalHydraulicControl=OriginalControl;
     CHECK(OnHydraulicHorn(nullptr)&&hornCalls==1);g_hydroManagedVehicle.store(controlled);
-    OnHydraulicControl(controlled);CHECK(controlCalls==1&&toggleCalls==0&&hornCalls==1);
+    OnHydraulicControl(controlled);CHECK(controlCalls==1&&toggleCalls==0&&hornCalls==1&&!g_hydraulicControlVehicle);
     g_hydroToggle=true;OnHydraulicControl(controlled);CHECK(toggleCalls==1&&!g_hydroToggle);
     OnHydraulicControl(controlled);CHECK(toggleCalls==1);
     OnHydraulicControl(other.data());CHECK(toggleCalls==2&&hornCalls==2); // ordinary caller still sees original horn

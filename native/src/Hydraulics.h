@@ -1,4 +1,5 @@
 #pragma once
+#include "RhythmHud.h"
 
 // Lowrider hydraulics from VR. While the player drives a car that actually has
 // hydraulics installed, holding BOTH grips turns the right stick into the
@@ -26,14 +27,17 @@ bool DanceRunning();
 // The values Driving's CPad car-gun hooks must return while IsActive(). Already
 // in the game's own units and sign convention (leftRight<0 lifts the LEFT side,
 // upDown<0 lifts the FRONT).
-int AxisLeftRight();
-int AxisUpDown();
+// liveControl is true ONLY inside the current player's HydraulicControl call.
+// All script queries retain the separate rhythm-scoring path.
+int AxisLeftRight(bool liveControl=false);
+int AxisUpDown(bool liveControl=false);
 
 // Rhythm-minigame beat readout (lowrider dance / nightclub). Returns the
 // direction the player must push next - 0 none, 1 UP, 2 DOWN, 3 LEFT, 4 RIGHT -
 // and writes the milliseconds until that beat. The stock arrows are SCM sprites
 // that never reach the VR eyes, so the mod draws its own from this.
 int PollBeat(int* msUntilOut);
+rhythm::Frame GetRhythmFrame();
 
 // Lowrider dance score. The stock counters go through the mobile touch-HUD
 // widget layer (opcode 0x0A8A -> CTouchInterface::SetWidgetInfo, widgets 103

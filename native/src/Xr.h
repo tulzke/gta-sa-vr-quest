@@ -2,6 +2,7 @@
 #include "RecoilModel.h"
 #include "TrackingFrame.h"
 #include "ReloadHint.h"
+#include "RhythmHud.h"
 
 #include <jni.h>
 
@@ -342,10 +343,9 @@ void SetRadialHolsterAtlas(unsigned int texture);
 void SetHolsterMarkerStates(const holstermarker::Marker* markers, int count,
                            std::uint64_t epoch, const float headPosition[3]);
 
-// Rhythm-minigame direction prompt (lowrider dance). dir: 0 none, 1 UP, 2 DOWN,
-// 3 LEFT, 4 RIGHT; msUntil counts down to the beat. Drawn head-locked because
-// the stock SCM arrow sprites never reach the VR eyes.
-void SetBeatArrow(int dir, int msUntil);
+// Read-only native rhythm timeline. One coherent snapshot for both eyes;
+// no game/script functions may be called by its renderer.
+void SetRhythmHud(const rhythm::Frame& frame);
 void SetPackageHint(bool visible);
 
 // Immersive jetpack REALISTIC mode: when on, the present thread draws a jet
