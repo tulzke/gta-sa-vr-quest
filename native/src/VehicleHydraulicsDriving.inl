@@ -38,14 +38,21 @@ hydrocontrol::Point HydroLocalPoint(const WheelVisualState& v,V3 point){
 hydrocontrol::Point HydroHandPoint(const WheelVisualState& v,const xr::HandPose& h){
     return HydroLocalPoint(v,{h.gripPos[0],h.gripPos[1],h.gripPos[2]})-hydrocontrol::Point{-.032f,.008f,.018f};
 }
+hydrocontrol::InputFrame HydroInputFrame(const WheelVisualState& v){
+    const hydrocontrol::Point r{v.hydroRight[0],v.hydroRight[1],v.hydroRight[2]},
+        f{v.hydroForward[0],v.hydroForward[1],v.hydroForward[2]},u{v.hydroUp[0],v.hydroUp[1],v.hydroUp[2]},
+        c{v.hydroCenter[0],v.hydroCenter[1],v.hydroCenter[2]};
+    return {c+(r*-.032f+f*.008f+u*.018f)*v.hydroScale,r,f,u,v.hydroScale};
+}
 hydrocontrol::Point HydroButtonPoint(const WheelVisualState& v,const xr::HandPose& h,int hand){
-    // A fixed extended-index proxy from the tracked wrist, independent of the
-    // rendered finger blend: changing gesture cannot generate a press edge.
-    return HydroLocalPoint(v,CockpitFingerPoint(h,hand))-hydrocontrol::Point{.047f,-.015f,.022f};
+    // Full Point pose from the actual hand GLB, independent of the current
+    // gesture blend: approaching the cap cannot press it by straightening.
+    float tip[3]{};if(!xr::GetPointingFingertip(h,hand,tip))return {1e6f,1e6f,1e6f};
+    return HydroLocalPoint(v,{tip[0],tip[1],tip[2]})-hydrocontrol::Point{.047f,-.015f,.022f};
 }
 float HydroButtonDistance(const WheelVisualState& v,const xr::HandPose& h,int hand){
-    const auto p=HydroButtonPoint(v,h,hand);if(!hydrocontrol::Finite(p)||p.z<-.015f||p.z>.08f)return 1e6f;
-    return std::hypot(p.x,p.y)<.045f?std::max(0.f,hydrocontrol::Length(p)-.016f):1e6f;
+    const auto p=HydroButtonPoint(v,h,hand);
+    return g_hydroLever.button[hand].WithinHover(p)?0.f:1e6f;
 }
 void UpdateHydraulicsJoystick(WheelVisualState& v,void* vehicle,const xr::InputState& input,const xr::HandPose poses[2],unsigned occupied,bool preview=false){
     if(!BuildHydraulicsTracking(v,vehicle,preview)){g_hydroLever.Reset();g_hydroManagedVehicle.store(nullptr);g_hydroToggle.store(false);return;}
@@ -58,11 +65,11 @@ void UpdateHydraulicsJoystick(WheelVisualState& v,void* vehicle,const xr::InputS
     const bool controls=pad&&*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(pad)+0x110)==0;
     const bool enabled=editor||(v.active&&!v.hydroGhost&&ModeForAppearance(1)==MODE_IMMERSIVE&&controls);
     hydrocontrol::Hand h[2];
-    for(int i=0;i<2;++i)h[i]={HydroHandPoint(v,poses[i]),HydroButtonPoint(v,poses[i],i),input.grip[i],poses[i].valid,
+    for(int i=0;i<2;++i)h[i]={{poses[i].gripPos[0],poses[i].gripPos[1],poses[i].gripPos[2]},HydroButtonPoint(v,poses[i],i),input.grip[i],poses[i].valid,
         !(occupied&(1u<<i))&&(preview||v.interactionTarget[i]==7)};
     const int previous=g_hydroLever.owner;
     if(g_hydroLever.four!=v.hydroFour)g_hydroToggle.store(false);
-    g_hydroLever.Step(h,dt,enabled,v.hydroFour);
+    g_hydroLever.StepTracked(h,HydroInputFrame(v),dt,enabled,v.hydroFour,xr::CaptureTrackingSnapshot().epoch);
     if(g_hydroLever.owner>=0&&g_hydroLever.owner!=previous){++g_hydroGrabSequence;xr::TriggerHaptic(g_hydroLever.owner,.18f,0,15);}
     if(g_hydroLever.changed&&g_hydroLever.owner>=0){
         xr::TriggerHaptic(g_hydroLever.owner,.32f,0,22);

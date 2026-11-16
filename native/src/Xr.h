@@ -96,6 +96,9 @@ void PublishRadioText(const char* text);
 // pose), so the game thread recenters + converts them exactly like the head.
 // Copy out both hands' poses (index 0 = left, 1 = right). Safe every frame.
 void GetHandPoses(HandPose out[2]);
+// Full authored Point pose tip in tracking space; independent of live finger
+// blending. Available after the hand asset is loaded, safe on the game thread.
+bool GetPointingFingertip(const HandPose& pose,int hand,float out[3]);
 // Latest atomic publication, or the sample pinned by ScopedTrackingFrame.
 TrackingSnapshot CaptureTrackingSnapshot();
 // Atomic head/hands sample: all poses belong to the same tracking epoch.

@@ -27,7 +27,9 @@ for obj in asset.objects:
     evaluated=obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
     mesh=evaluated.to_mesh()
     mesh.calc_loop_triangles()
-    layer=mesh.uv_layers.active
+    # Primitive meshes also have UVs. Only the authored label layer samples
+    # the alpha atlas; applying it to the ball cuts holes and draws letters.
+    layer=mesh.uv_layers.get('LabelAtlas')
     color=obj.data.materials[0].diffuse_color[:3]
     for tri in mesh.loop_triangles:
         for li in tri.loops:

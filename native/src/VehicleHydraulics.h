@@ -23,6 +23,12 @@ inline Point operator-(Point a,Point b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 inline Point operator*(Point a,float s){return {a.x*s,a.y*s,a.z*s};}
 inline bool Finite(Point p){return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);}
 inline float Length(Point p){return std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z);}
+inline float Dot(Point a,Point b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+struct InputFrame {
+    Point pivot{},right{1,0,0},forward{0,1,0},up{0,0,1};float scale{1.f};
+    Point Local(Point p)const{p=(p-pivot)*(1.f/scale);return {Dot(p,right),Dot(p,forward),Dot(p,up)};}
+    Point World(Point p)const{return pivot+(right*p.x+forward*p.y+up*p.z)*scale;}
+};
 // Swing about a horizontal axis; x/y are the tilt vector in radians.
 inline Point Swing(Point p,float x,float y){
     const float a=std::hypot(x,y);if(a<1e-7f)return p;
@@ -39,13 +45,17 @@ inline int Nearest(float x,float y,bool four){
 }
 struct Hand {Point point{},finger{};float grip{};bool valid{},available{};};
 struct Button {
-    bool armed{},pressed{},clicked{};float hover{},depth{};
+    bool armed{},pressed{},clicked{},pointing{};float hover{},depth{};
     void Reset(){*this=Button{};}
+    bool WithinHover(Point p)const{
+        return Finite(p)&&std::hypot(p.x,p.y)<(pointing?.060f:.045f)&&
+            p.z>(pointing?-.024f:-.012f)&&p.z<(pointing?.105f:.08f);
+    }
     void Step(Point p,bool valid,bool available,float dt){
         clicked=false;dt=std::isfinite(dt)?std::clamp(dt,0.f,.1f):0.f;
         const float radius=std::hypot(p.x,p.y);
-        const bool near=valid&&available&&Finite(p)&&radius<.045f&&p.z>-.012f&&p.z<.08f;
-        const float target=near?1.f:0.f;hover+=std::clamp(target-hover,-dt/.10f,dt/.10f);
+        pointing=valid&&available&&WithinHover(p);
+        const float target=pointing?1.f:0.f;hover+=std::clamp(target-hover,-dt/.10f,dt/.10f);
         if(!valid||!available||!Finite(p)){armed=pressed=false;depth=0;return;}
         // Arm only from the front after a deliberate withdrawal; side/rear
         // entry and pose/tracking reacquisition below the cap cannot press.
@@ -53,12 +63,13 @@ struct Button {
         if(radius>.028f||p.z<-.015f){armed=pressed=false;depth=0;return;}
         if(pressed&&p.z>.014f){pressed=false;armed=true;}
         if(!pressed&&armed&&radius<.016f&&p.z<=-.004f){pressed=true;armed=false;clicked=true;}
-        depth=near?std::clamp(-p.z/.006f,0.f,1.f):0.f;
+        depth=pointing?std::clamp(-p.z/.006f,0.f,1.f):0.f;
     }
 };
 struct State {
     int owner{-1},slot{};bool down[2]{true,true},four{},changed{},recenterVisual{};
     Point offset{};float visualX{},visualY{},aimX{},aimY{};
+    InputFrame grabFrame{};std::uint64_t inputEpoch{};
     Button button[2];
     void Reset(){*this=State{};}
     void Step(const Hand h[2],float dt,bool enabled,bool fourWay){
@@ -102,6 +113,17 @@ struct State {
         changed=previous!=slot;
         for(int i=0;i<2;++i){if(!h[i].valid||!std::isfinite(h[i].grip))down[i]=true;
             else if(h[i].grip<=.30f)down[i]=false;else if(h[i].grip>=.65f)down[i]=true;}
+    }
+    // Controller samples stay in OpenXR LOCAL space. Only an unowned lever
+    // follows the moving cockpit for acquisition; a grab freezes its input
+    // frame until release. Chassis translation/roll cannot steer or tear it off.
+    void StepTracked(const Hand tracked[2],const InputFrame& cockpit,float dt,bool enabled,bool fourWay,std::uint64_t epoch){
+        if(inputEpoch!=epoch)Reset();
+        const int previous=owner;Hand local[2]{tracked[0],tracked[1]};
+        for(int i=0;i<2;++i)local[i].point=(i==owner?grabFrame:cockpit).Local(tracked[i].point);
+        Step(local,dt,enabled,fourWay);
+        if(owner>=0&&owner!=previous)grabFrame=cockpit;
+        inputEpoch=epoch;
     }
     Point Command()const{return owner>=0?Direction(slot):Point{};}
 };

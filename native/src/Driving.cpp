@@ -2314,7 +2314,9 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
         if(d[5]>=.06f)d[5]=1e6f;
         if(d[7]>=.055f)d[7]=1e6f;
         if(d[8]>=.065f)d[8]=1e6f;
-        const int best=SelectCockpitTarget(d,g_visual.interactionTarget[h]);
+        // A free pointing finger over MODE keeps its target throughout the
+        // press; the nearby ball must not steal it as the wrist moves down.
+        const int best=d[8]<1e6f?8:SelectCockpitTarget(d,g_visual.interactionTarget[h]);
         visual.interactionTarget[h]=best;
         if (best!=1) keyBlocked|=bit;
         if (best!=2) radioBlocked|=bit;

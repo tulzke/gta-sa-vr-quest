@@ -11,6 +11,7 @@
 #include "WatchModel.h"
 #include "VehicleLiftLeverModel.h"
 #include "VehicleHydraulicsModel.h"
+#include "VehicleHydraulicsHand.h"
 #include "VehicleLiftLeverHand.h"
 #include "WatchLayout.h"
 #include "WatchInteraction.h"
@@ -8956,6 +8957,15 @@ void MatMul(float* o, const float* a, const float* b) {
 }
 
 handskeleton::Library g_handSkeleton;
+handskeleton::Vec g_pointingTip{};
+std::atomic<bool> g_pointingTipReady{false};
+bool GetPointingFingertip(const HandPose& pose,int hand,float out[3]){
+    if(!out||hand<0||hand>1||!pose.valid||!g_pointingTipReady.load(std::memory_order_acquire))return false;
+    const auto p=handrender::MeshPoint(handrender::TrackedPose(pose,hand),
+        {g_pointingTip[0],g_pointingTip[1],g_pointingTip[2]});
+    out[0]=p.x;out[1]=p.y;out[2]=p.z;
+    return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);
+}
 struct SkeletalHandFrame {
     handskeleton::Palette palette{};
     handskeleton::Mat model{}, wrist{};
@@ -8974,6 +8984,9 @@ void EnsureHandAssets() {
     g_handAssetsTried = true;
     const char* dir = "/sdcard/Android/data/com.rockstargames.gtasa/files/vrhands/";
     if (g_handSkeleton.Load(std::string(dir)+"skeletal/hands.glb") && EnsureSkeletalRenderer()) {
+        handskeleton::Palette point{};
+        g_handSkeleton.Evaluate({handanimation::Gesture::Point,handanimation::Gesture::Point,1,0},0,0,point);
+        if(g_handSkeleton.IndexTip(point,g_pointingTip))g_pointingTipReady.store(true,std::memory_order_release);
         // Keep a positive path marker in player builds for startup diagnosis.
         __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,
              "[hands] GLB GPU skinning ACTIVE: %zu joints, %zu vertices, %zu resident CPU bytes",
@@ -8991,32 +9004,27 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
                      const BallHandLock& ballLock, unsigned int weaponHandMask,
                      const float pinchAmounts[2], const int weaponTypes[2], unsigned debugPinchHands) {
     for(auto& frame:g_skeletalHands)frame.valid=false;
-    static radio::HandAttachment radioHands[2],hydroHands[2];
+    static radio::HandAttachment radioHands[2];
+    static hydrocontrol::HandAttachment hydroHands[2];
+    static std::uint64_t previousHandNs{};
+    const auto handNs=MonotonicNowNs();
+    const float handDt=previousHandNs?std::clamp(static_cast<float>(handNs-previousHandNs)*1e-9f,0.f,.1f):0.f;
+    previousHandNs=handNs;
     if (!drivingWheel.trackedHandsEnabled) {
         for (auto& attachment:radioHands) attachment.Reset();
+        for (auto& attachment:hydroHands) attachment.Reset();
         if(!hud::ShouldRenderWristHud()&&!g_hudActive.load(std::memory_order_relaxed))return;
     }
     EnsureHandAssets();
     for (int hand = 0; hand < 2; ++hand) {
         if (!drivingWheel.radioGrabbed[hand] || !hp[hand].valid) radioHands[hand].Reset();
-        if(!drivingWheel.hydroGrabbed[hand]||!hp[hand].valid)hydroHands[hand].Reset();
+        if(!hp[hand].valid)hydroHands[hand].Reset();
         if (!hp[hand].valid || !g_handSkeleton.loaded) continue;
-        const XrQuaternionf gq{hp[hand].gripOri[0], hp[hand].gripOri[1], hp[hand].gripOri[2], hp[hand].gripOri[3]};
-        const XrQuaternionf aq{hp[hand].aimOri[0], hp[hand].aimOri[1], hp[hand].aimOri[2], hp[hand].aimOri[3]};
-        XrVector3f pos{hp[hand].gripPos[0], hp[hand].gripPos[1], hp[hand].gripPos[2]};
-        const XrVector3f gRight = vnorm(QuatRotate(gq, {1, 0, 0}));
-        const XrVector3f gUp    = vnorm(QuatRotate(gq, {0, 1, 0}));
-        const XrVector3f gFwd   = vnorm(QuatRotate(gq, {0, 0, -1}));
-        const XrVector3f aimFwd = vnorm(QuatRotate(aq, {0, 0, -1}));
-        const float sign = (1 - hand) == 0 ? 1.0f : -1.0f;
-        XrVector3f forward = (hp[hand].aimValid && vdot(aimFwd, aimFwd) > 0.1f) ? aimFwd : gUp;
-        forward = vnorm(forward);
-        XrVector3f up = vscale(gRight, sign);
-        up = vsub(up, vscale(forward, vdot(up, forward)));
-        if (vdot(up, up) < 0.0001f) up = vscale(gRight, sign);
-        up = vnorm(up);
-        XrVector3f right = vnorm(vcross(up, forward));
-        if (vdot(right, gFwd) < 0.0f) right = vscale(right, -1.0f);
+        const auto trackedPose=handrender::TrackedPose(hp[hand],hand);
+        XrVector3f pos{trackedPose.position.x,trackedPose.position.y,trackedPose.position.z};
+        XrVector3f forward{trackedPose.forward.x,trackedPose.forward.y,trackedPose.forward.z};
+        XrVector3f up{trackedPose.up.x,trackedPose.up.y,trackedPose.up.z};
+        XrVector3f right{trackedPose.right.x,trackedPose.right.y,trackedPose.right.z};
 
         float grip = std::clamp(hp[hand].grip, 0.0f, 1.0f);
         float trig = std::clamp(hp[hand].trigger, 0.0f, 1.0f);
@@ -9025,6 +9033,17 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
                                   drivingWheel.grabbed[hand];
         const bool liftHand=drivingWheel.liftGrabbed[hand];
         const bool hydroHand=drivingWheel.hydroGrabbed[hand];
+        if(!hydroHand){
+            const bool free=!liftHand&&!steeringHand&&!hp[hand].climbGrip&&
+                !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
+                drivingWheel.horn[hand].weight<=0.f&&!(weaponHandMask&(1u<<hand))&&
+                !ballLock.locked[hand]&&!TwoHandStateUsable(twoHand)&&!(debugPinchHands&(1u<<hand));
+            if(free){const auto released=hydroHands[hand].Free(trackedPose,handDt);
+                pos={released.position.x,released.position.y,released.position.z};
+                right={released.right.x,released.right.y,released.right.z};up={released.up.x,released.up.y,released.up.z};
+                forward={released.forward.x,released.forward.y,released.forward.z};}
+            else hydroHands[hand].Reset();
+        }
         const bool hornHand=drivingWheel.active&&drivingWheel.horn[hand].weight>0.f&&
             !hp[hand].climbGrip&&!liftHand&&!hydroHand&&!steeringHand&&drivingWheel.hydroPoint[hand]<.01f&&
             !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
@@ -9054,7 +9073,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             const radio::HandFrame frame{base+transform(p)*drivingWheel.hydroScale,transform(hydrocontrol::Swing({1,0,0},x,y)),
                 transform(hydrocontrol::Swing({0,1,0},x,y)),transform(hydrocontrol::Swing({0,0,1},x,y))};
             const auto vec=[](XrVector3f v){return radio::HandVector{v.x,v.y,v.z};};
-            const auto pinned=hydroHands[hand].Update(drivingWheel.hydroGrabId[hand],frame,{vec(pos),vec(right),vec(up),vec(forward)});
+            const auto pinned=hydroHands[hand].Grab(drivingWheel.hydroGrabId[hand],frame,{vec(pos),vec(right),vec(up),vec(forward)});
             pos={pinned.position.x,pinned.position.y,pinned.position.z};right={pinned.right.x,pinned.right.y,pinned.right.z};
             up={pinned.up.x,pinned.up.y,pinned.up.z};forward={pinned.forward.x,pinned.forward.y,pinned.forward.z};grip=1.f;trig=0.f;
         } else if(liftHand) {
