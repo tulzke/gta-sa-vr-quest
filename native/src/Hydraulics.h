@@ -14,9 +14,10 @@ namespace savr::hydraulics {
 void Install(void* libGameHandle);
 
 // Publish this frame's intent from the game thread (VrCamera::OnUpdatePads).
-// `active` must already mean "in a hydraulics-equipped car with both grips
-// held"; x/y are the RAW right stick in [-1,1] (up positive).
-void SetStick(bool active, float x, float y);
+// `active` means a valid physical cockpit grab or the legacy both-grips chord
+// in an equipped car; x/y are in [-1,1] (up positive). Physical detent changes
+// can answer a new beat directly; the legacy stick still requires neutral.
+void SetStick(bool active, float x, float y, bool directChanges=false);
 
 // True while the override is feeding the game.
 bool IsActive();

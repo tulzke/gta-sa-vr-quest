@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include "CockpitBoundaryHaptic.h"
 
 namespace savr::hydrocontrol {
 constexpr float kRad=.017453292519943295f,kTravel=22.f*kRad,kReach=.055f;
@@ -68,6 +69,11 @@ inline int Nearest(float x,float y,bool four){
     int i=static_cast<int>(std::floor(a/step+.5f));i=(i%(four?4:8)+(four?4:8))%(four?4:8);
     return 1+i*(four?2:1);
 }
+inline float BoundaryDistance(Point handDelta,float scale){
+    const float radial=std::max(0.f,(std::hypot(handDelta.x,handDelta.y)-kInputLimit*kHandStroke)*scale);
+    const float height=std::max(0.f,std::abs((handDelta.z-kReach)*scale)-.04f);
+    return std::hypot(radial,height);
+}
 struct Hand {Point point{},finger{};float grip{};bool valid{},available{};};
 struct Button {
     bool armed{},pressed{},clicked{},pointing{};float hover{},depth{};
@@ -97,10 +103,11 @@ struct State {
     Point grabOffset{};float visualX{},visualY{},aimX{},aimY{};
     InputFrame grabFrame{};std::uint64_t inputEpoch{};
     Point previousInput{};bool previousInputValid{};
+    float boundaryError{};cockpitboundary::Feedback boundaryHaptic{};
     Button button[2];
     void Reset(){*this=State{};}
     void Step(const Hand h[2],float dt,bool enabled,bool fourWay){
-        changed=false;fourWay=fourWay||kCardinalOnly;dt=std::isfinite(dt)?std::clamp(dt,0.f,.1f):0.f;
+        changed=false;boundaryError=0;fourWay=fourWay||kCardinalOnly;dt=std::isfinite(dt)?std::clamp(dt,0.f,.1f):0.f;
         if(!enabled){Reset();return;}
         if(four!=fourWay){Reset();four=fourWay;}
         const int previous=slot;
@@ -118,6 +125,7 @@ struct State {
             // One immutable origin for this entire grip. Returning to neutral
             // or exceeding the gate must never move the physical centre.
             Point p=h[owner].point-grabOffset;
+            boundaryError=BoundaryDistance(p,grabFrame.scale);
             p.x/=kHandStroke;p.y/=kHandStroke;
             float radius=std::hypot(p.x,p.y);
             const bool crossedCentre=previousInputValid&&SweptRadius(previousInput,p)<=kNeutral;
@@ -130,11 +138,15 @@ struct State {
             // Keep a neutral frame even when a fast return skipped the whole
             // centre zone between two tracking samples.
             if(slot&&(radius<=kNeutral||crossedCentre))slot=0;
-            else if(!slot&&radius>=kEngage)slot=Nearest(p.x,p.y,four);
+            else if(slot||radius>=kEngage){
+                const int next=Nearest(p.x,p.y,four);
+                // About 8 degrees of angular hysteresis at cardinal sector
+                // borders. All neighbouring sectors remain reachable by arc.
+                if(!slot||Dot(p,Direction(next))-Dot(p,Direction(slot))>radius*.20f)slot=next;
+            }
             const float visualPerMetre=kTravel/(kReach*std::sin(kTravel));
             const Point d=Direction(slot);
-            // A detent cannot rotate into its neighbour: return to neutral
-            // first. Visual slack is small and cannot alter the command.
+            // Each destination is still a fixed detent, with small slack.
             float sx=p.x*visualPerMetre-d.x*kTravel,sy=p.y*visualPerMetre-d.y*kTravel;
             const float slack=std::hypot(sx,sy),limit=slot?2.f*kRad:kCenterPlay;
             if(slack>limit){sx*=limit/slack;sy*=limit/slack;}
@@ -142,7 +154,7 @@ struct State {
             // Neutral has real free play too. Visual shaft/hand/bellows follow
             // the controller within this small circle, while Command() stays zero.
         }
-        if(previous>0&&slot!=previous)recenterVisual=true;
+        if(previous>0&&slot==0)recenterVisual=true;
         const float targetX=recenterVisual?0.f:aimX,targetY=recenterVisual?0.f:aimY;
         const float dx=targetX-visualX,dy=targetY-visualY,distance=std::hypot(dx,dy),step=dt*kTravel/.035f;
         if(distance<=step){visualX=targetX;visualY=targetY;if(recenterVisual)recenterVisual=false;}

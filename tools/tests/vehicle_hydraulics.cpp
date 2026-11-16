@@ -1,6 +1,7 @@
 #include "VehicleHydraulics.h"
 #include "VehicleHydraulicsModel.h"
 #include "VehicleHydraulicsHand.h"
+#include "HydraulicFlick.h"
 #include "Symbols.h"
 #include "HandSkeleton.h"
 #include <array>
@@ -53,7 +54,7 @@ void Detents(){
     for(int ray=1;ray<=8;++ray){State s;Hand h[2];Capture(s,h);const auto d=Direction(ray);
         h[0].point=Stroke(d.x*kTravel,d.y*kTravel);s.Step(h,.02f,true,false);CHECK(Cardinal(s,d));
         const int latched=s.slot;CHECK(Length(s.Command()-Direction(latched))<1e-6f);
-        const auto n=Direction(ray==8?1:ray+1);h[0].point=Stroke(n.x*kTravel,n.y*kTravel);s.Step(h,.02f,true,false);CHECK(s.slot==latched);
+        const auto n=Direction(ray==8?1:ray+1);
         h[0].point=Stroke(0,0);s.Step(h,.02f,true,false);CHECK(s.slot==0&&Length(s.Command())==0);
         h[0].point=Stroke(n.x*kTravel,n.y*kTravel);s.Step(h,.02f,true,false);CHECK(Cardinal(s,n));
         h[0].point=Stroke(n.x*(kTravel+.01f),n.y*(kTravel+.01f));s.Step(h,.02f,true,false);CHECK(Cardinal(s,n));
@@ -73,7 +74,61 @@ void Detents(){
         if(std::hypot(path.visualX,path.visualY)<1e-6f)sawCenter=true;
         if(path.visualX>.001f)CHECK(sawCenter);}
     CHECK(sawCenter&&path.slot==3);
-    std::puts("PASS cardinal policy: only four directions plus neutral for all eight input rays; no diagonal command; neutral before change; fixed amplitude; fresh grip/invalid hand");
+    std::puts("PASS cardinal policy: only four directions plus neutral for all eight input rays; no diagonal command; fixed amplitude; fresh grip/invalid hand");
+}
+void ArcChanges(){
+    for(int hand=0;hand<2;++hand){
+        State s;InputFrame frame{{},{1,0,0},{0,0,-1},{0,1,0},2.f};Hand h[2]{};
+        h[hand]={frame.World(Grip(0,0)),{},0,true,true};s.StepTracked(h,frame,.02f,true,false,4);
+        h[hand].grip=1;s.StepTracked(h,frame,.02f,true,false,4);const auto origin=h[hand].point;
+        for(int i=0;i<720;++i){const float a=i*kRad;const Point d{std::sin(a),std::cos(a),0};
+            h[hand].point=origin+frame.Vector(d)*.09f;s.StepTracked(h,frame,.02f,true,false,4);
+            CHECK(s.owner==hand&&s.slot>0&&s.slot%2==1&&Dot(s.Command(),d)>.58f);
+            CHECK(!s.recenterVisual&&s.boundaryError<1e-6f);
+        }
+        // Settled right sector, then jitter at the diagonal: do not chatter.
+        h[hand].point=origin+frame.Vector(Direction(3))*.09f;s.StepTracked(h,frame,.02f,true,false,4);
+        for(int i=0;i<20;++i){const float a=(i%2?44.f:46.f)*kRad;
+            h[hand].point=origin+frame.Vector({std::sin(a),std::cos(a),0})*.09f;
+            s.StepTracked(h,frame,.02f,true,false,4);CHECK(s.slot==3);}
+        h[hand].point=origin+frame.Vector(Direction(1))*.09f;s.StepTracked(h,frame,.02f,true,false,4);CHECK(s.slot==1);
+        h[hand].point=origin;s.StepTracked(h,frame,.02f,true,false,4);CHECK(s.slot==0);
+    }
+    std::puts("PASS free arc transitions: two full circles each hand without neutral lock; right-to-front and sector hysteresis; no boundary warning along valid arc");
+}
+void BoundaryFeedback(){
+    using savr::cockpitboundary::Feedback;
+    Feedback feedback;CHECK(!feedback.Step(0,true,.02f).play);
+    float previous=0;int pulses=0;
+    for(int i=1;i<=100;++i){const auto p=feedback.Step(i*.001f,true,.02f);
+        CHECK(feedback.strength>=previous-1e-6f&&feedback.strength<=.65f);previous=feedback.strength;
+        if(p.play){++pulses;CHECK(p.amplitude>0&&p.amplitude<=.65f&&p.durationMs<=30);}}
+    CHECK(pulses>10&&previous>.6f);
+    const float strong=feedback.strength;feedback.Step(.01f,true,.02f);CHECK(feedback.strength<strong);
+    CHECK(!feedback.Step(0,true,.02f).play&&feedback.strength==0);
+    CHECK(!feedback.Step(.09f,true,.02f,true).play);
+    for(int i=0;i<3;++i)CHECK(!feedback.Step(.09f,true,.02f).play); // click priority
+    feedback.Step(.09f,true,.02f);CHECK(!feedback.Step(.09f,false,.02f).play&&feedback.strength==0);
+    const float scale=2.f;
+    CHECK(BoundaryDistance(Grip(0,0),scale)==0);
+    CHECK(BoundaryDistance({.05f,0,kReach},scale)==0);
+    CHECK(BoundaryDistance({.065f,0,kReach},scale)>BoundaryDistance({.055f,0,kReach},scale));
+    CHECK(BoundaryDistance({0,0,kReach+.01f},scale)==0);
+    CHECK(BoundaryDistance({0,0,kReach+.04f},scale)>.03f);
+    State s;InputFrame frame{{},{1,0,0},{0,0,-1},{0,1,0},2.f};Hand h[2]{{frame.World(Grip(0,0)),{},0,true,true},{}};
+    s.StepTracked(h,frame,.02f,true,false,1);h[0].grip=1;s.StepTracked(h,frame,.02f,true,false,1);
+    const auto origin=h[0].point;h[0].point=origin+frame.right*.15f;s.StepTracked(h,frame,.02f,true,false,1);CHECK(s.boundaryError>.04f);
+    h[0].grip=0;s.StepTracked(h,frame,.02f,true,false,1);CHECK(s.owner==-1&&s.boundaryError==0);
+    std::puts("PASS hot/cold boundary: silence inside, increasing capped amplitude, fast return, short pulses and click priority, radial/height distance and release cleanup");
+}
+void DirectBeatFlick(){
+    savr::hydraulics::Flick f;f.Step(true,0,0,1,true);f.Step(true,1,0,1,true);CHECK(f.pending==4);
+    f.Step(true,1,0,2,true);CHECK(f.pending==0); // holding cannot answer next beat
+    f.Step(true,0,1,2,true);CHECK(f.pending==1); // physical sector hop is a fresh action
+    f.Step(true,0,1,3,false);CHECK(f.pending==0);
+    f.Step(true,-1,0,3,false);CHECK(f.pending==0); // legacy input retains neutral-flick rule
+    f.Step(false,0,0,3,true);CHECK(f.pending==0&&f.neutral);
+    std::puts("PASS mission flick: direct physical direction change can answer a beat; holding cannot; legacy gesture remains unchanged");
 }
 void Buttons(){
     Button b;b.Step({0,0,-.005f},true,true,.02f);CHECK(!b.clicked&&!b.pressed);
@@ -193,7 +248,7 @@ void MovingCockpit(){
         for(int i=0;i<100;++i){const float angle=std::sin(i*.1f)*.8f;
             moving.pivot={.3f+std::sin(i*.3f),.2f+std::cos(i*.2f),-.1f+std::sin(i*.15f)*.6f};
             moving.right=Swing(start.right,angle,-angle*.4f);moving.forward=Swing(start.forward,angle,-angle*.4f);moving.up=Swing(start.up,angle,-angle*.4f);
-            s.StepTracked(h,moving,.02f,true,false,7);CHECK(s.owner==hand&&Cardinal(s,d));}
+            s.StepTracked(h,moving,.02f,true,false,7);CHECK(s.owner==hand&&Cardinal(s,d)&&s.boundaryError<1e-6f);}
         h[hand].point=start.World(Grip(0,0));s.StepTracked(h,moving,.02f,true,false,7);CHECK(s.slot==0&&s.owner==hand);
         h[hand].grip=0;s.StepTracked(h,moving,.02f,true,false,7);CHECK(s.owner==-1);
         for(int i=0;i<20;++i)s.StepTracked(h,moving,.02f,true,false,7);
@@ -354,4 +409,4 @@ void HandConfig(){
     savr::hydrohand::SetPreview(false);CHECK(savr::hydrohand::PreviewHand()==-1);
     std::puts("PASS hand config: separate left/right offsets and rotations; round trip/replace/reset; invalid data/save failure; rotations around grip opening; preview exit");
 }
-int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();HandTravel();SpringReturn();SharedCoordinates();HeightAndSweptReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);HandConfig();}
+int main(int argc,char** argv){CHECK(argc==4);Detents();ArcChanges();BoundaryFeedback();DirectBeatFlick();Buttons();HandTravel();SpringReturn();SharedCoordinates();HeightAndSweptReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);HandConfig();}

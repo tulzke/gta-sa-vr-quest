@@ -1,5 +1,6 @@
 #include "BeachDance.h"
 #include "Hydraulics.h"
+#include "HydraulicFlick.h"
 
 #include <algorithm>
 #include <atomic>
@@ -60,11 +61,9 @@ constexpr int kBeatIndexOff    = 0xA8;   // tBeatInfo::BeatNumber (the graded be
 // made every beat BAD while the stick was simply held.
 constexpr int kHitWindowMs     = 126;
 
-// Latched flick: a beat is answered by ONE fresh neutral->deflected flick, and
-// that answer is only handed to the game inside the hit window.
-int  g_pendingDir   = 0;      // 0 none, 1 UP, 2 DOWN, 3 LEFT, 4 RIGHT
-int  g_lastBeatIdx  = -1;
-bool g_stickNeutral = true;
+// A fresh flick or physical detent change answers a beat. Holding a position
+// cannot answer later beats; answers reach the game only inside the hit window.
+Flick g_flick;
 
 // Snapshot of BeatWindow[10] taken on the GAME thread. CAEAudioHardware::
 // GetBeatInfo zeroes the whole table before refilling it, so reading it from
@@ -100,10 +99,6 @@ bool DanceActive() {
     return running != 0;
 }
 
-int SnapDirection(float x, float y) {
-    if (std::fabs(x) >= std::fabs(y)) return x > 0.f ? 4 : 3;   // RIGHT / LEFT
-    return y > 0.f ? 1 : 2;                                      // UP / DOWN
-}
 bool CardinalKey(int key) {
     return key == 9 || key == 10 || key == 13 || key == 14 ||
            key == 1 || key == 2  || key == 3  || key == 4;
@@ -168,7 +163,7 @@ int PollBeat(int* msUntilOut) {
     return dir;
 }
 
-void SetStick(bool active, float x, float y) {
+void SetStick(bool active, float x, float y, bool directChanges) {
     g_stickX.store(active ? x : 0.0f, std::memory_order_relaxed);
     g_stickY.store(active ? y : 0.0f, std::memory_order_relaxed);
 
@@ -184,23 +179,11 @@ void SetStick(bool active, float x, float y) {
     g_curBeatKey.store(beatKey, std::memory_order_relaxed);
     g_curBeatMs.store(beatMs, std::memory_order_relaxed);
 
-    // --- one fresh flick answers one beat --------------------------------
-    if (beatIdx != g_lastBeatIdx) {   // beat advanced: a new answer is needed
-        g_lastBeatIdx = beatIdx;
-        g_pendingDir = 0;
-    }
-    const float mag = std::sqrt(x * x + y * y);
-    if (!active || mag < 0.35f) {
-        g_stickNeutral = true;
-    } else if (g_stickNeutral && mag >= 0.50f) {
-        g_stickNeutral = false;                 // neutral -> deflected EDGE
-        g_pendingDir = SnapDirection(x, y);     // latch what the player asked for
-    }
+    g_flick.Step(active,x,y,beatIdx,directChanges);
 
     const bool was = g_active.exchange(active, std::memory_order_acq_rel);
     if (was != active) {
         LOGI("[hydraulics] %s", active ? "ENGAGED" : "released");
-        if (!active) { g_pendingDir = 0; g_stickNeutral = true; }
     }
 }
 
@@ -211,12 +194,12 @@ void SetStick(bool active, float x, float y) {
 int ScoringDirection() {
     if (!g_active.load(std::memory_order_acquire)) return 0;
     if (!DanceActive()) return 0;
-    if (g_pendingDir == 0) return 0;
+    if (g_flick.pending == 0) return 0;
     const int key = g_curBeatKey.load(std::memory_order_relaxed);
     const int ms  = g_curBeatMs.load(std::memory_order_relaxed);
     if (!CardinalKey(key)) return 0;
     if (ms < 0 || ms >= kHitWindowMs) return 0;
-    return g_pendingDir;
+    return g_flick.pending;
 }
 
 bool IsActive() { return g_active.load(std::memory_order_acquire); }

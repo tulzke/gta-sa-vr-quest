@@ -1,4 +1,5 @@
 // Included after cockpit coordinate helpers in Driving.cpp.
+bool VrGameplayInputAllowed();
 bool HydroEquipment(void* vehicle){
     if(!vehicle)return false;const auto flags=*reinterpret_cast<const std::uint32_t*>(static_cast<const char*>(vehicle)+0x4b8);
     return (flags&0x20000u)!=0&&(flags&0x40000u)==0;
@@ -78,6 +79,10 @@ void UpdateHydraulicsJoystick(WheelVisualState& v,void* vehicle,const xr::InputS
     if(g_hydroLever.changed&&g_hydroLever.owner>=0){
         xr::TriggerHaptic(g_hydroLever.owner,.32f,0,22);
         if(g.AudioEngine&&g.CAudioEngine_ReportFrontendAudioEvent)g.CAudioEngine_ReportFrontendAudioEvent(g.AudioEngine,1,-14.f,1.f);}
+    const bool held=g_hydroLever.owner>=0&&!editor&&enabled&&VrGameplayInputAllowed()&&!xr::IsMenuVisible()&&xr::IsSessionFocused();
+    const auto boundary=g_hydroLever.boundaryHaptic.Step(g_hydroLever.boundaryError,held,dt,
+        g_hydroLever.changed||(g_hydroLever.owner>=0&&g_hydroLever.owner!=previous));
+    if(boundary.play)xr::TriggerHaptic(g_hydroLever.owner,boundary.amplitude,0.f,boundary.durationMs);
     v.hydroPress=0;
     for(int i=0;i<2;++i){
         const bool free=enabled&&g_hydroLever.owner<0&&g_hydroLever.slot==0&&!(occupied&(1u<<i))&&
