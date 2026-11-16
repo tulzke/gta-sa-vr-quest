@@ -16,6 +16,7 @@
 #include "IgnitionState.h"
 #include "RadioKnobState.h"
 #include "RadioLabel.h"
+#include "RadioRetune.h"
 #include "CockpitSelection.h"
 #include "VehicleLiftLever.h"
 #include "VehicleNitro.h"
@@ -212,6 +213,7 @@ std::atomic<int> g_activeBikeAccelerator{BIKE_ACCEL_HOLD_TRIGGER};
 std::atomic<bool> g_radioButtonDown{false};
 std::atomic<bool> g_radioChangeJustPressed{false};
 std::atomic<bool> g_radioPrevJustPressed{false};
+bool g_radioRetuneLayoutReady{};
 
 std::mutex g_stateMutex;
 WheelVisualState g_visual{};
@@ -2270,7 +2272,9 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
     if(!probe && g.AudioEngine && g.CAudioEngine_GetCurrentRadioStationID &&
        g.CAEVehicleAudioEntity_StaticGetPlayerVehicleAudioSettingsForRadio &&
        g.CAEVehicleAudioEntity_StaticGetPlayerVehicleAudioSettingsForRadio()==radio::VehicleRadioSettings(vehicle)) {
-        const int station=g.CAudioEngine_GetCurrentRadioStationID(g.AudioEngine);
+        const int playing=g.CAudioEngine_GetCurrentRadioStationID(g.AudioEngine);
+        const int station=g_radioRetuneLayoutReady?
+            radio::SelectedStation(g.AERadioTrackManager,playing,radio::UserTracksAvailable(g.AEUserRadioTrackManager)):playing;
         if(*radio::StationName(station))visual.radioStation=station;
     }
     const V3 vectors[4]{center,right,up,normal};
@@ -3576,7 +3580,26 @@ bool InstallInputTypePatch() {
                              reinterpret_cast<void*>(&OnGetInputType));
 }
 
+void InstallRadioRetuneTiming() {
+    void* code=g.CAERadioTrackManager_CheckForStationRetune;
+    g_radioRetuneLayoutReady=radio::RetuneLayoutMatches(code);
+    if(!g_radioRetuneLayoutReady){LOGW("[radio] retune ABI mismatch; keeping stock timing and playing-station label");return;}
+    const auto pageSize=static_cast<std::uintptr_t>(sysconf(_SC_PAGESIZE));
+    const auto address=reinterpret_cast<std::uintptr_t>(code);
+    const auto begin=address&~(pageSize-1);
+    const auto end=(address+0x18c+pageSize-1)&~(pageSize-1);
+    if(mprotect(reinterpret_cast<void*>(begin),end-begin,PROT_READ|PROT_WRITE|PROT_EXEC)!=0){
+        LOGW("[radio] cannot change retune timing");return;
+    }
+    for(const auto& patch:radio::kRetunePatches)
+        std::memcpy(static_cast<char*>(code)+patch.offset,&patch.after,sizeof(patch.after));
+    __builtin___clear_cache(static_cast<char*>(code),static_cast<char*>(code)+0x18c);
+    [[maybe_unused]] const int restored=mprotect(reinterpret_cast<void*>(begin),end-begin,PROT_READ|PROT_EXEC);
+    LOGI("[radio] retune settle=%u ms restart=%u ms RX restored=%d",radio::kRetuneSelectionMs,radio::kRetuneRestartMs,restored==0);
+}
+
 void InstallPadHooks() {
+    InstallRadioRetuneTiming();
     InstallNitroHook();
     InstallHydraulicsHooks();
     InstallBicycleSwayHook();

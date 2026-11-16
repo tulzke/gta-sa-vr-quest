@@ -1,6 +1,7 @@
 #include "RadioLabel.h"
 #include "Driving.h"
 #include "RadioKnobState.h"
+#include "RadioRetune.h"
 #include "IgnitionState.h"
 #include <algorithm>
 #include <cstdio>
@@ -68,6 +69,7 @@ void TriggerHaptic(int,float,float,float){}
 std::array<std::uint8_t,0x400> car{},other{};
 void* current=car.data();const void* bound=radio::VehicleRadioSettings(current);
 int station=2,stationReads=0;
+bool g_radioRetuneLayoutReady=false;
 bool driver=true,transformReady=true;
 V3 vehiclePosition{},cameraOffset{};
 void* FindVehicle(int,bool){return current;}void* FindPed(int){return &driver;}
@@ -81,6 +83,8 @@ struct {
     bool (*CVehicle_IsDriver)(void*,void*)=IsDriver;
     signed char (*CAudioEngine_GetCurrentRadioStationID)(void*)=ReadStation;
     void* (*CAEVehicleAudioEntity_StaticGetPlayerVehicleAudioSettingsForRadio)()=BoundSettings;
+    void* AERadioTrackManager{};
+    void* AEUserRadioTrackManager{};
 } g;
 struct Calibration{bool radioPoseSet{};float radioPose[12]{};};
 std::map<int,Calibration> g_modelCalibration;std::mutex g_modelMutex;
@@ -112,6 +116,16 @@ void Tests() {
     Check(w.radioStation==-1&&stationReads==reads,"same-model vehicle change cannot read previous car's station");
     bound=radio::VehicleRadioSettings(current);station=5;UpdateRadioKnob(w,current,input,hands,0,true);
     Check(w.radioStation==5,"new vehicle binding restores current station");
+    std::array<std::uint8_t,0x400> manager{};
+    const int noAbsolute=-1,pending=2;
+    std::memcpy(manager.data()+0x78,&noAbsolute,4);std::memcpy(manager.data()+0x7c,&noAbsolute,4);
+    manager[0xad]=5;std::memcpy(manager.data()+0x6c,&pending,4);
+    g.AERadioTrackManager=manager.data();g_radioRetuneLayoutReady=true;
+    UpdateRadioKnob(w,current,input,hands,0,true);
+    Check(w.radioStation==7&&station==5,"label shows pending target while previous station still plays");
+    g_radioRetuneLayoutReady=false;
+    UpdateRadioKnob(w,current,input,hands,0,true);
+    Check(w.radioStation==5,"unrecognized retail ABI safely uses playing station");
     const V3 previous{w.radioCenter[0],w.radioCenter[1],w.radioCenter[2]};
     cameraOffset={1,2,3};vehiclePosition={10,0,0};RefreshRadioTracking(w);
     Check(w.radioVisible&&Near(w.radioCenter[0],previous.x+9)&&Near(w.radioCenter[1],previous.y-2)&&Near(w.radioCenter[2],previous.z-3),"late camera/vehicle changes reproject knob and label together");
@@ -125,8 +139,51 @@ void Tests() {
     car[0x247]=0;driver=false;UpdateRadioKnob(w,current,input,hands,0,true);Check(!w.radioVisible,"passenger cannot see driver control");
 }
 }
+void RetuneTests() {
+    std::array<std::uint8_t,0x400> manager{},user{};
+    const auto write=[&](std::size_t offset,int value){std::memcpy(manager.data()+offset,&value,4);};
+    write(0x78,-1);write(0x7c,-1);manager[0xad]=2;
+    Check(radio::SelectedStation(nullptr,4,true)==4,"missing manager falls back to playing ID");
+    write(0x6c,1);Check(radio::SelectedStation(manager.data(),2,true)==3,"next target appears before audio commits");
+    write(0x6c,-1);Check(radio::SelectedStation(manager.data(),2,true)==1,"previous target appears before audio commits");
+    manager[0xad]=11;write(0x6c,1);
+    Check(radio::SelectedStation(manager.data(),11,false)==13,"skip unavailable user tracks forwards");
+    Check(radio::SelectedStation(manager.data(),11,true)==12,"select available user tracks");
+    manager[0xad]=13;write(0x6c,-1);
+    Check(radio::SelectedStation(manager.data(),13,false)==11,"skip unavailable user tracks backwards");
+    write(0x6c,1);Check(radio::SelectedStation(manager.data(),13,false)==1,"wrap OFF to first station");
+    manager[0xad]=1;write(0x6c,-1);Check(radio::SelectedStation(manager.data(),1,false)==13,"wrap first station to OFF");
+    write(0x7c,9);Check(radio::SelectedStation(manager.data(),1,false)==9,"absolute script selection overrides pending offset");
+    write(0x7c,12);Check(radio::SelectedStation(manager.data(),1,false)==13,"unavailable absolute user tracks select OFF like native retune");
+    write(0x7c,-1);write(0x78,4);Check(radio::SelectedStation(manager.data(),1,true)==4,"paused absolute request has correct preview");
+    write(0x78,-1);write(0x6c,0);manager[0xad]=7;
+    Check(radio::SelectedStation(manager.data(),13,false)==7,"loading new selected station does not flash playing OFF");
+    write(0x6c,0x7fffffff);Check(radio::SelectedStation(manager.data(),3,true)==3,"invalid offset cannot overflow preview");
+    Check(!radio::UserTracksAvailable(user.data()),"empty user catalogue detected");
+    user[0xa]=1;Check(radio::UserTracksAvailable(user.data()),"nonempty catalogue detected");
+    radio::KnobState knob;
+    Check(knob.Step(true,0)==0,"start one continuous grip");
+    manager[0xad]=2;write(0x6c,0);
+    for(int i=1;i<=3;++i) {
+        Check(knob.Step(true,22)==1,"another physical detent requires no release or audio acknowledgement");
+        write(0x6c,i);
+        Check(radio::SelectedStation(manager.data(),2,false)==2+i,"each detent advances pending target from same playing station");
+        Check(knob.Step(true,0)==0 && knob.held,"return to center rearms while grip remains held");
+    }
+    std::array<std::uint32_t,0x18c/4> code{};
+    code[0]=0x3943a408u;code[0x4c/4]=0xb9406e68u;code[0x100/4]=0xb9407e68u;code[0x108/4]=0x39c2b66au;
+    for(const auto& patch:radio::kRetunePatches)code[patch.offset/4]=patch.before;
+    Check(radio::RetuneLayoutMatches(code.data()),"verified stock timing layout accepted");
+    for(const auto& patch:radio::kRetunePatches)code[patch.offset/4]=patch.after;
+    Check(radio::RetuneLayoutMatches(code.data()),"installed timing patch is idempotent");
+    Check(((code[0x15c/4]>>10)&0xfff)==350,"ARM64 input settle immediate is 350 milliseconds");
+    for(auto offset:{0x16c,0x188})Check(((code[offset/4]>>5)&0xffff)==500,"both restart immediates are 500 milliseconds");
+    code[0x15c/4]^=1;Check(!radio::RetuneLayoutMatches(code.data()),"unexpected retail instruction blocks patch");
+    Check(!radio::RetuneLayoutMatches(nullptr),"missing symbol blocks patch safely");
+}
 int main(int argc,char** argv) {
     integration::Tests();
+    RetuneTests();
     Check(std::string(radio::StationName(13))=="RADIO OFF","retail OFF ID");
     for(int id:{-999,-1,0,14,127,255})Check(!*radio::StationName(id),"invalid/emergency stream is not OFF");
     for(unsigned type=0;type<256;++type)Check(radio::HasTunableRadio(type)==(type==0),"only civilian music radio is tunable");

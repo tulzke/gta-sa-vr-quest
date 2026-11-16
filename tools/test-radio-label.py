@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import struct
+import sys
 
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'build/radio-label-tests'
@@ -31,6 +33,21 @@ header=(ROOT/'native/src/RadioLabel.h').read_text(encoding='utf8')
 digits=[int(v) for v in re.findall(r'\d+',re.search(r'Glyph digits\[\]\{(.*?)\};',header,re.S)[1])]
 assert digits==ammo,'radio digits must exactly match the ammo counter'
 assert 'PublishRadioText' not in source,'old transient HUD message must be removed'
+if '--retail' in sys.argv:
+    # Targeted ABI verification for the new code patch; no APK/game-data audit.
+    data=(ROOT/'build/vehicle-lift-lever/retail.so').read_bytes()
+    phoff=struct.unpack_from('<Q',data,32)[0];phsize,phnum=struct.unpack_from('<HH',data,54)
+    segments=[struct.unpack_from('<IIQQQQQQ',data,phoff+i*phsize) for i in range(phnum)]
+    def word(va):
+        for kind,flags,offset,address,physical,filesz,memsz,align in segments:
+            if kind==1 and address<=va<address+filesz:return struct.unpack_from('<I',data,offset+va-address)[0]
+        raise AssertionError(hex(va))
+    for offset,expected in [(0,0x3943a408),(0x4c,0xb9406e68),(0x100,0xb9407e68),(0x108,0x39c2b66a),
+                            (0x15c,0x11177129),(0x16c,0x5281f40a),(0x188,0x5280fa09)]:
+        assert word(0x3889a8+offset)==expected,(hex(offset),hex(word(0x3889a8+offset)))
+    print('PASS ABI: native target/delta fields and original 1500/4000/2000 ms instructions match')
+if '--runtime-only' in sys.argv:
+    raise SystemExit(0)
 shaders=re.findall(r'R"GLSL\((.*?)\)GLSL"',(ROOT/'native/src/RadioLabelRender.inl').read_text(encoding='utf8'),re.S)
 mesh=json.loads((OUT/'mesh.json').read_text())
 html=r'''<!doctype html><meta charset="utf-8"><canvas id="view" width="1000" height="240"></canvas><pre id="result">RUNNING</pre><script>
