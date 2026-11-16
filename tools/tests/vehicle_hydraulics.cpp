@@ -117,7 +117,7 @@ void SpringReturn(){
         CHECK(s.slot==0&&std::hypot(s.visualX,s.visualY)<1e-6f);
         // A vertical wrist shift must neither latch a side nor break a grab.
         h[hand].point.z+=.06f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);
-        h[hand].point=h[hand].point+d*.08f;s.StepTracked(h,frame,.02f,true,four,1);
+        h[hand].point=h[hand].point+d*.084f;s.StepTracked(h,frame,.02f,true,four,1);
         CHECK(s.owner==hand&&correct());
     }
     std::puts("PASS 2x spring return: both hands/eight detents and mission; 24 cm overshoot returns with 6.4 cm pullback; vertical motion ignored");
@@ -128,11 +128,15 @@ void HandTravel(){
         h[hand]={frame.World(Grip(0,0)),{},0,true,true};s.StepTracked(h,frame,.02f,true,false,3);
         h[hand].grip=1;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.owner==hand);
         const auto start=h[hand].point,d=Direction(slot);
-        for(float metres:{.005f,.01f,.02f,.04f,.055f}){
-            h[hand].point=start+d*metres;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.owner==hand&&s.slot==0);}
-        h[hand].point=start+d*.058f;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.slot==slot);
+        for(float metres:{.005f,.01f,.02f,.04f,.055f,.079f}){
+            h[hand].point=start+d*metres;s.StepTracked(h,frame,.02f,true,false,3);
+            CHECK(s.owner==hand&&s.slot==0&&!s.changed&&Length(s.Command())==0);
+            CHECK(std::hypot(s.visualX,s.visualY)>.01f&&std::hypot(s.visualX,s.visualY)<=kCenterPlay+1e-6f);}
+        h[hand].point=start;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.slot==0&&std::hypot(s.visualX,s.visualY)<1e-6f);
+        h[hand].point=start+d*.082f;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.slot==slot);
     }
-    std::puts("PASS measured hand travel: no activation at 5-55 mm, engagement at 58 mm at default 200%, both hands/eight rays");
+    std::puts("PASS neutral free play: continuous shaft/hand pose within 3 degrees with zero command and no clicks; returns to centre");
+    std::puts("PASS measured hand travel: no activation at 5-79 mm, engagement at 82 mm at default 200%, both hands/eight rays");
 }
 void MovingCockpit(){
     for(int hand=0;hand<2;++hand)for(int slot=1;slot<=8;++slot){

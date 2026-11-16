@@ -6,7 +6,8 @@
 
 namespace savr::hydrocontrol {
 constexpr float kRad=.017453292519943295f,kTravel=22.f*kRad,kReach=.055f;
-constexpr float kModelScale=2.f,kNeutral=.011f,kEngage=.014f,kInputLimit=.026f;
+constexpr float kModelScale=2.f,kNeutral=.011f,kEngage=.020f,kInputLimit=.026f;
+constexpr float kCenterPlay=3.f*kRad;
 // The fixed wrist sits behind/above the sphere. Its arc is longer than the
 // sphere centre's arc; require a full hand stroke before the detent engages.
 constexpr float kHandStroke=2.f;
@@ -109,10 +110,11 @@ struct State {
             // A detent cannot rotate into its neighbour: return to neutral
             // first. Visual slack is small and cannot alter the command.
             float sx=p.x*visualPerMetre-d.x*kTravel,sy=p.y*visualPerMetre-d.y*kTravel;
-            const float slack=std::hypot(sx,sy),limit=(slot?2.f:3.f)*kRad;
+            const float slack=std::hypot(sx,sy),limit=slot?2.f*kRad:kCenterPlay;
             if(slack>limit){sx*=limit/slack;sy*=limit/slack;}
             aimX=d.x*kTravel+sx;aimY=d.y*kTravel+sy;
-            if(!slot&&radius<=kNeutral)aimX=aimY=0;
+            // Neutral has real free play too. Visual shaft/hand/bellows follow
+            // the controller within this small circle, while Command() stays zero.
         }
         if(previous>0&&slot!=previous)recenterVisual=true;
         const float targetX=recenterVisual?0.f:aimX,targetY=recenterVisual?0.f:aimY;
