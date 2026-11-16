@@ -24,7 +24,9 @@ vs=subprocess.check_output([str(where),'-latest','-products','*','-requires','Mi
 cmd=OUT/'test.cmd'
 cmd.write_text(f'@echo off\ncall "{vs}/VC/Auxiliary/Build/vcvars64.bat" >nul\nif errorlevel 1 exit /b 1\n'
     f'cl /nologo /std:c++20 /EHsc /W4 /D_CRT_SECURE_NO_WARNINGS /I"{ROOT}/native/src" /I"{OUT}" "{ROOT}/tools/tests/radio_label.cpp" /Fe:"{OUT}/test.exe" /Fo:"{OUT}/test.obj"\n'
-    f'if errorlevel 1 exit /b 1\n"{OUT}/test.exe" "{OUT}/mesh.json"\n',encoding='utf8')
+    f'if errorlevel 1 exit /b 1\n"{OUT}/test.exe" "{OUT}/mesh.json"\nif errorlevel 1 exit /b 1\n'
+    f'cl /nologo /std:c++20 /EHsc /W4 /I"{ROOT}/native/src" "{ROOT}/tools/tests/radio_knob_state.cpp" /Fe:"{OUT}/knob.exe" /Fo:"{OUT}/knob.obj"\n'
+    f'if errorlevel 1 exit /b 1\n"{OUT}/knob.exe"\n',encoding='utf8')
 subprocess.run(['cmd','/c',str(cmd)],cwd=OUT,check=True)
 # Check the same digit rows, not a similar-looking replacement font.
 source=(ROOT/'native/src/Xr.cpp').read_text(encoding='utf8')

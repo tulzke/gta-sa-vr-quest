@@ -52,6 +52,7 @@
 #include <mutex>
 
 namespace savr::driving {
+bool CabinVisualContext();
 namespace {
 
 struct V3 { float x{}, y{}, z{}; };
@@ -333,6 +334,7 @@ std::mutex g_modelMutex;
 std::map<int, ModelCalibration> g_modelCalibration;
 
 radio::KnobState g_radioKnob;
+double g_radioKnobLastTime{};
 int g_radioKnobHand=-1;
 void* g_radioKnobVehicle{};
 bool g_radioGripDown[2]{true,true};
@@ -2328,12 +2330,16 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
             const V3 v{q[0],q[1],q[2]};
             const V3 axis=V3{0,1,0}+Cross(v,Cross(v,V3{0,1,0})+V3{0,1,0}*q[3])*2.0f;
             constexpr float deg=180.0f/3.14159265358979323846f;
-            const int step=g_radioKnob.Step(true,-PlanarAngle(axis,right,up)*deg);
+            const double now=MonotonicSeconds();
+            const float dt=g_radioKnobLastTime>0?static_cast<float>(std::clamp(now-g_radioKnobLastTime,0.,.1)):0.f;
+            g_radioKnobLastTime=now;
+            const int step=g_radioKnob.Step(true,-PlanarAngle(axis,right,up)*deg,dt);
             if (step) {
                 auto& pending=step>0?g_radioKnobNext:g_radioKnobPrev;
                 pending.fetch_add(1,std::memory_order_release);
-                xr::TriggerHaptic(hand,.3f,0.f,30.f);
             }
+            const auto& pulse=g_radioKnob.haptic;
+            if(pulse.play)xr::TriggerHaptic(hand,pulse.amplitude,0.f,pulse.durationMs);
             visual.radioGrabbed[hand]=true;
             visual.radioGrabId[hand]=g_radioGrabSequence;
             visual.radioAngle=g_radioKnob.angle/deg;

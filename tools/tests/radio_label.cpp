@@ -64,7 +64,9 @@ namespace ignition=savr::ignition;
 namespace xr {
 struct InputState{float grip[2]{};};
 struct HandPose{bool valid{};float gripOri[4]{};};
-void TriggerHaptic(int,float,float,float){}
+struct Haptic{int hand;float amplitude,durationMs;};
+std::vector<Haptic> haptics;
+void TriggerHaptic(int hand,float amplitude,float,float durationMs){haptics.push_back({hand,amplitude,durationMs});}
 }
 std::array<std::uint8_t,0x400> car{},other{};
 void* current=car.data();const void* bound=radio::VehicleRadioSettings(current);
@@ -89,6 +91,8 @@ struct {
 struct Calibration{bool radioPoseSet{};float radioPose[12]{};};
 std::map<int,Calibration> g_modelCalibration;std::mutex g_modelMutex;
 radio::KnobState g_radioKnob;int g_radioKnobHand=-1;void* g_radioKnobVehicle{};
+double g_radioKnobLastTime{},testTime{};
+double MonotonicSeconds(){testTime+=.02;return testTime;}
 bool g_radioGripDown[2]{true,true};std::uint64_t g_radioGrabSequence{};
 std::atomic<int> g_radioKnobNext{},g_radioKnobPrev{};
 bool IsBicycleModel(int model){return model==481;}
@@ -138,6 +142,28 @@ void Tests() {
     Check(!w.radioVisible&&g_radioKnobNext==0,"no-radio transport clears visual and queued physical event");
     car[0x247]=0;driver=false;UpdateRadioKnob(w,current,input,hands,0,true);Check(!w.radioVisible,"passenger cannot see driver control");
 }
+void HapticTests() {
+    driver=true;cameraOffset={};vehiclePosition={};g_modelCalibration.clear();
+    current=car.data();bound=radio::VehicleRadioSettings(current);g_radioKnobVehicle=current;
+    for(int hand=0;hand<2;++hand) {
+        g_radioKnob.Reset();g_radioKnobHand=hand;g_radioKnobNext=0;g_radioKnobPrev=0;
+        xr::haptics.clear();xr::InputState input;input.grip[hand]=1;
+        xr::HandPose hands[2]{};hands[hand].valid=true;
+        WheelVisualState w;w.modelId=411;w.radius=.17f;w.right[0]=1;w.up[1]=1;w.normal[2]=-1;
+        const auto turn=[&](float angle) {
+            const float half=(-90-angle)*.01745329252f*.5f;
+            hands[hand].gripOri[2]=std::sin(half);hands[hand].gripOri[3]=std::cos(half);
+            UpdateRadioKnob(w,current,input,hands,0);
+        };
+        turn(0);Check(xr::haptics.empty(),"grabbing alone does not vibrate ratchet");
+        turn(7);Check(xr::haptics.size()==1&&xr::haptics.back().amplitude==.14f&&g_radioKnobNext==0,"rotation sends tooth pulse without changing station");
+        turn(23);Check(xr::haptics.size()==2&&xr::haptics.back().amplitude==.3f&&g_radioKnobNext==1,"station click has priority over tooth");
+        turn(65);Check(xr::haptics.size()==3&&xr::haptics.back().amplitude==.85f&&xr::haptics.back().durationMs==75,"stop sends stronger longer pulse");
+        Check(Near(w.radioAngle,1.04719755f),"rendered knob reaches sixty degrees");
+        turn(80);Check(xr::haptics.size()==3&&g_radioKnobNext==1,"holding beyond stop repeats neither haptic nor station event");
+        for(const auto& pulse:xr::haptics)Check(pulse.hand==hand,"only owning hand receives radio haptics");
+    }
+}
 }
 void RetuneTests() {
     std::array<std::uint8_t,0x400> manager{},user{};
@@ -183,6 +209,7 @@ void RetuneTests() {
 }
 int main(int argc,char** argv) {
     integration::Tests();
+    integration::HapticTests();
     RetuneTests();
     Check(std::string(radio::StationName(13))=="RADIO OFF","retail OFF ID");
     for(int id:{-999,-1,0,14,127,255})Check(!*radio::StationName(id),"invalid/emergency stream is not OFF");
