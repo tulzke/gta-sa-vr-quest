@@ -3,6 +3,7 @@
 #include "VehicleDebugDrag.h"
 #include "PdaDashboardPlacement.h"
 #include "Driving.h"
+#include "VehicleHydraulics.h"
 #include "CockpitSelection.h"
 #include <map>
 #include <array>
@@ -91,6 +92,11 @@ float GetWheelCalibrationValue(int) {return 0;}
 bool GetIgnitionFrame(void*,bool,float out[12]) { const float frame[12]{1,0,0,0,1,0,0,0,1,0,0,0}; std::copy_n(frame,12,out);return true; }
 void SetIgnitionPose(int,bool,const float*) {}
 void SetRadioPose(int,const float*) {}
+bool serviceVisible{};int serviceWrites{};
+float servicePose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};
+void SetServiceRadioPose(int,const float* p){std::copy_n(p,12,servicePose);++serviceWrites;}
+void SetHydraulicsPose(int,const float*) {}
+unsigned ServiceRadioClaimedHands(){return 0;}
 bool liftVisible{};int liftWrites{};
 float liftPose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};
 void SetLiftPose(int,const float* pose) {std::copy_n(pose,12,liftPose);++liftWrites;}
@@ -122,6 +128,9 @@ bool GetWheelVisualState(WheelVisualState* out) {
     if(liftVisible){out->modelId=530;out->liftVisible=true;
         std::copy_n(liftPose,3,out->liftCenter);std::copy_n(liftPose+3,3,out->liftRight);
         std::copy_n(liftPose+6,3,out->liftForward);std::copy_n(liftPose+9,3,out->liftUp);}
+    if(serviceVisible){out->serviceVisible=true;
+        std::copy_n(servicePose,3,out->serviceCenter);std::copy_n(servicePose+3,3,out->serviceRight);
+        std::copy_n(servicePose+6,3,out->serviceForward);std::copy_n(servicePose+9,3,out->serviceUp);}
     if(nitroVisible){out->nitroVisible=true;out->nitroGhost=true;
         std::copy_n(nitroPose,3,out->nitroCenter);std::copy_n(nitroPose+3,3,out->nitroRight);
         std::copy_n(nitroPose+6,3,out->nitroForward);std::copy_n(nitroPose+9,3,out->nitroUp);}
@@ -188,6 +197,7 @@ bool FakeLos(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,
     *hit=wall?static_cast<void*>(pedMemory):vehicle;return true;
 }
 void Setup() {
+    driving::serviceVisible=false;driving::serviceWrites=0;
     driving::liftVisible=false;driving::liftWrites=0;driving::nitroVisible=false;driving::nitroWrites=0;
     for(auto& detent:g_openDetents)detent={};
     Reset();g_epoch=5;g_updated=Now()-.02;g_ready=true;
@@ -791,6 +801,20 @@ int main() {
         CHECK(std::abs(driving::nitroPose[3]-.866025f)<.001f&&std::abs(driving::nitroPose[4]-.5f)<.001f);
         hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&driving::saves==1);
     }
+    for(int h:{0,1}){
+        Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+        driving::serviceVisible=true;
+        const float pose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};std::copy_n(pose,12,driving::servicePose);
+        hands[h].gripPos[0]=.6f;hands[h].gripPos[1]=.2f;hands[h].gripPos[2]=.714f;
+        Tick();hands[h].trigger=1;Tick();CHECK(g_editKind==14&&g_edit.hand==h&&ClaimedHands()==(1u<<h));
+        hands[h].gripPos[0]+=.06f;hands[h].gripPos[1]+=.04f;hands[h].gripPos[2]+=.03f;
+        hands[h].gripOri[2]=.258819f;hands[h].gripOri[3]=.965926f;Tick();
+        CHECK(driving::serviceWrites>0&&driving::saves==0);
+        CHECK(std::abs(driving::servicePose[0]-.66f)<.001f&&std::abs(driving::servicePose[1]-.24f)<.001f&&std::abs(driving::servicePose[2]-.68f)<.001f);
+        CHECK(std::abs(driving::servicePose[3]-.866025f)<.001f&&std::abs(driving::servicePose[4]-.5f)<.001f);
+        hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&driving::saves==1);
+    }
+    std::puts("service radio: both-hand editor translation/rotation, exclusive ownership and release save passed");
     std::puts("vehicle nitro: uninstalled ghost editable with either hand; rigid translation/rotation, persistent ownership and release save passed");
     std::puts("vehicle lift: both hands, rigid position/rotation edit, ownership and release save passed");
     std::puts("vehicle PDA: both hands, three-axis trigger drag, fixed angles, model placement, release save and visibility cancellation passed");

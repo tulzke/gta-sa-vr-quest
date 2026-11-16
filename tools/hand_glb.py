@@ -5,7 +5,7 @@ import struct
 
 ACTIONS = ('Grip', 'Pinch', 'Point', 'OpenPalm', 'Beckon', 'GripPistol',
            'GripPistolOffhand', 'Fist', 'GripPistolShoot', 'GripDeagle',
-           'GripDeagleOffhand', 'GripRifle', 'GripShotgun', 'GripShotgunOffhand')
+           'GripDeagleOffhand', 'GripRifle', 'GripShotgun', 'GripShotgunOffhand', 'HandleRadio')
 
 
 def action_key(name):

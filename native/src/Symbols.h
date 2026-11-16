@@ -205,6 +205,7 @@ struct GameSymbols {
     // SCM global variable pool. Globals are 32-bit at their byte offset;
     // player_parachute.scm keeps its phase in $2D0C (3 = deploy-ready).
     void* CTheScripts_ScriptSpace;
+    void** CTheScripts_pActiveScripts;
 
     // The object/ped script-brain table: 70 entries, 20 bytes each
     // (disasm AddNewScriptBrain @0x437974: streamedIndex u16 @+0, type s8

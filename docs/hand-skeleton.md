@@ -1,7 +1,7 @@
 # Скелетные VR-руки GLB
 
 Руки загружаются только из `vrhands/skeletal/hands.glb`: одна геометрия,
-один skin, embedded PNG и 14 клипов. Старые модели и покадровые UXRH-анимации,
+один skin, embedded PNG и 15 клипов. Старые модели и покадровые UXRH-анимации,
 их загрузчик, CPU-деформация, динамические буферы и старый шейдер удалены.
 UXRH радио к этой системе не относится и сохранён.
 
@@ -13,7 +13,7 @@ UXRH радио к этой системе не относится и сохра
 ## Исходники и Git LFS
 
 - `assets/vrhands/source/Hands.blend`: исходник только с HandRight, ригом Hand
-  и всеми 14 Actions; один меш, 25 deform-костей, один Armature modifier.
+  и всеми 15 Actions; один меш, 25 deform-костей, один Armature modifier.
   Constraints/IK нет, до 7 весов на вершину. Обязательных правок рига не выявлено.
 - `assets/vrhands/skeletal/hands.glb`: готовый runtime-ассет.
 - `assets/vrhands/BigHandsAlbedo.png`: исходная текстура для экспорта.
@@ -74,7 +74,7 @@ skin matrix, culling рук выключен. Ledge grip сохраняет пр
 
 ## Проверки
 
-- `tools/test-hand-actions.py`: committed GLB, один меш, skin, все 14 клипов,
+- `tools/test-hand-actions.py`: committed GLB, один меш, skin, все 15 клипов,
   embedded albedo, соответствие source hash, отсутствие старых моделей.
 - `tools/test-hand-animation-runtime.py`: аналоговый выбор жестов и приоритеты.
 - `tools/test-hand-skeleton.py`: production loader/sampler, все клипы, bind,
@@ -115,3 +115,9 @@ roundtrip и host GPU проверки; также прошли `test-radio-asse
 Новый payload содержит GLB без старых моделей/клипов; штатная публикация дерева
 удаляет их из активного каталога на Quest. Проверка ощущений и всех специальных
 взаимодействий в шлеме остаётся пользовательской проверкой после обновления.
+
+
+16 ноября 2026: добавлен `HandleRadio` для служебной рации (задача 97).
+Указательный на боковой кнопке, большой вверх по противоположной грани.
+Кадры 1…11 — удержание/нажатие; источник и GLB теперь содержат 15 клипов.
+Предыдущие 14 конечных поз GLB совпадают точно; геометрия, веса и риг сохранены.

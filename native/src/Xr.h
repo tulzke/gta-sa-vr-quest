@@ -55,6 +55,8 @@ struct InputState {
 
 // Copy out the most recent controller state. Cheap; safe to call every frame.
 void GetInput(InputState& out);
+// Simulation input producer needs the unclaimed PTT trigger. Other consumers use GetInput.
+void GetRawInput(InputState& out);
 
 // Fire a controller vibration pulse on one hand (0 left, 1 right).
 void TriggerHaptic(int hand, float amplitude, float frequencyHz,

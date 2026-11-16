@@ -4849,6 +4849,12 @@ const char16_t* OnGetText(void* self,const char* key) {
 }
 
 bool OnWidgetReleased(int widgetId, void* outTouchPos, int touchIndex) {
+    if(widgetId==70||widgetId==72){
+        const bool native=g_origWidgetReleased&&g_origWidgetReleased(widgetId,outTouchPos,touchIndex);
+        const bool radio=driving::ServiceRadioWidget(widgetId);
+        if(radio)FillTouchPos(outTouchPos);
+        return native||radio;
+    }
     const bool original = g_origWidgetReleased &&
         g_origWidgetReleased(widgetId, outTouchPos, touchIndex);
     if (widgetId==66) {
@@ -5048,7 +5054,7 @@ void OnUpdatePads() {
     g_origUpdatePads();
 
     xr::InputState in{};
-    xr::GetInput(in);
+    xr::GetRawInput(in);
     float mappedMoveX=0.0f,mappedMoveY=0.0f;
     float mappedTurnX=0.0f,mappedTurnY=0.0f;
     locomotion::MapGameplaySticks(
@@ -5101,6 +5107,7 @@ void OnUpdatePads() {
     // the bike. Block the actual menu chord, not the grips by themselves.
     tbone::UpdateInput(stereo&&!inputBlocked&&!openChord&&actionControls, in.a);
     driving::UpdateInput(in, stereo, inputBlocked);
+    for(int h=0;h<2;++h)if(driving::ServiceRadioConsumesTrigger(h))in.triggers[h]=0;
 
     const bool vehicleButtonAllowed =
         stereo && !inputBlocked && !bothGrips && !openChord && !beachdance::Active() &&

@@ -56,8 +56,8 @@ int AxisLeftRight(){return 0;}
 namespace savr::hydraulics {
 bool active=false;
 bool IsActive() { return active; }
-int AxisUpDown() { return -87; }
-int AxisLeftRight() { return 91; }
+int AxisUpDown(bool=false) { return -87; }
+int AxisLeftRight(bool=false) { return 91; }
 }
 void* seated=nullptr;
 int appearance=0;
@@ -83,7 +83,9 @@ struct Symbols {
 } g;
 namespace vrcam { bool IsStereoActive() { return allowed; } }
 namespace vrfire { bool scripted=false; bool IsScriptedWeaponCamera() { return scripted; } }
+void* g_hydraulicControlVehicle=nullptr;
 std::atomic<bool> g_inputBlocked{false};
+unsigned serviceMask{};bool ServiceRadioConsumesTrigger(int h){return (serviceMask&(1u<<h))!=0;}
 std::atomic<int> g_liftAxis{0};
 std::atomic<void*> g_liftAxisVehicle{nullptr};
 bool HasPlayerVehicle() { return seated!=nullptr; }
@@ -265,6 +267,12 @@ int main() {
     Check(OnGetSteering(pad)==-64,"editor preserves physical steering");
     debugMode=0;
     Check(OnGetBrake(pad)==191,"normal brake restored after editor");
+    xr::input.triggers[1]=.8f;serviceMask=2;
+    Check(OnGetAccelerate(pad)==0&&OnGetBrake(pad)==191,"right PTT owns gas, preserves left brake");
+    serviceMask=1;
+    Check(OnGetBrake(pad)==0&&OnGetAccelerate(pad)==204,"left PTT owns brake, preserves right gas");
+    serviceMask=3;Check(OnGetAccelerate(pad)==0&&OnGetBrake(pad)==0,"release latches suppress both pedals");
+    serviceMask=0;xr::input.triggers[1]=0;
     g_visual.steering=0.5f; xr::input.leftStick[0]=-1;
     Check(OnGetSteering(pad)==-64,"boat physical helm drives retail steering despite stick drift");
     g_visual.steering=-0.5f;

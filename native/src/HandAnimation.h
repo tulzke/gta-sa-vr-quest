@@ -9,11 +9,11 @@ namespace savr::handanimation {
 enum class Gesture { Grip, Pinch, Point, OpenPalm, Beckon, GripPistol,
                      GripPistolOffhand, Fist, GripPistolShoot,
                      GripDeagle, GripDeagleOffhand, GripRifle, GripShotgun,
-                     GripShotgunOffhand, Count };
+                     GripShotgunOffhand, HandleRadio, Count };
 inline constexpr std::array<const char*, static_cast<int>(Gesture::Count)> kNames{
     "Grip", "Pinch", "Point", "OpenPalm", "Beckon", "GripPistol",
     "GripPistolOffhand", "Fist", "GripPistolShoot", "GripDeagle", "GripDeagleOffhand",
-    "GripRifle", "GripShotgun", "GripShotgunOffhand"};
+    "GripRifle", "GripShotgun", "GripShotgunOffhand", "HandleRadio"};
 
 inline float Unit(float value) {
     return std::isfinite(value) ? std::clamp(value, 0.f, 1.f) : 0.f;

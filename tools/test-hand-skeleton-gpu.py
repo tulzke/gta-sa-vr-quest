@@ -19,9 +19,9 @@ glb = base64.b64encode((ROOT / 'assets/vrhands/skeletal/hands.glb').read_bytes()
 palettes = json.loads((out/'gpu.json').read_text())['palettes']
 html = r'''<!doctype html><meta charset="utf-8"><style>
 body{background:#17212c;color:#e9edf1;font:15px sans-serif}h1{font-size:22px}
-canvas{width:1120px;height:1400px}pre{white-space:pre-wrap}</style>
+canvas{width:1120px;height:1600px}pre{white-space:pre-wrap}</style>
 <h1>GLB skeletal hands — production shader / left and right</h1><pre id="result">RUNNING</pre>
-<canvas id="canvas" width="1120" height="1400"></canvas><script>
+<canvas id="canvas" width="1120" height="1600"></canvas><script>
 const vertexSource=__VS__,fragmentSource=__FS__,palettes=__PALETTES__;
 async function run(){
  const bytes=Uint8Array.from(atob('__GLB__'),c=>c.charCodeAt(0));
@@ -79,14 +79,14 @@ async function run(){
  gl.disable(gl.RASTERIZER_DISCARD);gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK,null);
  if(!Number.isFinite(maxPosition)||maxPosition>2e-5||maxNormal>2e-4)throw Error(JSON.stringify({maxPosition,maxNormal}));
  if(gl.getError()!==gl.NO_ERROR)throw Error('GL error during feedback');
- // Contact sheet: actual production albedo and shader, fourteen endpoints.
+ // Contact sheet: actual production albedo and shader, all clip endpoints.
  const image=doc.images[0],imageView=doc.bufferViews[image.bufferView];
  const bitmap=await createImageBitmap(new Blob([bytes.slice(bin+imageView.byteOffset,bin+imageView.byteOffset+imageView.byteLength)],{type:'image/png'}),{premultiplyAlpha:'none',colorSpaceConversion:'none'});
  const texture=gl.createTexture();gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,bitmap);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.uniform1i(loc('uTex'),0);gl.uniform1f(loc('uDarkSkin'),0);gl.uniform1i(loc('uLedge'),false);
  gl.clearColor(.12,.16,.2,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);
- for(let action=0;action<14;action++)for(let hand=0;hand<2;hand++){
-  gl.viewport((action%2)*560+hand*280,1200-Math.floor(action/2)*200,280,200);
+ for(let action=0;action<doc.animations.length;action++)for(let hand=0;hand<2;hand++){
+  gl.viewport((action%2)*560+hand*280,1400-Math.floor(action/2)*200,280,200);
   const mvp=identity.slice();mvp[0]=6;mvp[5]=6;mvp[10]=-6;
   gl.uniformMatrix4fv(loc('uMVP'),false,mvp);gl.uniformMatrix4fv(loc('uModel'),false,model(hand?1:-1));gl.uniformMatrix4fv(loc('uJoints[0]'),false,palettes[action*3+2]);
   gl.drawElements(gl.TRIANGLES,doc.accessors[prim.indices].count,gl.UNSIGNED_SHORT,0);

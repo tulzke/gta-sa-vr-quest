@@ -540,7 +540,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
     Vec eye{};float origin[3]{},forward[3]{};
     if (!usable||!pool.ReadCurrent()||!vrcam::GetHeadWorldRay(origin,forward)) { Reset();return; }
     eye={origin[0],origin[1],origin[2]};
-    unsigned occupied=ledgeclimb::ClaimedHands()|vehicleclimb::ClaimedHands()|physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands()|vehicleentry::ClaimedHands();
+    unsigned occupied=driving::ServiceRadioClaimedHands()|ledgeclimb::ClaimedHands()|vehicleclimb::ClaimedHands()|physicalweapon::HeldHandMaskRelaxed()|basketball::HeldHandMask()|npcgrab::ClaimedHands()|vehicleentry::ClaimedHands();
     void* seated=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
     if (g_release.active) {
         Door d;
@@ -810,7 +810,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         Publish(markers);return;
     }
 
-    int cockpitKind=(g_editKind==2||g_editKind==3||g_editKind==5||g_editKind==6||g_editKind==8||g_editKind==9||g_editKind==10||g_editKind==11||g_editKind==12||g_editKind==13)?g_editKind:0;
+    int cockpitKind=(g_editKind==2||g_editKind==3||g_editKind==5||g_editKind==6||g_editKind==8||g_editKind==9||g_editKind==10||g_editKind==11||g_editKind==12||g_editKind==13||g_editKind==14)?g_editKind:0;
     const int seatIndex=vehicleentry::SeatIndex(seated,ped);
     const bool passengerEditor=seatIndex>=0&&seatIndex<=2&&seated&&g.CVehicle_GetVehicleAppearance&&g.CVehicle_GetVehicleAppearance(seated)==1;
     if(editMode && seated && g_edit.hand<0 && ((g.CVehicle_IsDriver && g.CVehicle_IsDriver(seated,ped))||passengerEditor)) {
@@ -840,6 +840,10 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const bool keyReady=!passengerEditor&&wheel.ignitionVisible&&ToWorld(wheel.ignitionCenter,keyPoint);
             Vec radioPoint{};
             const bool radioReady=!passengerEditor&&wheel.radioVisible&&ToWorld(wheel.radioCenter,radioPoint);
+            Vec servicePoint{};float serviceGrip[3]{};
+            for(int a=0;a<3;++a)serviceGrip[a]=wheel.serviceCenter[a]+wheel.serviceUp[a]*.064f;
+            const bool serviceReady=!passengerEditor&&wheel.serviceVisible&&ToWorld(serviceGrip,servicePoint);
+            if(serviceReady&&markers.count<MarkerFrame::kCapacity)markers.markers[markers.count++]={servicePoint,car.forward,car.up,false};
             Vec liftPoint{};
             float liftGrip[3]{};for(int a=0;a<3;++a)liftGrip[a]=wheel.liftCenter[a]+wheel.liftUp[a]*.23f;
             const bool liftReady=!passengerEditor&&wheel.liftVisible&&ToWorld(liftGrip,liftPoint);
@@ -857,6 +861,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const auto pdaSettings=hud::GetWristSettings(hud::RADAR,hud::WRIST_SLOT_VEHICLE,wheel.modelId);
             if(pdaReady&&markers.count<MarkerFrame::kCapacity)markers.markers[markers.count++]={pdaFrame.centre,pdaFrame.normal,pdaFrame.up,false};
             for(int h=0;h<2;++h) if(valid[h]&&editFresh[h]&&!(occupied&(1u<<h))) {
+                if(serviceReady&&Length(world[h]-servicePoint)<.10f&&Length(world[h]-servicePoint)<best){best=Length(world[h]-servicePoint);cockpitKind=14;}
                 if(radioReady&&Length(world[h]-radioPoint)<.10f&&Length(world[h]-radioPoint)<best){best=Length(world[h]-radioPoint);cockpitKind=9;}
                 if(keyReady&&Length(world[h]-keyPoint)<.10f&&Length(world[h]-keyPoint)<best){best=Length(world[h]-keyPoint);cockpitKind=8;}
                 if(liftReady&&Length(world[h]-liftPoint)<.10f&&Length(world[h]-liftPoint)<best){best=Length(world[h]-liftPoint);cockpitKind=11;}
@@ -900,7 +905,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         Basis car=Matrix(matrix);
         driving::WheelVisualState wheel{};
         driving::GetWheelVisualState(&wheel);
-        if(cockpitKind==8||cockpitKind==9||cockpitKind==11) {
+        if(cockpitKind==8||cockpitKind==9||cockpitKind==11||cockpitKind==14) {
             float frame[12]{};if(!driving::GetIgnitionFrame(seated,wheel.bike,frame)){Reset();return;}
             car={{frame[0],frame[1],frame[2]},{frame[3],frame[4],frame[5]},{frame[6],frame[7],frame[8]},{frame[9],frame[10],frame[11]}};
         }
@@ -920,6 +925,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         const int mirrorOffset=cockpitKind==6?6:0;
         if(cockpitKind==8 && (!wheel.ignitionVisible||!ToWorld(wheel.ignitionCenter,point))) { Reset();return; }
         if(cockpitKind==9 && (!wheel.radioVisible||!ToWorld(wheel.radioCenter,point))) { Reset();return; }
+        if(cockpitKind==14){float grip[3]{};for(int a=0;a<3;++a)grip[a]=wheel.serviceCenter[a]+wheel.serviceUp[a]*.064f;
+            if(!wheel.serviceVisible||!ToWorld(grip,point)){Reset();return;}}
         if(cockpitKind==11) {
             float grip[3];for(int a=0;a<3;++a)grip[a]=wheel.liftCenter[a]+wheel.liftUp[a]*.23f;
             if(!wheel.liftVisible||!ToWorld(grip,point)){Reset();return;}
@@ -953,7 +960,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 g_pdaEditDirty=true;
                 if(!PdaWorldFrame(wheel,pdaFrame)){Reset();return;}point=pdaFrame.centre;
             }
-            if(cockpitKind==8||cockpitKind==9||cockpitKind==11||cockpitKind==12||cockpitKind==13) {
+            if(cockpitKind==8||cockpitKind==9||cockpitKind==11||cockpitKind==12||cockpitKind==13||cockpitKind==14) {
                 Basis current;if(!DebugHandBasis(hands[h],world[h],car,current)){Reset();return;}
                 const auto rotate=[&](Vec v){return current.Vector({Dot(v,g_mirrorHandStart.right),Dot(v,g_mirrorHandStart.forward),Dot(v,g_mirrorHandStart.up)});};
                 const Vec center=g_keyStart.position+g_edit.delta;
@@ -963,6 +970,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 else if(cockpitKind==9)driving::SetRadioPose(model,pose);
                 else if(cockpitKind==11)driving::SetLiftPose(model,pose);
                 else if(cockpitKind==12)driving::SetNitroPose(model,pose);
+                else if(cockpitKind==14)driving::SetServiceRadioPose(model,pose);
                 else driving::SetHydraulicsPose(model,pose);
                 g_editDirty=true;
             }
@@ -1043,11 +1051,11 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                     g_editBase[0]=driving::GetCurrentModelSeatSideCm(type);
                     g_editBase[1]=driving::GetCurrentModelSeatForwardCm(type);
                     g_editBase[2]=driving::GetCurrentModelSeatHeightCm(type);
-                } else if(cockpitKind==8||cockpitKind==9||cockpitKind==11||cockpitKind==12||cockpitKind==13) {
+                } else if(cockpitKind==8||cockpitKind==9||cockpitKind==11||cockpitKind==12||cockpitKind==13||cockpitKind==14) {
                     if(!DebugHandBasis(hands[h],world[h],car,g_mirrorHandStart)){Reset();return;}
                     Vec keyCenter{}, endpoints[3]{};
-                    const float* center=cockpitKind==13?wheel.hydroCenter:(cockpitKind==12?wheel.nitroCenter:(cockpitKind==11?wheel.liftCenter:(cockpitKind==8?wheel.ignitionCenter:wheel.radioCenter)));
-                    const float* axes[3]{cockpitKind==13?wheel.hydroRight:(cockpitKind==12?wheel.nitroRight:(cockpitKind==11?wheel.liftRight:(cockpitKind==8?wheel.ignitionRight:wheel.radioRight))),cockpitKind==13?wheel.hydroForward:(cockpitKind==12?wheel.nitroForward:(cockpitKind==11?wheel.liftForward:(cockpitKind==8?wheel.ignitionUp:wheel.radioUp))),cockpitKind==13?wheel.hydroUp:(cockpitKind==12?wheel.nitroUp:(cockpitKind==11?wheel.liftUp:(cockpitKind==8?wheel.ignitionNormal:wheel.radioNormal)))};
+                    const float* center=cockpitKind==14?wheel.serviceCenter:cockpitKind==13?wheel.hydroCenter:(cockpitKind==12?wheel.nitroCenter:(cockpitKind==11?wheel.liftCenter:(cockpitKind==8?wheel.ignitionCenter:wheel.radioCenter)));
+                    const float* axes[3]{cockpitKind==14?wheel.serviceRight:cockpitKind==13?wheel.hydroRight:(cockpitKind==12?wheel.nitroRight:(cockpitKind==11?wheel.liftRight:(cockpitKind==8?wheel.ignitionRight:wheel.radioRight))),cockpitKind==14?wheel.serviceForward:cockpitKind==13?wheel.hydroForward:(cockpitKind==12?wheel.nitroForward:(cockpitKind==11?wheel.liftForward:(cockpitKind==8?wheel.ignitionUp:wheel.radioUp))),cockpitKind==14?wheel.serviceUp:cockpitKind==13?wheel.hydroUp:(cockpitKind==12?wheel.nitroUp:(cockpitKind==11?wheel.liftUp:(cockpitKind==8?wheel.ignitionNormal:wheel.radioNormal)))};
                     if(!ToWorld(center,keyCenter)){Reset();return;}
                     for(int a=0;a<3;++a) {
                         float pos[3]{};for(int i=0;i<3;++i)pos[i]=center[i]+axes[a][i];
@@ -1065,7 +1073,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             }
         }
         if(g_edit.hand>=0) g_claimed.store((1u<<g_edit.hand)|(g_secondHand>=0?1u<<g_secondHand:0u),std::memory_order_relaxed);
-        if(cockpitKind==8||cockpitKind==9||cockpitKind==11||cockpitKind==12||cockpitKind==13) { Publish(markers);return; }
+        if(cockpitKind==8||cockpitKind==9||cockpitKind==11||cockpitKind==12||cockpitKind==13||cockpitKind==14) { Publish(markers);return; }
         bool existing=false;
         for(int i=0;i<markers.count;++i) if(Length(markers.markers[i].position-point)<.001f) {
             markers.markers[i].held=g_edit.hand>=0;existing=true;break;

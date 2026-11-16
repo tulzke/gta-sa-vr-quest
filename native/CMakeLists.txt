@@ -59,6 +59,10 @@ set(RADIO_KNOB_RGBA "${CMAKE_CURRENT_SOURCE_DIR}/../assets/radio/runtime/knob.rg
 configure_file(src/RadioAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" @ONLY)
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" PROPERTY OBJECT_DEPENDS "${RADIO_BASE_MESH};${RADIO_KNOB_MESH};${RADIO_BASE_RGBA};${RADIO_KNOB_RGBA}")
 
+set(SERVICE_RADIO_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/service-radio/runtime/service-radio.mesh")
+configure_file(src/ServiceRadioAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/ServiceRadioAssets.S" @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/ServiceRadioAssets.S" PROPERTY OBJECT_DEPENDS "${SERVICE_RADIO_MESH}")
+
 set(LIFT_LEVER_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/vehicle-lift-lever/lift-lever.mesh")
 configure_file(src/VehicleLiftLeverAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S" @ONLY)
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S" PROPERTY OBJECT_DEPENDS "${LIFT_LEVER_MESH}")
@@ -92,6 +96,7 @@ configure_file(src/HeartbeatAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAs
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S" PROPERTY OBJECT_DEPENDS "${HEARTBEAT_WAV};${HEARTBEAT_ATTRIBUTION}")
 
 add_library(savr SHARED
+    "${CMAKE_CURRENT_BINARY_DIR}/ServiceRadioAssets.S"
     src/CockpitClickAudio.cpp
     src/VehicleHydraulicsHandConfig.cpp
     src/VehicleNitroAudio.cpp

@@ -1,6 +1,6 @@
 {
   "task": 97,
-  "status": "review; no commit; no game integration",
+  "status": "approved model and hand pose; runtime integrated; Quest acceptance pending",
   "units": "metres",
   "variant": "1 | separate upper collar",
   "body_size_m": [
@@ -368,5 +368,8 @@
       0.0,
       1.0
     ]
-  ]
+  ],
+  "runtime_mesh": "runtime/service-radio.mesh",
+  "runtime_vertices": 4187,
+  "hand_action": "HandleRadio"
 }

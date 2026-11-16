@@ -1,0 +1,9 @@
+    .section .rodata.savr_service_radio,"a",@progbits
+    .balign 16
+    .global savr_service_radio_mesh
+    .hidden savr_service_radio_mesh
+savr_service_radio_mesh:
+    .incbin "@SERVICE_RADIO_MESH@"
+    .global savr_service_radio_mesh_end
+    .hidden savr_service_radio_mesh_end
+savr_service_radio_mesh_end:

@@ -70,4 +70,4 @@ for clip in report['clips']:
         finally:
             ev.to_mesh_clear()
     print('PASS Blender roundtrip', clip['name'])
-print(f'PASS one mesh, 25 bones, 14 clips, albedo material; roundtrip max {maximum*1000:.6f} mm')
+print(f'PASS one mesh, 25 bones, 15 clips, albedo material; roundtrip max {maximum*1000:.6f} mm')

@@ -154,6 +154,7 @@ bool ResolveGameSymbols(void* handle) {
         {"_ZN15CTouchInterface14IsDoubleTappedENS_9WidgetIDsEbi",                reinterpret_cast<void**>(&g.CTouchInterface_IsDoubleTapped),        false},
         {"_ZN15CTouchInterface9IsTouchedENS_9WidgetIDsEP9CVector2Di",            reinterpret_cast<void**>(&g.CTouchInterface_IsTouchedQuery),        false},
         {"_ZN9CPhysical14ApplyMoveForceE7CVector",                               reinterpret_cast<void**>(&g.CPhysical_ApplyMoveForce),              false},
+        {"_ZN11CTheScripts14pActiveScriptsE", reinterpret_cast<void**>(&g.CTheScripts_pActiveScripts), false},
         {"_ZN11CTheScripts11ScriptSpaceE",                                       reinterpret_cast<void**>(&g.CTheScripts_ScriptSpace),               false},
         {"_ZN11CTheScripts16ScriptsForBrainsE",                                  reinterpret_cast<void**>(&g.CTheScripts_ScriptsForBrains),          false},
         {"_ZN10CStreaming9LoadSceneERK7CVector",                                 reinterpret_cast<void**>(&g.CStreaming_LoadScene),                  false},

@@ -67,6 +67,7 @@ def trs(m):
 
 
 def main():
+    print("Starting skeletal hand export", flush=True)
     source = ROOT / 'assets/vrhands/source/Hands.blend'
     if Path(bpy.data.filepath).resolve() in (source.resolve(),(ROOT/'assets/vrhands/BothHands.blend').resolve()):
         raise ValueError('Open a separate COPY of source/Hands.blend before exporting')
@@ -228,7 +229,7 @@ def main():
                                          'interpolation': 'LINEAR'})
         doc['animations'].append(clip)
         report['clips'].append({'name': name, 'frames': frames, 'duration': times[-1]})
-        print(f'BAKED BONES {name}: {len(frames)} keys, {len(bones)} joints')
+        print(f'BAKED BONES {name}: {len(frames)} keys, {len(bones)} joints', flush=True)
     doc['buffers'] = [{'byteLength': len(binary)}]
     encoded = json.dumps(doc, separators=(',', ':')).encode()
     encoded += b' ' * (-len(encoded) % 4)
