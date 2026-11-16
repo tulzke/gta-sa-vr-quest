@@ -1,7 +1,7 @@
 // Included after cockpit coordinate helpers in Driving.cpp.
 bool HydroEquipment(void* vehicle){
     if(!vehicle)return false;const auto flags=*reinterpret_cast<const std::uint32_t*>(static_cast<const char*>(vehicle)+0x4b8);
-    return (flags&0x30000u)!=0&&(flags&0x40000u)==0;
+    return (flags&0x20000u)!=0&&(flags&0x40000u)==0;
 }
 void HydroModeClick(int hand){
     xr::TriggerHaptic(hand,.65f,180.f,18.f);
@@ -31,7 +31,7 @@ bool BuildHydraulicsTracking(WheelVisualState& v,void* vehicle,bool preview=fals
     const V3 vectors[]{c,Normalized(r-c),Normalized(f-c),Normalized(u-c)};
     float* fields[]{v.hydroCenter,v.hydroRight,v.hydroForward,v.hydroUp};
     for(int i=0;i<4;++i){fields[i][0]=vectors[i].x;fields[i][1]=vectors[i].y;fields[i][2]=vectors[i].z;}
-    v.hydroVisible=true;v.hydroGhost=!installed;v.hydroFour=hydraulics::DanceRunning();
+    v.hydroVisible=true;v.hydroGhost=!installed;v.hydroFour=hydrocontrol::kCardinalOnly||hydraulics::DanceRunning();
     v.hydroHigh=editor?g_hydroPreviewHigh:*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0xa88)>=500;
     return true;
 }

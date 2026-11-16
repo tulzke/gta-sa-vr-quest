@@ -25,10 +25,11 @@ const indices=new Uint16Array(raw.buffer,16+header[2]*56,header[3]);
 const gl=view.getContext('webgl2',{alpha:true,preserveDrawingBuffer:true,antialias:false});assert(gl,'WebGL2');
 const compile=(type,text)=>{const s=gl.createShader(type);gl.shaderSource(s,text);gl.compileShader(s);assert(gl.getShaderParameter(s,gl.COMPILE_STATUS),gl.getShaderInfoLog(s));return s};
 const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,shaders[0]));gl.attachShader(p,compile(gl.FRAGMENT_SHADER,shaders[1]));gl.linkProgram(p);assert(gl.getProgramParameter(p,gl.LINK_STATUS),gl.getProgramInfoLog(p));gl.useProgram(p);
-const sphere=[],labels=[];
+const sphere=[],labels=[],markers=[];
 for(let i=0;i<indices.length;i+=3){const tri=indices.subarray(i,i+3);
  if([...tri].every(v=>{const a=v*14;return vertices[a+11]===1&&Math.abs(Math.hypot(vertices[a],vertices[a+1],vertices[a+2]-.055)-.0225)<1e-6}))sphere.push(...tri);
  if([...tri].every(v=>vertices[v*14+9]>=0))labels.push(...tri);
+ if([...tri].every(v=>vertices[v*14+11]>=10))markers.push(...tri);
 }
 assert(sphere.length>1000&&labels.length===36,'ball and label geometry');
 // Production neutral deformation for the rigid lever; rings are covered by
@@ -40,7 +41,7 @@ gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,gl.createBuffer());
 const uniform=n=>gl.getUniformLocation(p,n);
 gl.uniformMatrix4fv(uniform('mvp'),false,new Float32Array([10,0,0,0,0,12,0,0,0,0,-10,0,0,0,0,1]));
 for(const [n,v] of [['center',[0,0,0]],['axisRight',[1,0,0]],['axisForward',[0,1,0]],['axisUp',[0,0,1]]])gl.uniform3fv(uniform(n),v);
-gl.uniform1f(uniform('scale'),1);gl.uniform4f(uniform('state'),0,0,0,0);
+gl.uniform1f(uniform('scale'),1);gl.uniform4f(uniform('state'),0,1,0,0);
 gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,gl.createTexture());
 gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,1024,256,0,gl.RED,gl.UNSIGNED_BYTE,bytes(payload[1]));
 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
@@ -55,6 +56,12 @@ const draw=list=>{gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);const solid=
 const sample=(x,y)=>{const a=new Uint8Array(4);gl.readPixels(Math.round((x*10+1)*256),Math.round((y*12+1)*256),1,1,gl.RGBA,gl.UNSIGNED_BYTE,a);return a};
 draw(sphere);let samples=0;
 for(let x=-3;x<=3;++x)for(let y=-3;y<=3;++y){if(x*x+y*y>9)continue;const c=sample(-.032+x*.004,.008+y*.004);assert(c[3]===255&&Math.min(c[0],c[1],c[2])>80&&Math.max(c[0],c[1],c[2])-Math.min(c[0],c[1],c[2])<35,'ball must be opaque ivory: '+c);samples++}
+draw(markers);
+for(let role=10;role<=17;role++){
+ const xy=[];for(let v=0;v<header[2];v++)if(vertices[v*14+11]===role)xy.push([vertices[v*14],vertices[v*14+1]]);
+ const c=sample((Math.min(...xy.map(p=>p[0]))+Math.max(...xy.map(p=>p[0])))/2,(Math.min(...xy.map(p=>p[1]))+Math.max(...xy.map(p=>p[1])))/2);
+ assert(role%2===1?c[3]===0:c[3]===255,'only four cardinal marker positions may be visible: '+role+' alpha '+c[3]);
+}
 draw(labels);const pixels=new Uint8Array(512*512*4);gl.readPixels(0,0,512,512,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
 let ink=0,clear=0;for(let i=3;i<pixels.length;i+=4){if(pixels[i]===0)clear++;else ink++}
 assert(ink>200&&clear>250000,'label alpha must remain visible and cut out');
@@ -67,7 +74,7 @@ for(const [name,x,y,w,h] of [['HYDRAULICS',-.027,-.044,.066,.0065],['MODE',.047,
   const at=(py*512+px)*4;if(pixels[at+3]>245){total++;if(Math.min(full[at],full[at+1],full[at+2])>225)white++;}}
  assert(total>5&&white/total>.9,name+' must remain uniformly white over deck: '+white+'/'+total);
 }
-result.textContent='PASS GPU: production shaders; '+samples+' opaque ivory ball samples; all six legends uniformly white over deck; transparent label atlas preserved ('+ink+' ink pixels)';
+result.textContent='PASS GPU: four cardinal markers, diagonals hidden; '+samples+' opaque ivory ball samples; all six legends uniformly white over deck; transparent label atlas preserved ('+ink+' ink pixels)';
 }catch(e){result.textContent='FAIL: '+e.stack}
 </script>'''.replace('__SHADERS__',json.dumps(shaders)).replace('__PAYLOAD__',json.dumps(payload))
 page=OUT/'gpu-test.html';page.write_text(html,encoding='utf8')

@@ -31,6 +31,8 @@ with zipfile.ZipFile(ROOT/'build/quest-deploy/template/split_config.arm64_v8a.ap
 for offset,words in [(0x6a1f8c,(0xd10403ff,0x6d063bef,0x6d0733ed,0x6d082beb)),(0x49d76c,(0xa9be7bfd,0xf9000bf3,0x910003fd,0x79422008)),(0x378d5c,(0xa9bd7bfd,0xf9000bf5,0xa9024ff4,0x910003fd))]:
     assert struct.unpack_from('<4I',elf,offset)==words,hex(offset)
 print('PASS exact target ARM64 hook prologues for hydraulic control, horn edge and beat output')
+assert struct.unpack_from('<2I',elf,0x6a8540)==(0x3952ea69,0x370803c9)
+print('PASS native ProcessControl dispatch requires HydraulicInst, not HydraulicGeom')
 nitro=ROOT/'native/src/VehicleNitroPcm.h'
 if nitro.exists():
     waveform=lambda s:s[s.index('inline auto MechanicalClickPcm()'):].strip()
