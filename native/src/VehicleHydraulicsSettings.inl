@@ -16,8 +16,9 @@ void AdjustHydraulicsScale(int direction){const int model=GetActiveVehicleModelI
     {std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];c.hydroScale=std::clamp(c.hydroScale+direction*.05f,.4f,2.f);}Save();ResetInteraction();}
 void ResetHydraulicsPose(){const int model=GetActiveVehicleModelId();
     {std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];c.hydroPoseSet=false;c.hydroScale=1.f;}Save();ResetInteraction();}
-bool GetPhysicalHydraulics(float* x,float* y){
+bool GetPhysicalHydraulics(float* x,float* y,bool* suspended){
     void* v=g_hydroManagedVehicle.load(std::memory_order_acquire);
     if(!v||v!=GetControlledVehicle())return false;
-    if(x)*x=g_hydroCommandX.load();if(y)*y=g_hydroCommandY.load();return true;
+    if(x)*x=g_hydroCommandX.load();if(y)*y=g_hydroCommandY.load();
+    if(suspended)*suspended=g_hydroInputSuspended.load();return true;
 }

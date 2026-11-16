@@ -232,7 +232,7 @@ void SetHydraulicsPose(int model,const float pose[12]);
 void ResetHydraulicsPose();
 float GetHydraulicsScale();
 void AdjustHydraulicsScale(int direction);
-bool GetPhysicalHydraulics(float* x,float* y);
+bool GetPhysicalHydraulics(float* x,float* y,bool* suspended=nullptr);
 void SetNitroPose(int model,const float pose[12]);
 void ResetNitroPose();
 float GetNitroScale();

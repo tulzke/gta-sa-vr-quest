@@ -5382,9 +5382,10 @@ void OnUpdatePads() {
         }
         // The physical cockpit owns neutral too, so legacy chords cannot bypass
         // its detents or the four-way mission gate.
-        const bool physicalHydraulics=driving::GetPhysicalHydraulics(&hydroX,&hydroY);
+        bool hydroSuspended=false;
+        const bool physicalHydraulics=driving::GetPhysicalHydraulics(&hydroX,&hydroY,&hydroSuspended);
         if(physicalHydraulics)hydroActive=true;
-        hydraulics::SetStick(hydroActive, hydroX, hydroY,physicalHydraulics);
+        hydraulics::SetStick(hydroActive, hydroX, hydroY,physicalHydraulics,hydroSuspended);
         // Publish a coherent native timeline: no script/audio calls on the
         // compositor thread, and no second animation clock for hit timing.
         xr::SetRhythmHud(hydraulics::GetRhythmFrame());

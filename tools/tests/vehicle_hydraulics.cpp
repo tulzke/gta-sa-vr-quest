@@ -64,7 +64,8 @@ void Detents(){
     State s;Hand h[2];Capture(s,h);h[0].available=false;s.Step(h,.02f,true,false);CHECK(s.owner==-1);
     h[0].available=true;s.Step(h,.02f,true,false);CHECK(s.owner==-1);
     h[0].grip=0;s.Step(h,.02f,true,false);h[0].grip=1;s.Step(h,.02f,true,false);CHECK(s.owner==0);
-    h[0].point.x=std::numeric_limits<float>::quiet_NaN();s.Step(h,.02f,true,false);CHECK(s.owner==-1&&s.slot==0);
+    h[0].point.x=std::numeric_limits<float>::quiet_NaN();s.Step(h,.02f,true,false);CHECK(s.owner==0&&s.slot==0);
+    for(int i=0;i<5;++i)s.Step(h,.02f,true,false);CHECK(s.owner==-1&&s.slot==0);
     State held;Hand q[2]{{Grip(0,0),{},1,true,true},{}};held.Step(q,.02f,true,false);CHECK(held.owner==-1);
     State path;Hand points[2];Capture(path,points);points[0].point=Stroke(0,kTravel);
     for(int i=0;i<8;++i)path.Step(points,.01f,true,false);
@@ -232,11 +233,12 @@ void HeightAndSweptReturn(){
         // A single fast sample can cross all of neutral and end beyond it.
         h[hand].point=origin-motion*.09f+height*.10f;s.StepTracked(h,cockpit,.02f,true,false,5);CHECK(s.owner==hand&&s.slot==0&&Length(s.Command())==0);
         s.StepTracked(h,cockpit,.02f,true,false,5);CHECK(Cardinal(s,dir*-1.f));
-        h[hand].point=origin-motion*.09f+height*.14f;s.StepTracked(h,cockpit,.02f,true,false,5);CHECK(s.owner==-1&&s.slot==0);
+        h[hand].point=origin-motion*.09f+height*.14f;s.StepTracked(h,cockpit,.02f,true,false,5);CHECK(s.owner==hand&&s.slot==0);
+        for(int i=0;i<5;++i)s.StepTracked(h,cockpit,.02f,true,false,5);CHECK(s.owner==-1&&s.slot==0);
         h[hand].point=origin;s.StepTracked(h,cockpit,.02f,true,false,5);CHECK(s.owner==-1);
         h[hand].grip=0;s.StepTracked(h,cockpit,.02f,true,false,5);h[hand].grip=1;s.StepTracked(h,cockpit,.02f,true,false,5);CHECK(s.owner==hand);
     }
-    std::puts("PASS height/swept return: pitched/rolled grab, 10 cm height changes do not latch input; fast centre crossing yields neutral; 14 cm withdrawal releases and requires fresh grip");
+    std::puts("PASS height/swept return: pitched/rolled grab, 10 cm height changes do not latch input; fast centre crossing yields neutral; sustained 14 cm withdrawal releases and requires fresh grip");
 }
 void MovingCockpit(){
     for(int hand=0;hand<2;++hand)for(int slot=1;slot<=8;++slot){
@@ -272,6 +274,39 @@ void AttachedHand(){
     CHECK(std::abs(previous-tracked.position.x)<1e-6f);
     s.Reset();CHECK(std::abs(s.Free(tracked,.02f).position.x-tracked.position.x)<1e-6f);
     std::puts("PASS visual hand follows moving ball; release returns continuously to tracked wrist in 120 ms");
+}
+void RapidReturnGaps(){
+    for(int hand=0;hand<2;++hand)for(float dt:{1.f/60,1.f/72,1.f/90,1.f/120}){
+        State s;InputFrame frame{{},{1,0,0},{0,0,-1},{0,1,0},2.f};Hand h[2]{};
+        h[hand]={frame.World(Grip(0,0)),{},0,true,true};s.StepTracked(h,frame,dt,true,false,1);
+        h[hand].grip=1;s.StepTracked(h,frame,dt,true,false,1);const auto origin=h[hand].point,offset=s.grabOffset;
+        for(int cycle=0;cycle<80;++cycle){const auto direction=Direction((cycle%4)*2+1);
+            h[hand].point=origin+frame.Vector(direction)*.095f;s.StepTracked(h,frame,dt,true,false,1);CHECK(Cardinal(s,direction));
+            h[hand].point=origin;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==hand&&s.slot==0);
+            h[hand].point=origin+frame.Vector(direction)*.095f;s.StepTracked(h,frame,dt,true,false,1);CHECK(Cardinal(s,direction));
+            // The return frame can have an invalid predicted controller pose.
+            // It must stop the command, without demanding a new squeeze.
+            h[hand].valid=false;s.StepTracked(h,frame,dt,true,false,1);
+            CHECK(s.owner==hand&&s.slot==0&&Length(s.Command())==0);
+            h[hand].valid=true;h[hand].point=origin;s.StepTracked(h,frame,dt,true,false,1);
+            CHECK(s.owner==hand&&s.slot==0&&Length(s.grabOffset-offset)<1e-7f);
+        }
+        const Point vertical{0,1,0};
+        h[hand].point=origin+frame.right*.095f;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.slot==3);
+        h[hand].point=origin+vertical*.14f;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==hand&&s.slot==0);
+        h[hand].point=origin;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==hand&&s.slot==0);
+        h[hand].point=origin+frame.forward*.095f;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.slot==1);
+        h[hand].point=origin+frame.right*.6f;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==hand&&s.slot==0);
+        h[hand].point=origin;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==hand&&s.slot==0);
+        h[hand].valid=false;s.StepTracked(h,frame,dt,true,false,1);
+        h[hand].valid=true;h[hand].grip=0;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==-1&&s.slot==0);
+        h[hand].grip=1;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==hand);
+        h[hand].valid=false;for(int i=0;i<30;++i)s.StepTracked(h,frame,dt,true,false,1);
+        CHECK(s.owner==-1&&s.slot==0);h[hand].valid=true;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==-1);
+        h[hand].grip=0;s.StepTracked(h,frame,dt,true,false,1);h[hand].grip=1;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==hand);
+        h[hand].available=false;s.StepTracked(h,frame,dt,true,false,1);CHECK(s.owner==-1&&s.slot==0);
+    }
+    std::puts("PASS rapid returns: 80 cycles each hand at 60/72/90/120 Hz with one-frame pose loss, brief height/position spikes, zero command during interruption, unchanged origin, bounded loss and fresh squeeze after true release");
 }
 void Runtime(){
     using namespace savr;using namespace savr::driving;
@@ -409,4 +444,4 @@ void HandConfig(){
     savr::hydrohand::SetPreview(false);CHECK(savr::hydrohand::PreviewHand()==-1);
     std::puts("PASS hand config: separate left/right offsets and rotations; round trip/replace/reset; invalid data/save failure; rotations around grip opening; preview exit");
 }
-int main(int argc,char** argv){CHECK(argc==4);Detents();ArcChanges();BoundaryFeedback();DirectBeatFlick();Buttons();HandTravel();SpringReturn();SharedCoordinates();HeightAndSweptReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);HandConfig();}
+int main(int argc,char** argv){CHECK(argc==4);RapidReturnGaps();Detents();ArcChanges();BoundaryFeedback();DirectBeatFlick();Buttons();HandTravel();SpringReturn();SharedCoordinates();HeightAndSweptReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);HandConfig();}

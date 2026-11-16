@@ -370,6 +370,7 @@ double g_hydroLastTime{};
 std::uint64_t g_hydroGrabSequence{};
 std::atomic<void*> g_hydroManagedVehicle{nullptr};
 std::atomic<float> g_hydroCommandX{},g_hydroCommandY{};
+std::atomic<bool> g_hydroInputSuspended{};
 std::atomic<bool> g_hydroToggle{false};
 bool g_hydroHooksReady{},g_hydroWasPreview{},g_hydroPreviewHigh{};
 void InstallHydraulicsHooks();
@@ -1263,8 +1264,11 @@ void UpdateBicycleGestureLocked(const xr::HandPose poses[2]) {
 }
 
 void ClearInteractionLocked(bool preserveRadio=false) {
+    if(g_hydroLever.owner>=0)LOGI("[hydraulics.grip] cleared hand=%d cause=interaction_context blocked=%d",
+        g_hydroLever.owner,g_inputBlocked.load(std::memory_order_relaxed));
     g_hydroLever.Reset();g_hydroLastTime=0;g_hydroWasPreview=false;g_hydroPreviewHigh=false;
     g_hydroManagedVehicle.store(nullptr);g_hydroCommandX.store(0);g_hydroCommandY.store(0);g_hydroToggle.store(false);
+    g_hydroInputSuspended.store(false);
     g_nitroWasPreview=false;
     g_nitroFeel.Reset();g_nitroSpeed.Reset();
     g_nitroLever.Reset();g_nitroLastTime=0;g_nitroCommand.store(false,std::memory_order_release);

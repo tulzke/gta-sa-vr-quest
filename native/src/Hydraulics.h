@@ -18,7 +18,8 @@ void Install(void* libGameHandle);
 // `active` means a valid physical cockpit grab or the legacy both-grips chord
 // in an equipped car; x/y are in [-1,1] (up positive). Physical detent changes
 // can answer a new beat directly; the legacy stick still requires neutral.
-void SetStick(bool active, float x, float y, bool directChanges=false);
+// suspended is a brief missing pose/position spike, not a player input edge.
+void SetStick(bool active, float x, float y, bool directChanges=false,bool suspended=false);
 
 // True while the override is feeding the game.
 bool IsActive();

@@ -60,6 +60,12 @@ int main(int argc,char** argv){
     CHECK(hydraulics::ScoringDirection()==0&&hydraulics::AxisLeftRight()==0&&hydraulics::AxisLeftRight(true)==127);
     Put<int>(beat,0x50,500);hydraulics::SetStick(true,0,-1,true);
     CHECK(hydraulics::ScoringDirection()==0&&hydraulics::AxisUpDown()==0&&hydraulics::AxisUpDown(true)==127);
+    // Tracking interruptions must neither hold physics on nor invent a fresh
+    // neutral->deflected edge when the same held position reappears next beat.
+    hydraulics::SetStick(true,0,0,true,true);CHECK(hydraulics::AxisUpDown(true)==0&&hydraulics::ScoringDirection()==0);
+    Put<int>(beat,0xa8,42);Put<int>(beat,0x50,63);hydraulics::SetStick(true,0,0,true,true);
+    hydraulics::SetStick(true,0,-1,true);CHECK(hydraulics::AxisUpDown(true)==127&&hydraulics::ScoringDirection()==0);
+    hydraulics::SetStick(true,0,0,true);hydraulics::SetStick(true,0,-1,true);CHECK(hydraulics::ScoringDirection()==2);
     hydraulics::SetStick(false,0,0);CHECK(hydraulics::AxisLeftRight(true)==0&&hydraulics::AxisUpDown(true)==0);
     Put<int>(script,0x1004,0);hydraulics::SetStick(false,0,0);CHECK(!hydraulics::GetRhythmFrame().active);
     beachdance::playing=true;hydraulics::SetStick(false,0,0);CHECK(hydraulics::GetRhythmFrame().active);beachdance::playing=false;

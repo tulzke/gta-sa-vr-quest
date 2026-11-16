@@ -46,6 +46,7 @@ namespace savr::hydraulics {
 namespace {
 
 std::atomic<bool>  g_active{false};
+std::atomic<bool> g_inputSuspended{false};
 std::atomic<float> g_stickX{0.0f};
 std::atomic<float> g_stickY{0.0f};
 
@@ -171,9 +172,10 @@ rhythm::Frame GetRhythmFrame(){
     return g_rhythmFrame;
 }
 
-void SetStick(bool active, float x, float y, bool directChanges) {
-    g_stickX.store(active ? x : 0.0f, std::memory_order_relaxed);
-    g_stickY.store(active ? y : 0.0f, std::memory_order_relaxed);
+void SetStick(bool active, float x, float y, bool directChanges,bool suspended) {
+    g_inputSuspended.store(active&&suspended,std::memory_order_relaxed);
+    g_stickX.store(active&&!suspended ? x : 0.0f, std::memory_order_relaxed);
+    g_stickY.store(active&&!suspended ? y : 0.0f, std::memory_order_relaxed);
 
     // --- beat snapshot (game thread) -------------------------------------
     int beatKey = 0, beatMs = 0, beatIdx = -1;
@@ -189,7 +191,8 @@ void SetStick(bool active, float x, float y, bool directChanges) {
     {std::lock_guard<std::mutex> lock(g_rhythmMutex);
         g_rhythmFrame=rhythm::Decode(g_beatInfo,DanceActive()||beachdance::Active());}
 
-    g_flick.Step(active,x,y,beatIdx,directChanges);
+    if(active&&suspended)g_flick.Suspend(beatIdx);
+    else g_flick.Step(active,x,y,beatIdx,directChanges);
 
     const bool was = g_active.exchange(active, std::memory_order_acq_rel);
     if (was != active) {
@@ -203,6 +206,7 @@ void SetStick(bool active, float x, float y, bool directChanges) {
 // decoded as a diagonal (11/12/15/16) -> "wrong direction" (grade 5).
 int ScoringDirection() {
     if (!g_active.load(std::memory_order_acquire)) return 0;
+    if (g_inputSuspended.load(std::memory_order_relaxed)) return 0;
     if (!DanceActive()) return 0;
     if (g_flick.pending == 0) return 0;
     const int key = g_curBeatKey.load(std::memory_order_relaxed);

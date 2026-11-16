@@ -13,6 +13,7 @@ constexpr float kCenterPlay=9.f*kRad;
 // sphere centre's arc; require a full hand stroke before the detent engages.
 constexpr float kHandStroke=2.f;
 constexpr bool kCardinalOnly=true;
+constexpr float kInterruptionGrace=.10f;
 // Deterministic mission simplification, applied to BOTH native beat data and
 // VR hints. Cardinal keys keep their values; input is never chosen for player.
 inline std::uint32_t MissionKey(std::uint32_t key){
@@ -75,6 +76,12 @@ inline float BoundaryDistance(Point handDelta,float scale){
     return std::hypot(radial,height);
 }
 struct Hand {Point point{},finger{};float grip{};bool valid{},available{};};
+enum class HoldIssue {None,Tracking,Height,Reach,Grip,Occupied};
+inline const char* IssueName(HoldIssue issue){
+    switch(issue){case HoldIssue::Tracking:return "tracking";case HoldIssue::Height:return "height";
+        case HoldIssue::Reach:return "reach";case HoldIssue::Grip:return "grip";
+        case HoldIssue::Occupied:return "occupied";default:return "none/context";}
+}
 struct Button {
     bool armed{},pressed{},clicked{},pointing{};float hover{},depth{};
     void Reset(){*this=Button{};}
@@ -104,6 +111,7 @@ struct State {
     InputFrame grabFrame{};std::uint64_t inputEpoch{};
     Point previousInput{};bool previousInputValid{};
     float boundaryError{};cockpitboundary::Feedback boundaryHaptic{};
+    HoldIssue issue{};float interruptedFor{};
     Button button[2];
     void Reset(){*this=State{};}
     void Step(const Hand h[2],float dt,bool enabled,bool fourWay){
@@ -112,16 +120,29 @@ struct State {
         if(four!=fourWay){Reset();four=fourWay;}
         const int previous=slot;
         if(owner>=0){const auto& hand=h[owner];
-            if(!hand.valid||!hand.available||!Finite(hand.point)||!std::isfinite(hand.grip)||
-               hand.grip<=.30f||Distance(hand.point-grabOffset,visualX,visualY)>.18f){
-                owner=-1;slot=0;aimX=aimY=0;previousInputValid=false;down[0]=down[1]=true;}}
+            const Point p=hand.point-grabOffset;
+            issue=!hand.available?HoldIssue::Occupied:
+                !std::isfinite(hand.grip)||hand.grip<=.30f?HoldIssue::Grip:
+                !hand.valid||!Finite(p)?HoldIssue::Tracking:
+                std::abs((p.z-kReach)*grabFrame.scale)>.12f?HoldIssue::Height:
+                Distance(p,visualX,visualY)>.18f?HoldIssue::Reach:HoldIssue::None;
+            if(issue==HoldIssue::None)interruptedFor=0;
+            else {
+                // Invalid predicted samples must never hold a suspension command.
+                // Preserve only ownership/origin briefly, so a one-frame tracking
+                // gap or position spike does not demand a new physical squeeze.
+                interruptedFor+=dt;slot=0;aimX=aimY=0;previousInputValid=false;
+                if(issue==HoldIssue::Height||issue==HoldIssue::Reach)boundaryError=BoundaryDistance(p,grabFrame.scale);
+                if(issue==HoldIssue::Grip||issue==HoldIssue::Occupied||interruptedFor+1e-6f>=kInterruptionGrace){
+                    owner=-1;boundaryError=0;down[0]=down[1]=true;}
+            }}
         if(owner<0){
             int best=-1;float distance=.055f;
             for(int i=0;i<2;++i){const auto& hand=h[i];const float d=Distance(hand.point,visualX,visualY);
                 if(hand.valid&&hand.available&&Finite(hand.point)&&std::isfinite(hand.grip)&&!down[i]&&hand.grip>=.65f&&d<distance){best=i;distance=d;}}
-            if(best>=0){owner=best;grabOffset=h[best].point-Grip(0,0);previousInputValid=false;}
+            if(best>=0){owner=best;issue=HoldIssue::None;interruptedFor=0;grabOffset=h[best].point-Grip(0,0);previousInputValid=false;}
         }
-        if(owner>=0){
+        if(owner>=0&&issue==HoldIssue::None){
             // One immutable origin for this entire grip. Returning to neutral
             // or exceeding the gate must never move the physical centre.
             Point p=h[owner].point-grabOffset;
@@ -171,8 +192,6 @@ struct State {
         if(inputEpoch!=epoch)Reset();
         const int previous=owner;Hand local[2]{tracked[0],tracked[1]};
         for(int i=0;i<2;++i)local[i].point=(i==owner?grabFrame:cockpit).Local(tracked[i].point);
-        if(owner>=0&&std::abs((local[owner].point.z-grabOffset.z-kReach)*grabFrame.scale)>.12f)
-            local[owner].available=false; // deliberate vertical withdrawal: release, then require a fresh squeeze
         Step(local,dt,enabled,fourWay);
         if(owner>=0&&owner!=previous){
             grabFrame=LevelControlFrame(cockpit);

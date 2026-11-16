@@ -60,10 +60,13 @@ float HydroButtonDistance(const WheelVisualState& v,const xr::HandPose& h,int ha
     return g_hydroLever.button[hand].WithinHover(p)?0.f:1e6f;
 }
 void UpdateHydraulicsJoystick(WheelVisualState& v,void* vehicle,const xr::InputState& input,const xr::HandPose poses[2],unsigned occupied,bool preview=false){
-    if(!BuildHydraulicsTracking(v,vehicle,preview)){g_hydroLever.Reset();g_hydroManagedVehicle.store(nullptr);g_hydroToggle.store(false);return;}
+    if(!BuildHydraulicsTracking(v,vehicle,preview)){
+        if(g_hydroLever.owner>=0)LOGI("[hydraulics.grip] cleared hand=%d cause=hydraulics_context",g_hydroLever.owner);
+        g_hydroLever.Reset();g_hydroManagedVehicle.store(nullptr);g_hydroToggle.store(false);return;}
     const bool editor=preview||GetVehicleDebugMode()!=0;
     const auto key=vehiclecabin::SeatKey(g,vehicle,nullptr,v.modelId,-1);
     if(g_hydroVehicle!=vehicle||!(key==g_hydroSeatKey)||editor!=g_hydroWasPreview){
+        if(g_hydroLever.owner>=0)LOGI("[hydraulics.grip] cleared hand=%d cause=seat_or_preview",g_hydroLever.owner);
         g_hydroVehicle=vehicle;g_hydroSeatKey=key;g_hydroLever.Reset();g_hydroLastTime=0;g_hydroToggle.store(false);g_hydroPreviewHigh=false;g_hydroWasPreview=editor;}
     const double now=MonotonicSeconds();const float dt=g_hydroLastTime?static_cast<float>(now-g_hydroLastTime):0.f;g_hydroLastTime=now;
     void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
@@ -73,10 +76,17 @@ void UpdateHydraulicsJoystick(WheelVisualState& v,void* vehicle,const xr::InputS
     for(int i=0;i<2;++i)h[i]={{poses[i].gripPos[0],poses[i].gripPos[1],poses[i].gripPos[2]},HydroButtonPoint(v,poses[i],i),input.grip[i],poses[i].valid,
         !(occupied&(1u<<i))&&(preview||v.interactionTarget[i]==7)};
     const int previous=g_hydroLever.owner;
+    const auto previousIssue=g_hydroLever.issue;const float previousGap=g_hydroLever.interruptedFor;
     if(g_hydroLever.four!=v.hydroFour)g_hydroToggle.store(false);
     g_hydroLever.StepTracked(h,HydroInputFrame(v),dt,enabled,v.hydroFour,xr::CaptureTrackingSnapshot().epoch);
+    if(previous>=0&&g_hydroLever.owner<0)
+        LOGI("[hydraulics.grip] released hand=%d cause=%s gap=%.0fms valid=%d grip=%.2f",previous,
+            hydrocontrol::IssueName(g_hydroLever.issue),g_hydroLever.interruptedFor*1000.f,poses[previous].valid,input.grip[previous]);
+    else if(previous>=0&&g_hydroLever.owner==previous&&previousIssue!=g_hydroLever.issue)
+        LOGI("[hydraulics.grip] hand=%d state=%s gap=%.0fms",previous,
+            hydrocontrol::IssueName(g_hydroLever.issue),std::max(previousGap,g_hydroLever.interruptedFor)*1000.f);
     if(g_hydroLever.owner>=0&&g_hydroLever.owner!=previous){++g_hydroGrabSequence;xr::TriggerHaptic(g_hydroLever.owner,.18f,0,15);}
-    if(g_hydroLever.changed&&g_hydroLever.owner>=0){
+    if(g_hydroLever.changed&&g_hydroLever.owner>=0&&g_hydroLever.issue==hydrocontrol::HoldIssue::None){
         xr::TriggerHaptic(g_hydroLever.owner,.32f,0,22);
         if(g.AudioEngine&&g.CAudioEngine_ReportFrontendAudioEvent)g.CAudioEngine_ReportFrontendAudioEvent(g.AudioEngine,1,-14.f,1.f);}
     const bool held=g_hydroLever.owner>=0&&!editor&&enabled&&VrGameplayInputAllowed()&&!xr::IsMenuVisible()&&xr::IsSessionFocused();
@@ -99,5 +109,6 @@ void UpdateHydraulicsJoystick(WheelVisualState& v,void* vehicle,const xr::InputS
         v.hydroGrabbed[previewHand]=true;v.hydroPoint[previewHand]=0;v.grabbed[previewHand]=false;}
     if(editor)v.hydroHigh=g_hydroPreviewHigh;
     const auto command=g_hydroLever.Command();g_hydroCommandX.store(command.x);g_hydroCommandY.store(command.y);
+    g_hydroInputSuspended.store(g_hydroLever.owner>=0&&g_hydroLever.issue!=hydrocontrol::HoldIssue::None);
     g_hydroManagedVehicle.store(!editor&&enabled?vehicle:nullptr,std::memory_order_release);
 }
