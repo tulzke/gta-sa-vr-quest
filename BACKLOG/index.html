@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Бэклог · San Andreas VR Quest</title>
+  <link rel="stylesheet" href="backlog.css">
+  <script src="backlog.js" defer></script>
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <p class="eyebrow"><span class="mark" aria-hidden="true">SA</span> SAN ANDREAS <span class="muted">/ VR QUEST</span></p>
+        <h1>Бэклог проекта<span class="accent">.</span></h1>
+        <p class="subtitle">От идеи до проверки в шлеме.</p>
+      </div>
+      <dl class="stats" aria-label="Сводка задач">
+        <div><dt>Всего задач</dt><dd id="total">—</dd></div>
+        <div><dt>В работе</dt><dd id="in-progress">—</dd></div>
+      </dl>
+    </header>
+
+    <section id="load-message" class="notice" role="status" hidden></section>
+    <div id="file-loader" class="notice" hidden>
+      <p>Для открытия двойным щелчком выберите <strong>index.json</strong> из этой папки.
+        Или запустите <code>node tools/backlog-server.mjs</code> из корня проекта — данные загрузятся автоматически.</p>
+      <label class="file-label">Открыть JSON <input id="json-file" type="file" accept=".json,application/json"></label>
+    </div>
+    <noscript><p class="notice">Для загрузки индекса и фильтров нужен JavaScript. <a href="BACKLOG.md">Открыть Markdown-индекс</a>.</p></noscript>
+
+    <div id="workspace" class="workspace" hidden>
+      <aside class="sidebar" aria-label="Категории задач">
+        <h2>Категории</h2>
+        <nav id="categories" aria-label="Фильтр по категории"></nav>
+        <p class="sidebar-note">Одна задача может относиться к нескольким категориям.</p>
+      </aside>
+
+      <main id="tasks" class="tasks">
+        <div class="toolbar">
+          <label class="search"><span class="sr-only">Поиск по номеру или названию</span>
+            <input id="search" type="search" placeholder="Номер или название задачи…" autocomplete="off">
+          </label>
+          <label class="control">Статус
+            <select id="status"><option value="all">Все статусы</option><option value="in_progress">В работе</option><option value="open">Открыта</option></select>
+          </label>
+          <label class="control">Сортировка
+            <select id="sort"><option value="priority-desc">Приоритет: сначала высокий</option><option value="priority-asc">Приоритет: сначала низкий</option><option value="id">Номер: по возрастанию</option><option value="title">Название: А—Я</option></select>
+          </label>
+        </div>
+        <div class="list-heading"><h2 id="category-title">Все задачи</h2><span id="result-count" class="muted" role="status" aria-live="polite"></span><button id="reset" class="text-button" type="button">Сбросить фильтры</button></div>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Задачи бэклога. Название открывает Markdown с подробностями.</caption>
+            <thead><tr><th scope="col" class="number">№</th><th scope="col">Задача</th><th scope="col">Статус</th><th scope="col" id="priority-heading" aria-sort="descending"><button id="priority-sort" type="button">Приоритет <span id="sort-arrow" aria-hidden="true">↓</span></button></th></tr></thead>
+            <tbody id="task-list"></tbody>
+          </table>
+          <p id="empty" class="empty" hidden>Ничего не найдено. Попробуйте другое название или сбросьте фильтры.</p>
+        </div>
+      </main>
+    </div>
+
+    <footer><span>Категории и приоритеты: <a href="index.json">index.json</a> · <a href="README.md">Как вести индекс</a></span><a href="BACKLOG.md">Старый Markdown-индекс ↗</a></footer>
+  </div>
+</body>
+</html>

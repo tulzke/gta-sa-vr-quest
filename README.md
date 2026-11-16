@@ -60,7 +60,8 @@ for most cars.
 
 Coverage and calibration vary by vehicle model. Some features are still being
 refined; handling, reach, and comfort need testing in Quest. See
-[BACKLOG/BACKLOG.md](BACKLOG/BACKLOG.md) for remaining work and
+[the HTML backlog](BACKLOG/index.html) ([local viewing instructions](BACKLOG/README.md),
+[Markdown index](BACKLOG/BACKLOG.md)) for remaining work and
 [completed task notes](BACKLOG/ARCHIVE) for implementation details and limits.
 
 ## Requirements
