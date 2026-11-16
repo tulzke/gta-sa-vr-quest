@@ -20,6 +20,7 @@ void SetStick(bool active, float x, float y);
 
 // True while the override is feeding the game.
 bool IsActive();
+bool DanceRunning();
 
 // The values Driving's CPad car-gun hooks must return while IsActive(). Already
 // in the game's own units and sign convention (leftRight<0 lifts the LEFT side,

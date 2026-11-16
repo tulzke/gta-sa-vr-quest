@@ -220,6 +220,7 @@ int ScoringDirection() {
 }
 
 bool IsActive() { return g_active.load(std::memory_order_acquire); }
+bool DanceRunning() { return DanceActive(); }
 
 // HydraulicControl uses live stick input; LOWGAME receives a cardinal snap
 // on the beat. The minigame takes priority while a beat track is playing.

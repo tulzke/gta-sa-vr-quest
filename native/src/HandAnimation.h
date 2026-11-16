@@ -25,6 +25,7 @@ struct Selection {
     Gesture first{Gesture::Grip}, second{Gesture::Grip};
     float progress{}, blend{};
     float openPalmBlend{};
+    float pointBlend{}; // free-hand physical cockpit button approach
 };
 inline Selection FreeHand(float grip, float trigger) {
     grip=Unit(grip);trigger=Unit(trigger);

@@ -10,6 +10,7 @@
 #include "HandSkeleton.h"
 #include "WatchModel.h"
 #include "VehicleLiftLeverModel.h"
+#include "VehicleHydraulicsModel.h"
 #include "VehicleLiftLeverHand.h"
 #include "WatchLayout.h"
 #include "WatchInteraction.h"
@@ -6344,7 +6345,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     drivingWheel.trackedHandsEnabled = driving::ShouldUseTrackedHands() ||
         drivingWheel.ignitionGrabbed[0] || drivingWheel.ignitionGrabbed[1] ||
         drivingWheel.radioGrabbed[0] || drivingWheel.radioGrabbed[1] || debugPinchHands!=0;
-    drivingWheel.trackedHandsEnabled=drivingWheel.trackedHandsEnabled||drivingWheel.liftGrabbed[0]||drivingWheel.liftGrabbed[1];
+    drivingWheel.trackedHandsEnabled=drivingWheel.trackedHandsEnabled||drivingWheel.liftGrabbed[0]||drivingWheel.liftGrabbed[1]||drivingWheel.hydroGrabbed[0]||drivingWheel.hydroGrabbed[1]||drivingWheel.hydroPoint[0]>0.f||drivingWheel.hydroPoint[1]>0.f;
     g_lastDashModelId.store(
         (drivingWheel.active || drivingWheel.dashAnchorValid)
             ? drivingWheel.modelId : -1,
@@ -7885,6 +7886,10 @@ void BuildDrivingMenu() {
                 break;
             case driving::MENU_MIRROR_RESET_POSE:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET MIRROR POSITION");break;
+            case driving::MENU_HYDRAULICS_SCALE:
+                std::snprintf(rows[row],sizeof(rows[row]),"HYDRAULICS SIZE < %.0f%% >",driving::GetHydraulicsScale()*100.f);break;
+            case driving::MENU_HYDRAULICS_RESET_POSE:
+                std::snprintf(rows[row],sizeof(rows[row]),"RESET HYDRAULICS POSE");break;
             case driving::MENU_LIFT_RESET_POSE:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET LIFT LEVER POSE");break;
             case driving::MENU_PASSENGER_RESET:
@@ -8986,7 +8991,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
                      const BallHandLock& ballLock, unsigned int weaponHandMask,
                      const float pinchAmounts[2], const int weaponTypes[2], unsigned debugPinchHands) {
     for(auto& frame:g_skeletalHands)frame.valid=false;
-    static radio::HandAttachment radioHands[2];
+    static radio::HandAttachment radioHands[2],hydroHands[2];
     if (!drivingWheel.trackedHandsEnabled) {
         for (auto& attachment:radioHands) attachment.Reset();
         if(!hud::ShouldRenderWristHud()&&!g_hudActive.load(std::memory_order_relaxed))return;
@@ -8994,6 +8999,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
     EnsureHandAssets();
     for (int hand = 0; hand < 2; ++hand) {
         if (!drivingWheel.radioGrabbed[hand] || !hp[hand].valid) radioHands[hand].Reset();
+        if(!drivingWheel.hydroGrabbed[hand]||!hp[hand].valid)hydroHands[hand].Reset();
         if (!hp[hand].valid || !g_handSkeleton.loaded) continue;
         const XrQuaternionf gq{hp[hand].gripOri[0], hp[hand].gripOri[1], hp[hand].gripOri[2], hp[hand].gripOri[3]};
         const XrQuaternionf aq{hp[hand].aimOri[0], hp[hand].aimOri[1], hp[hand].aimOri[2], hp[hand].aimOri[3]};
@@ -9018,8 +9024,9 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
         const bool liftHand=drivingWheel.liftGrabbed[hand];
+        const bool hydroHand=drivingWheel.hydroGrabbed[hand];
         const bool hornHand=drivingWheel.active&&drivingWheel.horn[hand].weight>0.f&&
-            !hp[hand].climbGrip&&!liftHand&&!steeringHand&&
+            !hp[hand].climbGrip&&!liftHand&&!hydroHand&&!steeringHand&&drivingWheel.hydroPoint[hand]<.01f&&
             !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
             !(weaponHandMask&(1u<<hand))&&!ballLock.locked[hand]&&!TwoHandStateUsable(twoHand)&&
             !(debugPinchHands&(1u<<hand));
@@ -9036,7 +9043,21 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
                 forward={blended.forward.x,blended.forward.y,blended.forward.z};
             }
         }
-        if(liftHand) {
+        if(hydroHand){
+            const radio::HandVector base{drivingWheel.hydroCenter[0],drivingWheel.hydroCenter[1],drivingWheel.hydroCenter[2]};
+            const auto transform=[&](hydrocontrol::Point p){return radio::HandVector{
+                drivingWheel.hydroRight[0]*p.x+drivingWheel.hydroForward[0]*p.y+drivingWheel.hydroUp[0]*p.z,
+                drivingWheel.hydroRight[1]*p.x+drivingWheel.hydroForward[1]*p.y+drivingWheel.hydroUp[1]*p.z,
+                drivingWheel.hydroRight[2]*p.x+drivingWheel.hydroForward[2]*p.y+drivingWheel.hydroUp[2]*p.z};};
+            const float x=drivingWheel.hydroX,y=drivingWheel.hydroY;
+            const auto p=hydrocontrol::Grip(x,y)+hydrocontrol::Point{-.032f,.008f,.018f};
+            const radio::HandFrame frame{base+transform(p)*drivingWheel.hydroScale,transform(hydrocontrol::Swing({1,0,0},x,y)),
+                transform(hydrocontrol::Swing({0,1,0},x,y)),transform(hydrocontrol::Swing({0,0,1},x,y))};
+            const auto vec=[](XrVector3f v){return radio::HandVector{v.x,v.y,v.z};};
+            const auto pinned=hydroHands[hand].Update(drivingWheel.hydroGrabId[hand],frame,{vec(pos),vec(right),vec(up),vec(forward)});
+            pos={pinned.position.x,pinned.position.y,pinned.position.z};right={pinned.right.x,pinned.right.y,pinned.right.z};
+            up={pinned.up.x,pinned.up.y,pinned.up.z};forward={pinned.forward.x,pinned.forward.y,pinned.forward.z};grip=1.f;trig=0.f;
+        } else if(liftHand) {
             const auto toXr=[](vehicledoors::Vec v){return XrVector3f{v.x,v.y,v.z};};
             const auto vec=[](const float v[3]){return vehicledoors::Vec{v[0],v[1],v[2]};};
             const vehicledoors::Basis lever{vec(drivingWheel.liftRight),vec(drivingWheel.liftForward),vec(drivingWheel.liftUp),vec(drivingWheel.liftCenter)};
@@ -9258,18 +9279,21 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         const bool debugPinch=(debugPinchHands&(1u<<hand))!=0;
         if (debugPinch) grip=trig=0.f;
         const bool pinch = debugPinch || (!hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
-            !steeringHand && !liftHand && !hornHand &&
+            !steeringHand && !liftHand && !hydroHand && !hornHand && drivingWheel.hydroPoint[hand]<.01f &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand));
         const float pinchAmount = debugPinch ? 1.f : (pinch ? pinchAmounts[hand] : 0.0f);
         const float pinchWeight = pinchAmount * (1.0f - grip);
-        const auto selected = handanimation::Select(grip,trig,{
+        auto selected = handanimation::Select(grip,trig,{
             hp[hand].climbGrip,
             debugPinch || drivingWheel.radioGrabbed[hand] || drivingWheel.ignitionGrabbed[hand],
-            steeringHand || liftHand, basketballFlatPalm,
+            steeringHand || liftHand || hydroHand, basketballFlatPalm,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand,
             (weaponHandMask & (1u<<hand))!=0,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand
                 ? twoHand.weaponType : weaponTypes[hand],hornWeight});
+        if(!hydroHand&&!liftHand&&!steeringHand&&!hornHand&&!hp[hand].climbGrip&&!debugPinch&&
+           !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
+           !(weaponHandMask&(1u<<hand))&&!ballLock.locked[hand]&&!TwoHandStateUsable(twoHand))selected.pointBlend=drivingWheel.hydroPoint[hand];
         auto& frame=g_skeletalHands[hand];
         g_handSkeleton.Evaluate(selected,pinchAmount,pinchWeight,frame.palette);
         const auto model=[](XrVector3f p,XrVector3f f,XrVector3f r,XrVector3f u) {
@@ -11404,6 +11428,7 @@ void DrawRadioKnob(const float* mvp,const driving::WheelVisualState& w) {
 
 #include "VehicleLiftLeverRender.inl"
 
+#include "VehicleHydraulicsRender.inl"
 void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
     if (!w.ignitionVisible) return;
     const XrVector3f c{w.ignitionCenter[0],w.ignitionCenter[1],w.ignitionCenter[2]};
@@ -12364,7 +12389,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // the closed hands are drawn over it at the exact animated rim sockets.
     if (trackedVisuals && drivingWheel.active)
         DrawImmersiveDrivingWheel(mvp, drivingWheel);
-    if (!scope.active) { DrawIgnition(mvp,drivingWheel); DrawRadioKnob(mvp,drivingWheel); DrawLiftLever(mvp,drivingWheel); }
+    if (!scope.active) { DrawIgnition(mvp,drivingWheel); DrawRadioKnob(mvp,drivingWheel); DrawLiftLever(mvp,drivingWheel); DrawHydraulicsJoystick(mvp,drivingWheel); }
     // Never turn the optional highlight into a wallhack: if the shared game
     // depth cannot be copied this frame, omit it instead of drawing on top.
     if (usingGameDepth)

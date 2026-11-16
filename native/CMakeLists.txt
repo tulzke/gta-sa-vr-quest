@@ -63,6 +63,11 @@ set(LIFT_LEVER_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/vehicle-lift-lever/li
 configure_file(src/VehicleLiftLeverAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S" @ONLY)
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S" PROPERTY OBJECT_DEPENDS "${LIFT_LEVER_MESH}")
 
+set(HYDRAULICS_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/hydraulics/runtime/hydraulics.mesh")
+set(HYDRAULICS_ALPHA "${CMAKE_CURRENT_SOURCE_DIR}/../assets/hydraulics/runtime/hydraulics.alpha")
+configure_file(src/VehicleHydraulicsAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/VehicleHydraulicsAssets.S" @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/VehicleHydraulicsAssets.S" PROPERTY OBJECT_DEPENDS "${HYDRAULICS_MESH};${HYDRAULICS_ALPHA}")
+
 set(WATCH_GLB "${CMAKE_CURRENT_SOURCE_DIR}/../assets/watches/watches.glb")
 set(WATCH_ATTRIBUTION "${CMAKE_CURRENT_SOURCE_DIR}/../assets/watches/ATTRIBUTION.md")
 file(READ "${WATCH_GLB}" WATCH_MAGIC LIMIT 4 HEX)
@@ -82,6 +87,7 @@ configure_file(src/HeartbeatAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAs
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S" PROPERTY OBJECT_DEPENDS "${HEARTBEAT_WAV};${HEARTBEAT_ATTRIBUTION}")
 
 add_library(savr SHARED
+    "${CMAKE_CURRENT_BINARY_DIR}/VehicleHydraulicsAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S"

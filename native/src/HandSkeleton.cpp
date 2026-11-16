@@ -275,6 +275,7 @@ void Library::Evaluate(const handanimation::Selection& selection,float pinchProg
     Blend(a,b,selection.blend,pose);
     if(pinchWeight>0) {Sample(handanimation::Gesture::Pinch,pinchProgress,a);Blend(pose,a,pinchWeight,pose);}
     if(selection.openPalmBlend>0) {Sample(handanimation::Gesture::OpenPalm,1.f,a);Blend(pose,a,selection.openPalmBlend,pose);}
+    if(selection.pointBlend>0) {Sample(handanimation::Gesture::Point,1.f,a);Blend(pose,a,selection.pointBlend,pose);}
     Matrices(pose,out);
 }
 bool Library::IndexTip(const Palette& palette,Vec& out) const {

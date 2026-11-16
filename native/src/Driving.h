@@ -103,10 +103,12 @@ struct WheelVisualState {
     bool markerVisible[2]{};
     bool rimGrip[2]{};
     float rimAngle[2]{}; // angle in the rotating wheel frame
-    // 0 none, 1 ignition, 2 radio, 3 wheel, 4 door, 5 lift lever.
+    // 0 none, 1 ignition, 2 radio, 3 wheel, 4 door, 5 lift, 6 reserved, 7 hydraulics, 8 MODE.
     int interactionTarget[2]{};
     int modelId{-1};
     float center[3]{};
+    // Car-local anchor survives late world-to-tracking camera reprojection.
+    float wheelVehicleCenter[3]{};
     float right[3]{};
     float up[3]{};
     float normal[3]{};
@@ -137,6 +139,11 @@ struct WheelVisualState {
     bool liftVisible{},liftGrabbed[2]{};
     float liftCenter[3]{},liftRight[3]{},liftForward[3]{},liftUp[3]{};
     float liftAngle{},liftGripX{};
+    bool hydroVisible{},hydroGhost{},hydroHigh{},hydroFour{},hydroGrabbed[2]{};
+    float hydroCenter[3]{},hydroRight[3]{},hydroForward[3]{},hydroUp[3]{};
+    float hydroX{},hydroY{},hydroScale{1.f},hydroPress{},hydroPoint[2]{};
+    int hydroSlot{};
+    std::uint64_t hydroGrabId[2]{};
 };
 
 // Per-vehicle-type camera view for stereo driving. FIRST anchors the eyes at
@@ -185,7 +192,7 @@ enum MenuItem {
     , MENU_IGNITION_X, MENU_IGNITION_Y, MENU_IGNITION_Z,
     MENU_IGNITION_RX, MENU_IGNITION_RY, MENU_IGNITION_RZ,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV,
-    MENU_MIRROR_RESET_POSE, MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE
+    MENU_MIRROR_RESET_POSE, MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE, MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE
 };
 
 bool RearMirrorEnabled();
@@ -211,6 +218,12 @@ void SetIgnitionPose(int model,bool bike,const float pose[12]);
 void SetRadioPose(int model,const float pose[12]);
 void SetLiftPose(int model,const float pose[12]);
 void ResetLiftPose();
+bool HydraulicsCompatible(int model);
+void SetHydraulicsPose(int model,const float pose[12]);
+void ResetHydraulicsPose();
+float GetHydraulicsScale();
+void AdjustHydraulicsScale(int direction);
+bool GetPhysicalHydraulics(float* x,float* y);
 float GetIgnitionCalibration(int field);
 void AdjustIgnitionCalibration(int field,int direction);
 

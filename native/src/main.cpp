@@ -1499,6 +1499,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::ResetPassengerView();
             } else if(item==savr::driving::MENU_LIFT_RESET_POSE&&enter) {
                 savr::driving::ResetLiftPose();
+            } else if(item==savr::driving::MENU_HYDRAULICS_SCALE&&step) {
+                savr::driving::AdjustHydraulicsScale(step);
+            } else if(item==savr::driving::MENU_HYDRAULICS_RESET_POSE&&enter) {
+                savr::driving::ResetHydraulicsPose();
             } else if (item==savr::driving::MENU_REAR_MIRROR_FOV && step) {
                 savr::driving::AdjustRearMirrorFov(step);
             } else if (item>=savr::driving::MENU_IGNITION_X &&

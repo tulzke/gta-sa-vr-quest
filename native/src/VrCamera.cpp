@@ -5382,6 +5382,9 @@ void OnUpdatePads() {
                 hydroActive = true;
             }
         }
+        // The physical cockpit owns neutral too, so legacy chords cannot bypass
+        // its detents or the four-way mission gate.
+        if(driving::GetPhysicalHydraulics(&hydroX,&hydroY))hydroActive=true;
         hydraulics::SetStick(hydroActive, hydroX, hydroY);
         // Rhythm prompt: publish the next required direction so the compositor
         // can draw an arrow (the stock SCM arrows never reach the VR eyes).
