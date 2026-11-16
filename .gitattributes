@@ -12,6 +12,9 @@
 /assets/nitro-lever/*.glb filter=lfs diff=lfs merge=lfs -text
 /assets/hydraulics/*.blend filter=lfs diff=lfs merge=lfs -text
 /assets/hydraulics/*.glb filter=lfs diff=lfs merge=lfs -text
+/assets/service-radio/*.blend filter=lfs diff=lfs merge=lfs -text
+/assets/service-radio/*.glb filter=lfs diff=lfs merge=lfs -text
+/assets/service-radio/reference/*.png filter=lfs diff=lfs merge=lfs -text
 /assets/watches/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/vrhands/skeletal/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/vrhands/source/*.blend filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,372 @@
+{
+  "task": 97,
+  "status": "review; no commit; no game integration",
+  "units": "metres",
+  "variant": "1 | separate upper collar",
+  "body_size_m": [
+    0.056,
+    0.034,
+    0.142
+  ],
+  "antenna_height_m": 0.07,
+  "accent_material": "RadioServiceAccent",
+  "colors_linear": {
+    "police": [
+      0.018,
+      0.12,
+      0.64
+    ],
+    "medic": [
+      0.78,
+      0.8,
+      0.79
+    ],
+    "fire": [
+      0.65,
+      0.022,
+      0.018
+    ]
+  },
+  "ptt_travel_m": 0.0015,
+  "ptt_frames": [
+    1,
+    11
+  ],
+  "triangles": 8210,
+  "parts": [
+    {
+      "name": "RadioShell",
+      "triangles": 380,
+      "parent": "RadioBody",
+      "material": "Radio | graphite ABS"
+    },
+    {
+      "name": "BatteryBase",
+      "triangles": 188,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "BatteryLatch",
+      "triangles": 188,
+      "parent": "RadioBody",
+      "material": "Radio | graphite ABS"
+    },
+    {
+      "name": "ServiceAccentCollar",
+      "triangles": 668,
+      "parent": "RadioBody",
+      "material": "RadioServiceAccent"
+    },
+    {
+      "name": "SpeakerBaffle",
+      "triangles": 602,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "SpeakerBacking",
+      "triangles": 188,
+      "parent": "RadioBody",
+      "material": "Radio | speaker inset"
+    },
+    {
+      "name": "SideGrip_-1_0",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "SideGrip_-1_1",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "SideGrip_-1_2",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "SideGrip_-1_3",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "SideGrip_1_0",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "SideGrip_1_1",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "SideGrip_1_2",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "SideGrip_1_3",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "FrontGripFlute_0",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "FrontGripFlute_1",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "FrontGripFlute_2",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "FrontGripFlute_3",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "FrontGripFlute_4",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "FrontGripFlute_5",
+      "triangles": 108,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "RearGripPad",
+      "triangles": 188,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "PTTBezel",
+      "triangles": 188,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "PTTCap",
+      "triangles": 188,
+      "parent": "RadioPTT",
+      "material": "Radio | light neutral PTT"
+    },
+    {
+      "name": "PTTTactileRib_0",
+      "triangles": 108,
+      "parent": "RadioPTT",
+      "material": "Radio | light neutral PTT"
+    },
+    {
+      "name": "PTTTactileRib_1",
+      "triangles": 108,
+      "parent": "RadioPTT",
+      "material": "Radio | light neutral PTT"
+    },
+    {
+      "name": "PTTTactileRib_2",
+      "triangles": 108,
+      "parent": "RadioPTT",
+      "material": "Radio | light neutral PTT"
+    },
+    {
+      "name": "PTTTactileRib_3",
+      "triangles": 108,
+      "parent": "RadioPTT",
+      "material": "Radio | light neutral PTT"
+    },
+    {
+      "name": "AntennaSocket",
+      "triangles": 284,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "AntennaLowerRing",
+      "triangles": 284,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "RigidAntenna",
+      "triangles": 236,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "TopKnobBase",
+      "triangles": 284,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "TopKnob",
+      "triangles": 188,
+      "parent": "RadioBody",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "CaseFastener",
+      "triangles": 204,
+      "parent": "RadioBody",
+      "material": "Radio | dark steel fasteners"
+    },
+    {
+      "name": "FastenerSlot",
+      "triangles": 44,
+      "parent": "RadioBody",
+      "material": "Radio | speaker inset"
+    },
+    {
+      "name": "CaseFastener.001",
+      "triangles": 204,
+      "parent": "RadioBody",
+      "material": "Radio | dark steel fasteners"
+    },
+    {
+      "name": "FastenerSlot.001",
+      "triangles": 44,
+      "parent": "RadioBody",
+      "material": "Radio | speaker inset"
+    },
+    {
+      "name": "CaseFastener.002",
+      "triangles": 204,
+      "parent": "RadioBody",
+      "material": "Radio | dark steel fasteners"
+    },
+    {
+      "name": "FastenerSlot.002",
+      "triangles": 44,
+      "parent": "RadioBody",
+      "material": "Radio | speaker inset"
+    },
+    {
+      "name": "CaseFastener.003",
+      "triangles": 204,
+      "parent": "RadioBody",
+      "material": "Radio | dark steel fasteners"
+    },
+    {
+      "name": "FastenerSlot.003",
+      "triangles": 44,
+      "parent": "RadioBody",
+      "material": "Radio | speaker inset"
+    },
+    {
+      "name": "CradleFloor",
+      "triangles": 188,
+      "parent": "RadioCradle",
+      "material": "Radio | grip and antenna rubber"
+    },
+    {
+      "name": "CradleBack",
+      "triangles": 188,
+      "parent": "RadioCradle",
+      "material": "Radio | graphite ABS"
+    },
+    {
+      "name": "CradleWing_-1",
+      "triangles": 188,
+      "parent": "RadioCradle",
+      "material": "Radio | graphite ABS"
+    },
+    {
+      "name": "CradleWing_1",
+      "triangles": 188,
+      "parent": "RadioCradle",
+      "material": "Radio | graphite ABS"
+    },
+    {
+      "name": "CradleFrontLip",
+      "triangles": 188,
+      "parent": "RadioCradle",
+      "material": "Radio | graphite ABS"
+    },
+    {
+      "name": "CradleMountScrew",
+      "triangles": 140,
+      "parent": "RadioCradle",
+      "material": "Radio | dark steel fasteners"
+    },
+    {
+      "name": "CradleMountScrew.001",
+      "triangles": 140,
+      "parent": "RadioCradle",
+      "material": "Radio | dark steel fasteners"
+    }
+  ],
+  "radio_from_right_wrist_m": [
+    [
+      -1.0,
+      -8.742277657347586e-08,
+      0.0,
+      0.1120000034570694
+    ],
+    [
+      8.742277657347586e-08,
+      -1.0,
+      0.0,
+      0.02500000037252903
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      -0.05999999865889549
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "radio_from_left_wrist_m": [
+    [
+      1.0,
+      0.0,
+      0.0,
+      -0.1120000034570694
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.02500000037252903
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      -0.05999999865889549
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ]
+}
