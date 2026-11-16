@@ -157,10 +157,11 @@ void HapticTests() {
         };
         turn(0);Check(xr::haptics.empty(),"grabbing alone does not vibrate ratchet");
         turn(7);Check(xr::haptics.size()==1&&xr::haptics.back().amplitude==.14f&&g_radioKnobNext==0,"rotation sends tooth pulse without changing station");
-        turn(23);Check(xr::haptics.size()==2&&xr::haptics.back().amplitude==.3f&&g_radioKnobNext==1,"station click has priority over tooth");
-        turn(65);Check(xr::haptics.size()==3&&xr::haptics.back().amplitude==.85f&&xr::haptics.back().durationMs==75,"stop sends stronger longer pulse");
+        turn(49);Check(xr::haptics.size()==2&&xr::haptics.back().amplitude==.14f&&g_radioKnobNext==0,"ratchet before fifty degrees does not change station");
+        turn(51);Check(xr::haptics.size()==3&&xr::haptics.back().amplitude==.3f&&g_radioKnobNext==1,"fifty-degree station click has priority over tooth");
+        turn(65);Check(xr::haptics.size()==4&&xr::haptics.back().amplitude==.85f&&xr::haptics.back().durationMs==75,"stop sends stronger longer pulse");
         Check(Near(w.radioAngle,1.04719755f),"rendered knob reaches sixty degrees");
-        turn(80);Check(xr::haptics.size()==3&&g_radioKnobNext==1,"holding beyond stop repeats neither haptic nor station event");
+        turn(80);Check(xr::haptics.size()==4&&g_radioKnobNext==1,"holding beyond stop repeats neither haptic nor station event");
         for(const auto& pulse:xr::haptics)Check(pulse.hand==hand,"only owning hand receives radio haptics");
     }
 }
@@ -191,7 +192,7 @@ void RetuneTests() {
     Check(knob.Step(true,0)==0,"start one continuous grip");
     manager[0xad]=2;write(0x6c,0);
     for(int i=1;i<=3;++i) {
-        Check(knob.Step(true,22)==1,"another physical detent requires no release or audio acknowledgement");
+        Check(knob.Step(true,50)==1,"another physical detent requires no release or audio acknowledgement");
         write(0x6c,i);
         Check(radio::SelectedStation(manager.data(),2,false)==2+i,"each detent advances pending target from same playing station");
         Check(knob.Step(true,0)==0 && knob.held,"return to center rearms while grip remains held");

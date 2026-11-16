@@ -6,29 +6,31 @@
 int main() {
     savr::radio::KnobState knob;
     assert(knob.Step(true, 350) == 0);
-    assert(knob.Step(true, 12) == 1);
+    assert(knob.Step(true, 12) == 0);
+    assert(knob.Step(true, 40) == 1); // wrap across 360, exactly fifty degrees
     assert(knob.Step(true, 60) == 0 && knob.angle == 60);
     assert(knob.haptic.play && knob.haptic.amplitude==.85f);
     assert(knob.Step(true, 60) == 0 && !knob.haptic.play);
     assert(knob.Step(true, 3) == 0);
-    assert(knob.Step(true, 27) == 1);
-    assert(knob.Step(false, 27) == 0 && knob.angle == 0);
+    assert(knob.Step(true, 53) == 1);
+    assert(knob.Step(false, 53) == 0 && knob.angle == 0);
     assert(knob.Step(true, 20) == 0);
-    assert(knob.Step(true, -2) == -1);
+    assert(knob.Step(true, -30) == -1);
     assert(knob.Step(true, std::numeric_limits<float>::quiet_NaN()) == 0);
     assert(!knob.held && knob.angle == 0);
 
     // Ratchet teeth require actual motion, work in both directions, and have
-    // no effect on station selection below the existing 22-degree threshold.
+    // no effect on station selection below the fifty-degree threshold.
     knob.Reset();assert(knob.Step(true,0,.02f)==0 && !knob.haptic.play);
     for(float angle:{1.f,2.f,4.f,5.f})assert(knob.Step(true,angle,.02f)==0 && !knob.haptic.play);
     assert(knob.Step(true,6,.02f)==0 && knob.haptic.play && knob.haptic.amplitude==.14f && knob.haptic.durationMs==12);
     assert(knob.Step(true,6,.02f)==0 && !knob.haptic.play);
     assert(knob.Step(true,0,.02f)==0 && knob.haptic.play && knob.haptic.amplitude==.14f);
     assert(knob.Step(true,-6,.02f)==0 && knob.haptic.play);
-    assert(knob.Step(true,-22,.02f)==-1 && knob.haptic.play && knob.haptic.amplitude==.3f);
-    assert(knob.Step(true,-28,.005f)==0 && !knob.haptic.play); // don't replace station click
-    assert(knob.Step(true,-28,.1f)==0 && !knob.haptic.play); // no queued pulse while still
+    assert(knob.Step(true,-49,.02f)==0 && knob.armed);
+    assert(knob.Step(true,-50,.02f)==-1 && knob.haptic.play && knob.haptic.amplitude==.3f);
+    assert(knob.Step(true,-56,.005f)==0 && !knob.haptic.play); // don't replace station click
+    assert(knob.Step(true,-56,.1f)==0 && !knob.haptic.play); // no queued pulse while still
     assert(knob.Step(true,-60,.02f)==0 && knob.angle==-60 && knob.haptic.play && knob.haptic.amplitude==.85f);
     assert(knob.Step(true,-90,.02f)==0 && knob.angle==-60 && !knob.haptic.play);
     assert(knob.Step(true,-88,.02f)==0 && !knob.haptic.play); // two degrees off stop
@@ -42,6 +44,10 @@ int main() {
     knob.Step(true,0);assert(knob.Step(true,90,.02f)==1 && knob.angle==60 && knob.haptic.amplitude==.85f);
     assert(knob.Step(true,150,.1f)==0 && knob.angle==60 && !knob.haptic.play);
     assert(knob.Step(true,90,.1f)==0 && knob.angle==0); // immediate return from saturation
-    assert(knob.Step(true,67,.02f)==-1); // rearmed without releasing grip
+    assert(knob.Step(true,40,.02f)==-1); // rearmed without releasing grip
+    knob.Reset();knob.Step(true,0);
+    assert(knob.Step(true,49.9f,.02f)==0 && knob.armed);
+    assert(knob.Step(true,50,.02f)==1 && !knob.armed);
+    assert(knob.Step(true,55,.1f)==0); // no second switch in the last ten degrees
     std::puts("PASS: radio knob +/-60 degree travel, ratchet, station click, stop hysteresis and haptic priorities");
 }

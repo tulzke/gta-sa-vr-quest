@@ -56,7 +56,7 @@ struct KnobState {
         if(atStop)stopSide=atStop;
         int step=0;
         if (!armed && std::abs(travel) <= 8.0f) armed = true;
-        if (armed && std::abs(travel) >= 22.0f) {
+        if (armed && std::abs(travel) >= 50.0f) {
             armed = false;
             step=travel > 0.0f ? 1 : -1;
         }
