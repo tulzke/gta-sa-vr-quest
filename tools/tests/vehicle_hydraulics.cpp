@@ -15,6 +15,10 @@ using namespace savr::hydrocontrol;
 namespace savr {GameSymbols g{};}
 namespace savr::vrcam {bool IsStereoActive(){return true;}}
 namespace savr::hydraulics {bool dancing{};bool DanceRunning(){return dancing;}}
+namespace savr::xr {
+int clicks{};float clickAmplitude{},clickFrequency{},clickDuration{};
+void TriggerHaptic(int,float amplitude,float frequency,float duration){++clicks;clickAmplitude=amplitude;clickFrequency=frequency;clickDuration=duration;}
+}
 namespace savr::driving {
 std::atomic<void*> g_hydroManagedVehicle{nullptr};std::atomic<bool> g_hydroToggle{};bool g_hydroHooksReady{};
 constexpr int MODE_IMMERSIVE=1;int mode=MODE_IMMERSIVE,debug{};bool allowed=true,third=false;
@@ -35,25 +39,28 @@ void OriginalControl(void* vehicle){
     if(g_hydraulicHornScope)CHECK(!OnHydraulicHorn(nullptr)); // one edge per native call
 }
 void OriginalBeat(void*,void*){}
+int clickSounds{};
+void ClickSound(void*,int event,float volume,float speed){CHECK(event==1&&volume>=-3.f&&speed==1.f);++clickSounds;}
 bool IsCar(int m){return m==400||m==567;}
 }
 
+Point Stroke(float x,float y){auto p=Grip(x,y);p.x*=kHandStroke;p.y*=kHandStroke;return p;}
 void Capture(State& s,Hand h[2],bool four=false){
     h[0]={Grip(0,0),{},0,true,true};h[1]={};
     s.Step(h,.02f,true,four);h[0].grip=1;s.Step(h,.02f,true,four);CHECK(s.owner==0);
 }
 void Detents(){
     for(int slot=1;slot<=8;++slot){State s;Hand h[2];Capture(s,h);const auto d=Direction(slot);
-        h[0].point=Grip(d.x*kTravel,d.y*kTravel);s.Step(h,.02f,true,false);CHECK(s.slot==slot);CHECK(Length(s.Command()-d)<1e-6f);
-        const int next=slot==8?1:slot+1;const auto n=Direction(next);h[0].point=Grip(n.x*kTravel,n.y*kTravel);s.Step(h,.02f,true,false);CHECK(s.slot==slot);
-        h[0].point=Grip(0,0);s.Step(h,.02f,true,false);CHECK(s.slot==0&&Length(s.Command())==0);
-        h[0].point=Grip(n.x*kTravel,n.y*kTravel);s.Step(h,.02f,true,false);CHECK(s.slot==next);
-        h[0].point=Grip(n.x*(kTravel+.01f),n.y*(kTravel+.01f));s.Step(h,.02f,true,false);CHECK(s.slot==next&&Length(s.Command()-n)<1e-6f);
+        h[0].point=Stroke(d.x*kTravel,d.y*kTravel);s.Step(h,.02f,true,false);CHECK(s.slot==slot);CHECK(Length(s.Command()-d)<1e-6f);
+        const int next=slot==8?1:slot+1;const auto n=Direction(next);h[0].point=Stroke(n.x*kTravel,n.y*kTravel);s.Step(h,.02f,true,false);CHECK(s.slot==slot);
+        h[0].point=Stroke(0,0);s.Step(h,.02f,true,false);CHECK(s.slot==0&&Length(s.Command())==0);
+        h[0].point=Stroke(n.x*kTravel,n.y*kTravel);s.Step(h,.02f,true,false);CHECK(s.slot==next);
+        h[0].point=Stroke(n.x*(kTravel+.01f),n.y*(kTravel+.01f));s.Step(h,.02f,true,false);CHECK(s.slot==next&&Length(s.Command()-n)<1e-6f);
         h[0].grip=0;s.Step(h,.02f,true,false);CHECK(s.owner==-1&&s.slot==0&&Length(s.Command())==0);
         for(int i=0;i<80;++i)s.Step(h,.02f,true,false);CHECK(std::hypot(s.visualX,s.visualY)<1e-5f);
     }
     for(int i=0;i<8;++i){State s;Hand h[2];Capture(s,h,true);const auto d=Direction(i+1);
-        h[0].point=Grip(d.x*kTravel,d.y*kTravel);s.Step(h,.02f,true,true);CHECK(s.slot%2==1);
+        h[0].point=Stroke(d.x*kTravel,d.y*kTravel);s.Step(h,.02f,true,true);CHECK(s.slot%2==1);
         s.Step(h,.02f,true,false);CHECK(s.owner==-1&&s.slot==0); // mission boundary cannot send a beat
     }
     State s;Hand h[2];Capture(s,h);h[0].available=false;s.Step(h,.02f,true,false);CHECK(s.owner==-1);
@@ -61,9 +68,9 @@ void Detents(){
     h[0].grip=0;s.Step(h,.02f,true,false);h[0].grip=1;s.Step(h,.02f,true,false);CHECK(s.owner==0);
     h[0].point.x=std::numeric_limits<float>::quiet_NaN();s.Step(h,.02f,true,false);CHECK(s.owner==-1&&s.slot==0);
     State held;Hand q[2]{{Grip(0,0),{},1,true,true},{}};held.Step(q,.02f,true,false);CHECK(held.owner==-1);
-    State path;Hand points[2];Capture(path,points);points[0].point=Grip(0,kTravel);
+    State path;Hand points[2];Capture(path,points);points[0].point=Stroke(0,kTravel);
     for(int i=0;i<8;++i)path.Step(points,.01f,true,false);
-    points[0].point=Grip(0,0);path.Step(points,.005f,true,false);points[0].point=Grip(kTravel,0);
+    points[0].point=Stroke(0,0);path.Step(points,.005f,true,false);points[0].point=Stroke(kTravel,0);
     bool sawCenter=false;
     for(int i=0;i<12;++i){path.Step(points,.005f,true,false);
         if(std::hypot(path.visualX,path.visualY)<1e-6f)sawCenter=true;
@@ -74,7 +81,9 @@ void Detents(){
 void Buttons(){
     Button b;b.Step({0,0,-.005f},true,true,.02f);CHECK(!b.clicked&&!b.pressed);
     b.Step({0,0,.03f},true,true,.1f);CHECK(b.hover==1&&!b.clicked);
+    b.Step({0,0,-.003f},true,true,.02f);CHECK(!b.clicked&&b.depth<.45f);
     b.Step({0,0,-.005f},true,true,.02f);CHECK(b.clicked&&b.pressed);
+    CHECK(b.depth==1.f); // cap snaps through with the click
     b.Step({0,0,-.005f},true,true,.02f);CHECK(!b.clicked&&b.pressed);
     b.Step({0,0,.02f},true,true,.02f);b.Step({0,0,-.005f},true,true,.02f);CHECK(b.clicked);
     b.Step({0,0,-.005f},false,true,.02f);b.Step({0,0,-.005f},true,true,.02f);CHECK(!b.clicked&&!b.pressed);
@@ -103,23 +112,35 @@ void SpringReturn(){
         // No physical stop: overshoot the visible gate by 20 cm at 2x size.
         h[hand].point=origin+d*.24f;s.StepTracked(h,frame,.02f,true,four,1);
         CHECK(s.owner==hand&&correct());
-        // A 3.2 cm pullback must reach neutral, regardless of prior overshoot.
-        h[hand].point=h[hand].point-d*.032f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);
+        // The wider hand stroke scales both activation and return travel.
+        h[hand].point=h[hand].point-d*.064f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);
         for(int i=0;i<12;++i)s.StepTracked(h,frame,.02f,true,four,1);
         CHECK(s.slot==0&&std::hypot(s.visualX,s.visualY)<1e-6f);
         // A vertical wrist shift must neither latch a side nor break a grab.
         h[hand].point.z+=.06f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);
-        h[hand].point=h[hand].point+d*.04f;s.StepTracked(h,frame,.02f,true,four,1);
+        h[hand].point=h[hand].point+d*.08f;s.StepTracked(h,frame,.02f,true,four,1);
         CHECK(s.owner==hand&&correct());
     }
-    std::puts("PASS 2x spring return: both hands/eight detents and mission; 24 cm overshoot returns with 3.2 cm pullback; vertical motion ignored");
+    std::puts("PASS 2x spring return: both hands/eight detents and mission; 24 cm overshoot returns with 6.4 cm pullback; vertical motion ignored");
+}
+void HandTravel(){
+    for(int hand=0;hand<2;++hand)for(int slot=1;slot<=8;++slot){
+        State s;InputFrame frame{{},{1,0,0},{0,1,0},{0,0,1},kModelScale};Hand h[2]{};
+        h[hand]={frame.World(Grip(0,0)),{},0,true,true};s.StepTracked(h,frame,.02f,true,false,3);
+        h[hand].grip=1;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.owner==hand);
+        const auto start=h[hand].point,d=Direction(slot);
+        for(float metres:{.005f,.01f,.02f,.04f,.055f}){
+            h[hand].point=start+d*metres;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.owner==hand&&s.slot==0);}
+        h[hand].point=start+d*.058f;s.StepTracked(h,frame,.02f,true,false,3);CHECK(s.slot==slot);
+    }
+    std::puts("PASS measured hand travel: no activation at 5-55 mm, engagement at 58 mm at default 200%, both hands/eight rays");
 }
 void MovingCockpit(){
     for(int hand=0;hand<2;++hand)for(int slot=1;slot<=8;++slot){
         State s;InputFrame start{{.3f,.2f,-.1f}},moving=start;
         Hand h[2]{};h[hand]={start.World(Grip(0,0)),{},0,true,true};
         s.StepTracked(h,start,.02f,true,false,7);h[hand].grip=1;s.StepTracked(h,start,.02f,true,false,7);CHECK(s.owner==hand);
-        const auto d=Direction(slot);h[hand].point=start.World(Grip(d.x*kTravel,d.y*kTravel));
+        const auto d=Direction(slot);h[hand].point=start.World(Stroke(d.x*kTravel,d.y*kTravel));
         s.StepTracked(h,start,.02f,true,false,7);CHECK(s.slot==slot);
         for(int i=0;i<100;++i){const float angle=std::sin(i*.1f)*.8f;
             moving.pivot={.3f+std::sin(i*.3f),.2f+std::cos(i*.2f),-.1f+std::sin(i*.15f)*.6f};
@@ -139,8 +160,9 @@ void AttachedHand(){
     using namespace savr::radio;
     savr::hydrocontrol::HandAttachment s;HandPose tracked{{.2f,.3f,.4f},{1,0,0},{0,1,0},{0,0,1}};
     HandFrame frame{{.2f,.3f,.4f},{1,0,0},{0,1,0},{0,0,1}};
-    const auto first=s.Grab(1,frame,tracked);CHECK(Dot(first.position-tracked.position,first.position-tracked.position)<1e-10f);
-    frame.center.x+=.4f;const auto attached=s.Grab(1,frame,tracked);CHECK(std::abs(attached.position.x-.6f)<1e-6f);
+    const auto first=s.Grab(frame,0,.045f);const auto anchor=FixedGrip(frame,0,.045f);
+    CHECK(Dot(first.position-anchor.position,first.position-anchor.position)<1e-10f);
+    frame.center.x+=.4f;const auto attached=s.Grab(frame,0,.045f);CHECK(std::abs(attached.position.x-first.position.x-.4f)<1e-6f);
     const auto released=s.Free(tracked,.02f);CHECK(std::abs(released.position.x-attached.position.x)<1e-6f);
     float previous=released.position.x;
     for(int i=0;i<10;++i){const auto p=s.Free(tracked,.02f);CHECK(p.position.x<=previous+1e-6f);previous=p.position.x;}
@@ -165,6 +187,8 @@ void Runtime(){
     OnHydraulicControl(other.data());CHECK(toggleCalls==2&&hornCalls==2); // ordinary caller still sees original horn
     debug=1;g_hydroToggle=true;OnHydraulicControl(controlled);CHECK(controlCalls==4&&!g_hydroToggle);debug=0;
     allowed=false;OnHydraulicControl(controlled);CHECK(controlCalls==4);allowed=true;
+    g.AudioEngine=vehicle.data();g.CAudioEngine_ReportFrontendAudioEvent=ClickSound;
+    HydroModeClick(0);CHECK(clickSounds==1&&xr::clicks==1&&xr::clickAmplitude>=.6f&&xr::clickFrequency>=150.f&&xr::clickDuration<=20.f);
     Button button;
     for(int i=0;i<20;++i){
         const auto before=*reinterpret_cast<std::uint16_t*>(vehicle.data()+0xa88)>=500;
@@ -230,5 +254,34 @@ void PointPose(const char* path){
         for(int i=0;i<3;++i)CHECK(std::abs(actual[i]-(m[i]*b[0]+m[4+i]*b[1]+m[8+i]*b[2]+m[12+i]))<1e-6f);
     }
     std::puts("PASS automatic point pose: real hand asset, full override and continuous intermediate fingertip pose");
+    handskeleton::Palette grip{};
+    library.Evaluate({handanimation::Gesture::Grip,handanimation::Gesture::Grip,1,0},0,0,grip);
+    const radio::HandFrame ballFrame{{},{1,0,0},{0,1,0},{0,0,1}};
+    for(int hand=0;hand<2;++hand){
+        const auto pose=FixedGrip(ballFrame,hand,.045f);int palm=0;
+        std::ofstream obj(hand==0?"fixed-grip-left.obj":"fixed-grip-right.obj");
+        for(const auto& vertex:library.vertices){radio::HandVector p{};
+            for(int j=0;j<8;++j){const auto& m=grip[vertex.joints[j]];const float w=vertex.weights[j];
+                p.x+=w*(m[0]*vertex.pos[0]+m[4]*vertex.pos[1]+m[8]*vertex.pos[2]+m[12]);
+                p.y+=w*(m[1]*vertex.pos[0]+m[5]*vertex.pos[1]+m[9]*vertex.pos[2]+m[13]);
+                p.z+=w*(m[2]*vertex.pos[0]+m[6]*vertex.pos[1]+m[10]*vertex.pos[2]+m[14]);}
+            const auto world=handrender::MeshPoint(pose,p);
+            if(p.x>.03f&&p.x<.08f){++palm;CHECK(radio::Dot(world,world)>.045f*.045f);}
+            obj<<"v "<<world.x<<' '<<world.y<<' '<<world.z<<'\n';
+        }
+        CHECK(palm>100);
+        for(std::size_t i=0;i<library.indices.size();i+=3)
+            obj<<"f "<<library.indices[i]+1<<' '<<library.indices[i+1]+1<<' '<<library.indices[i+2]+1<<'\n';
+        for(int slot=1;slot<=8;++slot){const auto d=Direction(slot);const float x=d.x*kTravel,y=d.y*kTravel;
+            const auto swing=[&](radio::HandVector v){const auto p=Swing({v.x,v.y,v.z},x,y);return radio::HandVector{p.x,p.y,p.z};};
+            radio::HandFrame moved{ swing({0,0,kReach*kModelScale})-radio::HandVector{0,0,kReach*kModelScale},
+                swing(ballFrame.right),swing(ballFrame.up),swing(ballFrame.normal)};
+            const auto fit=FixedGrip(moved,hand,.045f);const auto expected=moved.center+swing(pose.position);
+            CHECK(radio::Dot(fit.position-expected,fit.position-expected)<1e-10f);
+            const auto travel=fit.position-pose.position;const float stroke=std::sqrt(travel.x*travel.x+travel.y*travel.y);
+            CHECK(stroke>.04f&&stroke<.065f);
+        }
+    }
+    std::puts("PASS fixed ball grip: real skinned palms outside 90 mm sphere, both mirrored hands, 4-6.5 cm wrist arc across all detents");
 }
-int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();SpringReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);}
+int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();HandTravel();SpringReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);}

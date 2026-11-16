@@ -7,6 +7,9 @@
 namespace savr::hydrocontrol {
 constexpr float kRad=.017453292519943295f,kTravel=22.f*kRad,kReach=.055f;
 constexpr float kModelScale=2.f,kNeutral=.011f,kEngage=.014f,kInputLimit=.026f;
+// The fixed wrist sits behind/above the sphere. Its arc is longer than the
+// sphere centre's arc; require a full hand stroke before the detent engages.
+constexpr float kHandStroke=2.f;
 // Deterministic mission simplification, applied to BOTH native beat data and
 // VR hints. Cardinal keys keep their values; input is never chosen for player.
 inline std::uint32_t MissionKey(std::uint32_t key){
@@ -65,7 +68,7 @@ struct Button {
         if(radius>.028f||p.z<-.015f){armed=pressed=false;depth=0;return;}
         if(!pressed&&armed&&radius<.016f&&p.z<=-.004f){pressed=true;armed=false;clicked=true;}
         // An unarmed contact must not look like a successful button press.
-        depth=pointing&&(armed||pressed)?std::clamp(-p.z/.006f,0.f,1.f):0.f;
+        depth=pointing&&(armed||pressed)?(pressed?1.f:.45f*std::clamp(-p.z/.004f,0.f,1.f)):0.f;
     }
 };
 struct State {
@@ -91,12 +94,13 @@ struct State {
         }
         if(owner>=0){
             Point p=h[owner].point-offset;
+            p.x/=kHandStroke;p.y/=kHandStroke;
             float radius=std::hypot(p.x,p.y);
             // There is no physical stop on a controller. Discard outward
             // overtravel at the gate so a short pull back can reach neutral.
             // Vertical wrist motion does not change the planar command.
             if(radius>kInputLimit){const float factor=kInputLimit/radius;
-                offset.x+=p.x*(1.f-factor);offset.y+=p.y*(1.f-factor);
+                offset.x+=p.x*(1.f-factor)*kHandStroke;offset.y+=p.y*(1.f-factor)*kHandStroke;
                 p.x*=factor;p.y*=factor;radius=kInputLimit;}
             if(slot&&radius<=kNeutral){slot=0;offset=h[owner].point-Grip(0,0);p=Grip(0,0);radius=0;}
             else if(!slot&&radius>=kEngage)slot=Nearest(p.x,p.y,four);

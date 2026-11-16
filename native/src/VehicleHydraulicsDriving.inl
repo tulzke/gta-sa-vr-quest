@@ -3,6 +3,11 @@ bool HydroEquipment(void* vehicle){
     if(!vehicle)return false;const auto flags=*reinterpret_cast<const std::uint32_t*>(static_cast<const char*>(vehicle)+0x4b8);
     return (flags&0x30000u)!=0&&(flags&0x40000u)==0;
 }
+void HydroModeClick(int hand){
+    xr::TriggerHaptic(hand,.65f,180.f,18.f);
+    if(g.AudioEngine&&g.CAudioEngine_ReportFrontendAudioEvent)
+        g.CAudioEngine_ReportFrontendAudioEvent(g.AudioEngine,1,-3.f,1.f);
+}
 bool BuildHydraulicsTracking(WheelVisualState& v,void* vehicle,bool preview=false){
     v.hydroVisible=false;const int model=v.modelId;
     if(!vehicle||!HydraulicsCompatible(model)||ThirdPersonViewActive()||!g.FindPlayerPed||!g.CVehicle_IsDriver||
@@ -80,7 +85,7 @@ void UpdateHydraulicsJoystick(WheelVisualState& v,void* vehicle,const xr::InputS
             (preview||v.interactionTarget[i]==8);
         auto& b=g_hydroLever.button[i];b.Step(h[i].finger,poses[i].valid,free,dt);
         if(b.clicked){if(editor)g_hydroPreviewHigh=!g_hydroPreviewHigh;else g_hydroToggle.store(true,std::memory_order_release);
-            xr::TriggerHaptic(i,.3f,0,25);}
+            HydroModeClick(i);}
         v.hydroPoint[i]=b.hover;v.hydroPress=std::max(v.hydroPress,b.depth);
         v.hydroGrabbed[i]=g_hydroLever.owner==i;v.hydroGrabId[i]=v.hydroGrabbed[i]?g_hydroGrabSequence:0;
     }

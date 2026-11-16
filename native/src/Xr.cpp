@@ -9072,8 +9072,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             const auto p=hydrocontrol::Grip(x,y)+hydrocontrol::Point{-.032f,.008f,.018f};
             const radio::HandFrame frame{base+transform(p)*drivingWheel.hydroScale,transform(hydrocontrol::Swing({1,0,0},x,y)),
                 transform(hydrocontrol::Swing({0,1,0},x,y)),transform(hydrocontrol::Swing({0,0,1},x,y))};
-            const auto vec=[](XrVector3f v){return radio::HandVector{v.x,v.y,v.z};};
-            const auto pinned=hydroHands[hand].Grab(drivingWheel.hydroGrabId[hand],frame,{vec(pos),vec(right),vec(up),vec(forward)});
+            const auto pinned=hydroHands[hand].Grab(frame,hand,.0225f*drivingWheel.hydroScale);
             pos={pinned.position.x,pinned.position.y,pinned.position.z};right={pinned.right.x,pinned.right.y,pinned.right.z};
             up={pinned.up.x,pinned.up.y,pinned.up.z};forward={pinned.forward.x,pinned.forward.y,pinned.forward.z};grip=1.f;trig=0.f;
         } else if(liftHand) {
