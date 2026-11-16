@@ -261,11 +261,16 @@ struct GameSymbols {
     //   atomic = GetFirstAtomic(clump);   geom = *(void**)(atomic + 0x30)
     //   numTris = *(int32*)(geom + 0x18);  numVerts = *(int32*)(geom + 0x1C)
     void* (*CWeaponInfo_GetWeaponInfo)(int weaponType, signed char skill);
+    void** CModelInfo_ms_modelInfoPtrs;   // base of the CBaseModelInfo* array
+    bool (*CVehicleModelInfo_IsUpgradeAvailable)(void*,int);
     bool (*CModelInfo_IsCarModel)(int);
+    int (*CVehicle_GetUpgrade)(void*,int);
+    void (*CAutomobile_NitrousControl)(void*,signed char);
+    void (*CAutomobile_StopNitroEffect)(void*);
+    int (*CPad_GetNitroFired)(void*);
     void (*CAutomobile_HydraulicControl)(void*);
     bool (*CPad_HornJustDown)(void*);
     void (*CAEAudioHardware_GetBeatInfo)(void*,void*);
-    void** CModelInfo_ms_modelInfoPtrs;   // base of the CBaseModelInfo* array
     bool  (*CModelInfo_IsTrainModel)(int modelId);
     bool  (*CModelInfo_IsBmxModel)(int modelId);
     bool  (*CModelInfo_IsQuadBikeModel)(int modelId);

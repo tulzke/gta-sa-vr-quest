@@ -94,6 +94,9 @@ void SetRadioPose(int,const float*) {}
 bool liftVisible{};int liftWrites{};
 float liftPose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};
 void SetLiftPose(int,const float* pose) {std::copy_n(pose,12,liftPose);++liftWrites;}
+bool nitroVisible{};int nitroWrites{};
+float nitroPose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};
+void SetNitroPose(int,const float* pose) {std::copy_n(pose,12,nitroPose);++nitroWrites;}
 int mirrorValues[12]{0,45,110,0,0,0,0,-200,100,0,0,0};
 void GetRearMirrorCalibration(int,int out[12]) {std::copy_n(mirrorValues,12,out);}
 void SetRearMirrorCalibration(int,const int values[12]) {std::copy_n(values,12,mirrorValues);}
@@ -119,6 +122,9 @@ bool GetWheelVisualState(WheelVisualState* out) {
     if(liftVisible){out->modelId=530;out->liftVisible=true;
         std::copy_n(liftPose,3,out->liftCenter);std::copy_n(liftPose+3,3,out->liftRight);
         std::copy_n(liftPose+6,3,out->liftForward);std::copy_n(liftPose+9,3,out->liftUp);}
+    if(nitroVisible){out->nitroVisible=true;out->nitroGhost=true;
+        std::copy_n(nitroPose,3,out->nitroCenter);std::copy_n(nitroPose+3,3,out->nitroRight);
+        std::copy_n(nitroPose+6,3,out->nitroForward);std::copy_n(nitroPose+9,3,out->nitroUp);}
     return true;
 }
 }
@@ -182,7 +188,7 @@ bool FakeLos(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,
     *hit=wall?static_cast<void*>(pedMemory):vehicle;return true;
 }
 void Setup() {
-    driving::liftVisible=false;driving::liftWrites=0;
+    driving::liftVisible=false;driving::liftWrites=0;driving::nitroVisible=false;driving::nitroWrites=0;
     for(auto& detent:g_openDetents)detent={};
     Reset();g_epoch=5;g_updated=Now()-.02;g_ready=true;
     std::memset(flags,0x80,sizeof(flags));flags[0]=3;
@@ -772,6 +778,20 @@ int main() {
         CHECK(std::abs(driving::liftPose[3]-.866025f)<.001f&&std::abs(driving::liftPose[4]-.5f)<.001f);
         hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&driving::saves==1);
     }
+    for(int h:{0,1}){
+        Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+        driving::nitroVisible=true;
+        const float pose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};std::copy_n(pose,12,driving::nitroPose);
+        hands[h].gripPos[0]=.6f;hands[h].gripPos[1]=.2f+1.5f*(.018f-.088f*std::sin(.38397244f));hands[h].gripPos[2]=.65f+1.5f*(.048f+.088f*std::cos(.38397244f));
+        Tick();hands[h].trigger=1;Tick();CHECK(g_editKind==12&&g_edit.hand==h&&ClaimedHands()==(1u<<h));
+        hands[h].gripPos[0]+=.06f;hands[h].gripPos[1]+=.04f;hands[h].gripPos[2]+=.03f;
+        hands[h].gripOri[2]=.258819f;hands[h].gripOri[3]=.965926f;Tick();
+        CHECK(driving::nitroWrites>0&&driving::saves==0);
+        CHECK(std::abs(driving::nitroPose[0]-.66f)<.001f&&std::abs(driving::nitroPose[1]-.24f)<.001f&&std::abs(driving::nitroPose[2]-.68f)<.001f);
+        CHECK(std::abs(driving::nitroPose[3]-.866025f)<.001f&&std::abs(driving::nitroPose[4]-.5f)<.001f);
+        hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&driving::saves==1);
+    }
+    std::puts("vehicle nitro: uninstalled ghost editable with either hand; rigid translation/rotation, persistent ownership and release save passed");
     std::puts("vehicle lift: both hands, rigid position/rotation edit, ownership and release save passed");
     std::puts("vehicle PDA: both hands, three-axis trigger drag, fixed angles, model placement, release save and visibility cancellation passed");
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");

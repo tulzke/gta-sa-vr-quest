@@ -1,0 +1,17 @@
+.section .rodata
+.balign 16
+.global savr_nitro_mesh
+.hidden savr_nitro_mesh
+savr_nitro_mesh:
+.incbin "@NITRO_MESH@"
+.global savr_nitro_mesh_end
+.hidden savr_nitro_mesh_end
+savr_nitro_mesh_end:
+.balign 16
+.global savr_nitro_alpha
+.hidden savr_nitro_alpha
+savr_nitro_alpha:
+.incbin "@NITRO_ALPHA@"
+.global savr_nitro_alpha_end
+.hidden savr_nitro_alpha_end
+savr_nitro_alpha_end:

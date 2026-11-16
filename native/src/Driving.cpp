@@ -17,6 +17,8 @@
 #include "RadioKnobState.h"
 #include "CockpitSelection.h"
 #include "VehicleLiftLever.h"
+#include "VehicleNitro.h"
+#include "VehicleNitroAudio.h"
 #include "VehicleHydraulics.h"
 #include "VehicleHydraulicsHandConfig.h"
 #include "CockpitClickAudio.h"
@@ -308,6 +310,9 @@ struct ModelCalibration {
     bool radioPoseSet{};
     float liftPose[12]{};
     bool liftPoseSet{};
+    float nitroPose[12]{};
+    bool nitroPoseSet{};
+    float nitroScale{1.f};
     float hydroPose[12]{};
     bool hydroPoseSet{};
     float hydroScale{1.f};
@@ -345,6 +350,19 @@ int g_liftModel{-1};
 std::atomic<int> g_liftAxis{0};
 std::atomic<void*> g_liftAxisVehicle{nullptr};
 double g_liftLastTime{};
+nitro::State g_nitroLever;
+nitro::Feel g_nitroFeel;
+nitro::SpeedEffect g_nitroSpeed;
+void* g_nitroVehicle{};
+tracking::SeatKey g_nitroSeatKey{};
+double g_nitroLastTime{};
+std::atomic<void*> g_nitroManagedVehicle{nullptr};
+std::atomic<bool> g_nitroCommand{false};
+bool g_nitroHookReady{};
+bool g_nitroWasPreview{};
+struct NitroSample {bool installed{},usable{},flow{};float reserve{};};
+NitroSample ReadNitroSample(void* vehicle);
+void InstallNitroHook();
 hydrocontrol::State g_hydroLever;
 void* g_hydroVehicle{};
 tracking::SeatKey g_hydroSeatKey{};
@@ -651,6 +669,10 @@ void Save() {
             if(calibration.liftPoseSet)
                 for(int field=0;field<12;++field)
                     std::fprintf(file,"LiftPose.%d.%d=%.9g\n",model,field,calibration.liftPose[field]);
+            if(calibration.nitroPoseSet)
+                for(int field=0;field<12;++field)
+                    std::fprintf(file,"NitroPose.%d.%d=%.9g\n",model,field,calibration.nitroPose[field]);
+            if(calibration.nitroScale!=1.f)std::fprintf(file,"NitroScale.%d=%.9g\n",model,calibration.nitroScale);
             if(calibration.hydroPoseSet)for(int field=0;field<12;++field)std::fprintf(file,"HydroPose.%d.%d=%.9g\n",model,field,calibration.hydroPose[field]);
             if(calibration.hydroScale!=1.f)std::fprintf(file,"HydroScale.%d=%.9g\n",model,calibration.hydroScale);
             if (calibration.ignitionPoseSet) {
@@ -865,6 +887,10 @@ void Load() {
                     g_modelCalibration[model].hydroPose[axis]=poseValue;if(axis==11)g_modelCalibration[model].hydroPoseSet=true;continue;}
                 if(std::sscanf(line,"HydroScale.%d=%f",&model,&poseValue)==2&&model>=400&&model<=611&&std::isfinite(poseValue)){
                     g_modelCalibration[model].hydroScale=std::clamp(poseValue,.4f,2.f);continue;}
+                if(std::sscanf(line,"NitroPose.%d.%d=%f",&model,&axis,&poseValue)==3&&model>=400&&model<=611&&axis>=0&&axis<12&&std::isfinite(poseValue)&&std::abs(poseValue)<=10.f){
+                    g_modelCalibration[model].nitroPose[axis]=poseValue;if(axis==11)g_modelCalibration[model].nitroPoseSet=true;continue;}
+                if(std::sscanf(line,"NitroScale.%d=%f",&model,&poseValue)==2&&model>=400&&model<=611&&std::isfinite(poseValue)){
+                    g_modelCalibration[model].nitroScale=std::clamp(poseValue,.4f,2.f);continue;}
                 if(std::sscanf(line,"LiftPose.%d.%d=%f",&model,&axis,&poseValue)==3&&
                    liftlever::Supported(model)&&axis>=0&&axis<12&&std::isfinite(poseValue)&&std::abs(poseValue)<=10.f){
                     g_modelCalibration[model].liftPose[axis]=poseValue;
@@ -1239,6 +1265,10 @@ void UpdateBicycleGestureLocked(const xr::HandPose poses[2]) {
 void ClearInteractionLocked(bool preserveRadio=false) {
     g_hydroLever.Reset();g_hydroLastTime=0;g_hydroWasPreview=false;g_hydroPreviewHigh=false;
     g_hydroManagedVehicle.store(nullptr);g_hydroCommandX.store(0);g_hydroCommandY.store(0);g_hydroToggle.store(false);
+    g_nitroWasPreview=false;
+    g_nitroFeel.Reset();g_nitroSpeed.Reset();
+    g_nitroLever.Reset();g_nitroLastTime=0;g_nitroCommand.store(false,std::memory_order_release);
+    g_nitroManagedVehicle.store(nullptr,std::memory_order_release);
     g_liftLever.Reset(); g_liftAxis.store(0,std::memory_order_release);
     g_liftAxisVehicle.store(nullptr,std::memory_order_release);
     g_liftLastTime=0;
@@ -1688,7 +1718,6 @@ bool BuildWheelTracking(WheelVisualState* visual) {
     visual->wheelVehicleCenter[0]=Dot(vehicleCenter,vr);
     visual->wheelVehicleCenter[1]=Dot(vehicleCenter,vf);
     visual->wheelVehicleCenter[2]=Dot(vehicleCenter,vu);
-
     visual->right[0]=right.x; visual->right[1]=right.y; visual->right[2]=right.z;
     visual->up[0]=up.x; visual->up[1]=up.y; visual->up[2]=up.z;
     visual->normal[0]=normal.x; visual->normal[1]=normal.y; visual->normal[2]=normal.z;
@@ -2032,6 +2061,7 @@ void UpdateLiftLever(WheelVisualState& visual,void* vehicle,const xr::InputState
     g_liftAxis.store(liftlever::RetailAxis(visual.modelId,g_liftLever.Output(),true),std::memory_order_release);
 }
 
+#include "VehicleNitroDriving.inl"
 #include "VehicleHydraulicsDriving.inl"
 
 void UpdateIgnition(WheelVisualState& visual, void* vehicle,
@@ -2280,19 +2310,21 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
     UpdateIgnition(geometry,vehicle,input,poses,occupied,true);
     UpdateRadioKnob(geometry,vehicle,input,poses,occupied,true,true);
     BuildLiftTracking(geometry,vehicle);
+    BuildNitroTracking(geometry,vehicle);
     BuildHydraulicsTracking(geometry,vehicle);
     float doorDistance[2]{};
     vehicledoors::InteriorDistances(vehicle,poses,doorDistance);
-    unsigned keyBlocked=occupied, radioBlocked=occupied,liftBlocked=occupied,hydroBlocked=occupied;
+    unsigned keyBlocked=occupied, radioBlocked=occupied,liftBlocked=occupied,nitroBlocked=occupied,hydroBlocked=occupied;
     for (int h=0;h<2;++h) {
         const unsigned bit=1u<<h;
-        const bool otherControl=(g_ignitionRotation.owners&bit)||g_radioKnobHand==h||g_liftLever.owner==h||(g_grabbed[h]&&wheelAvailable);
+        const bool otherControl=(g_ignitionRotation.owners&bit)||g_radioKnobHand==h||g_liftLever.owner==h||g_nitroLever.owner==h||(g_grabbed[h]&&wheelAvailable);
         if(otherControl)hydroBlocked|=bit;
-        if(g_hydroLever.owner==h){visual.interactionTarget[h]=7;keyBlocked|=bit;radioBlocked|=bit;liftBlocked|=bit;continue;}
-        if (g_ignitionRotation.owners&bit) { visual.interactionTarget[h]=1; radioBlocked|=bit;liftBlocked|=bit; continue; }
-        if (g_radioKnobHand==h) { visual.interactionTarget[h]=2; keyBlocked|=bit;liftBlocked|=bit; continue; }
-        if (g_liftLever.owner==h) {visual.interactionTarget[h]=5;keyBlocked|=bit;radioBlocked|=bit;continue;}
-        if (g_grabbed[h] && wheelAvailable) { visual.interactionTarget[h]=3;liftBlocked|=bit; continue; }
+        if(g_hydroLever.owner==h){visual.interactionTarget[h]=7;keyBlocked|=bit;radioBlocked|=bit;liftBlocked|=bit;nitroBlocked|=bit;continue;}
+        if (g_ignitionRotation.owners&bit) { visual.interactionTarget[h]=1; radioBlocked|=bit;liftBlocked|=bit;nitroBlocked|=bit; continue; }
+        if (g_radioKnobHand==h) { visual.interactionTarget[h]=2; keyBlocked|=bit;liftBlocked|=bit;nitroBlocked|=bit; continue; }
+        if (g_liftLever.owner==h) {visual.interactionTarget[h]=5;keyBlocked|=bit;radioBlocked|=bit;nitroBlocked|=bit;continue;}
+        if (g_nitroLever.owner==h) {visual.interactionTarget[h]=6;keyBlocked|=bit;radioBlocked|=bit;liftBlocked|=bit;continue;}
+        if (g_grabbed[h] && wheelAvailable) { visual.interactionTarget[h]=3;liftBlocked|=bit;nitroBlocked|=bit; continue; }
         if (occupied&bit) continue;
         const V3 p{poses[h].gripPos[0],poses[h].gripPos[1],poses[h].gripPos[2]};
         if (!poses[h].valid || !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
@@ -2305,7 +2337,8 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
                    wheelAvailable?Length(p-wheel):1e6f,doorDistance[h],
                    geometry.liftVisible&&g_liftLever.owner<0&&wheelAvailable?
                        liftlever::Distance(LiftHandPoint(geometry,poses[h]),g_liftLever.angle):1e6f,
-                   1e6f, // target 6 reserved for the parallel nitro control
+                   geometry.nitroVisible&&!geometry.nitroGhost&&g_nitroLever.owner<0&&wheelAvailable?
+                       nitro::Distance(NitroHandPoint(geometry,poses[h]),g_nitroLever.position):1e6f,
                    geometry.hydroVisible&&!geometry.hydroGhost&&g_hydroLever.owner<0&&wheelAvailable?
                        hydrocontrol::Distance(HydroHandPoint(geometry,poses[h]),g_hydroLever.visualX,g_hydroLever.visualY):1e6f,
                    geometry.hydroVisible&&!geometry.hydroGhost&&g_hydroLever.owner<0&&wheelAvailable?
@@ -2314,6 +2347,7 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
         if (d[2]>=.10f) d[2]=1e6f;
         if (d[3]>(visual.bike?.17f:.23f)) d[3]=1e6f;
         if(d[5]>=.06f)d[5]=1e6f;
+        if(d[6]>=.06f)d[6]=1e6f;
         if(d[7]>=.055f)d[7]=1e6f;
         if(d[8]>=.065f)d[8]=1e6f;
         // A free pointing finger over MODE keeps its target throughout the
@@ -2323,12 +2357,14 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
         if (best!=1) keyBlocked|=bit;
         if (best!=2) radioBlocked|=bit;
         if (best!=5) liftBlocked|=bit;
+        if (best!=6) nitroBlocked|=bit;
         if(best!=7&&best!=8)hydroBlocked|=bit;
     }
     UpdateIgnition(visual,vehicle,input,poses,keyBlocked);
     for (int h=0;h<2;++h) if (visual.ignitionGrabbed[h]) radioBlocked|=1u<<h;
     UpdateRadioKnob(visual,vehicle,input,poses,radioBlocked);
     UpdateLiftLever(visual,vehicle,input,poses,liftBlocked);
+    UpdateNitroLever(visual,vehicle,input,poses,nitroBlocked);
     UpdateHydraulicsJoystick(visual,vehicle,input,poses,hydroBlocked);
 }
 
@@ -2932,6 +2968,9 @@ void* InstallVerifiedTrampoline(void* target,void* replacement,
     return trampoline;
 }
 
+#include "VehicleNitroRuntime.inl"
+#include "VehicleHydraulicsRuntime.inl"
+
 using BmxControlFn=void(*)(void*);
 BmxControlFn g_origBmxControl{};
 thread_local bicyclepedal::State g_bicyclePedal;
@@ -3056,8 +3095,6 @@ void* InstallSprintTrampoline(void* target,void* replacement) {
     LOGI("[driving] CPad::GetSprint VR sprint-toggle hook installed");
     return trampoline;
 }
-
-#include "VehicleHydraulicsRuntime.inl"
 
 void* InstallHandBrakeTrampoline(void* target,void* replacement) {
     if (!target||!replacement) return nullptr;
@@ -3484,6 +3521,7 @@ bool InstallInputTypePatch() {
 }
 
 void InstallPadHooks() {
+    InstallNitroHook();
     InstallHydraulicsHooks();
     InstallBicycleSwayHook();
     if (g.LoadBase) {
@@ -3932,7 +3970,8 @@ constexpr int kDefaultBikeItems[] = {
 constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
-    MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE, MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
+    MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE, MENU_NITRO_SCALE, MENU_NITRO_RESET_POSE,
+    MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
     MENU_HYDRAULICS_HAND, MENU_HYDRAULICS_HAND_X, MENU_HYDRAULICS_HAND_Y, MENU_HYDRAULICS_HAND_Z,
     MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET,
     MENU_CAR_CAMERA_TILT,
@@ -3956,7 +3995,8 @@ constexpr int kImmersiveBikeItems[] = {
 constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
-    MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE, MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
+    MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE, MENU_NITRO_SCALE, MENU_NITRO_RESET_POSE,
+    MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
     MENU_HYDRAULICS_HAND, MENU_HYDRAULICS_HAND_X, MENU_HYDRAULICS_HAND_Y, MENU_HYDRAULICS_HAND_Z,
     MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET,
     MENU_CAR_CAMERA_TILT,
@@ -4036,7 +4076,11 @@ int GetMenuItemCount(int vehicleType) {
     const int* items=nullptr; int count=0;
     MenuTableForType(vehicleType,&items,&count);
     int visible=0;
-    for(int i=0;i<count;++i)if((items[i]!=MENU_LIFT_RESET_POSE||liftlever::Supported(GetActiveVehicleModelId()))&&(!IsHydraulicsMenuItem(items[i])||HydraulicsCompatible(GetActiveVehicleModelId())))++visible;
+    for(int i=0;i<count;++i){
+        if(items[i]==MENU_LIFT_RESET_POSE&&!liftlever::Supported(GetActiveVehicleModelId()))continue;
+        if((items[i]==MENU_NITRO_SCALE||items[i]==MENU_NITRO_RESET_POSE)&&!NitroCompatible(GetActiveVehicleModelId()))continue;
+        if(IsHydraulicsMenuItem(items[i])&&!HydraulicsCompatible(GetActiveVehicleModelId()))continue;
+        ++visible;}
     return visible;
 }
 int GetMenuItemForRow(int vehicleType,int row) {
@@ -4045,6 +4089,7 @@ int GetMenuItemForRow(int vehicleType,int row) {
     if(row<0)return MENU_BACK;
     for(int i=0;i<count;++i){
         if(items[i]==MENU_LIFT_RESET_POSE&&!liftlever::Supported(GetActiveVehicleModelId()))continue;
+        if((items[i]==MENU_NITRO_SCALE||items[i]==MENU_NITRO_RESET_POSE)&&!NitroCompatible(GetActiveVehicleModelId()))continue;
         if(IsHydraulicsMenuItem(items[i])&&!HydraulicsCompatible(GetActiveVehicleModelId()))continue;
         if(row--==0)return items[i];
     }
@@ -4171,6 +4216,25 @@ void ResetLiftPose() {
     Save();ResetInteraction();
 }
 #include "VehicleHydraulicsSettings.inl"
+bool NitroCompatible(int model){
+    if(model<400||model>611||!g.CModelInfo_IsCarModel||!g.CModelInfo_IsCarModel(model)||
+       !g.CModelInfo_ms_modelInfoPtrs||!g.CVehicleModelInfo_IsUpgradeAvailable)return false;
+    void* info=g.CModelInfo_ms_modelInfoPtrs[model];void* structure{};
+    if(!info)return false;std::memcpy(&structure,static_cast<const char*>(info)+0x90,sizeof(structure));
+    return structure&&g.CVehicleModelInfo_IsUpgradeAvailable(info,15);
+}
+void SetNitroPose(int model,const float pose[12]){
+    if(!NitroCompatible(model)||!pose)return;
+    for(int i=0;i<12;++i)if(!std::isfinite(pose[i])||std::abs(pose[i])>10.f)return;
+    const V3 r{pose[3],pose[4],pose[5]},f{pose[6],pose[7],pose[8]},u{pose[9],pose[10],pose[11]};
+    if(std::abs(Length(r)-1.f)>.01f||std::abs(Length(f)-1.f)>.01f||std::abs(Length(u)-1.f)>.01f||Dot(Cross(r,f),u)<.99f)return;
+    std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];std::copy_n(pose,12,c.nitroPose);c.nitroPoseSet=true;
+}
+float GetNitroScale(){const int model=GetActiveVehicleModelId();std::lock_guard<std::mutex> lock(g_modelMutex);const auto it=g_modelCalibration.find(model);return it==g_modelCalibration.end()?1.f:it->second.nitroScale;}
+void AdjustNitroScale(int direction){const int model=GetActiveVehicleModelId();if(!NitroCompatible(model))return;
+    {std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];c.nitroScale=std::clamp(c.nitroScale+direction*.05f,.4f,2.f);}Save();ResetInteraction();}
+void ResetNitroPose(){const int model=GetActiveVehicleModelId();
+    {std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];c.nitroPoseSet=false;c.nitroScale=1.f;}Save();ResetInteraction();}
 float GetIgnitionCalibration(int field) {
     if (field<0||field>=6) return 0;
     const int model=GetActiveVehicleModelId();
@@ -5003,8 +5067,12 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         const int previousTarget[2]{g_visual.interactionTarget[0],g_visual.interactionTarget[1]};
         const bool keepHydroPreview=(preview||GetVehicleDebugMode()!=0)&&anchorBuilt&&g_hydroWasPreview;
         const auto hydroPreview=g_hydroLever;const double hydroPreviewTime=g_hydroLastTime;const bool hydroPreviewHigh=g_hydroPreviewHigh;
+        const bool keepNitroPreview=(preview||GetVehicleDebugMode()!=0)&&anchorBuilt&&g_nitroWasPreview;
+        const auto nitroPreview=g_nitroLever;const double nitroPreviewTime=g_nitroLastTime;
+        const auto nitroPreviewFeel=g_nitroFeel;
         ClearInteractionLocked(gameplay && !blocked && anchorBuilt && (activeType==VEHICLE_CAR||activeType==VEHICLE_BIKE));
         if(keepHydroPreview){g_hydroLever=hydroPreview;g_hydroLastTime=hydroPreviewTime;g_hydroWasPreview=true;g_hydroPreviewHigh=hydroPreviewHigh;}
+        if(keepNitroPreview){g_nitroLever=nitroPreview;g_nitroFeel=nitroPreviewFeel;g_nitroLastTime=nitroPreviewTime;g_nitroWasPreview=true;}
         if (anchorBuilt) {
             if (!blocked) for (int h=0;h<2;++h) g_visual.interactionTarget[h]=previousTarget[h];
             anchor.active=false;
@@ -5021,6 +5089,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
                     UpdateIgnition(anchor,activeVehicle,input,hands,occupied,true);
                     UpdateRadioKnob(anchor,activeVehicle,input,hands,occupied,true);
                     UpdateLiftLever(anchor,activeVehicle,input,hands,occupied,true);
+                    UpdateNitroLever(anchor,activeVehicle,input,hands,occupied,true);
                     UpdateHydraulicsJoystick(anchor,activeVehicle,input,hands,occupied,true);
                 } else UpdateCockpitControls(anchor,activeVehicle,input,hands,occupied,false);
             }
@@ -5081,7 +5150,10 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
             UpdateIgnition(visual,activeVehicle,input,hands,0,true);
             UpdateRadioKnob(visual,activeVehicle,input,hands,0,true);
             UpdateLiftLever(visual,activeVehicle,input,hands,0,true);
-            UpdateHydraulicsJoystick(visual,activeVehicle,input,hands,physicalweapon::HeldHandMaskRelaxed()|vehicledoors::ClaimedHands()|(calibrationHand>=0&&calibrationHand<2?1u<<calibrationHand:0u),true);
+            const unsigned nitroOccupied=physicalweapon::HeldHandMaskRelaxed()|vehicledoors::ClaimedHands()|
+                (calibrationHand>=0&&calibrationHand<2?1u<<calibrationHand:0u);
+            UpdateNitroLever(visual,activeVehicle,input,hands,nitroOccupied,true);
+            UpdateHydraulicsJoystick(visual,activeVehicle,input,hands,nitroOccupied,true);
         }
         g_visual=visual;
         return;
@@ -5134,7 +5206,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
                          visual.handlePosition[hand][1],
                          visual.handlePosition[hand][2]};
         const float distance=poseValid[hand]?Length(positions[hand]-neutral):1000.0f;
-        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand] || visual.liftGrabbed[hand] || visual.hydroGrabbed[hand] || visual.hydroPoint[hand]>.01f || g_hornState.hands[hand].visual.attached;
+        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand] || visual.liftGrabbed[hand] || visual.nitroGrabbed[hand] || visual.hydroGrabbed[hand] || visual.hydroPoint[hand]>.01f || g_hornState.hands[hand].visual.attached;
         if (g_grabbed[hand]&&(!poseValid[hand]||input.grip[hand]<=0.30f||
                               holdsWeapon)) {
             g_grabbed[hand]=false; g_angleValid[hand]=false;
@@ -5158,7 +5230,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
             const auto frame=vehiclehorn::WheelFrame(visual);
             for (int hand=0;hand<2;++hand) {
                 const bool available=!(weaponHands&(1u<<hand))&&!g_grabbed[hand]&&
-                    !visual.ignitionGrabbed[hand]&&!visual.radioGrabbed[hand]&&!visual.liftGrabbed[hand]&&!visual.hydroGrabbed[hand]&&visual.hydroPoint[hand]<.01f;
+                    !visual.ignitionGrabbed[hand]&&!visual.radioGrabbed[hand]&&!visual.liftGrabbed[hand]&&!visual.nitroGrabbed[hand]&&!visual.hydroGrabbed[hand]&&visual.hydroPoint[hand]<.01f;
                 auto& contact=g_hornState.hands[hand];
                 contact.Step(frame,poses[hand],hand,available,input.grip[hand],dt);
                 visual.horn[hand]=contact.visual;
@@ -5491,6 +5563,8 @@ void RefreshVisualTracking() {
     }
     if(g_visual.hydroVisible){void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
         BuildHydraulicsTracking(g_visual,vehicle,GetVehicleDebugMode()!=0);}
+    if(g_visual.nitroVisible){void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+        BuildNitroTracking(g_visual,vehicle,GetVehicleDebugMode()!=0);}
     if (!g_visual.active||(!g_visual.bike&&g_visual.modelId!=532)) return;
     const WheelVisualState previous=g_visual;
     // Input runs before the camera publishes this frame's world-to-tracking

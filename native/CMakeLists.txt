@@ -63,6 +63,11 @@ set(LIFT_LEVER_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/vehicle-lift-lever/li
 configure_file(src/VehicleLiftLeverAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S" @ONLY)
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S" PROPERTY OBJECT_DEPENDS "${LIFT_LEVER_MESH}")
 
+set(NITRO_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/nitro-lever/runtime/nitro.mesh")
+set(NITRO_ALPHA "${CMAKE_CURRENT_SOURCE_DIR}/../assets/nitro-lever/runtime/nitro.alpha")
+configure_file(src/VehicleNitroAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/VehicleNitroAssets.S" @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/VehicleNitroAssets.S" PROPERTY OBJECT_DEPENDS "${NITRO_MESH};${NITRO_ALPHA}")
+
 set(HYDRAULICS_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/hydraulics/runtime/hydraulics.mesh")
 set(HYDRAULICS_ALPHA "${CMAKE_CURRENT_SOURCE_DIR}/../assets/hydraulics/runtime/hydraulics.alpha")
 configure_file(src/VehicleHydraulicsAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/VehicleHydraulicsAssets.S" @ONLY)
@@ -89,7 +94,9 @@ set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S" PROPERTY OBJ
 add_library(savr SHARED
     src/CockpitClickAudio.cpp
     src/VehicleHydraulicsHandConfig.cpp
+    src/VehicleNitroAudio.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/VehicleHydraulicsAssets.S"
+    "${CMAKE_CURRENT_BINARY_DIR}/VehicleNitroAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/WatchAssets.S"

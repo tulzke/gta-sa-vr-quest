@@ -1,6 +1,7 @@
 #include "Cheats.h"
 #include "MissionCatalog.h"
 #include "DirectMission.h"
+#include "Driving.h"
 
 #include "Basketball.h"
 #include "Holster.h"
@@ -29,7 +30,7 @@ enum class Kind : unsigned char { Plain, Vehicle, GodMode, UnlockCities, Reset,
                                   MissionSkip, TutorialSkip, MissionSelect,
                                   MissionLaunch, Respect, NeverTired,
                                   Teleport, Basketball, SpawnByButton,
-                                  InstallHydraulics, WeaponSkills };
+                                  InstallHydraulics, WeaponSkills, InstallNitro };
 
 struct Entry {
     const char* label;
@@ -159,6 +160,7 @@ Entry g_cheats[] = {
     // dribble off the ground. No story script involved.
     {"SPAWN BASKETBALL",       "_ZN7CObject6CreateEib",                -1, Kind::Basketball, nullptr},
     {"INSTALL HYDRAULICS",     "_ZN8CVehicle17AddVehicleUpgradeEi",    -1, Kind::InstallHydraulics, nullptr},
+    {"INSTALL NITRO",          "_ZN8CVehicle17AddVehicleUpgradeEi",    -1, Kind::InstallNitro, nullptr},
 #ifdef SAVR_DEV
     // Hidden developer toggle (never compiled into player builds). While ON,
     // the grips+A chord cycle-spawns vehicle model 400..611 for calibration.
@@ -167,6 +169,42 @@ Entry g_cheats[] = {
 };
 
 std::atomic<bool> g_godMode{false};
+void (*g_loadUpgradeModels)(bool){};
+void (*g_releaseUpgradeModel)(int){};
+const std::uint16_t* g_nitroBottleModel{};
+
+void* NitroInstallVehicle() {
+    void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    void* vehicle=ped&&g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+    if(!vehicle||!g.CVehicle_IsDriver||!g.CVehicle_IsDriver(vehicle,ped)||
+       !*reinterpret_cast<void**>(static_cast<char*>(vehicle)+0x20))return nullptr;
+    const int model=*reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0x32);
+    return driving::NitroCompatible(model)?vehicle:nullptr;
+}
+
+bool NitroInstallAvailable(void* upgrade) {
+    return upgrade&&g_nitroBottleModel&&*g_nitroBottleModel>=1000&&*g_nitroBottleModel<=1193&&
+        g_loadUpgradeModels&&g_releaseUpgradeModel&&g.CStreaming_RequestModel&&
+        g.CStreaming_ms_aInfoForModel&&g.CModelInfo_ms_modelInfoPtrs&&g.CVehicle_GetUpgrade&&NitroInstallVehicle();
+}
+
+bool InstallNitroUpgrade(void* upgrade) {
+    if(!NitroInstallAvailable(upgrade))return false;
+    void* vehicle=NitroInstallVehicle();
+    const int model=*g_nitroBottleModel;
+    // AddVehicleUpgrade clones the bottle atomic; stream it before invoking
+    // the garage path. Its positive NitrousControl call also clears our pause.
+    g.CStreaming_RequestModel(model,2); // STREAMFLAGS_GAME_REQUIRED
+    g_loadUpgradeModels(false);
+    bool installed=false;
+    if(g.CStreaming_ms_aInfoForModel[model*20+0x10]==1&&g.CModelInfo_ms_modelInfoPtrs[model]) {
+        driving::ResetInteraction();
+        reinterpret_cast<void(*)(void*,int)>(upgrade)(vehicle,model);
+        installed=g.CVehicle_GetUpgrade(vehicle,15)!=-1;
+    }
+    g_releaseUpgradeModel(model);
+    return installed;
+}
 // Dev-only: while ON, the grips+A chord cycle-spawns vehicles (see
 // ProcessDevVehicleRequest). Its menu row is compiled out of player builds.
 std::atomic<bool> g_spawnByButton{false};
@@ -408,6 +446,7 @@ int CategoryForIndex(int index) {
     // must not be relied on for entries appended at the end of the table.
     if (g_cheats[index].kind == Kind::Vehicle ||
         g_cheats[index].kind == Kind::InstallHydraulics ||
+        g_cheats[index].kind == Kind::InstallNitro ||
         index == 25 || (index >= 61 && index <= 67))
         return CATEGORY_VEHICLES;
     if (index >= 20 && index <= 24)
@@ -441,6 +480,9 @@ int CategorySourceIndex(int category, int item) {
 
 void Init(void* handle) {
     if (handle == nullptr) return;
+    g_loadUpgradeModels=reinterpret_cast<void(*)(bool)>(dlsym(handle,"_ZN10CStreaming22LoadAllRequestedModelsEb"));
+    g_releaseUpgradeModel=reinterpret_cast<void(*)(int)>(dlsym(handle,"_ZN10CStreaming19SetModelIsDeletableEi"));
+    g_nitroBottleModel=static_cast<const std::uint16_t*>(dlsym(handle,"MI_NITRO_BOTTLE_LARGE"));
     int ok = 0;
     for (Entry& cheat : g_cheats) {
         cheat.fn = dlsym(handle, cheat.sym);
@@ -613,6 +655,8 @@ const char* Name(int index) {
 }
 
 bool Available(int index) {
+    if(index>=0&&index<Count()&&g_cheats[index].kind==Kind::InstallNitro)
+        return NitroInstallAvailable(g_cheats[index].fn);
     if (index >= 0 && index < Count() &&
         g_cheats[index].kind == Kind::WeaponSkills)
         return g_getStatValue && g_setStatValue && g.CPed_GetWeaponSkill;
@@ -655,6 +699,11 @@ void Activate(int index) {
         return;
     }
     Entry& cheat = g_cheats[index];
+    if(cheat.kind==Kind::InstallNitro) {
+        const bool installed=InstallNitroUpgrade(cheat.fn);
+        LOGI("cheat: INSTALL NITRO %s",installed?"fitted/refilled":"unavailable for this vehicle or model not loaded");
+        return;
+    }
     if (cheat.kind == Kind::WeaponSkills) {
         if (!Available(index)) return;
         void* ped = g.FindPlayerPed(-1);

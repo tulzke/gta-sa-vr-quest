@@ -1,0 +1,287 @@
+{
+  "task": 32,
+  "approval": "geometry approved 2026-11-16; BLEND/GLB committed as 82eb21d; implementation tested on Quest and accepted by user; task 32 closed 2026-11-16",
+  "triangles": 1376,
+  "parts": [
+    {
+      "name": "MountingHousing",
+      "parent": "NitroFixed",
+      "triangles": 36,
+      "solid": true
+    },
+    {
+      "name": "MountScrew_1",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "ScrewSlot_1",
+      "parent": "NitroFixed",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "MountScrew_2",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "ScrewSlot_2",
+      "parent": "NitroFixed",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "MountScrew_3",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "ScrewSlot_3",
+      "parent": "NitroFixed",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "MountScrew_4",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "ScrewSlot_4",
+      "parent": "NitroFixed",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "GuideCheek_L",
+      "parent": "NitroFixed",
+      "triangles": 144,
+      "solid": true
+    },
+    {
+      "name": "GuideCheek_R",
+      "parent": "NitroFixed",
+      "triangles": 144,
+      "solid": true
+    },
+    {
+      "name": "FixedPivotAxle",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "PivotCap_L",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "PivotCap_R",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "LeverShaft",
+      "parent": "NitroPivot",
+      "triangles": 60,
+      "solid": true
+    },
+    {
+      "name": "GuideFollowerPin",
+      "parent": "NitroPivot",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "FollowerCap_L",
+      "parent": "NitroPivot",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "FollowerCap_R",
+      "parent": "NitroPivot",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "HorizontalGrip",
+      "parent": "NitroPivot",
+      "triangles": 156,
+      "solid": true
+    },
+    {
+      "name": "GripBlueCap_L",
+      "parent": "NitroPivot",
+      "triangles": 124,
+      "solid": true
+    },
+    {
+      "name": "GripBlueCap_R",
+      "parent": "NitroPivot",
+      "triangles": 124,
+      "solid": true
+    },
+    {
+      "name": "GripLabel_N2O",
+      "parent": "NitroPivot",
+      "triangles": 16,
+      "solid": false
+    },
+    {
+      "name": "BaseLabel_NITRO",
+      "parent": "NitroFixed",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveHundreds",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveTens",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveUnits",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReservePercent",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_01",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_02",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_03",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_04",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_05",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_06",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_07",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_08",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_09",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ReserveSegment_10",
+      "parent": "NitroGauge",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "StateLabel_OFF",
+      "parent": "NitroFixed",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "StateLabel_ON",
+      "parent": "NitroFixed",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "ForwardArrow",
+      "parent": "NitroFixed",
+      "triangles": 2,
+      "solid": false
+    },
+    {
+      "name": "FlowLampBezel",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    },
+    {
+      "name": "FlowLampLens",
+      "parent": "NitroFixed",
+      "triangles": 44,
+      "solid": true
+    }
+  ],
+  "blender_axes": [
+    "right +X",
+    "forward +Y",
+    "up +Z"
+  ],
+  "pivot_m": [
+    0,
+    0.018,
+    0.048
+  ],
+  "grip_local_m": [
+    0,
+    0,
+    0.088
+  ],
+  "off_angle_deg": 22,
+  "on_angle_deg": -22,
+  "frames": {
+    "OFF": 1,
+    "ON": 25,
+    "OFF_RETURN": 49
+  },
+  "atlas": "nitro-atlas.png",
+  "preview_uninstalled": {
+    "yellow_mix": 0.2,
+    "opacity": 0.45
+  },
+  "validation": "manifold solids; correct rigid pivot; through slots clear; stops present; runtime export validated at 1376 triangles; host tests, GPU shader tests and Android build passed; installed and accepted by user on Quest"
+}

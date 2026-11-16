@@ -1510,6 +1510,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::AdjustHydraulicsScale(step);
             } else if(item==savr::driving::MENU_HYDRAULICS_RESET_POSE&&enter) {
                 savr::driving::ResetHydraulicsPose();
+            } else if(item==savr::driving::MENU_NITRO_SCALE&&step) {
+                savr::driving::AdjustNitroScale(step);
+            } else if(item==savr::driving::MENU_NITRO_RESET_POSE&&enter) {
+                savr::driving::ResetNitroPose();
             } else if (item==savr::driving::MENU_REAR_MIRROR_FOV && step) {
                 savr::driving::AdjustRearMirrorFov(step);
             } else if (item>=savr::driving::MENU_IGNITION_X &&

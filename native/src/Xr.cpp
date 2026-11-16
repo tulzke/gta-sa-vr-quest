@@ -10,6 +10,8 @@
 #include "HandSkeleton.h"
 #include "WatchModel.h"
 #include "VehicleLiftLeverModel.h"
+#include "VehicleNitroModel.h"
+#include "VehicleNitroSpeedShader.h"
 #include "VehicleHydraulicsModel.h"
 #include "VehicleHydraulicsHand.h"
 #include "VehicleLiftLeverHand.h"
@@ -2167,6 +2169,7 @@ struct State {
     GLint  fxaaInverseSizeUniform{-1};
     GLint  fxaaUnderwaterUniform{-1};
     GLint  fxaaWaterDepthUniform{-1};
+    GLint  fxaaNitroUniform{-1};
     GLint  fxaaMobileColorModeUniform{-1};
     GLint  fxaaContrastMultUniform{-1};
     GLint  fxaaContrastAddUniform{-1};
@@ -2174,15 +2177,15 @@ struct State {
     GLint  fxaaGreenGradeUniform{-1};
     GLint  fxaaBlueGradeUniform{-1};
 
-    // When FXAA is disabled, underwater grading replaces the normal linear
-    // blit with this one-sample copy. It is created lazily and used only while
-    // the game camera is submerged.
+    // FXAA-off copy for colour/water grading and active nitro blur. Created
+    // lazily; the ordinary linear blit remains available when all are off.
     GLuint underwaterProgram{0};
     GLuint underwaterVertexArray{0};
     GLuint underwaterSampler{0};
     GLint  underwaterTextureUniform{-1};
     GLint  underwaterAmountUniform{-1};
     GLint  underwaterDepthUniform{-1};
+    GLint  underwaterNitroUniform{-1};
     GLint  underwaterMobileColorModeUniform{-1};
     GLint  underwaterContrastMultUniform{-1};
     GLint  underwaterContrastAddUniform{-1};
@@ -3500,7 +3503,7 @@ void ConfigureRenderWareEyeFoveation(int set, int eye, GLuint texture) {
 // The Quest Vice City port's stable single-frame FXAA, translated to GLES.
 // Low-contrast pixels stop after five samples; edge pixels use nine. Sampling
 // is clamped to half a source texel so the filter cannot bleed across an eye.
-const char* kFxaaFragmentShader = R"(#version 300 es
+const std::string kFxaaFragmentShader = std::string(R"(#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uTexture;
@@ -3514,7 +3517,7 @@ uniform vec4 uRedGrade;
 uniform vec4 uGreenGrade;
 uniform vec4 uBlueGrade;
 out vec4 outColor;
-
+)") + nitro::kSpeedBlurGlsl + R"(
 float Luma(vec3 colour) {
     return dot(colour, vec3(0.299, 0.587, 0.114));
 }
@@ -3552,7 +3555,7 @@ vec3 GradeOutput(vec3 colour) {
     // Retail MobileRender first lands in a normalized render target. Preserve
     // that saturation point before our compositor-only underwater blend;
     // otherwise highlights above 1.0 would be over-weighted under water.
-    return GradeUnderwater(clamp(GradeMobileOriginal(colour), 0.0, 1.0));
+    return GradeUnderwater(clamp(GradeMobileOriginal(NitroSpeedBlur(colour,vUv)), 0.0, 1.0));
 }
 
 void main() {
@@ -3591,7 +3594,7 @@ void main() {
 }
 )";
 
-const char* kUnderwaterCopyFragmentShader = R"(#version 300 es
+const std::string kUnderwaterCopyFragmentShader = std::string(R"(#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uTexture;
@@ -3604,7 +3607,7 @@ uniform vec4 uRedGrade;
 uniform vec4 uGreenGrade;
 uniform vec4 uBlueGrade;
 out vec4 outColor;
-
+)") + nitro::kSpeedBlurGlsl + R"(
 vec3 GradeMobileOriginal(vec3 colour) {
     if (uMobileColorMode == 1)
         return colour * uContrastMult + uContrastAdd;
@@ -3620,7 +3623,7 @@ vec3 GradeMobileOriginal(vec3 colour) {
 void main() {
     // Match the normalized intermediate target used by retail before applying
     // the compositor-only underwater tint.
-    vec3 colour = clamp(GradeMobileOriginal(texture(uTexture, vUv).rgb),
+    vec3 colour = clamp(GradeMobileOriginal(NitroSpeedBlur(texture(uTexture, vUv).rgb,vUv)),
                         0.0, 1.0);
     float amount = smoothstep(0.12, 0.50, clamp(uUnderwater, 0.0, 1.0));
     float depth = clamp(uWaterDepth * 0.08, 0.0, 0.65);
@@ -3791,7 +3794,7 @@ bool BuildFxaaProgram() {
     g_fxaaBuildAttempted = true;
 
     GLuint vertex = CompileShader(GL_VERTEX_SHADER, kVertexShader);
-    GLuint fragment = CompileShader(GL_FRAGMENT_SHADER, kFxaaFragmentShader);
+    GLuint fragment = CompileShader(GL_FRAGMENT_SHADER, kFxaaFragmentShader.c_str());
     if (vertex == 0 || fragment == 0) {
         if (vertex != 0) glDeleteShader(vertex);
         if (fragment != 0) glDeleteShader(fragment);
@@ -3821,6 +3824,7 @@ bool BuildFxaaProgram() {
     }
 
     s.fxaaTextureUniform = glGetUniformLocation(s.fxaaProgram, "uTexture");
+    s.fxaaNitroUniform = glGetUniformLocation(s.fxaaProgram,"uNitro");
     s.fxaaInverseSizeUniform =
         glGetUniformLocation(s.fxaaProgram, "uInverseSourceSize");
     s.fxaaUnderwaterUniform =
@@ -3841,7 +3845,7 @@ bool BuildFxaaProgram() {
         glGetUniformLocation(s.fxaaProgram, "uBlueGrade");
     glGenVertexArrays(1, &s.fxaaVertexArray);
     glGenSamplers(1, &s.fxaaSampler);
-    if (s.fxaaTextureUniform < 0 || s.fxaaInverseSizeUniform < 0 ||
+    if (s.fxaaTextureUniform < 0 || s.fxaaInverseSizeUniform < 0 || s.fxaaNitroUniform < 0 ||
         s.fxaaUnderwaterUniform < 0 || s.fxaaWaterDepthUniform < 0 ||
         s.fxaaMobileColorModeUniform < 0 ||
         s.fxaaContrastMultUniform < 0 || s.fxaaContrastAddUniform < 0 ||
@@ -3891,7 +3895,7 @@ bool BuildUnderwaterCopyProgram() {
 
     GLuint vertex = CompileShader(GL_VERTEX_SHADER, kVertexShader);
     GLuint fragment = CompileShader(
-        GL_FRAGMENT_SHADER, kUnderwaterCopyFragmentShader);
+        GL_FRAGMENT_SHADER, kUnderwaterCopyFragmentShader.c_str());
     if (vertex == 0 || fragment == 0) {
         if (vertex != 0) glDeleteShader(vertex);
         if (fragment != 0) glDeleteShader(fragment);
@@ -3919,6 +3923,7 @@ bool BuildUnderwaterCopyProgram() {
 
     s.underwaterTextureUniform =
         glGetUniformLocation(s.underwaterProgram, "uTexture");
+    s.underwaterNitroUniform=glGetUniformLocation(s.underwaterProgram,"uNitro");
     s.underwaterAmountUniform =
         glGetUniformLocation(s.underwaterProgram, "uUnderwater");
     s.underwaterDepthUniform =
@@ -3937,7 +3942,7 @@ bool BuildUnderwaterCopyProgram() {
         glGetUniformLocation(s.underwaterProgram, "uBlueGrade");
     glGenVertexArrays(1, &s.underwaterVertexArray);
     glGenSamplers(1, &s.underwaterSampler);
-    if (s.underwaterTextureUniform < 0 ||
+    if (s.underwaterTextureUniform < 0 || s.underwaterNitroUniform < 0 ||
         s.underwaterAmountUniform < 0 || s.underwaterDepthUniform < 0 ||
         s.underwaterMobileColorModeUniform < 0 ||
         s.underwaterContrastMultUniform < 0 ||
@@ -4433,6 +4438,7 @@ bool DrawEyeFxaa(GLuint sourceTexture, int sourceWidth, int sourceHeight,
                  int targetWidth, int targetHeight,
                  float underWaterness, float waterDepth,
                  const MobileColorState& mobileColor,
+                 float nitroStrength,float nitroCenterX,float nitroCenterY,
                  const FxaaGlState& restoreState, FxaaFrameStats& stats) {
     if (sourceTexture == 0 || sourceWidth <= 0 || sourceHeight <= 0 ||
         !BuildFxaaProgram() || g_fxaaRuntimeFailed) {
@@ -4470,6 +4476,7 @@ bool DrawEyeFxaa(GLuint sourceTexture, int sourceWidth, int sourceHeight,
         glBindTexture(GL_TEXTURE_2D, sourceTexture);
         glBindSampler(0, s.fxaaSampler);
         glUniform1i(s.fxaaTextureUniform, 0);
+        glUniform3f(s.fxaaNitroUniform,nitroStrength,nitroCenterX,nitroCenterY);
         glUniform2f(s.fxaaInverseSizeUniform,
                     1.0f / static_cast<float>(sourceWidth),
                     1.0f / static_cast<float>(sourceHeight));
@@ -4528,9 +4535,10 @@ bool DrawEyeUnderwaterCopy(GLuint sourceTexture,
                            int targetWidth, int targetHeight,
                            float underWaterness, float waterDepth,
                            const MobileColorState& mobileColor,
+                           float nitroStrength,float nitroCenterX,float nitroCenterY,
                            const FxaaGlState& restoreState) {
     if (sourceTexture == 0 || targetWidth <= 0 || targetHeight <= 0 ||
-        (underWaterness <= 0.001f && mobileColor.mode == 0) ||
+        (underWaterness <= 0.001f && mobileColor.mode == 0 && nitroStrength<=.001f) ||
         !BuildUnderwaterCopyProgram() ||
         g_underwaterRuntimeFailed) {
         return false;
@@ -4562,6 +4570,7 @@ bool DrawEyeUnderwaterCopy(GLuint sourceTexture,
         glBindTexture(GL_TEXTURE_2D, sourceTexture);
         glBindSampler(0, s.underwaterSampler);
         glUniform1i(s.underwaterTextureUniform, 0);
+        glUniform3f(s.underwaterNitroUniform,nitroStrength,nitroCenterX,nitroCenterY);
         glUniform1f(s.underwaterAmountUniform,
                     std::clamp(underWaterness, 0.0f, 1.0f));
         glUniform1f(s.underwaterDepthUniform,
@@ -6346,7 +6355,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     drivingWheel.trackedHandsEnabled = driving::ShouldUseTrackedHands() ||
         drivingWheel.ignitionGrabbed[0] || drivingWheel.ignitionGrabbed[1] ||
         drivingWheel.radioGrabbed[0] || drivingWheel.radioGrabbed[1] || debugPinchHands!=0;
-    drivingWheel.trackedHandsEnabled=drivingWheel.trackedHandsEnabled||drivingWheel.liftGrabbed[0]||drivingWheel.liftGrabbed[1]||drivingWheel.hydroGrabbed[0]||drivingWheel.hydroGrabbed[1]||drivingWheel.hydroPoint[0]>0.f||drivingWheel.hydroPoint[1]>0.f;
+    drivingWheel.trackedHandsEnabled=drivingWheel.trackedHandsEnabled||drivingWheel.liftGrabbed[0]||drivingWheel.liftGrabbed[1]||drivingWheel.nitroGrabbed[0]||drivingWheel.nitroGrabbed[1]||drivingWheel.hydroGrabbed[0]||drivingWheel.hydroGrabbed[1]||drivingWheel.hydroPoint[0]>0.f||drivingWheel.hydroPoint[1]>0.f;
     g_lastDashModelId.store(
         (drivingWheel.active || drivingWheel.dashAnchorValid)
             ? drivingWheel.modelId : -1,
@@ -7887,6 +7896,8 @@ void BuildDrivingMenu() {
                 break;
             case driving::MENU_MIRROR_RESET_POSE:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET MIRROR POSITION");break;
+            case driving::MENU_LIFT_RESET_POSE:
+                std::snprintf(rows[row],sizeof(rows[row]),"RESET LIFT LEVER POSE");break;
             case driving::MENU_HYDRAULICS_SCALE:
                 std::snprintf(rows[row],sizeof(rows[row]),"HYDRAULICS SIZE < %.0f%% >",driving::GetHydraulicsScale()*100.f);break;
             case driving::MENU_HYDRAULICS_HAND:
@@ -7900,8 +7911,10 @@ void BuildDrivingMenu() {
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET HAND FIT%s",hydrohand::Saved()?"":" (SAVE FAILED)");break;
             case driving::MENU_HYDRAULICS_RESET_POSE:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET HYDRAULICS POSE");break;
-            case driving::MENU_LIFT_RESET_POSE:
-                std::snprintf(rows[row],sizeof(rows[row]),"RESET LIFT LEVER POSE");break;
+            case driving::MENU_NITRO_SCALE:
+                std::snprintf(rows[row],sizeof(rows[row]),"NITRO SIZE < %.0f%% >",driving::GetNitroScale()*100.f);break;
+            case driving::MENU_NITRO_RESET_POSE:
+                std::snprintf(rows[row],sizeof(rows[row]),"RESET NITRO LEVER POSE");break;
             case driving::MENU_PASSENGER_RESET:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET PASSENGER VIEW / REAR PAIR");break;
             case driving::MENU_REAR_MIRROR_FOV:
@@ -9040,7 +9053,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         bool basketballFlatPalm = false;
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
-        const bool liftHand=drivingWheel.liftGrabbed[hand];
+        const bool liftHand=drivingWheel.liftGrabbed[hand]||drivingWheel.nitroGrabbed[hand];
         const bool hydroHand=drivingWheel.hydroGrabbed[hand];
         if(!hydroHand){
             const bool free=!liftHand&&!steeringHand&&!hp[hand].climbGrip&&
@@ -9087,8 +9100,14 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         } else if(liftHand) {
             const auto toXr=[](vehicledoors::Vec v){return XrVector3f{v.x,v.y,v.z};};
             const auto vec=[](const float v[3]){return vehicledoors::Vec{v[0],v[1],v[2]};};
-            const vehicledoors::Basis lever{vec(drivingWheel.liftRight),vec(drivingWheel.liftForward),vec(drivingWheel.liftUp),vec(drivingWheel.liftCenter)};
-            const auto frame=liftlever::HandFrame(lever,drivingWheel.liftAngle,drivingWheel.liftGripX,hand);
+            const bool nitroHand=drivingWheel.nitroGrabbed[hand];
+            const vehicledoors::Basis lever=nitroHand?vehicledoors::Basis{vec(drivingWheel.nitroRight),vec(drivingWheel.nitroForward),vec(drivingWheel.nitroUp),vec(drivingWheel.nitroCenter)}:
+                vehicledoors::Basis{vec(drivingWheel.liftRight),vec(drivingWheel.liftForward),vec(drivingWheel.liftUp),vec(drivingWheel.liftCenter)};
+            const float angle=nitroHand?drivingWheel.nitroAngle:drivingWheel.liftAngle;
+            auto frame=liftlever::HandFrame(lever,angle,nitroHand?drivingWheel.nitroGripX:drivingWheel.liftGripX,hand);
+            if(nitroHand){const float scale=drivingWheel.nitroScale;
+                const auto u=lever.up*std::cos(angle)-lever.forward*std::sin(angle);
+                frame.position=frame.position+lever.forward*(.018f*scale)+lever.up*(.048f*scale-.05f)+u*(.088f*scale-.18f)+lever.right*(drivingWheel.nitroGripX*(scale-1.f));}
             right=toXr(frame.right);forward=toXr(frame.forward);up=toXr(frame.up);
             pos=toXr(frame.position);
             grip=1.f;trig=0.f;
@@ -11455,8 +11474,9 @@ void DrawRadioKnob(const float* mvp,const driving::WheelVisualState& w) {
 }
 
 #include "VehicleLiftLeverRender.inl"
-
+#include "VehicleNitroRender.inl"
 #include "VehicleHydraulicsRender.inl"
+
 void DrawIgnition(const float* mvp,const driving::WheelVisualState& w) {
     if (!w.ignitionVisible) return;
     const XrVector3f c{w.ignitionCenter[0],w.ignitionCenter[1],w.ignitionCenter[2]};
@@ -12417,7 +12437,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // the closed hands are drawn over it at the exact animated rim sockets.
     if (trackedVisuals && drivingWheel.active)
         DrawImmersiveDrivingWheel(mvp, drivingWheel);
-    if (!scope.active) { DrawIgnition(mvp,drivingWheel); DrawRadioKnob(mvp,drivingWheel); DrawLiftLever(mvp,drivingWheel); DrawHydraulicsJoystick(mvp,drivingWheel); }
+    if (!scope.active) { DrawIgnition(mvp,drivingWheel); DrawRadioKnob(mvp,drivingWheel); DrawLiftLever(mvp,drivingWheel); DrawNitroLever(mvp,drivingWheel); DrawHydraulicsJoystick(mvp,drivingWheel); }
     // Never turn the optional highlight into a wallhack: if the shared game
     // depth cannot be copied this frame, omit it instead of drawing on top.
     if (usingGameDepth)
@@ -12736,8 +12756,10 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         IsSessionFocused() && !IsMenuVisible() && g_headPoseValid,
         g_trackingRecovery.epoch);
     const auto haloFx=peripheral::Select(combatFx,wantedFx,vitalsFx);
+    const float nitroStrength=IsSessionFocused()&&!IsMenuVisible()&&drivingWheel.active&&
+        !drivingWheel.nitroGhost&&!bakedScope.active?drivingWheel.nitroEffect:0.f;
     const bool shaderCopyMayRun = fxaaStats.requested ||
-        underWaterness > 0.001f || mobileColor.mode != 0 || haloFx.Active();
+        underWaterness > 0.001f || mobileColor.mode != 0 || haloFx.Active() || nitroStrength>.001f;
     // Submit projection layers with their recorded render pose; use theater until that pose is available.
     if (!haveRenderPose) {
         outcome = perf::StereoProjectionOutcome::MissingPose;
@@ -12835,13 +12857,19 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         // belonging to this slot. The scope guard transfers the CPU lease to a
         // GPU fence on every return path after this point.
         gpuRead.MarkIssued();
+        // Match the symmetric game frustum submitted below, rather than the
+        // headset's different native optical frustum. Head-forward is (0.5,0.5)
+        // in both recorded eye images, keeping their sharp regions aligned.
+        constexpr float nitroCenterX=.5f,nitroCenterY=.5f;
         const bool usedFxaa = fxaaStats.requested &&
             DrawEyeFxaa(sourceTexture, ew, eh, chain.width, chain.height,
                         underWaterness, waterDepth, mobileColor,
+                        nitroStrength,nitroCenterX,nitroCenterY,
                         fxaaGlState, fxaaStats);
         const bool usedUnderwaterCopy = !usedFxaa &&
             DrawEyeUnderwaterCopy(sourceTexture, chain.width, chain.height,
                                   underWaterness, waterDepth, mobileColor,
+                                  nitroStrength,nitroCenterX,nitroCenterY,
                                   fxaaGlState);
         // Bind the source only after FXAA has finished sampling it. This keeps
         // the shader path free of attached-texture ambiguity while preserving
