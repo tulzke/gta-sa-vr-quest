@@ -1,8 +1,8 @@
 {
   "task": 31,
-  "status": "approved 2026-11-16; runtime integration in progress",
+  "status": "approved 2026-11-16; four cardinal divisions; integrated",
   "units": "metres",
-  "triangles": 4912,
+  "triangles": 4904,
   "parts": [
     {
       "name": "MountingHousing",
@@ -95,19 +95,9 @@
       "parent": "DetentIndex_0"
     },
     {
-      "name": "DetentTick_1",
-      "triangles": 2,
-      "parent": "DetentIndex_1"
-    },
-    {
       "name": "DetentTick_2",
       "triangles": 2,
       "parent": "DetentIndex_2"
-    },
-    {
-      "name": "DetentTick_3",
-      "triangles": 2,
-      "parent": "DetentIndex_3"
     },
     {
       "name": "DetentTick_4",
@@ -115,19 +105,9 @@
       "parent": "DetentIndex_4"
     },
     {
-      "name": "DetentTick_5",
-      "triangles": 2,
-      "parent": "DetentIndex_5"
-    },
-    {
       "name": "DetentTick_6",
       "triangles": 2,
       "parent": "DetentIndex_6"
-    },
-    {
-      "name": "DetentTick_7",
-      "triangles": 2,
-      "parent": "DetentIndex_7"
     },
     {
       "name": "ModeButtonFixedBezel",
@@ -202,18 +182,14 @@
     0.055
   ],
   "detent_angle_deg": 22,
-  "positions": 9,
+  "positions": 5,
   "mission_positions": 5,
   "poses": {
     "NEUTRAL": 1,
     "FRONT": 9,
-    "FRONT RIGHT": 31,
-    "RIGHT": 53,
-    "REAR RIGHT": 75,
-    "REAR": 97,
-    "REAR LEFT": 119,
-    "LEFT": 141,
-    "FRONT LEFT": 163
+    "RIGHT": 31,
+    "REAR": 53,
+    "LEFT": 75
   },
   "bellows": {
     "method": "continuous axial ring skinning",

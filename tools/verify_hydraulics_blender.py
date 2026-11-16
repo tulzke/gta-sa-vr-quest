@@ -78,10 +78,14 @@ first=evaluate(3.5,5.)
 second=evaluate(3.51,5.01)
 distance=max((a-b).length for a,b in zip(first,second))
 assert 0<distance<.0001,('continuous tiny-angle deformation',distance)
-root['mission_four_way']=1.;root.update_tag();bpy.context.view_layer.update()
+assert 'mission_four_way' not in root
+assert set(manifest['poses'])=={'NEUTRAL','FRONT','RIGHT','REAR','LEFT'}
+assert manifest['positions']==5
 for i in range(8):
-    scale=bpy.data.objects[f'DetentIndex_{i}'].scale.x
-    assert abs(scale-(0 if i%2 else 1))<1e-6
+    if i%2:
+        assert f'DetentIndex_{i}' not in bpy.data.objects and f'DetentTick_{i}' not in bpy.data.objects
+    else:
+        assert abs(bpy.data.objects[f'DetentIndex_{i}'].scale.x-1)<1e-6
 root['button_press']=1.;root.update_tag();bpy.context.view_layer.update()
 assert abs(bpy.data.objects['HydraulicsModeButton'].location.z-.009)<1e-6
 report['tiny_tilt_max_displacement_m']=distance
@@ -98,6 +102,8 @@ assert doc.get('animations') and len(doc['images'])==1
 assert not doc.get('cameras') and not doc.get('extensions',{}).get('KHR_lights_punctual')
 assert all('uri' not in im for im in doc['images'])
 assert all('targets' not in primitive for m in doc['meshes'] for primitive in m['primitives'])
+names={node.get('name') for node in doc['nodes']}
+assert {n for n in names if n and n.startswith('DetentTick_')}=={f'DetentTick_{i}' for i in (0,2,4,6)}
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.context.scene.render.fps=30
 bpy.ops.import_scene.gltf(filepath=str(OUT/'hydraulics-joystick-v1.glb'))
@@ -125,6 +131,6 @@ for name,original in manifest['poses'].items():
         assert max((a-b).length for a,b in zip(neutral,pts))>.002,(name,'static GLB bellows')
     report['glb_samples']+=1
 report['triangles']=manifest['triangles']
-report['result']='PASS: closed solids; arbitrary-angle samples; fixed base; exact moving collar; no bellows self-intersections; continuous tiny motion; clamp; mission indices; button travel; standalone GLB skin animation'
+report['result']='PASS: closed solids; arbitrary-angle samples; fixed base; exact moving collar; no bellows self-intersections; continuous tiny motion; clamp; four permanent cardinal divisions in BLEND/GLB; button travel; standalone GLB skin animation'
 (ROOT/'build/hydraulics-review/validation.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf8')
 print(json.dumps(report,indent=2))

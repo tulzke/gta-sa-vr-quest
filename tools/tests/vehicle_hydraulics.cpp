@@ -352,7 +352,10 @@ void Runtime(){
 }
 std::vector<unsigned char> Read(const char* path){std::ifstream f(path,std::ios::binary);return {std::istreambuf_iterator<char>(f),{}};}
 void Geometry(const char* meshPath,const char* fixturePath){
-    const auto bytes=Read(meshPath);Model model;CHECK(model.Load(bytes.data(),bytes.size()));CHECK(model.indices.size()/3==4912);
+    const auto bytes=Read(meshPath);Model model;CHECK(model.Load(bytes.data(),bytes.size()));CHECK(model.indices.size()/3==4904);
+    std::array<bool,8> divisions{};
+    for(const auto& v:model.vertices)if(v.role>=10){const int index=static_cast<int>(v.role)-10;CHECK(index%2==0);divisions[index]=true;}
+    for(int i=0;i<8;++i)CHECK(divisions[i]==(i%2==0));
     int ball=0,labels=0;
     for(const auto& v:model.vertices){
         if(v.uv[0]>=0){++labels;CHECK(v.role==0&&std::abs(v.position[2]-.0148f)<1e-6f);}

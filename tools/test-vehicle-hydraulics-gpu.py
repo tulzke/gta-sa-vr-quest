@@ -59,7 +59,8 @@ for(let x=-3;x<=3;++x)for(let y=-3;y<=3;++y){if(x*x+y*y>9)continue;const c=sampl
 draw(markers);
 for(let role=10;role<=17;role++){
  const xy=[];for(let v=0;v<header[2];v++)if(vertices[v*14+11]===role)xy.push([vertices[v*14],vertices[v*14+1]]);
- const c=sample((Math.min(...xy.map(p=>p[0]))+Math.max(...xy.map(p=>p[0])))/2,(Math.min(...xy.map(p=>p[1]))+Math.max(...xy.map(p=>p[1])))/2);
+ assert(role%2===1?xy.length===0:xy.length>0,'diagonal divisions must be absent from the mesh: '+role);
+ const a=(role-10)*Math.PI/4,c=sample(-.032+.032*Math.sin(a),.008+.032*Math.cos(a));
  assert(role%2===1?c[3]===0:c[3]===255,'only four cardinal marker positions may be visible: '+role+' alpha '+c[3]);
 }
 draw(labels);const pixels=new Uint8Array(512*512*4);gl.readPixels(0,0,512,512,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
@@ -74,7 +75,7 @@ for(const [name,x,y,w,h] of [['HYDRAULICS',-.027,-.044,.066,.0065],['MODE',.047,
   const at=(py*512+px)*4;if(pixels[at+3]>245){total++;if(Math.min(full[at],full[at+1],full[at+2])>225)white++;}}
  assert(total>5&&white/total>.9,name+' must remain uniformly white over deck: '+white+'/'+total);
 }
-result.textContent='PASS GPU: four cardinal markers, diagonals hidden; '+samples+' opaque ivory ball samples; all six legends uniformly white over deck; transparent label atlas preserved ('+ink+' ink pixels)';
+result.textContent='PASS GPU: four cardinal divisions, diagonals absent from mesh; '+samples+' opaque ivory ball samples; all six legends uniformly white over deck; transparent label atlas preserved ('+ink+' ink pixels)';
 }catch(e){result.textContent='FAIL: '+e.stack}
 </script>'''.replace('__SHADERS__',json.dumps(shaders)).replace('__PAYLOAD__',json.dumps(payload))
 page=OUT/'gpu-test.html';page.write_text(html,encoding='utf8')

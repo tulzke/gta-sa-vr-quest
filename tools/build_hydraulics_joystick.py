@@ -48,10 +48,9 @@ root['tilt_right_deg'] = 0.
 root['tilt_forward_deg'] = 0.
 root['button_press'] = 0.
 root['high_mode'] = 0.
-root['mission_four_way'] = 0.
 for k in ('tilt_right_deg', 'tilt_forward_deg'):
     root.id_properties_ui(k).update(min=-25., max=25., soft_min=-22., soft_max=22., description='Continuous tilt vector; nominal detent radius 22 degrees, combined limit 25 degrees')
-for k in ('button_press', 'high_mode', 'mission_four_way'):
+for k in ('button_press', 'high_mode'):
     root.id_properties_ui(k).update(min=0., max=1.)
 root['bellows_note'] = '21 axial ring joints; smoothstep weights; fixed base, exact shaft collar; continuous any-angle deformation'
 fixed = empty('HydraulicsFixed', root)
@@ -69,7 +68,7 @@ button['interaction'] = 'free-hand fingertip press; Trigger stays accelerator'
 def drive(owner, path, index, expression):
     f = owner.driver_add(path, index) if index is not None else owner.driver_add(path)
     d = f.driver
-    for var, prop in [('x', 'tilt_right_deg'), ('y', 'tilt_forward_deg'), ('press', 'button_press'), ('high', 'high_mode'), ('mission', 'mission_four_way')]:
+    for var, prop in [('x', 'tilt_right_deg'), ('y', 'tilt_forward_deg'), ('press', 'button_press'), ('high', 'high_mode')]:
         v = d.variables.new()
         v.name, v.type = var, 'SINGLE_PROP'
         v.targets[0].id = root
@@ -260,15 +259,13 @@ mod = boot.modifiers.new('Continuous accordion | fixed foot to moving neck','ARM
 mod.object = rig
 mod.use_deform_preserve_volume = False
 
-# Eight external detent indices. The actual gate sits beneath the sealed boot.
-for i in range(8):
+# Four permanent cardinal indices. The actual gate sits beneath the sealed boot.
+for i in (0,2,4,6):
     a = i*math.tau/8
     marker = empty(f'DetentIndex_{i}',fixed,(PX+.032*math.sin(a),PY+.032*math.cos(a),.0147))
     marker['direction_angle_deg'] = i*45
-    marker['diagonal'] = bool(i%2)
-    if i%2:
-        for axis in range(3): drive(marker,'scale',axis,'1-mission')
-    length,width = (.005,.0015) if not i%2 else (.0035,.0013)
+    marker['diagonal'] = False
+    length,width = .005,.0015
     vs = [(-width/2,-length/2,0),(width/2,-length/2,0),(width/2,length/2,0),(-width/2,length/2,0)]
     tick = mesh(f'DetentTick_{i}',vs,[(0,1,2,3)],amber,marker,solid=False)
     tick.rotation_euler.z = -a
@@ -352,14 +349,14 @@ label('HIGH',.059,.029,.017,.005)
 label('FRONT',PX,.050,.021,.0045)
 label('BACK',PX,-.033,.017,.0045)
 
-# An editable tour through all nine detents. Every movement passes through N;
+# An editable tour through the four cardinal detents and neutral;
 # evaluation between keyframes also demonstrates genuinely continuous rubber.
 frame=1
 poses={'NEUTRAL':1}
 root.keyframe_insert(data_path='["tilt_right_deg"]',frame=frame)
 root.keyframe_insert(data_path='["tilt_forward_deg"]',frame=frame)
 scene.timeline_markers.new('NEUTRAL',frame=1)
-for name,dx,dy in [('FRONT',0,1),('FRONT RIGHT',1,1),('RIGHT',1,0),('REAR RIGHT',1,-1),('REAR',0,-1),('REAR LEFT',-1,-1),('LEFT',-1,0),('FRONT LEFT',-1,1)]:
+for name,dx,dy in [('FRONT',0,1),('RIGHT',1,0),('REAR',0,-1),('LEFT',-1,0)]:
     length=math.hypot(dx,dy)
     for delta,scale,suffix in [(8,1.,''),(6,1.,' HOLD'),(8,0.,' NEUTRAL')]:
         frame+=delta
@@ -449,7 +446,7 @@ bpy.context.preferences.filepaths.save_version=0
 bpy.ops.wm.save_as_mainfile(filepath=str(BLEND),compress=True)
 manifest={'task':31,'status':'review; not committed; no game integration','units':'metres','triangles':triangles,'parts':parts,
           'base_size_m':[.150,.110,.0145],'pivot_m':[PX,PY,PZ],'ball_diameter_m':.045,'grip_local_m':[0,0,GRIP],
-          'detent_angle_deg':22,'positions':9,'mission_positions':5,'poses':poses,
+          'detent_angle_deg':22,'positions':5,'mission_positions':5,'poses':poses,
           'bellows':{'method':'continuous axial ring skinning','rings':count,'sides':SIDES,'profile_z_radius':PROFILE,
                      'base_z_m':BOTTOM,'neck_z_m':TOP,'weight':'t*t*(3-2*t)','t':'(z-base_z)/(neck_z-base_z)',
                      'ring_center_delta':'weight * (swingQuaternion * (0,0,neck_z-pivot_z) - (0,0,neck_z-pivot_z))',
@@ -457,7 +454,7 @@ manifest={'task':31,'status':'review; not committed; no game integration','units
                      'runtime_note':'evaluate ring transforms for actual visual lever pose, including transitions and slack; CPU ring deformation or skin palette; no cloth simulation'},
           'atlas':'hydraulics-labels.png','button_travel_m':.006}
 (OUT/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf8')
-for name,pose in [('neutral','NEUTRAL'),('front-right','FRONT RIGHT'),('left','LEFT')]:
+for name,pose in [('neutral','NEUTRAL'),('front','FRONT'),('left','LEFT')]:
     scene.frame_set(poses[pose])
     scene.render.filepath=str(REVIEW/f'hydraulics-{name}.png')
     bpy.ops.render.render(write_still=True)
