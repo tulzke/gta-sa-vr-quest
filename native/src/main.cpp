@@ -14,6 +14,7 @@
 #include "Cheats.h"
 #include "WeaponRecoil.h"
 #include "Driving.h"
+#include "VehicleHydraulicsHandConfig.h"
 #include "FrameTarget.h"
 #include "HdWeapons.h"
 #include "ModelSets.h"
@@ -1499,6 +1500,12 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::ResetPassengerView();
             } else if(item==savr::driving::MENU_LIFT_RESET_POSE&&enter) {
                 savr::driving::ResetLiftPose();
+            } else if(item==savr::driving::MENU_HYDRAULICS_HAND&&(step||enter)) {
+                savr::hydrohand::Select(step?step:1);
+            } else if(item>=savr::driving::MENU_HYDRAULICS_HAND_X&&item<=savr::driving::MENU_HYDRAULICS_HAND_RZ&&step) {
+                savr::hydrohand::Adjust(item-savr::driving::MENU_HYDRAULICS_HAND_X,step);
+            } else if(item==savr::driving::MENU_HYDRAULICS_HAND_RESET&&enter) {
+                savr::hydrohand::Reset();
             } else if(item==savr::driving::MENU_HYDRAULICS_SCALE&&step) {
                 savr::driving::AdjustHydraulicsScale(step);
             } else if(item==savr::driving::MENU_HYDRAULICS_RESET_POSE&&enter) {
@@ -1936,6 +1943,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             savr::basketball::EndHandCalibration();
 
         xr::SetMainMenu    (menuPage == PG_MAIN,     mainSel);
+        const int hydroHandItem=menuPage==PG_DRIVING?savr::driving::GetMenuItemForRow(drivingVehicleType,drivingSel):-1;
+        savr::hydrohand::SetPreview(hydroHandItem>=savr::driving::MENU_HYDRAULICS_HAND&&hydroHandItem<=savr::driving::MENU_HYDRAULICS_HAND_RESET);
         xr::SetCalibPage   (menuPage == PG_CALIB, calibSel, 1, calibWeaponType, calibGroup);
         xr::SetHolsterCalibMenu(menuPage == PG_HOLSTER_CALIB, holsterCalibSel);
         xr::SetHolsterMenu (menuPage == PG_HOLSTERS, holsterSel);

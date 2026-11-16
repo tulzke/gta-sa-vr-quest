@@ -15,6 +15,7 @@ using namespace savr::hydrocontrol;
 namespace savr {GameSymbols g{};}
 namespace savr::vrcam {bool IsStereoActive(){return true;}}
 namespace savr::hydraulics {bool dancing{};bool DanceRunning(){return dancing;}}
+namespace savr::cockpitclick {int clicks{};bool last{};void Click(bool on){++clicks;last=on;}}
 namespace savr::xr {
 int clicks{};float clickAmplitude{},clickFrequency{},clickDuration{};
 void TriggerHaptic(int,float amplitude,float frequency,float duration){++clicks;clickAmplitude=amplitude;clickFrequency=frequency;clickDuration=duration;}
@@ -39,8 +40,6 @@ void OriginalControl(void* vehicle){
     if(g_hydraulicHornScope)CHECK(!OnHydraulicHorn(nullptr)); // one edge per native call
 }
 void OriginalBeat(void*,void*){}
-int clickSounds{};
-void ClickSound(void*,int event,float volume,float speed){CHECK(event==1&&volume>=-3.f&&speed==1.f);++clickSounds;}
 bool IsCar(int m){return m==400||m==567;}
 }
 
@@ -187,8 +186,7 @@ void Runtime(){
     OnHydraulicControl(other.data());CHECK(toggleCalls==2&&hornCalls==2); // ordinary caller still sees original horn
     debug=1;g_hydroToggle=true;OnHydraulicControl(controlled);CHECK(controlCalls==4&&!g_hydroToggle);debug=0;
     allowed=false;OnHydraulicControl(controlled);CHECK(controlCalls==4);allowed=true;
-    g.AudioEngine=vehicle.data();g.CAudioEngine_ReportFrontendAudioEvent=ClickSound;
-    HydroModeClick(0);CHECK(clickSounds==1&&xr::clicks==1&&xr::clickAmplitude>=.6f&&xr::clickFrequency>=150.f&&xr::clickDuration<=20.f);
+    HydroModeClick(0);CHECK(cockpitclick::clicks==1&&cockpitclick::last&&xr::clicks==1&&xr::clickAmplitude>=.6f&&xr::clickFrequency>=150.f&&xr::clickDuration<=20.f);
     Button button;
     for(int i=0;i<20;++i){
         const auto before=*reinterpret_cast<std::uint16_t*>(vehicle.data()+0xa88)>=500;
@@ -284,4 +282,25 @@ void PointPose(const char* path){
     }
     std::puts("PASS fixed ball grip: real skinned palms outside 90 mm sphere, both mirrored hands, 4-6.5 cm wrist arc across all detents");
 }
-int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();HandTravel();SpringReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);}
+void HandConfig(){
+    using savr::hydrohand::Config;
+    const char* path="hand-fit-test.ini";std::remove(path);
+    Config config(path);CHECK(config.Get(0)==savr::hydrohand::Fit{}&&config.Saved());
+    CHECK(config.Adjust(0,0,13)&&config.Adjust(0,3,-45)&&config.Adjust(1,1,25));
+    Config read(path);CHECK(std::abs(read.Get(0)[0]-1.3f)<1e-5f&&read.Get(0)[3]==-45.f&&read.Get(1)[1]==2.5f);
+    CHECK(read.Reset(0));Config reset(path);CHECK(reset.Get(0)==savr::hydrohand::Fit{}&&reset.Get(1)[1]==2.5f);
+    std::ofstream invalid("hand-fit-invalid.ini");invalid<<"Left.Xcm=nan\nLeft.Zcm=10000\nRight.RotZDeg=-10000\nOther.Xcm=7\n";invalid.close();
+    Config filtered("hand-fit-invalid.ini");CHECK(filtered.Get(0)[0]==0&&filtered.Get(0)[2]==25&&filtered.Get(1)[5]==-360);
+    Config failed("hand-fit-missing-directory/no-config.ini");CHECK(failed.Get(0)==savr::hydrohand::Fit{}&&!failed.Saved());
+    for(int h=0;h<2;++h){const savr::radio::HandFrame frame{{},{1,0,0},{0,1,0},{0,0,1}};
+        const savr::hydrohand::Fit fit{1,2,3,45,-90,25};const auto pose=FixedGrip(frame,h,.045f,fit);
+        const auto opening=savr::handrender::MeshPoint(pose,{.09869f,.01410f,0});
+        const savr::radio::HandVector expected{.01f,-.037f+.02f,.012f+.03f};
+        CHECK(savr::radio::Dot(opening-expected,opening-expected)<1e-10f);
+        CHECK(std::abs(savr::radio::Dot(pose.up,pose.forward))<1e-6f);
+    }
+    savr::hydrohand::SetPreview(true);CHECK(savr::hydrohand::PreviewHand()==savr::hydrohand::Selected());
+    savr::hydrohand::SetPreview(false);CHECK(savr::hydrohand::PreviewHand()==-1);
+    std::puts("PASS hand config: separate left/right offsets and rotations; round trip/replace/reset; invalid data/save failure; rotations around grip opening; preview exit");
+}
+int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();HandTravel();SpringReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);HandConfig();}

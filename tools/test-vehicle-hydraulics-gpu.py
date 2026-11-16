@@ -46,7 +46,12 @@ gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,1024,256,0,gl.RED,gl.UNSIGNED_BYTE,bytes(pay
 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.uniform1i(uniform('atlas'),0);
 gl.viewport(0,0,512,512);gl.enable(gl.DEPTH_TEST);gl.clearColor(0,0,0,0);
-const draw=list=>{gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(list),gl.STATIC_DRAW);gl.drawElements(gl.TRIANGLES,list.length,gl.UNSIGNED_SHORT,0);assert(gl.getError()===gl.NO_ERROR,'draw error')};
+const draw=list=>{gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);const solid=[],decal=[];
+ for(let i=0;i<list.length;i+=3)(vertices[list[i]*14+9]>=0?decal:solid).push(...list.slice(i,i+3));
+ gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array([...solid,...decal]),gl.STATIC_DRAW);
+ gl.drawElements(gl.TRIANGLES,solid.length,gl.UNSIGNED_SHORT,0);
+ gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(-1,-4);gl.drawElements(gl.TRIANGLES,decal.length,gl.UNSIGNED_SHORT,solid.length*2);gl.disable(gl.POLYGON_OFFSET_FILL);
+ assert(gl.getError()===gl.NO_ERROR,'draw error')};
 const sample=(x,y)=>{const a=new Uint8Array(4);gl.readPixels(Math.round((x*10+1)*256),Math.round((y*12+1)*256),1,1,gl.RGBA,gl.UNSIGNED_BYTE,a);return a};
 draw(sphere);let samples=0;
 for(let x=-3;x<=3;++x)for(let y=-3;y<=3;++y){if(x*x+y*y>9)continue;const c=sample(-.032+x*.004,.008+y*.004);assert(c[3]===255&&Math.min(c[0],c[1],c[2])>80&&Math.max(c[0],c[1],c[2])-Math.min(c[0],c[1],c[2])<35,'ball must be opaque ivory: '+c);samples++}
@@ -54,7 +59,15 @@ draw(labels);const pixels=new Uint8Array(512*512*4);gl.readPixels(0,0,512,512,gl
 let ink=0,clear=0;for(let i=3;i<pixels.length;i+=4){if(pixels[i]===0)clear++;else ink++}
 assert(ink>200&&clear>250000,'label alpha must remain visible and cut out');
 draw(indices);
-result.textContent='PASS GPU: production shaders; '+samples+' opaque ivory ball samples; transparent label atlas preserved ('+ink+' ink pixels)';
+const full=new Uint8Array(pixels.length);gl.readPixels(0,0,512,512,gl.RGBA,gl.UNSIGNED_BYTE,full);
+for(const [name,x,y,w,h] of [['HYDRAULICS',-.027,-.044,.066,.0065],['MODE',.047,-.040,.021,.006],['LOW',.032,.029,.014,.005],['HIGH',.059,.029,.017,.005],['FRONT',-.032,.050,.021,.0045],['BACK',-.032,-.033,.017,.0045]]){
+ let total=0,white=0;
+ for(let py=0;py<512;py++)for(let px=0;px<512;px++){
+  const wx=(px/256-1)/10,wy=(py/256-1)/12;if(Math.abs(wx-x)>w/2||Math.abs(wy-y)>h/2)continue;
+  const at=(py*512+px)*4;if(pixels[at+3]>245){total++;if(Math.min(full[at],full[at+1],full[at+2])>225)white++;}}
+ assert(total>5&&white/total>.9,name+' must remain uniformly white over deck: '+white+'/'+total);
+}
+result.textContent='PASS GPU: production shaders; '+samples+' opaque ivory ball samples; all six legends uniformly white over deck; transparent label atlas preserved ('+ink+' ink pixels)';
 }catch(e){result.textContent='FAIL: '+e.stack}
 </script>'''.replace('__SHADERS__',json.dumps(shaders)).replace('__PAYLOAD__',json.dumps(payload))
 page=OUT/'gpu-test.html';page.write_text(html,encoding='utf8')

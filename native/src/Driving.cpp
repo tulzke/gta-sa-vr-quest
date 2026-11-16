@@ -18,6 +18,8 @@
 #include "CockpitSelection.h"
 #include "VehicleLiftLever.h"
 #include "VehicleHydraulics.h"
+#include "VehicleHydraulicsHandConfig.h"
+#include "CockpitClickAudio.h"
 #include "VehicleHorn.h"
 
 #include "Locomotion.h"
@@ -3931,6 +3933,8 @@ constexpr int kDefaultCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
     MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE, MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
+    MENU_HYDRAULICS_HAND, MENU_HYDRAULICS_HAND_X, MENU_HYDRAULICS_HAND_Y, MENU_HYDRAULICS_HAND_Z,
+    MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -3953,6 +3957,8 @@ constexpr int kImmersiveCarItems[] = {
     MENU_VEHICLE_TYPE, MENU_DRIVING_TYPE, MENU_CAMERA_VIEW,
     MENU_REAR_MIRROR, MENU_REAR_MIRROR_FOV, MENU_MIRROR_RESET_POSE,
     MENU_PASSENGER_RESET, MENU_LIFT_RESET_POSE, MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
+    MENU_HYDRAULICS_HAND, MENU_HYDRAULICS_HAND_X, MENU_HYDRAULICS_HAND_Y, MENU_HYDRAULICS_HAND_Z,
+    MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -4022,11 +4028,15 @@ void MenuTableForType(int vehicleType, const int** items, int* count) {
 }
 } // namespace
 
+bool IsHydraulicsMenuItem(int item){
+    return item==MENU_HYDRAULICS_SCALE||item==MENU_HYDRAULICS_RESET_POSE||
+        (item>=MENU_HYDRAULICS_HAND&&item<=MENU_HYDRAULICS_HAND_RESET);
+}
 int GetMenuItemCount(int vehicleType) {
     const int* items=nullptr; int count=0;
     MenuTableForType(vehicleType,&items,&count);
     int visible=0;
-    for(int i=0;i<count;++i)if((items[i]!=MENU_LIFT_RESET_POSE||liftlever::Supported(GetActiveVehicleModelId()))&&((items[i]!=MENU_HYDRAULICS_SCALE&&items[i]!=MENU_HYDRAULICS_RESET_POSE)||HydraulicsCompatible(GetActiveVehicleModelId())))++visible;
+    for(int i=0;i<count;++i)if((items[i]!=MENU_LIFT_RESET_POSE||liftlever::Supported(GetActiveVehicleModelId()))&&(!IsHydraulicsMenuItem(items[i])||HydraulicsCompatible(GetActiveVehicleModelId())))++visible;
     return visible;
 }
 int GetMenuItemForRow(int vehicleType,int row) {
@@ -4035,7 +4045,7 @@ int GetMenuItemForRow(int vehicleType,int row) {
     if(row<0)return MENU_BACK;
     for(int i=0;i<count;++i){
         if(items[i]==MENU_LIFT_RESET_POSE&&!liftlever::Supported(GetActiveVehicleModelId()))continue;
-        if((items[i]==MENU_HYDRAULICS_SCALE||items[i]==MENU_HYDRAULICS_RESET_POSE)&&!HydraulicsCompatible(GetActiveVehicleModelId()))continue;
+        if(IsHydraulicsMenuItem(items[i])&&!HydraulicsCompatible(GetActiveVehicleModelId()))continue;
         if(row--==0)return items[i];
     }
     return MENU_BACK;

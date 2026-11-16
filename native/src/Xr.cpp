@@ -7889,6 +7889,15 @@ void BuildDrivingMenu() {
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET MIRROR POSITION");break;
             case driving::MENU_HYDRAULICS_SCALE:
                 std::snprintf(rows[row],sizeof(rows[row]),"HYDRAULICS SIZE < %.0f%% >",driving::GetHydraulicsScale()*100.f);break;
+            case driving::MENU_HYDRAULICS_HAND:
+                std::snprintf(rows[row],sizeof(rows[row]),"HYDRAULICS HAND < %s >",hydrohand::Selected()?"RIGHT":"LEFT");break;
+            case driving::MENU_HYDRAULICS_HAND_X:case driving::MENU_HYDRAULICS_HAND_Y:case driving::MENU_HYDRAULICS_HAND_Z:
+            case driving::MENU_HYDRAULICS_HAND_RX:case driving::MENU_HYDRAULICS_HAND_RY:case driving::MENU_HYDRAULICS_HAND_RZ:{
+                const int field=item-driving::MENU_HYDRAULICS_HAND_X;
+                static const char* names[]{"RIGHT","FORWARD","UP","ROT X","ROT Y","ROT Z"};
+                std::snprintf(rows[row],sizeof(rows[row]),"HAND %s < %+.1f %s >",names[field],hydrohand::Get(hydrohand::Selected())[field],field<3?"CM":"DEG");break;}
+            case driving::MENU_HYDRAULICS_HAND_RESET:
+                std::snprintf(rows[row],sizeof(rows[row]),"RESET HAND FIT%s",hydrohand::Saved()?"":" (SAVE FAILED)");break;
             case driving::MENU_HYDRAULICS_RESET_POSE:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET HYDRAULICS POSE");break;
             case driving::MENU_LIFT_RESET_POSE:
@@ -9072,7 +9081,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             const auto p=hydrocontrol::Grip(x,y)+hydrocontrol::Point{-.032f,.008f,.018f};
             const radio::HandFrame frame{base+transform(p)*drivingWheel.hydroScale,transform(hydrocontrol::Swing({1,0,0},x,y)),
                 transform(hydrocontrol::Swing({0,1,0},x,y)),transform(hydrocontrol::Swing({0,0,1},x,y))};
-            const auto pinned=hydroHands[hand].Grab(frame,hand,.0225f*drivingWheel.hydroScale);
+            const auto pinned=hydroHands[hand].Grab(frame,hand,.0225f*drivingWheel.hydroScale,hydrohand::Get(hand));
             pos={pinned.position.x,pinned.position.y,pinned.position.z};right={pinned.right.x,pinned.right.y,pinned.right.z};
             up={pinned.up.x,pinned.up.y,pinned.up.z};forward={pinned.forward.x,pinned.forward.y,pinned.forward.z};grip=1.f;trig=0.f;
         } else if(liftHand) {
@@ -9309,6 +9318,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             (weaponHandMask & (1u<<hand))!=0,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand
                 ? twoHand.weaponType : weaponTypes[hand],hornWeight});
+        if(hydroHand)selected={handanimation::Gesture::Grip,handanimation::Gesture::Grip,1.f,0.f};
         if(!hydroHand&&!liftHand&&!steeringHand&&!hornHand&&!hp[hand].climbGrip&&!debugPinch&&
            !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
            !(weaponHandMask&(1u<<hand))&&!ballLock.locked[hand]&&!TwoHandStateUsable(twoHand))selected.pointBlend=drivingWheel.hydroPoint[hand];

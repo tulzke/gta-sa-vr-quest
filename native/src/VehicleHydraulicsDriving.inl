@@ -5,8 +5,7 @@ bool HydroEquipment(void* vehicle){
 }
 void HydroModeClick(int hand){
     xr::TriggerHaptic(hand,.65f,180.f,18.f);
-    if(g.AudioEngine&&g.CAudioEngine_ReportFrontendAudioEvent)
-        g.CAudioEngine_ReportFrontendAudioEvent(g.AudioEngine,1,-3.f,1.f);
+    cockpitclick::Click(true);
 }
 bool BuildHydraulicsTracking(WheelVisualState& v,void* vehicle,bool preview=false){
     v.hydroVisible=false;const int model=v.modelId;
@@ -90,6 +89,9 @@ void UpdateHydraulicsJoystick(WheelVisualState& v,void* vehicle,const xr::InputS
         v.hydroGrabbed[i]=g_hydroLever.owner==i;v.hydroGrabId[i]=v.hydroGrabbed[i]?g_hydroGrabSequence:0;
     }
     v.hydroX=g_hydroLever.visualX;v.hydroY=g_hydroLever.visualY;v.hydroSlot=g_hydroLever.slot;
+    const int previewHand=hydrohand::PreviewHand();
+    if(editor&&previewHand>=0&&poses[previewHand].valid&&!(occupied&(1u<<previewHand))){
+        v.hydroGrabbed[previewHand]=true;v.hydroPoint[previewHand]=0;v.grabbed[previewHand]=false;}
     if(editor)v.hydroHigh=g_hydroPreviewHigh;
     const auto command=g_hydroLever.Command();g_hydroCommandX.store(command.x);g_hydroCommandY.store(command.y);
     g_hydroManagedVehicle.store(!editor&&enabled?vehicle:nullptr,std::memory_order_release);

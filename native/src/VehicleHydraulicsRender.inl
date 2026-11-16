@@ -1,6 +1,6 @@
 extern "C" const unsigned char savr_hydraulics_mesh[],savr_hydraulics_mesh_end[],savr_hydraulics_alpha[],savr_hydraulics_alpha_end[];
 GLuint g_hydroProgram{},g_hydroVbo{},g_hydroEbo{},g_hydroTexture{};
-GLsizei g_hydroIndexCount{};
+GLsizei g_hydroIndexCount{},g_hydroSolidCount{};
 hydrocontrol::Model g_hydroModel;
 std::vector<hydrocontrol::Vertex> g_hydroDeformed;
 float g_hydroLastX=999,g_hydroLastY=999,g_hydroLastPress=999;
@@ -19,6 +19,7 @@ void main(){vec3 c=color;texcoord=uv;visible=1.;
  if(role>=10.){int slot=int(role)-9;if(state.y>.5&&(slot%2)==0)visible=0.;c=int(state.z)==slot?vec3(1.,.5,.07):vec3(.30,.20,.10);}
  float light=.42+.58*max(0.,dot(normalize(n),normalize(vec3(-.4,-.5,.8))));
  shade=pow(max(c,vec3(0.)),vec3(1./2.2))*light;
+ if(uv.x>=0.)shade=vec3(.96); // all printed legends stay equally readable
  if(state.w>.5)shade=mix(shade,vec3(1.,.85,.12),.20);
  gl_Position=mvp*vec4(center+(axisRight*p.x+axisForward*p.y+axisUp*p.z)*scale,1.);
 })GLSL";
@@ -33,8 +34,14 @@ void main(){float a=visible*(state.w>.5?.45:1.);if(texcoord.x>=0.)a*=texture(atl
     g_hydroProgram=program;g_hydroDeformed=g_hydroModel.vertices;
     glGenBuffers(1,&g_hydroVbo);glGenBuffers(1,&g_hydroEbo);glBindBuffer(GL_ARRAY_BUFFER,g_hydroVbo);glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,g_hydroEbo);
     glBufferData(GL_ARRAY_BUFFER,g_hydroDeformed.size()*sizeof(hydrocontrol::Vertex),g_hydroDeformed.data(),GL_DYNAMIC_DRAW);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,g_hydroModel.indices.size()*2,g_hydroModel.indices.data(),GL_STATIC_DRAW);
-    g_hydroIndexCount=static_cast<GLsizei>(g_hydroModel.indices.size());
+    std::vector<std::uint16_t> ordered,labels;
+    for(std::size_t i=0;i<g_hydroModel.indices.size();i+=3){
+        const auto* tri=g_hydroModel.indices.data()+i;
+        auto& target=g_hydroModel.vertices[tri[0]].uv[0]>=0?labels:ordered;
+        target.insert(target.end(),tri,tri+3);}
+    g_hydroSolidCount=static_cast<GLsizei>(ordered.size());ordered.insert(ordered.end(),labels.begin(),labels.end());
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,ordered.size()*2,ordered.data(),GL_STATIC_DRAW);
+    g_hydroIndexCount=static_cast<GLsizei>(ordered.size());
     glGenTextures(1,&g_hydroTexture);glBindTexture(GL_TEXTURE_2D,g_hydroTexture);
     glTexImage2D(GL_TEXTURE_2D,0,GL_R8,1024,256,0,GL_RED,GL_UNSIGNED_BYTE,savr_hydraulics_alpha);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
@@ -66,7 +73,14 @@ void DrawHydraulicsJoystick(const float* mvp,const driving::WheelVisualState& v)
         for(int a=0;a<5;++a)glEnableVertexAttribArray(a);
         glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,56,reinterpret_cast<void*>(0));glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,56,reinterpret_cast<void*>(12));
         glVertexAttribPointer(2,3,GL_FLOAT,GL_FALSE,56,reinterpret_cast<void*>(24));glVertexAttribPointer(3,2,GL_FLOAT,GL_FALSE,56,reinterpret_cast<void*>(36));glVertexAttribPointer(4,1,GL_FLOAT,GL_FALSE,56,reinterpret_cast<void*>(44));
-        glDrawElements(GL_TRIANGLES,g_hydroIndexCount,GL_UNSIGNED_SHORT,nullptr);
+        glDrawElements(GL_TRIANGLES,g_hydroSolidCount,GL_UNSIGNED_SHORT,nullptr);
+        // Decals share the deck's depth at Quest precision. Render them last
+        // with a small polygon bias, retaining depth occlusion by other parts.
+        const GLboolean offset=glIsEnabled(GL_POLYGON_OFFSET_FILL);GLfloat factor{},units{};
+        glGetFloatv(GL_POLYGON_OFFSET_FACTOR,&factor);glGetFloatv(GL_POLYGON_OFFSET_UNITS,&units);
+        glEnable(GL_POLYGON_OFFSET_FILL);glPolygonOffset(-1.f,-4.f);
+        glDrawElements(GL_TRIANGLES,g_hydroIndexCount-g_hydroSolidCount,GL_UNSIGNED_SHORT,reinterpret_cast<void*>(g_hydroSolidCount*2));
+        glPolygonOffset(factor,units);if(!offset)glDisable(GL_POLYGON_OFFSET_FILL);
         for(int a=0;a<5;++a)glDisableVertexAttribArray(a);
         glBindBuffer(GL_ARRAY_BUFFER,0);glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);glUseProgram(0);
     }

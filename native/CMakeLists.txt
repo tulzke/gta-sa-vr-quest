@@ -87,6 +87,8 @@ configure_file(src/HeartbeatAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAs
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S" PROPERTY OBJECT_DEPENDS "${HEARTBEAT_WAV};${HEARTBEAT_ATTRIBUTION}")
 
 add_library(savr SHARED
+    src/CockpitClickAudio.cpp
+    src/VehicleHydraulicsHandConfig.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/VehicleHydraulicsAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/VehicleLiftLeverAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S"
