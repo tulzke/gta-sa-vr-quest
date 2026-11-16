@@ -26,9 +26,14 @@ void* InstallVerifiedTrampoline(void*,void*,const std::uint32_t*,const char*){re
 // COMPATIBILITY_FUNCTION
 // EQUIPMENT_FUNCTION
 #include "VehicleHydraulicsRuntime.inl"
-int hornCalls{},toggleCalls{},controlCalls{};
+int hornCalls{},toggleCalls{},controlCalls{};bool queryHorn=true,acceptToggle=true;
 bool OriginalHorn(void*){++hornCalls;return true;}
-void OriginalControl(void*){++controlCalls;if(OnHydraulicHorn(nullptr))++toggleCalls;}
+void OriginalControl(void* vehicle){
+    ++controlCalls;if(!queryHorn)return;
+    if(OnHydraulicHorn(nullptr)&&acceptToggle){++toggleCalls;
+        auto& timer=*reinterpret_cast<std::uint16_t*>(static_cast<char*>(vehicle)+0xa88);timer=timer>=500?60:500;}
+    if(g_hydraulicHornScope)CHECK(!OnHydraulicHorn(nullptr)); // one edge per native call
+}
 void OriginalBeat(void*,void*){}
 bool IsCar(int m){return m==400||m==567;}
 }
@@ -80,6 +85,34 @@ void Buttons(){
     hover.Step({0,0,-.006f},true,true,.02f);CHECK(hover.pointing&&hover.hover==1&&!hover.clicked);
     hover.Step({.065f,0,.02f},true,true,.1f);CHECK(!hover.pointing&&hover.hover==0);
     std::puts("PASS button: approach is gesture only; front arming, physical travel, withdrawal, no repeats, side/rear/tracking/occupied rejection");
+    Button repeat;
+    for(int i=0;i<20;++i){repeat.Step({0,0,.004f},true,true,.02f);CHECK(!repeat.clicked&&!repeat.pressed);
+        repeat.Step({0,0,-.005f},true,true,.02f);CHECK(repeat.clicked&&repeat.pressed&&repeat.depth>.8f);
+        repeat.Step({0,0,-.005f},true,true,.02f);CHECK(!repeat.clicked&&repeat.pressed);}
+    repeat.Step({0,0,-.005f},false,true,.02f);repeat.Step({0,0,-.005f},true,true,.02f);
+    CHECK(!repeat.clicked&&!repeat.pressed&&repeat.depth==0); // no fake animated press after tracking loss
+    std::puts("PASS MODE repeats: 20 short withdrawals, one click per poke; unarmed contact has no fake cap travel");
+}
+void SpringReturn(){
+    for(int hand=0;hand<2;++hand)for(bool four:{false,true})for(int slot=1;slot<=8;++slot){
+        State s;InputFrame frame{{.3f,.2f,-.1f},{1,0,0},{0,1,0},{0,0,1},kModelScale};
+        Hand h[2]{};h[hand]={frame.World(Grip(0,0)),{},0,true,true};
+        s.StepTracked(h,frame,.02f,true,four,1);h[hand].grip=1;s.StepTracked(h,frame,.02f,true,four,1);
+        const auto d=Direction(slot);const auto origin=h[hand].point;
+        const auto correct=[&]{return four?s.slot>0&&s.slot%2==1&&Dot(Direction(s.slot),d)>.7f:s.slot==slot;};
+        // No physical stop: overshoot the visible gate by 20 cm at 2x size.
+        h[hand].point=origin+d*.24f;s.StepTracked(h,frame,.02f,true,four,1);
+        CHECK(s.owner==hand&&correct());
+        // A 3.2 cm pullback must reach neutral, regardless of prior overshoot.
+        h[hand].point=h[hand].point-d*.032f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);
+        for(int i=0;i<12;++i)s.StepTracked(h,frame,.02f,true,four,1);
+        CHECK(s.slot==0&&std::hypot(s.visualX,s.visualY)<1e-6f);
+        // A vertical wrist shift must neither latch a side nor break a grab.
+        h[hand].point.z+=.06f;s.StepTracked(h,frame,.02f,true,four,1);CHECK(s.owner==hand&&s.slot==0);
+        h[hand].point=h[hand].point+d*.04f;s.StepTracked(h,frame,.02f,true,four,1);
+        CHECK(s.owner==hand&&correct());
+    }
+    std::puts("PASS 2x spring return: both hands/eight detents and mission; 24 cm overshoot returns with 3.2 cm pullback; vertical motion ignored");
 }
 void MovingCockpit(){
     for(int hand=0;hand<2;++hand)for(int slot=1;slot<=8;++slot){
@@ -132,6 +165,16 @@ void Runtime(){
     OnHydraulicControl(other.data());CHECK(toggleCalls==2&&hornCalls==2); // ordinary caller still sees original horn
     debug=1;g_hydroToggle=true;OnHydraulicControl(controlled);CHECK(controlCalls==4&&!g_hydroToggle);debug=0;
     allowed=false;OnHydraulicControl(controlled);CHECK(controlCalls==4);allowed=true;
+    Button button;
+    for(int i=0;i<20;++i){
+        const auto before=*reinterpret_cast<std::uint16_t*>(vehicle.data()+0xa88)>=500;
+        button.Step({0,0,.004f},true,true,.02f);button.Step({0,0,-.005f},true,true,.02f);CHECK(button.clicked);
+        g_hydroToggle=button.clicked;OnHydraulicControl(controlled);
+        CHECK(!g_hydroToggle&&(*reinterpret_cast<std::uint16_t*>(vehicle.data()+0xa88)>=500)!=before);
+    }
+    queryHorn=false;g_hydroToggle=true;OnHydraulicControl(controlled);CHECK(g_hydroToggle);queryHorn=true;
+    acceptToggle=false;OnHydraulicControl(controlled);CHECK(g_hydroToggle);acceptToggle=true;
+    OnHydraulicControl(controlled);CHECK(!g_hydroToggle);
     alignas(16) std::array<unsigned char,0xd94> hardware{};std::array<unsigned char,0xac> output{};
     for(int i=0;i<20;++i){std::uint32_t time=999-i,key=11;std::memcpy(output.data()+i*8,&time,4);std::memcpy(output.data()+i*8+4,&key,4);}
     std::uint32_t last=16,index=42;std::memcpy(output.data()+0xa4,&last,4);std::memcpy(output.data()+0xa8,&index,4);
@@ -188,4 +231,4 @@ void PointPose(const char* path){
     }
     std::puts("PASS automatic point pose: real hand asset, full override and continuous intermediate fingertip pose");
 }
-int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);}
+int main(int argc,char** argv){CHECK(argc==4);Detents();Buttons();SpringReturn();MovingCockpit();AttachedHand();Runtime();Geometry(argv[1],argv[2]);PointPose(argv[3]);}

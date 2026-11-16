@@ -14,8 +14,12 @@ void OnHydraulicBeat(void* hardware,void* output){
     if(output!=internal)hydrocontrol::SimplifyBeatWindow(output);
 }
 thread_local bool g_hydraulicHornScope{};
+thread_local bool g_hydraulicHornDelivered{};
 bool OnHydraulicHorn(void* pad){
-    if(g_hydraulicHornScope)return g_hydroToggle.exchange(false,std::memory_order_acq_rel);
+    if(g_hydraulicHornScope){
+        if(g_hydraulicHornDelivered||!g_hydroToggle.load(std::memory_order_acquire))return false;
+        g_hydraulicHornDelivered=true;return true;
+    }
     return g_originalHydraulicHorn?g_originalHydraulicHorn(pad):false;
 }
 void OnHydraulicControl(void* vehicle){
@@ -26,8 +30,14 @@ void OnHydraulicControl(void* vehicle){
     const bool physical=g_hydroHooksReady&&current&&vrcam::IsStereoActive()&&ModeForAppearance(1)==MODE_IMMERSIVE&&
         !ThirdPersonViewActive()&&HydraulicsCompatible(model)&&HydroEquipment(vehicle);
     if(physical&&(GetVehicleDebugMode()!=0||!VrGameplayInputAllowed())){g_hydroToggle.store(false);return;}
-    const bool saved=g_hydraulicHornScope;g_hydraulicHornScope=managed||physical;
-    g_originalHydraulicControl(vehicle);g_hydraulicHornScope=saved;
+    const bool saved=g_hydraulicHornScope,savedDelivered=g_hydraulicHornDelivered;
+    g_hydraulicHornScope=managed||physical;g_hydraulicHornDelivered=false;
+    const auto high=[&]{return *reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(vehicle)+0xa88)>=500;};
+    const bool before=high();g_originalHydraulicControl(vehicle);
+    // A pad query is not an acknowledgement. Keep the event until the
+    // original hydraulic routine actually changes LOW/HIGH.
+    if(g_hydraulicHornScope&&g_hydraulicHornDelivered&&high()!=before)g_hydroToggle.store(false,std::memory_order_release);
+    g_hydraulicHornScope=saved;g_hydraulicHornDelivered=savedDelivered;
 }
 void InstallHydraulicsHooks(){
     if(!g.CAutomobile_HydraulicControl||!g.CPad_HornJustDown||!g.CAEAudioHardware_GetBeatInfo)return;

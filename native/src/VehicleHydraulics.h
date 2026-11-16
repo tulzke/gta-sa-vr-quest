@@ -6,6 +6,7 @@
 
 namespace savr::hydrocontrol {
 constexpr float kRad=.017453292519943295f,kTravel=22.f*kRad,kReach=.055f;
+constexpr float kModelScale=2.f,kNeutral=.011f,kEngage=.014f,kInputLimit=.026f;
 // Deterministic mission simplification, applied to BOTH native beat data and
 // VR hints. Cardinal keys keep their values; input is never chosen for player.
 inline std::uint32_t MissionKey(std::uint32_t key){
@@ -57,13 +58,14 @@ struct Button {
         pointing=valid&&available&&WithinHover(p);
         const float target=pointing?1.f:0.f;hover+=std::clamp(target-hover,-dt/.10f,dt/.10f);
         if(!valid||!available||!Finite(p)){armed=pressed=false;depth=0;return;}
-        // Arm only from the front after a deliberate withdrawal; side/rear
-        // entry and pose/tracking reacquisition below the cap cannot press.
-        if(radius<.023f&&p.z>.018f&&p.z<.08f)armed=true;
+        // A short withdrawal above the cap rearms it. The same threshold is
+        // used on first approach and on repeats; depressed side/rear entry
+        // and tracking reacquisition still cannot generate an edge.
+        if(radius<.023f&&p.z>.003f&&p.z<.08f){armed=true;pressed=false;}
         if(radius>.028f||p.z<-.015f){armed=pressed=false;depth=0;return;}
-        if(pressed&&p.z>.014f){pressed=false;armed=true;}
         if(!pressed&&armed&&radius<.016f&&p.z<=-.004f){pressed=true;armed=false;clicked=true;}
-        depth=pointing?std::clamp(-p.z/.006f,0.f,1.f):0.f;
+        // An unarmed contact must not look like a successful button press.
+        depth=pointing&&(armed||pressed)?std::clamp(-p.z/.006f,0.f,1.f):0.f;
     }
 };
 struct State {
@@ -79,7 +81,7 @@ struct State {
         const int previous=slot;
         if(owner>=0){const auto& hand=h[owner];
             if(!hand.valid||!hand.available||!Finite(hand.point)||!std::isfinite(hand.grip)||
-               hand.grip<=.30f||Distance(hand.point,visualX,visualY)>.18f){
+               hand.grip<=.30f||Distance(hand.point-offset,visualX,visualY)>.18f){
                 owner=-1;slot=0;aimX=aimY=0;down[0]=down[1]=true;}}
         if(owner<0){
             int best=-1;float distance=.055f;
@@ -88,21 +90,25 @@ struct State {
             if(best>=0){owner=best;offset=h[best].point-Grip(visualX,visualY);}
         }
         if(owner>=0){
-            const Point p=h[owner].point-offset;
-            const float radius=std::hypot(p.x,p.y),a=std::atan2(radius,p.z);
-            if(p.z<.012f||!std::isfinite(a)){owner=-1;slot=0;aimX=aimY=0;down[0]=down[1]=true;}
-            else {
-                const float x=radius>1e-6f?a*p.x/radius:0.f,y=radius>1e-6f?a*p.y/radius:0.f;
-                if(slot&&a<8.f*kRad)slot=0;
-                else if(!slot&&a>13.f*kRad)slot=Nearest(x,y,four);
-                const Point d=Direction(slot);
-                // A detent cannot rotate into its neighbour: return to neutral
-                // first. Visual slack is small and cannot alter the command.
-                float sx=x-d.x*kTravel,sy=y-d.y*kTravel;
-                const float slack=std::hypot(sx,sy),limit=(slot?2.f:3.f)*kRad;
-                if(slack>limit){sx*=limit/slack;sy*=limit/slack;}
-                aimX=d.x*kTravel+sx;aimY=d.y*kTravel+sy;
-            }
+            Point p=h[owner].point-offset;
+            float radius=std::hypot(p.x,p.y);
+            // There is no physical stop on a controller. Discard outward
+            // overtravel at the gate so a short pull back can reach neutral.
+            // Vertical wrist motion does not change the planar command.
+            if(radius>kInputLimit){const float factor=kInputLimit/radius;
+                offset.x+=p.x*(1.f-factor);offset.y+=p.y*(1.f-factor);
+                p.x*=factor;p.y*=factor;radius=kInputLimit;}
+            if(slot&&radius<=kNeutral){slot=0;offset=h[owner].point-Grip(0,0);p=Grip(0,0);radius=0;}
+            else if(!slot&&radius>=kEngage)slot=Nearest(p.x,p.y,four);
+            const float visualPerMetre=kTravel/(kReach*std::sin(kTravel));
+            const Point d=Direction(slot);
+            // A detent cannot rotate into its neighbour: return to neutral
+            // first. Visual slack is small and cannot alter the command.
+            float sx=p.x*visualPerMetre-d.x*kTravel,sy=p.y*visualPerMetre-d.y*kTravel;
+            const float slack=std::hypot(sx,sy),limit=(slot?2.f:3.f)*kRad;
+            if(slack>limit){sx*=limit/slack;sy*=limit/slack;}
+            aimX=d.x*kTravel+sx;aimY=d.y*kTravel+sy;
+            if(!slot&&radius<=kNeutral)aimX=aimY=0;
         }
         if(previous>0&&slot!=previous)recenterVisual=true;
         const float targetX=recenterVisual?0.f:aimX,targetY=recenterVisual?0.f:aimY;

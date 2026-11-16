@@ -11,7 +11,7 @@ void SetHydraulicsPose(int model,const float pose[12]){
     if(std::abs(Length(r)-1.f)>.01f||std::abs(Length(f)-1.f)>.01f||std::abs(Length(u)-1.f)>.01f||Dot(Cross(r,f),u)<.99f)return;
     std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];std::copy_n(pose,12,c.hydroPose);c.hydroPoseSet=true;
 }
-float GetHydraulicsScale(){const int model=GetActiveVehicleModelId();std::lock_guard<std::mutex> lock(g_modelMutex);const auto it=g_modelCalibration.find(model);return it==g_modelCalibration.end()?1.f:it->second.hydroScale;}
+float GetHydraulicsScale(){const int model=GetActiveVehicleModelId();std::lock_guard<std::mutex> lock(g_modelMutex);const auto it=g_modelCalibration.find(model);return hydrocontrol::kModelScale*(it==g_modelCalibration.end()?1.f:it->second.hydroScale);}
 void AdjustHydraulicsScale(int direction){const int model=GetActiveVehicleModelId();if(!HydraulicsCompatible(model))return;
     {std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[model];c.hydroScale=std::clamp(c.hydroScale+direction*.05f,.4f,2.f);}Save();ResetInteraction();}
 void ResetHydraulicsPose(){const int model=GetActiveVehicleModelId();

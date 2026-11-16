@@ -10,9 +10,9 @@ bool BuildHydraulicsTracking(WheelVisualState& v,void* vehicle,bool preview=fals
     const bool editor=preview||GetVehicleDebugMode()!=0,installed=HydroEquipment(vehicle);
     if(!editor&&(!installed||!g_hydroHooksReady||ModeForAppearance(1)!=MODE_IMMERSIVE))return false;
     V3 vr{},vf{},vu{},vp{};if(!ReadEntityMatrix(vehicle,&vr,&vf,&vu,&vp))return false;
-    V3 local{},right=vr,forward=vf,up=vu;float pose[12]{};bool custom=false;v.hydroScale=1.f;
+    V3 local{},right=vr,forward=vf,up=vu;float pose[12]{};bool custom=false;v.hydroScale=hydrocontrol::kModelScale;
     {std::lock_guard<std::mutex> lock(g_modelMutex);const auto it=g_modelCalibration.find(model);
-        if(it!=g_modelCalibration.end()){v.hydroScale=it->second.hydroScale;custom=it->second.hydroPoseSet;if(custom)std::copy_n(it->second.hydroPose,12,pose);}}
+        if(it!=g_modelCalibration.end()){v.hydroScale=hydrocontrol::kModelScale*it->second.hydroScale;custom=it->second.hydroPoseSet;if(custom)std::copy_n(it->second.hydroPose,12,pose);}}
     if(custom){local={pose[0],pose[1],pose[2]};right=Normalized(vr*pose[3]+vf*pose[4]+vu*pose[5]);
         forward=Normalized(vr*pose[6]+vf*pose[7]+vu*pose[8]);up=Normalized(vr*pose[9]+vf*pose[10]+vu*pose[11]);
         if(!std::isfinite(Length(local))||Length(local)>10||Dot(Cross(right,forward),up)<.95f)return false;
