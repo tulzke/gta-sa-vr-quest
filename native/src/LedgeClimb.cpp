@@ -82,36 +82,21 @@ bool Hook(void* target,const std::uint32_t (&expected)[4],void* hook,void*& orig
 
 using ClimbFn=void* (*)(void*,Vec&,float&,unsigned char&,bool);
 using LaunchFn=void (*)(void*,void*);
-using DamageFn=void (*)(void*,void*,void*,bool);
-DamageFn originalDamage{};void* fallPed{};float fallOrigin{},fallDepth{};bool fallValid{},wasAirborne{};
+void* fallPed{};float fallOrigin{},fallDepth{};bool fallValid{},wasAirborne{};
 void BeginFall(void* ped){fallPed=ped;fallOrigin=Position(ped).z;fallDepth=0;fallValid=std::isfinite(fallOrigin);}
-float FallDamage(float original,float drop){return drop<=kSafeFallHeight?0.f:original;}
-void OnDamage(void* calculator,void* ped,void* response,bool speak){
- const float saved=Read<float>(calculator,8);bool quiet=false;
- if(g.FindPlayerPed&&ped==g.FindPlayerPed(-1)&&ped==fallPed&&fallValid&&Read<int>(calculator,0x10)==54){
-  const float drop=std::max(fallDepth,fallOrigin-Position(ped).z);
-  if(std::isfinite(drop)){quiet=drop<=kSafeFallHeight;Write(calculator,8,FallDamage(saved,drop));}
- }
- originalDamage(calculator,ped,response,speak&&!quiet);Write(calculator,8,saved);
-}
-bool QuietFall(void* ped){
- if(!ped||!g.FindPlayerPed||ped!=g.FindPlayerPed(-1)||ped!=fallPed||!fallValid)return false;
- fallDepth=std::max(fallDepth,fallOrigin-Position(ped).z);
- return fallDepth<=kSafeFallHeight;
-}
 using FallTaskFn=bool (*)(void*,void*);
 FallTaskFn originalAir{},originalLand{};
 bool (*abortLand)(void*,void*,int,const void*){};
 void (*originalLandingAudio)(void*,int){};
 bool OnAir(void* task,void* ped){
- const bool quiet=QuietFall(ped);const auto speech=Read<unsigned char>(task,0x44);
+ const bool quiet=IsQuietFall(ped);const auto speech=Read<unsigned char>(task,0x44);
  if(quiet)Write(task,0x44,std::uint8_t(0));
  const bool result=originalAir(task,ped);
  if(quiet)Write(task,0x44,speech);
  return result;
 }
 bool OnLand(void* task,void* ped){
- const bool quiet=QuietFall(ped);
+ const bool quiet=IsQuietFall(ped);
  // Let retail initialise its landing state and animation callbacks first.
  // Air associations retain their native blend/time so the parent jump task
  // can finish normally. A hidden association with zero blend can stall it.
@@ -122,7 +107,7 @@ bool OnLand(void* task,void* ped){
  }
  return result;
 }
-void OnLandingAudio(void* audio,int event){if(!QuietFall(Read<void*>(audio,0xa8)))originalLandingAudio(audio,event);}
+void OnLandingAudio(void* audio,int event){if(!IsQuietFall(Read<void*>(audio,0xa8)))originalLandingAudio(audio,event);}
 ClimbFn originalClimb{};LaunchFn originalLaunch{};
 bool hooksReady{};bool installed{};double jumpUntil{},hoverUntil{};bool hovered{};
 void* OnClimb(void* ped,Vec& point,float& angle,unsigned char& surface,bool launch){
@@ -274,6 +259,13 @@ bool Find(Vec hand,Vec forward,Vec& point,Vec& tangent,Reach reach={.18f,.48f,.5
  return found;
 }
 }
+bool IsQuietFall(void* ped) {
+    if (!ped || !g.FindPlayerPed || ped != g.FindPlayerPed(-1) || ped != fallPed || !fallValid)
+        return false;
+    fallDepth = std::max(fallDepth, fallOrigin - Position(ped).z);
+    return fallDepth <= kSafeFallHeight;
+}
+
 void Install(void* h){
  if(installed)return;installed=true;
  removeEntity=reinterpret_cast<decltype(removeEntity)>(dlsym(h,"_ZN6CWorld6RemoveEP7CEntity"));
@@ -289,8 +281,6 @@ void Install(void* h){
   const bool b=Hook(launch,launchCode,reinterpret_cast<void*>(&OnLaunch),l);originalLaunch=reinterpret_cast<LaunchFn>(l);
   hooksReady=a&&b;
  }
- const std::uint32_t damageCode[]{0xd10283ff,0xa9067bfd,0xf9003bf7,0xa90857f6};void* damageOriginal{};
- if(Hook(dlsym(h,"_ZN28CPedDamageResponseCalculator21ComputeDamageResponseEP4CPedR18CPedDamageResponseb"),damageCode,reinterpret_cast<void*>(&OnDamage),damageOriginal))originalDamage=reinterpret_cast<DamageFn>(damageOriginal);
  const std::uint32_t airCode[]{0xd102c3ff,0xfd0033e8,0xa9077bfd,0xa9085ff8};
  abortLand=reinterpret_cast<decltype(abortLand)>(dlsym(h,"_ZN15CTaskSimpleLand13MakeAbortableEP4CPediPK6CEvent"));
  const std::uint32_t landCode[]{0xfc1d0fe8,0xa900fbfd,0xf9000ff5,0xa9024ff4};
@@ -300,7 +290,6 @@ void Install(void* h){
  if(Hook(dlsym(h,"_ZN15CTaskSimpleLand10ProcessPedEP4CPed"),landCode,reinterpret_cast<void*>(&OnLand),landOriginal))originalLand=reinterpret_cast<FallTaskFn>(landOriginal);
  if(Hook(dlsym(h,"_ZN17CAEPedAudioEntity18HandleLandingEventEi"),audioCode,reinterpret_cast<void*>(&OnLandingAudio),audioOriginal))originalLandingAudio=reinterpret_cast<decltype(originalLandingAudio)>(audioOriginal);
  LOGI("[ledge] quiet falls air=%d land=%d audio=%d",originalAir!=nullptr,originalLand!=nullptr,originalLandingAudio!=nullptr);
- LOGI("[ledge] fall damage %s",originalDamage?"ready":"unavailable");
  LOGI("[ledge] hand climbing %s",hooksReady?"ready":"DISABLED: retail hooks unavailable");
 }
 bool JumpInProgress(){return Now()<jumpUntil;}

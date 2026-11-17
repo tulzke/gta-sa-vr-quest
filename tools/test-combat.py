@@ -18,6 +18,15 @@ def replace_function(text, signature, replacement=''):
     return text[:start] + replacement + text[end:]
 
 combat = (ROOT / 'native/src/Combat.cpp').read_text(encoding='utf8')
+# Host tests stub native installation. Guard against a second installer claiming
+# the same retail entry point before Combat can validate its original prologue.
+damage_symbol = '"_ZN28CPedDamageResponseCalculator21ComputeDamageResponseEP4CPedR18CPedDamageResponseb"'
+damage_hook_owners = [
+    source.name for source in (ROOT / 'native/src').glob('*.cpp')
+    if damage_symbol in source.read_text(encoding='utf8')
+]
+if damage_hook_owners != ['Combat.cpp']:
+    raise SystemExit(f'ComputeDamageResponse must have one hook owner, found {damage_hook_owners}')
 combat = replace_function(combat, 'bool Hook(void* target,')
 combat = replace_function(combat, 'void Install(void* handle)')
 combat = replace_function(combat, 'double Now()', 'double Now() { return testNow; }')

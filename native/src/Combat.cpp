@@ -1,5 +1,6 @@
 #include "Combat.h"
 #include "CombatPolicy.h"
+#include "LedgeClimb.h"
 #include "Melee.h"
 #include "PhysicalWeapon.h"
 #include "PlayerLife.h"
@@ -127,7 +128,8 @@ void ClearGuards() {
 
 // Retail 2.11.311 constructor stores creator at +0, damage +8, piece +c,
 // weapon +10. ComputeDamageResponse initialises its 12-byte response before
-// subtracting armour (+6b4) and health (+6ac). Only melee against CJ is filtered.
+// subtracting armour (+6b4) and health (+6ac). This hook owns both the melee
+// guard and quiet fall damage adjustments.
 void OnComputeDamage(void* calculator,void* victim,void* response,bool speak) {
     const double now=Now();
     void* player=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
@@ -156,6 +158,14 @@ void OnComputeDamage(void* calculator,void* victim,void* response,bool speak) {
         // Clear BEFORE native damage can request a pain voice. A real hit
         // immediately following a block must always retain its reaction.
         if (victim==player && !Read<unsigned char>(response,0xa) && damage>0) blockSound={};
+        constexpr int kFallWeapon = 54;
+        if (weapon==kFallWeapon && ledgeclimb::IsQuietFall(victim)) {
+            alignas(8) unsigned char reduced[0x18];
+            std::memcpy(reduced,calculator,sizeof(reduced));
+            Store(reduced,8,0.f);
+            computeDamage(reduced,victim,response,false);
+            return;
+        }
         computeDamage(calculator,victim,response,speak);return;
     }
 

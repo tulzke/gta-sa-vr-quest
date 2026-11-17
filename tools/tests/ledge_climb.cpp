@@ -126,14 +126,12 @@ int main(){
  hands[0].grip=0;testNow+=.01;Update(true,hands,1,0);assert(ClaimedHands()==2&&Length(Read<Vec>(ped,0x68))==0);
  Reset();noFloor=false;hands[1].valid=false;
  // Fall damage is based on the last support/release, not the old jump.
- char calculator[32]{};float computed{};
- originalDamage=[](void* c,void*,void* out,bool){*static_cast<float*>(out)=Read<float>(c,8);};
- Put(calculator,8,100.f);Put(calculator,0x10,54);
  Put(matrix,0x30,Vec{0,0,20});BeginFall(ped);
- Put(matrix,0x30,Vec{0,0,15});OnDamage(calculator,ped,&computed,false);assert(computed==100.f&&Read<float>(calculator,8)==100.f);
- BeginFall(ped);Put(matrix,0x30,Vec{0,0,8});OnDamage(calculator,ped,&computed,false);assert(computed==100.f);
- Put(calculator,0x10,22);OnDamage(calculator,ped,&computed,false);assert(computed==100.f);
- Put(calculator,0x10,54);OnDamage(calculator,matrix,&computed,false);assert(computed==100.f);
+ Put(matrix,0x30,Vec{0,0,15});assert(!IsQuietFall(ped));
+ Put(matrix,0x30,Vec{0,0,18});assert(!IsQuietFall(ped)); // earlier maximum depth
+ BeginFall(ped);Put(matrix,0x30,Vec{0,0,15});assert(IsQuietFall(ped));
+ assert(!IsQuietFall(matrix));
+ Put(matrix,0x30,Vec{0,0,8});assert(!IsQuietFall(ped));
  assert(handanimation::PalmLockWeight(0)==0&&handanimation::PalmLockWeight(.1f)==1);
  assert(handanimation::PalmLockWeight(.04f)>.4f&&handanimation::PalmLockWeight(.04f)<.6f);
  // One threshold controls damage, fall visuals and landing sound.
@@ -148,14 +146,14 @@ int main(){
   Put(task,0x10,static_cast<void*>(nullptr));Put(p,0x584,Read<std::uint64_t>(p,0x584)&~std::uint64_t(0x400));return true;
  };
  originalLandingAudio=[](void*,int event){assert(event==123);};
- Put(matrix,0x30,Vec{0,0,16});assert(QuietFall(ped));assert(FallDamage(100,4)==0);
+ Put(matrix,0x30,Vec{0,0,16});assert(IsQuietFall(ped));
  Put(assoc,0x44,std::uint16_t(121));Put(assoc,0x30,1.f);assert(OnAir(airTask,ped));assert(Read<float>(assoc,0x30)==1&&Read<unsigned char>(airTask,0x44)==1);
  Put(ped,0x584,std::uint64_t(0x401));
  assert(OnLand(landTask,ped));assert(abortCalls==1&&landCalls==1);
  assert(Read<void*>(landTask,0x10)==nullptr&&(Read<unsigned char>(landTask,0x1c)&1));
  assert(Read<std::uint64_t>(ped,0x584)==1); // landing lock cleared, standing preserved
  OnLandingAudio(audio,999); // suppressed callback
- Put(matrix,0x30,Vec{0,0,15.99f});assert(!QuietFall(ped));assert(FallDamage(100,4.01f)==100);
+ Put(matrix,0x30,Vec{0,0,15.99f});assert(!IsQuietFall(ped));
  originalAir=[](void* task,void*){assert(Read<unsigned char>(task,0x44)==1);return true;};
  OnAir(airTask,ped);assert(Read<float>(assoc,0x30)==1);OnLandingAudio(audio,123);
  assert(!OnLand(landTask,ped));assert(abortCalls==1&&landCalls==2); // high falls keep native task
