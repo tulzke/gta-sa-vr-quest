@@ -92,16 +92,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 31,
-      "title": "Джойстик управления гидравликой",
-      "file": "31-dzhoystik-upravleniya-gidravlikoy.md",
-      "categories": [
-        "vehicle-controls"
-      ],
-      "priority": "critical",
-      "status": "in_progress"
-    },
-    {
       "id": 35,
       "title": "Автоматическое восстановление здоровья",
       "file": "35-avtomaticheskoe-vosstanovlenie-zdorovya.md",
