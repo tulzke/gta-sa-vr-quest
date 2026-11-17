@@ -817,6 +817,18 @@ const BACKLOG_DATA = {
       ],
       "priority": "high",
       "status": "open"
+    },
+    {
+      "id": 131,
+      "title": "Показывать грипы мотоциклов и квадроциклов в дебаг-режиме",
+      "file": "131-vidimost-gripov-v-debag-rezhime.md",
+      "categories": [
+        "vehicle-calibration",
+        "vehicle-controls",
+        "tooling"
+      ],
+      "priority": "high",
+      "status": "open"
     }
   ]
 };
