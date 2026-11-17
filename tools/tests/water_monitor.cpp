@@ -2,6 +2,7 @@
 #include "WaterMonitorHand.h"
 #include "WaterMonitorModel.h"
 #include "WaterMonitorCamera.h"
+#include "WaterMonitorStream.h"
 #include <fstream>
 #include <iterator>
 #include <cstdio>
@@ -92,6 +93,27 @@ int main(int argc,char** argv){
   CHECK(m.vertices[m.indices[i+1]].role==role&&m.vertices[m.indices[i+2]].role==role);}
  CHECK(roles[0]&&roles[2]&&roles[3]);
  CHECK(m.indices.size()/3+roles[3]+64+4==3470); // clean video layer, circle, crosshair
+ CHECK(m.indices.size()/3+64+4==3290); // active screen replaces the black surface
  CHECK(!m.Load(bytes.data(),bytes.size()-1));bytes[0]=0;CHECK(!m.Load(bytes.data(),bytes.size()));
+ std::array<unsigned char,CannonStride> cannonBytes{};const std::uint32_t id=123;const std::int16_t current=2;
+ std::memcpy(cannonBytes.data(),&id,4);std::memcpy(cannonBytes.data()+4,&current,2);
+ for(int age=0;age<32;++age){const int slot=(current-age+32)&31;const Vec p{0,age*.5f,2-age*.01f};
+  std::memcpy(cannonBytes.data()+0xc+slot*12,&p,12);cannonBytes[0x30c+slot]=1;}
+ const auto originalCannon=cannonBytes;auto cannon=ReadCannon(cannonBytes.data(),cannonBytes.size());CHECK(cannon.id==123&&cannon.current==2);
+ WaterMesh water;int queries{};const auto clear=[&](Vec,Vec){++queries;return false;};
+ AppendWater(cannon,{0,1,0},{1,0,0},clear,water);
+ CHECK(water.vertices.size()==31*12&&water.indices.size()==31*18&&queries==31);
+ CHECK(cannonBytes==originalCannon);CHECK(water.vertices.front().color>>24==64&&water.vertices.back().color>>24==4);
+ for(const auto& v:water.vertices)CHECK(finite(v.position));
+ for(auto ix:water.indices)CHECK(ix<water.vertices.size());
+ Vec centre{};for(int i=0;i<4;++i)centre=centre+water.vertices[i].position*.25f;
+ CHECK(near(centre.y,.25f)&&near(centre.z,1.995f)); // real section positions, no predicted arc
+ water={};queries=0;AppendWater(cannon,{0,1,0},{1,0,0},[&](Vec,Vec){++queries;return true;},water);
+ CHECK(queries==1&&water.indices.size()==18); // tail stops at first obstacle
+ water={};cannon.id=0;AppendWater(cannon,{0,1,0},{1,0,0},clear,water);CHECK(water.vertices.empty());
+ cannon=ReadCannon(originalCannon.data(),originalCannon.size());cannon.active.fill(0);AppendWater(cannon,{0,1,0},{1,0,0},clear,water);CHECK(water.vertices.empty());
+ cannon=ReadCannon(originalCannon.data(),originalCannon.size());cannon.positions[current].x=std::numeric_limits<float>::quiet_NaN();
+ AppendWater(cannon,{0,1,0},{1,0,0},clear,water);for(const auto& v:water.vertices)CHECK(finite(v.position));
+ CHECK(ReadCannon(cannonBytes.data(),10).id==0);cannonBytes[4]=255;cannonBytes[5]=255;CHECK(ReadCannon(cannonBytes.data(),cannonBytes.size()).id==0);
  std::printf("Water monitor: %d checks passed; 3222 asset triangles, %u screen triangles\n",checks,roles[3]);
 }

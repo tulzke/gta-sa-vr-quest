@@ -51,6 +51,9 @@ bool GetWaterMonitorVisual(watermonitor::Visual* out){*out=monitorVisual;return 
 }
 '''
 monitor = (ROOT / 'native/src/WaterMonitorRender.inl').read_text(encoding='utf8')
+start = monitor.index('bool ResolveStreamApi(')
+end = monitor.index('\nvoid DrawWaterStream()', start)
+monitor = monitor[:start] + 'bool ResolveStreamApi(){return streamApi.cannons&&g.CWorld_ProcessLineOfSight;}\n' + monitor[end:]
 start = monitor.index('void RenderEffects(')
 end = monitor.index('\nvoid Prepare()', start)
 monitor = monitor[:start] + 'void RenderEffects(void*){}\n' + monitor[end:]
@@ -82,7 +85,7 @@ for name in ('ClearHeat', 'ValidHeatEntity', 'UpdateHeat', 'ApplyReticleAim'):
     production += function(scope, name)
 production += '\n}\n'
 harness = (ROOT / 'tools/tests/rear_mirror.cpp').read_text(encoding='utf8')
-harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include "WaterMonitorCamera.h"\n#include <fstream>\n#include <iterator>\n' + harness
+harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include "WaterMonitorCamera.h"\n#include "WaterMonitorStream.h"\n#include <fstream>\n#include <iterator>\n' + harness
 harness = harness.replace('// PRODUCTION_ADAPTER', production)
 tests = (ROOT / 'tools/tests/weapon_optics.inc').read_text(encoding='utf8')
 tests += (ROOT / 'tools/tests/water_monitor_render.inc').read_text(encoding='utf8').replace('WATER_ASSET_PATH', (ROOT / 'assets/firetruck-controller/runtime/monitor.mesh').as_posix())

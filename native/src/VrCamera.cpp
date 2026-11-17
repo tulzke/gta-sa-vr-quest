@@ -22,6 +22,7 @@
 #include "Driving.h"
 #include "WaterMonitorModel.h"
 #include "WaterMonitorCamera.h"
+#include "WaterMonitorStream.h"
 #include "RearMirrorPolicy.h"
 #include "EyeDepth.h"
 #include "GraphicsEffects.h"

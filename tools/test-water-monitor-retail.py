@@ -16,6 +16,9 @@ checks = {
     0x5fa9bc: (0x2a1303e0,),
     0x5fa9e0: (0xfd403662,),
     0x5fa9f4: (0x94084a5f,),
+    # Read-only stream renderer: current index, positions, active-byte layout.
+    0x5fa220: (0x79400a69, 0x91003268, 0x93403d29, 0x5280018a),
+    0x5fa26c: (0x79800a68, 0x8b080268, 0x390c3109),
     # Stock Firetruck launch multiplier is 0.5; no reduced VR coefficient.
     0x5fa994: (0x1e2c1001,),
     # After a 150ms startup the current sample advances by one, modulo 32,
@@ -59,6 +62,7 @@ for name, expected in {
     '_Z13RwFrameGetLTMP7RwFrame': (0x768858, 48),
     '_ZN11FxManager_c6RenderEP8RwCamerah': (0x4dfae4, 196),
     'g_fxMan': (0xa5bcf8, 280),
+    '_ZN13CWaterCannons8aCannonsE': (0xcc65e8, 0xbe8),
 }.items():
     assert symbols[name] == expected, name
 print('Retail water control/emission ABI, native nozzle PreRender and remote effects fingerprints PASS')

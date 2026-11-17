@@ -42,10 +42,12 @@
             // The shipped screen UV runs left-to-right with physical model X.
             // Do not inherit the old mirror compensation from weapon optics.
             CHECK(std::abs(v[i].u-source.uv[0])<.00001f);if(source.position[0]>.04f)CHECK(v[i].u>.8f);checkedWaterUv=true;
-            if(states[1])CHECK(v[i].color==wm::Color(waterLight,waterLight,waterLight));}}
+            if(states[1]){CHECK(v[i].color==wm::Color(waterLight,waterLight,waterLight));
+                if(waterLight==1.f){const auto world=wm::Point(wm::body,{source.position[0],source.position[1],source.position[2]});
+                    CHECK(std::abs(v[i].position.y-world.y)<.000001f);}}}}
         return p;};
     g.RwIm3DRenderIndexedPrimitive=[](int,unsigned short*,int count){waterTriangles+=count/3;return 1;};
-    wm::DrawSurface();CHECK(checkedWaterUv&&waterTriangles==3470&&states==waterStates);
+    wm::DrawSurface();CHECK(checkedWaterUv&&waterTriangles==3290&&states==waterStates);
     waterTriangles=0;opt::DrawSurfaces();CHECK(waterTriangles==0&&states==waterStates); // no weapon tube for remote
     opt::ResetFrame();monitor.owner=-1;monitor.cameraActive=false;monitor.screen={.3f,.018f,.4f};
     waterLight=.4f;wm::Prepare();CHECK(wm::ready&&!remote.visible);wm::DrawSurface();CHECK(waterTriangles==3470);
@@ -61,4 +63,16 @@
     const auto unrolledCamera=remote.frame.camera;
     monitor.body.right={0,0,-1};monitor.body.up={1,0,0};wm::Prepare();
     CHECK(std::memcmp(&unrolledCamera,&remote.frame.camera,sizeof(unrolledCamera))==0);
+    std::array<unsigned char,watermonitor::CannonStride*3> cannonData{};
+    Put(cannonData.data(),0,std::uint32_t{42});Put(cannonData.data(),4,std::int16_t{1});
+    Put(cannonData.data(),0xc,watermonitor::Vec{0,1.5f,1});Put(cannonData.data(),0x18,watermonitor::Vec{0,1,1});
+    cannonData[0x30c]=cannonData[0x30d]=1;
+    const auto originalWater=cannonData;wm::streamApi.cannons=cannonData.data();static int waterQueries{};
+    g.CWorld_ProcessLineOfSight=[](const GameSymbols::Vec3* a,const GameSymbols::Vec3* b,void*,void**,bool buildings,bool vehicles,bool peds,bool objects,bool dummies,bool seeThrough,bool someObjects,bool shootThrough){
+        CHECK(a->y==1&&b->y==1.5f&&buildings&&vehicles&&!peds&&!objects&&!dummies&&!seeThrough&&!someObjects&&!shootThrough);
+        ++waterQueries;return true;};
+    waterTriangles=0;wm::DrawWaterStream();CHECK(waterTriangles==6&&waterQueries==1&&states==waterStates&&cannonData==originalWater);
+    wm::DrawWaterStream();CHECK(waterTriangles==12&&waterQueries==2&&cannonData==originalWater);
+    cannonData[0x30c]=0;wm::DrawWaterStream();CHECK(waterTriangles==12); // no fabricated stream after native state disappears
     std::puts("water monitor: camera axes/aspect, own truck render, no scan lines/vignette, independent device roll, frozen shutdown, UV and render state restoration PASS");
+    std::puts("water stream: real native samples, collision-only query, no simulation/audio/particle calls, repeatable geometry and state restoration PASS");

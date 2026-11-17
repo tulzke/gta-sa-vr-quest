@@ -19,7 +19,41 @@ bool WorldFrame(const watermonitor::Frame& source,CamBasis& out){
  return Dot(out.right,out.right)>.9f&&Dot(out.forward,out.forward)>.9f&&Dot(out.up,out.up)>.9f;
 }
 bool NeedsRaster(){watermonitor::Visual v{};return driving::GetWaterMonitorVisual(&v)&&v.cameraActive&&!weapon_optic_render::optics[2].raster;}
+struct StreamApi {const unsigned char* cannons{};bool attempted{};} streamApi;
+bool ResolveStreamApi(){
+ if(streamApi.attempted)return streamApi.cannons&&g.CWorld_ProcessLineOfSight;streamApi.attempted=true;
+ void* h=dlopen("libGame.so",RTLD_NOW|RTLD_NOLOAD);if(!h)return false;
+ const auto* p=static_cast<const unsigned char*>(dlsym(h,"_ZN13CWaterCannons8aCannonsE"));
+ if(reinterpret_cast<std::uintptr_t>(p)==g.LoadBase+0xcc65e8)streamApi.cannons=p;
+ dlclose(h);return streamApi.cannons&&g.CWorld_ProcessLineOfSight;
+}
+void DrawWaterStream(){
+ if(!ResolveStreamApi())return;
+ // Snapshot on the game producer. No native water state is written by this pass.
+ std::array<unsigned char,watermonitor::CannonStride*watermonitor::CannonCount> snapshot{};
+ std::memcpy(snapshot.data(),streamApi.cannons,snapshot.size());
+ static watermonitor::WaterMesh mesh;mesh.vertices.clear();mesh.indices.clear();
+ const auto blocked=[](Vec a,Vec b){
+  alignas(4) unsigned char hitPoint[0x2c]{};void* entity{};
+  const GameSymbols::Vec3 from{a.x,a.y,a.z},to{b.x,b.y,b.z};
+  return g.CWorld_ProcessLineOfSight(&from,&to,hitPoint,&entity,true,true,false,false,false,false,false,false);
+ };
+ for(std::size_t i=0;i<watermonitor::CannonCount;++i)
+  watermonitor::AppendWater(watermonitor::ReadCannon(snapshot.data()+i*watermonitor::CannonStride,watermonitor::CannonStride),camera.forward,camera.right,blocked,mesh);
+ if(mesh.indices.empty())return;
+ static std::vector<SkyBackdropVertex> vertices;vertices.clear();vertices.reserve(mesh.vertices.size());
+ for(const auto& v:mesh.vertices)vertices.push_back({V(v.position),{},v.color,0,0});
+ constexpr int states[]{1,6,8,9,10,11,12,14,20};std::uintptr_t saved[std::size(states)]{};
+ for(std::size_t i=0;i<std::size(states);++i)g.RwRenderStateGet(states[i],&saved[i]);
+ g.RwRenderStateSet(1,nullptr);g.RwRenderStateSet(6,reinterpret_cast<void*>(1));g.RwRenderStateSet(8,nullptr);
+ g.RwRenderStateSet(9,reinterpret_cast<void*>(2));g.RwRenderStateSet(10,reinterpret_cast<void*>(5));g.RwRenderStateSet(11,reinterpret_cast<void*>(6));
+ g.RwRenderStateSet(12,reinterpret_cast<void*>(1));g.RwRenderStateSet(14,nullptr);g.RwRenderStateSet(20,reinterpret_cast<void*>(1));
+ if(g.RwIm3DTransform(vertices.data(),static_cast<int>(vertices.size()),nullptr,1u|8u|16u)){
+  g.RwIm3DRenderIndexedPrimitive(3,mesh.indices.data(),static_cast<int>(mesh.indices.size()));g.RwIm3DEnd();}
+ for(std::size_t i=0;i<std::size(states);++i)g.RwRenderStateSet(states[i],reinterpret_cast<void*>(saved[i]));
+}
 void RenderEffects(void* sc){
+ DrawWaterStream();
  using RenderFx=void(*)(void*,void*,unsigned char);
  static RenderFx fx=[](){void* h=dlopen("libGame.so",RTLD_NOW|RTLD_NOLOAD);if(!h)return RenderFx{};
   auto p=reinterpret_cast<RenderFx>(dlsym(h,"_ZN11FxManager_c6RenderEP8RwCamerah"));
@@ -81,15 +115,22 @@ void DrawSurface(){
    Color(visual.cameraActive?.85f:.11f,visual.cameraActive?.40f:.06f,.025f):Color(channel(v.color[0]),channel(v.color[1]),channel(v.color[2]));
   vertices.push_back({Point(frame,p),normal,color,v.uv[0],v.uv[1]});
  }
- // Original glass stays black behind the collapsing image.
- indices.assign(model.indices.begin(),model.indices.end());draw(vertices,indices,nullptr);
  const auto& optic=weapon_optic_render::optics[2];
- if(visual.screen.light>0&&optic.imageReady&&optic.raster){
+ const bool showImage=visual.screen.light>0&&optic.imageReady&&optic.raster;
+ const bool collapsing=showImage&&(visual.screen.x<.999f||visual.screen.y<.999f);
+ // Draw the authored CRT front exactly once during normal operation: the
+ // camera material replaces black glass on the original curved triangles.
+ for(std::size_t i=0;i<model.indices.size();i+=3){
+  if(showImage&&!collapsing&&model.vertices[model.indices[i]].role==3)continue;
+  for(int n=0;n<3;++n)indices.push_back(model.indices[i+n]);
+ }
+ draw(vertices,indices,nullptr);
+ if(showImage){
   for(std::size_t i=0;i<model.indices.size();i+=3)
    if(model.vertices[model.indices[i]].role==3)for(int n=0;n<3;++n)glass.push_back(model.indices[i+n]);
   for(std::size_t i=0;i<model.vertices.size();++i){const auto& v=model.vertices[i];if(v.role!=3)continue;
    const float x=v.position[0]*visual.screen.x,z=(v.position[2]-.173f)*visual.screen.y;
-   const float y=-.059f+.0033f*((x/.061f)*(x/.061f)+(z/.04575f)*(z/.04575f))-.00012f;
+   const float y=collapsing?-.059f+.0033f*((x/.061f)*(x/.061f)+(z/.04575f)*(z/.04575f))-.001f:v.position[1];
    const float light=visual.screen.light;vertices[i].position=Point(body,{x,y,z+.173f});vertices[i].color=Color(light,light,light);
   }
   draw(vertices,glass,optic.raster);
