@@ -484,7 +484,7 @@ const BACKLOG_DATA = {
         "vehicle-controls"
       ],
       "priority": "low",
-      "status": "open"
+      "status": "in_progress"
     },
     {
       "id": 101,
