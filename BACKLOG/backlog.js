@@ -839,6 +839,17 @@ const BACKLOG_DATA = {
       ],
       "priority": "medium",
       "status": "open"
+    },
+    {
+      "id": 133,
+      "title": "Прямолинейная отдача в плечо вдоль оси стрельбы",
+      "file": "133-otdacha-v-plecho-po-osi-strelby.md",
+      "categories": [
+        "weapons",
+        "bugs"
+      ],
+      "priority": "medium",
+      "status": "open"
     }
   ]
 };
