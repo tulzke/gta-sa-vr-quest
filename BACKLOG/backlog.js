@@ -477,17 +477,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 97,
-      "title": "Рация для запуска служебных миссий в транспорте",
-      "file": "97-ratsiya-dlya-sluzhebnykh-missiy.md",
-      "categories": [
-        "vehicle-controls",
-        "missions"
-      ],
-      "priority": "high",
-      "status": "in_progress"
-    },
-    {
       "id": 98,
       "title": "Телефон в машине сутенёра для запуска миссии",
       "file": "98-telefon-v-mashine-sutenera.md",
