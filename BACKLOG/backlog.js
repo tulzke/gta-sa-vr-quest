@@ -850,6 +850,18 @@ const BACKLOG_DATA = {
       ],
       "priority": "medium",
       "status": "open"
+    },
+    {
+      "id": 134,
+      "title": "Комфортная камера при смерти и аресте",
+      "file": "134-komfort-kamery-pri-smerti-i-areste.md",
+      "categories": [
+        "graphics",
+        "player",
+        "bugs"
+      ],
+      "priority": "medium",
+      "status": "open"
     }
   ]
 };
