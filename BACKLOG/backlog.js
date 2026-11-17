@@ -829,17 +829,6 @@ const BACKLOG_DATA = {
       ],
       "priority": "high",
       "status": "open"
-    },
-    {
-      "id": 132,
-      "title": "Смещение рук на руле при авариях",
-      "file": "132-smeshchenie-ruk-na-rule-pri-avariyakh.md",
-      "categories": [
-        "vehicle-controls",
-        "bugs"
-      ],
-      "priority": "critical",
-      "status": "in_progress"
     }
   ]
 };
