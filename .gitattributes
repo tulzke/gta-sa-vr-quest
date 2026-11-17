@@ -16,6 +16,8 @@
 /assets/service-radio/*.glb filter=lfs diff=lfs merge=lfs -text
 /assets/service-radio/runtime/*.mesh filter=lfs diff=lfs merge=lfs -text
 /assets/service-radio/reference/*.png filter=lfs diff=lfs merge=lfs -text
+/assets/firetruck-controller/*.blend filter=lfs diff=lfs merge=lfs -text
+/assets/firetruck-controller/*.glb filter=lfs diff=lfs merge=lfs -text
 /assets/watches/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/vrhands/skeletal/*.glb filter=lfs diff=lfs merge=lfs -text
 assets/vrhands/source/*.blend filter=lfs diff=lfs merge=lfs -text

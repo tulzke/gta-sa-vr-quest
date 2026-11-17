@@ -1,0 +1,395 @@
+{
+  "task": 113,
+  "status": "approved form; optimized <=4000 triangles; no gameplay integration",
+  "scope": "Firetruck 407 only",
+  "units": "metres",
+  "axes": "metres; +X right; +Y aiming forward; -Y screen toward operator; +Z up",
+  "body_size_m": [
+    0.166,
+    0.09,
+    0.134
+  ],
+  "body_top_m": 0.236,
+  "ceiling_anchor_m": [
+    0,
+    0.045,
+    0.27
+  ],
+  "active_screen_m": [
+    0.122,
+    0.0915
+  ],
+  "trigger_rotation_deg": [
+    0,
+    -12
+  ],
+  "trigger_animation": "WaterTriggerPull",
+  "no_rotary_knob": true,
+  "video_material": "CRT_VideoSurface_REPLACE_WITH_CAMERA",
+  "sample_feed": "self-authored preview, not game assets; replace at runtime",
+  "triangle_budget": 4000,
+  "triangles": 3222,
+  "parts": [
+    {
+      "name": "MainHousing",
+      "triangles": 436,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Housing | cool graphite polymer"
+      ]
+    },
+    {
+      "name": "FrontHousingLip",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Rear shell | dark graphite"
+      ]
+    },
+    {
+      "name": "DeepRubberBezel",
+      "triangles": 128,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Grip and bezel | black rubber"
+      ]
+    },
+    {
+      "name": "ScreenInnerGasket",
+      "triangles": 128,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "RearServicePanel",
+      "triangles": 244,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Rear shell | dark graphite"
+      ]
+    },
+    {
+      "name": "RearVentDarkBacking",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "LeftVentBacking",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "RightVentBacking",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "FrontFastener",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "FastenerSlot",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "FrontFastener.001",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "FastenerSlot.001",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "FrontFastener.002",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "FastenerSlot.002",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "FrontFastener.003",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "FastenerSlot.003",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "RearFastener",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "RearFastenerSlot",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "RearFastener.001",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "RearFastenerSlot.001",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "RearFastener.002",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "RearFastenerSlot.002",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "RearFastener.003",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "RearFastenerSlot.003",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Vents and recesses | black"
+      ]
+    },
+    {
+      "name": "PowerLampMetalRim",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "PowerLampAmberLens",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Power lamp | amber glass"
+      ]
+    },
+    {
+      "name": "PistolGripRubber",
+      "triangles": 444,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Grip and bezel | black rubber"
+      ]
+    },
+    {
+      "name": "GripShoulder",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Housing | cool graphite polymer"
+      ]
+    },
+    {
+      "name": "GripHeel",
+      "triangles": 44,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Grip and bezel | black rubber"
+      ]
+    },
+    {
+      "name": "IndexFingerTrigger",
+      "triangles": 156,
+      "parent": "TriggerPivot",
+      "materials": [
+        "Trigger | satin graphite"
+      ]
+    },
+    {
+      "name": "TriggerPivotCap_R",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "TriggerPivotCap_L",
+      "triangles": 28,
+      "parent": "MonitorDevice",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "CeilingPlate",
+      "triangles": 44,
+      "parent": "RoofCradle",
+      "materials": [
+        "Rear shell | dark graphite"
+      ]
+    },
+    {
+      "name": "CeilingStem",
+      "triangles": 44,
+      "parent": "RoofCradle",
+      "materials": [
+        "Housing | cool graphite polymer"
+      ]
+    },
+    {
+      "name": "CradleBackSpine",
+      "triangles": 44,
+      "parent": "RoofCradle",
+      "materials": [
+        "Housing | cool graphite polymer"
+      ]
+    },
+    {
+      "name": "CradleUpperStop",
+      "triangles": 44,
+      "parent": "RoofCradle",
+      "materials": [
+        "Rear shell | dark graphite"
+      ]
+    },
+    {
+      "name": "LeftCradleGuide",
+      "triangles": 44,
+      "parent": "RoofCradle",
+      "materials": [
+        "Rear shell | dark graphite"
+      ]
+    },
+    {
+      "name": "LeftCradlePad",
+      "triangles": 44,
+      "parent": "RoofCradle",
+      "materials": [
+        "Grip and bezel | black rubber"
+      ]
+    },
+    {
+      "name": "RightCradleGuide",
+      "triangles": 44,
+      "parent": "RoofCradle",
+      "materials": [
+        "Rear shell | dark graphite"
+      ]
+    },
+    {
+      "name": "RightCradlePad",
+      "triangles": 44,
+      "parent": "RoofCradle",
+      "materials": [
+        "Grip and bezel | black rubber"
+      ]
+    },
+    {
+      "name": "CeilingMountScrew",
+      "triangles": 28,
+      "parent": "RoofCradle",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "CeilingMountScrew.001",
+      "triangles": 28,
+      "parent": "RoofCradle",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "CeilingMountScrew.002",
+      "triangles": 28,
+      "parent": "RoofCradle",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "CeilingMountScrew.003",
+      "triangles": 28,
+      "parent": "RoofCradle",
+      "materials": [
+        "Fasteners | blackened steel"
+      ]
+    },
+    {
+      "name": "CurvedCRTScreen",
+      "triangles": 238,
+      "parent": "MonitorDevice",
+      "materials": [
+        "CRT_VideoSurface_REPLACE_WITH_CAMERA",
+        "CRT glass edge | smoke"
+      ]
+    }
+  ]
+}
