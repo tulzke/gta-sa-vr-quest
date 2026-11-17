@@ -24,6 +24,7 @@ checks = {
     # After a 150ms startup the current sample advances by one, modulo 32,
     # per update, independent of timestep. This can limit range at higher FPS.
     0x5f9300: (0x11025929, 0x6b09011f, 0x54000149),
+    0x5f92d4: (0xa9bc7bfd, 0xf9000bf7, 0xa90257f6, 0xa9034ff4),
     0x5f9310: (0x11000508, 0x6b0803e9, 0x12001108, 0x12001129),
     # Native gravity/position integration, then fixed extinguishing arguments.
     0x5f9334: (0x52824deb,),
@@ -32,6 +33,13 @@ checks = {
     0x5f93e4: (0x1e201003, 0x1e2c1004),
     # Render alpha: 64*(1-segmentAge/32); older sections become fainter.
     0x5f9c70: (0x1f010400,),
+    # Extinguishing strength is time-scaled: strength / 50 * native timestep.
+    0x494c48: (0x52a84908,),
+    0x494c78: (0x1e20188d,),
+    0x494cf4: (0xbd400300,),
+    0x494d04: (0x1e2009ab,),
+    # Water integration precedes vehicle/world control in this retail build.
+    0x496260: (0x940db394, 0x940db397, 0x940db39a),
     # Model 407 PreRender consumes these same angles: reset X, then append Z.
     0x6af294: (0xf9445261, 0xbd4b8660, 0xaa1303e0, 0x2a1f03e2, 0x52800023, 0x94058442),
     0x6af2ac: (0xbd4b8260, 0x2a1f03e3, 0x91228268, 0x52800042),
@@ -63,6 +71,7 @@ for name, expected in {
     '_ZN11FxManager_c6RenderEP8RwCamerah': (0x4dfae4, 196),
     'g_fxMan': (0xa5bcf8, 280),
     '_ZN13CWaterCannons8aCannonsE': (0xcc65e8, 0xbe8),
+    '_ZN12CWaterCannon19Update_OncePerFrameEs': (0x5f92d4, 0x270),
 }.items():
     assert symbols[name] == expected, name
 print('Retail water control/emission ABI, native nozzle PreRender and remote effects fingerprints PASS')

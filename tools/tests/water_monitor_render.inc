@@ -42,15 +42,16 @@
             // The shipped screen UV runs left-to-right with physical model X.
             // Do not inherit the old mirror compensation from weapon optics.
             CHECK(std::abs(v[i].u-source.uv[0])<.00001f);if(source.position[0]>.04f)CHECK(v[i].u>.8f);checkedWaterUv=true;
-            if(states[1]){CHECK(v[i].color==wm::Color(waterLight,waterLight,waterLight));
+            if(states[1]){const float nx=source.position[0]/.061f,nz=(source.position[2]-.173f)/.04575f;
+                const float level=waterLight*(1-.14f*std::clamp(nx*nx+nz*nz,0.f,1.f));CHECK(v[i].color==wm::Color(level,level,level));
                 if(waterLight==1.f){const auto world=wm::Point(wm::body,{source.position[0],source.position[1],source.position[2]});
                     CHECK(std::abs(v[i].position.y-world.y)<.000001f);}}}}
         return p;};
     g.RwIm3DRenderIndexedPrimitive=[](int,unsigned short*,int count){waterTriangles+=count/3;return 1;};
-    wm::DrawSurface();CHECK(checkedWaterUv&&waterTriangles==3290&&states==waterStates);
+    wm::DrawSurface();CHECK(checkedWaterUv&&waterTriangles==3546&&states==waterStates);
     waterTriangles=0;opt::DrawSurfaces();CHECK(waterTriangles==0&&states==waterStates); // no weapon tube for remote
     opt::ResetFrame();monitor.owner=-1;monitor.cameraActive=false;monitor.screen={.3f,.018f,.4f};
-    waterLight=.4f;wm::Prepare();CHECK(wm::ready&&!remote.visible);wm::DrawSurface();CHECK(waterTriangles==3470);
+    waterLight=.4f;wm::Prepare();CHECK(wm::ready&&!remote.visible);wm::DrawSurface();CHECK(waterTriangles==3726);
     opt::Render(camera.data(),reinterpret_cast<std::uintptr_t>(&head));CHECK(remotePasses==1&&remoteFx==1); // freeze after tail
     waterTriangles=0;monitor.screen={};wm::Prepare();wm::DrawSurface();CHECK(waterTriangles==3222&&states==waterStates);
     monitor.visible=false;wm::Prepare();CHECK(!wm::ready);
@@ -74,5 +75,5 @@
     waterTriangles=0;wm::DrawWaterStream();CHECK(waterTriangles==6&&waterQueries==1&&states==waterStates&&cannonData==originalWater);
     wm::DrawWaterStream();CHECK(waterTriangles==12&&waterQueries==2&&cannonData==originalWater);
     cannonData[0x30c]=0;wm::DrawWaterStream();CHECK(waterTriangles==12); // no fabricated stream after native state disappears
-    std::puts("water monitor: camera axes/aspect, own truck render, no scan lines/vignette, independent device roll, frozen shutdown, UV and render state restoration PASS");
+    std::puts("water monitor: camera axes/aspect, own truck render, CRT filter, independent device roll, frozen shutdown, UV and render state restoration PASS");
     std::puts("water stream: real native samples, collision-only query, no simulation/audio/particle calls, repeatable geometry and state restoration PASS");

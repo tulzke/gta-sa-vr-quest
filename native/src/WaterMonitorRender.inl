@@ -102,7 +102,7 @@ void DrawSurface(){
  };
  static std::vector<SkyBackdropVertex> vertices;static std::vector<unsigned short> indices,glass;
  vertices.clear();indices.clear();glass.clear();vertices.reserve(model.vertices.size());
- const float angle=visual.fire?-.20943951f:0.f,c=std::cos(angle),s=std::sin(angle);
+ const float angle=-.20943951f*visual.press,c=std::cos(angle),s=std::sin(angle);
  for(const auto& v:model.vertices){
   Vec p{v.position[0],v.position[1],v.position[2]},n{v.normal[0],v.normal[1],v.normal[2]};
   if(v.role==2){const float y=p.y-.018f,z=p.z-.103f;p.y=.018f+c*y-s*z;p.z=.103f+s*y+c*z;
@@ -131,11 +131,11 @@ void DrawSurface(){
   for(std::size_t i=0;i<model.vertices.size();++i){const auto& v=model.vertices[i];if(v.role!=3)continue;
    const float x=v.position[0]*visual.screen.x,z=(v.position[2]-.173f)*visual.screen.y;
    const float y=collapsing?-.059f+.0033f*((x/.061f)*(x/.061f)+(z/.04575f)*(z/.04575f))-.001f:v.position[1];
-   const float light=visual.screen.light;vertices[i].position=Point(body,{x,y,z+.173f});vertices[i].color=Color(light,light,light);
+   const float vignette=1.f-.14f*std::clamp((v.position[0]/.061f)*(v.position[0]/.061f)+((v.position[2]-.173f)/.04575f)*((v.position[2]-.173f)/.04575f),0.f,1.f);
+   const float light=visual.screen.light*vignette;vertices[i].position=Point(body,{x,y,z+.173f});vertices[i].color=Color(light,light,light);
   }
   draw(vertices,glass,optic.raster);
-  // Clean video for the in-headset ripple investigation: no scan lines or
-  // vignette. Shutdown collapse and the two aiming markers are independent.
+  // Subtle neutral CRT filter, on the same curved video surface.
   vertices.clear();indices.clear();
   const auto vertex=[&](float x,float z,std::uint32_t color){
    x*=visual.screen.x;z*=visual.screen.y;
@@ -146,6 +146,7 @@ void DrawSurface(){
    vertices.push_back(vertex(x0,z0,color));vertices.push_back(vertex(x1,z0,color));vertices.push_back(vertex(x1,z1,color));vertices.push_back(vertex(x0,z1,color));
    for(int i:{0,1,2,0,2,3})indices.push_back(start+i);
   };
+  for(int row=0;row<64;++row){const float z=-.0454f+row*.00142f;for(int col=0;col<2;++col)quad(-.0604f+col*.0604f,z,col*.0604f,z+.00025f,Color(0,0,0,.16f));}
   // Desired crosshair is fixed; the real nozzle circle follows the native
   // direction, including limits and inertia. Off-screen directions pin to edge.
   const auto circle=watermonitor::Circle(visual.actualWorld,camera);

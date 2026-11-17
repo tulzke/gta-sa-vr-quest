@@ -18,6 +18,7 @@
 #include "ServiceRadio.h"
 #include "WaterMonitorHand.h"
 #include "WaterMonitorCamera.h"
+#include "WaterMonitorSampling.h"
 #include "ServiceRadioMission.h"
 #include "RadioLabel.h"
 #include "RadioRetune.h"
@@ -2753,65 +2754,6 @@ bool VrGameplayInputAllowed() {
     return true;
 }
 
-// Interior glass, part two: the windscreen is its own named atomic (hidden in
-// the render callback), but SIDE windows are translucent MATERIALS inside the
-// door atomics. While the player sits in a vehicle with the option on, drop
-// the alpha of every translucent material in its clump to near-invisible and
-// restore the exact bytes on exit. Materials are shared per MODEL, so twin
-// traffic cars lose their tint too — only while the player is inside.
-struct GlassMaterialSave { void* material; std::uint8_t alpha; };
-GlassMaterialSave g_glassSaved[128];
-int g_glassSavedCount=0;
-void* g_glassVehicle=nullptr;
-
-void* GlassMaterialCB(void* material,void* data) {
-    (void)data;
-    if (!material||g_glassSavedCount>=128) return material;
-    auto* alpha=reinterpret_cast<std::uint8_t*>(
-        static_cast<char*>(material)+0xb); // RpMaterial color.a (SetAlphaCB)
-    if (*alpha<250&&*alpha>8) {
-        g_glassSaved[g_glassSavedCount++]={material,*alpha};
-        *alpha=8;
-    }
-    return material;
-}
-
-void* GlassAtomicCB(void* atomic,void* data) {
-    if (!atomic||!g.RpGeometryForAllMaterials) return atomic;
-    void* geometry=*reinterpret_cast<void**>(
-        static_cast<char*>(atomic)+0x30);
-    if (geometry)
-        g.RpGeometryForAllMaterials(geometry,&GlassMaterialCB,data);
-    return atomic;
-}
-
-void RestoreGlassMaterials() {
-    for (int i=0;i<g_glassSavedCount;++i)
-        *reinterpret_cast<std::uint8_t*>(
-            static_cast<char*>(g_glassSaved[i].material)+0xb)=
-            g_glassSaved[i].alpha;
-    if (g_glassSavedCount>0)
-        LOGI("[driving] interior glass: restored %d materials",
-             g_glassSavedCount);
-    g_glassSavedCount=0;
-    g_glassVehicle=nullptr;
-}
-
-void UpdateInteriorGlassMaterials() {
-    void* vehicle=(g.FindPlayerVehicle&&IsInteriorGlassHidden()&&
-                   vrcam::IsStereoActive())
-        ? g.FindPlayerVehicle(-1,false) : nullptr;
-    if (vehicle==g_glassVehicle) return;
-    RestoreGlassMaterials();
-    if (!vehicle||!g.RpClumpForAllAtomics) return;
-    void* clump=*reinterpret_cast<void**>(static_cast<char*>(vehicle)+0x20);
-    if (!clump) return;
-    g_glassVehicle=vehicle;
-    g.RpClumpForAllAtomics(clump,&GlassAtomicCB,nullptr);
-    LOGI("[driving] interior glass: cleared %d side-window materials",
-         g_glassSavedCount);
-}
-
 // The mobile pad queries do not consistently consume CPad::NewState.  In
 // particular, their CHID/touch paths can remain at zero even though UpdatePads
 // already received a live Touch controller.  Vice City solves this one level
@@ -5258,7 +5200,6 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     }
     // Held R2 drives acceleration directly in OnGetAccelerate; keep cadence pulses cleared.
     UpdateBicycleTriggerCadenceLocked(input.triggers[1],false);
-    UpdateInteriorGlassMaterials();
     if (!gameplay||(blocked&&!preview)||activeMode!=MODE_IMMERSIVE) {
         // No immersive interaction — but the dashboard HUD panels still need
         // the wheel/handlebar centre frame in DEFAULT driving (the Vice City

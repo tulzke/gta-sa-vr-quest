@@ -7,6 +7,7 @@ WaterUpdateOne g_waterUpdateOne{};WaterPointSpeed g_waterPointSpeed{};
 void* (*g_waterFrameLtm)(void*){};
 watermonitor::Servo g_waterServo{};tracking::SeatKey g_waterPhysicsSeat{};
 std::uint32_t g_waterPhysicsTick=~std::uint32_t{};
+#include "WaterMonitorSampling.inl"
 bool WaterTrackingToWorld(watermonitor::Vec p,watermonitor::Vec& out){
  float a[3]{p.x,p.y,p.z},b[3]{};if(!vrcam::TrackingPointToWorld(a,b))return false;out={b[0],b[1],b[2]};return watermonitor::finite(out);
 }
@@ -77,7 +78,7 @@ void OnWaterFireControl(void* vehicle,void* fire){
   const float noise=static_cast<float>(std::rand()&15)*.001f;
   const auto velocity=(actual+watermonitor::Vec{0,0,noise})*.5f+watermonitor::Vec{carSpeed.x,carSpeed.y,carSpeed.z*.3f};
   GameSymbols::Vec3 p{start.x,start.y,start.z},v{velocity.x,velocity.y,velocity.z};
-  g_waterUpdateOne(static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(vehicle)),&p,&v);
+  SubmitWaterInput(static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(vehicle)),&p,&v);
  }
 }
 void InstallWaterMonitorHook(){
@@ -88,6 +89,11 @@ void InstallWaterMonitorHook(){
  g_waterPointSpeed=reinterpret_cast<WaterPointSpeed>(resolve("_ZN9CPhysical8GetSpeedE7CVector",0x4a1408));
  g_waterFrameLtm=reinterpret_cast<decltype(g_waterFrameLtm)>(resolve("_Z13RwFrameGetLTMP7RwFrame",0x768858));
  constexpr std::uint32_t words[4]{0xd10343ff,0x6d072beb,0x6d0823e9,0xa9097bfd};
+ g_waterCannonPool=static_cast<unsigned char*>(resolve("_ZN13CWaterCannons8aCannonsE",0xcc65e8));
+ constexpr std::uint32_t updateWords[4]{0xa9bc7bfd,0xf9000bf7,0xa90257f6,0xa9034ff4};
+ if(g_waterCannonPool&&g.CTimer_m_FrameCounter&&g.CTimer_m_snTimeInMilliseconds&&g.CTimer_ms_fTimeStep)
+  g_origWaterCannonUpdate=reinterpret_cast<WaterCannonUpdate>(InstallVerifiedTrampoline(
+   resolve("_ZN12CWaterCannon19Update_OncePerFrameEs",0x5f92d4),reinterpret_cast<void*>(&OnWaterCannonUpdate),updateWords,"Firetruck time-based water sampling"));
  if(g_waterUpdateOne&&g_waterPointSpeed&&g_waterFrameLtm&&g.CTimer_ms_fTimeStep)
   g_origWaterFireControl=reinterpret_cast<WaterFireControl>(InstallVerifiedTrampoline(target,reinterpret_cast<void*>(&OnWaterFireControl),words,"Firetruck water control"));
  g_waterRetailReady=g_origWaterFireControl!=nullptr;dlclose(h);

@@ -9348,7 +9348,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         if(!monitorHand&&!serviceHand&&!hydroHand&&!liftHand&&!steeringHand&&!hornHand&&!hp[hand].climbGrip&&!debugPinch&&
            !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
            !(weaponHandMask&(1u<<hand))&&!ballLock.locked[hand]&&!TwoHandStateUsable(twoHand))selected.pointBlend=drivingWheel.hydroPoint[hand];
-        if(monitorHand)selected={handanimation::Gesture::GripPistol,handanimation::Gesture::GripPistolShoot,drivingWheel.monitor.fire?1.f:0.f,0.f};
+        if(monitorHand)selected=watermonitor::PistolPose(drivingWheel.monitor.press);
         if(serviceHand)selected={handanimation::Gesture::HandleRadio,handanimation::Gesture::HandleRadio,drivingWheel.servicePress,0.f};
         auto& frame=g_skeletalHands[hand];
         g_handSkeleton.Evaluate(selected,pinchAmount,pinchWeight,frame.palette);

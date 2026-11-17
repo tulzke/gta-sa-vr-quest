@@ -1,7 +1,11 @@
 #pragma once
 #include "WaterMonitorLogic.h"
 #include "ServiceRadioHand.h"
+#include "HandAnimation.h"
 namespace savr::watermonitor {
+inline handanimation::Selection PistolPose(float press){
+ return {handanimation::Gesture::GripPistolShoot,handanimation::Gesture::GripPistolShoot,handanimation::Unit(press),0.f};
+}
 // Pistol pose in runtime hand-mesh coordinates. The finger opening is placed
 // at the authored grip anchor, with the thumb mirrored across the handle for
 // the left hand. No tracked pose or per-grab offset changes this attachment.

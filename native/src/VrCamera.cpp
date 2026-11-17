@@ -23,6 +23,7 @@
 #include "WaterMonitorModel.h"
 #include "WaterMonitorCamera.h"
 #include "WaterMonitorStream.h"
+#include "VehicleInteriorGlass.h"
 #include "RearMirrorPolicy.h"
 #include "EyeDepth.h"
 #include "GraphicsEffects.h"
@@ -12547,40 +12548,10 @@ void* OnRenderBoatHiDetail(void* atomic) {
     return g_origRenderBoatHiDetail(atomic);
 }
 
+#include "VehicleInteriorGlass.inl"
 void* OnRenderVehicleHiDetailAlpha(void* atomic) {
-    if (!g_origRenderVehicleHiDetailAlpha) return atomic;
-    if (atomic&&driving::IsInteriorGlassHidden()&&
-        g_stereoActive.load(std::memory_order_relaxed)&&
-        g.FindPlayerVehicle&&g.CVehicle_GetVehicleAppearance&&
-        g.GetFrameNodeName) {
-        void* vehicle=g.FindPlayerVehicle(-1,false);
-        // Cars AND aircraft: plane/heli canopy glass carries the same env-map
-        // reflection that reads as smearing right in front of the VR pilot.
-        const int glassAppearance=vehicle?
-            g.CVehicle_GetVehicleAppearance(vehicle):0;
-        if (vehicle&&(glassAppearance==1||glassAppearance==3||
-                      glassAppearance==5)) {
-            void* playerClump=*reinterpret_cast<void**>(
-                reinterpret_cast<char*>(vehicle)+0x20);
-            void* atomicClump=*reinterpret_cast<void**>(
-                reinterpret_cast<char*>(atomic)+0x58);
-            void* frame=*reinterpret_cast<void**>(
-                reinterpret_cast<char*>(atomic)+0x08);
-            const char* name=frame?g.GetFrameNodeName(frame):nullptr;
-            const bool glass=name&&(
-                std::strstr(name,"windscreen")||
-                std::strstr(name,"window")||
-                std::strstr(name,"glass"));
-            if (playerClump&&playerClump==atomicClump&&glass) {
-                static bool logged=false;
-                if (!logged) {
-                    LOGI("[driving] hidden player interior glass atomic=%s",name);
-                    logged=true;
-                }
-                return atomic;
-            }
-        }
-    }
+    if(!g_origRenderVehicleHiDetailAlpha)return atomic;
+    if(PlayerInteriorGlassAtomic(atomic)&&NamedInteriorWindow(atomic))return atomic;
     return g_origRenderVehicleHiDetailAlpha(atomic);
 }
 
@@ -14097,6 +14068,10 @@ int OnSetupMapEntityVisibility(void* entity, void* modelInfo,
 
 void* OnAtomicDefaultRender(void* atomic) {
     if (!g_origAtomicDefaultRender) return atomic;
+    const bool hideWindows=PlayerInteriorGlassAtomic(atomic);
+    if(hideWindows&&NamedInteriorWindow(atomic))return atomic;
+    ScopedInteriorGlass glass;
+    if(hideWindows)glass.Apply(atomic);
     void* const entity = g_visibilityCurrentRenderEntity;
     TrafficAtomicRenderScope* const trafficScope =
         g_trafficAtomicRenderScope;

@@ -39,7 +39,7 @@ struct Servo {
 struct Screen {float x{},y{},light{};};
 struct State {
  tracking::SeatKey seat{};int owner{-1};bool gripDown[2]{true,true},armed{},fire{},block{};
- Frame held{},released{};double returnUntil{},cameraUntil{};
+ Frame held{},released{};double returnUntil{},cameraUntil{},pressTime{};float press{};
  void Observe(bool b){if(!b)block=false;}
  void Reset(bool b=false){const bool blocked=block||b;*this=State{};block=blocked;}
  bool ConsumesFire()const{return owner>=0||block;}
@@ -62,6 +62,8 @@ struct State {
    if(valid&&in.grip<=.30f)gripDown[h]=false;else if(!valid||in.grip>=.65f)gripDown[h]=true;
   }
   if(owner>=0){held=hands[owner].frame;if(!b)armed=true;fire=armed&&b;}
+  const float dt=pressTime>0?static_cast<float>(std::clamp(now-pressTime,0.0,.1)):0.f;pressTime=now;
+  press+=std::clamp((fire?1.f:0.f)-press,-12.f*dt,12.f*dt);
  }
  bool CameraActive(double now)const{return owner>=0||(cameraUntil>0&&now<cameraUntil);}
  Screen Display(double now)const{
@@ -75,7 +77,7 @@ struct State {
  }
 };
 struct Visual {
- bool visible{},cameraActive{},fire{};int owner{-1};void* vehicle{};
+ bool visible{},cameraActive{},fire{};float press{};int owner{-1};void* vehicle{};
  Frame dock{},body{},nozzleWorld{};Screen screen{};Vec desiredTracking{},actualWorld{},cameraWorld{};
  float cameraSettings[6]{35,0,30,0,0,0};
 };

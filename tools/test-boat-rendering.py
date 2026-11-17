@@ -182,23 +182,17 @@ int main() {
 '''
 
 def main():
-    msvc = sorted(Path('C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC').iterdir())[-1]
-    sdk = Path('C:/Program Files (x86)/Windows Kits/10')
-    ver = sorted((sdk/'Include').iterdir())[-1].name
-    env = os.environ.copy()
-    env['INCLUDE'] = ';'.join(str(p) for p in [msvc/'include', *[sdk/'Include'/ver/n for n in ('ucrt','shared','um')]])
-    env['LIB'] = ';'.join(str(p) for p in [msvc/'lib/x64', *[sdk/'Lib'/ver/n/'x64' for n in ('ucrt','um')]])
-    compiler = msvc/'bin/Hostx64/x64'
-    env['PATH'] = str(compiler)+os.pathsep+env.get('PATH','')
+    vswhere=Path(os.environ.get('ProgramFiles(x86)',r'C:\Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
+    base=Path(subprocess.check_output([str(vswhere),'-latest','-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-property','installationPath'],text=True).strip())
     out = ROOT/'build/boat-render-tests'
     out.mkdir(parents=True,exist_ok=True)
     source = (ROOT/'native/src/VrCamera.cpp').read_text()
-    core = source[source.index('AlphaListNode* FindBoatAlphaNode('):source.index('void* OnRenderVehicleHiDetailAlpha(')]
+    core = source[source.index('AlphaListNode* FindBoatAlphaNode('):source.index('#include "VehicleInteriorGlass.inl"')]
     harness = out/'boat_render.cpp'
     harness.write_text(PRELUDE+core+TESTS)
-    subprocess.run([str(compiler/'cl.exe'),'/nologo','/std:c++17','/EHsc','/MD',str(harness),
-                    '/Fe:'+str(out/'boat_render.exe'),'/Fo:'+str(out/'boat_render.obj')],env=env,check=True)
-    subprocess.run([str(out/'boat_render.exe')],check=True)
+    command=out/'run.cmd';vc=base/'VC/Auxiliary/Build/vcvars64.bat'
+    command.write_text(f'@echo off\ncall "{vc}" >nul\nif errorlevel 1 exit /b 1\ncl /nologo /std:c++17 /EHsc /MD "{harness}" /Fe:"{out/"boat_render.exe"}" /Fo:"{out/"boat_render.obj"}"\nif errorlevel 1 exit /b 1\n"{out/"boat_render.exe"}"\n')
+    subprocess.run(['cmd','/c',str(command)],cwd=out,check=True)
 
 if __name__ == '__main__':
     main()

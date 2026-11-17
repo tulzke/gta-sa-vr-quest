@@ -3,6 +3,7 @@
 #include "WaterMonitorModel.h"
 #include "WaterMonitorCamera.h"
 #include "WaterMonitorStream.h"
+#include "WaterMonitorSampling.h"
 #include <fstream>
 #include <iterator>
 #include <cstdio>
@@ -21,7 +22,7 @@ int main(int argc,char** argv){
  hands[0].grip=0;hands[1].near=false;s.Step(true,key,hands,false,.01);
  hands[0].grip=1;s.Step(true,key,hands,true,.02);CHECK(s.owner==0&&!s.fire&&s.ConsumesFire());
  s.Step(true,key,hands,true,.03);CHECK(!s.fire); // no inherited shot at grab
- s.Step(true,key,hands,false,.04);s.Step(true,key,hands,true,.05);CHECK(s.fire);
+ s.Step(true,key,hands,false,.04);s.Step(true,key,hands,true,.05);CHECK(s.fire&&s.press>0&&s.press<1);
  hands[0].frame.forward={1,0,0};s.Step(true,key,hands,true,.06);CHECK(s.held.forward.x==1); // no smoothing of target
  hands[0].grip=0;s.Step(true,key,hands,true,1);CHECK(s.owner==-1&&!s.fire&&s.ConsumesFire());
  CHECK(s.CameraActive(3.999)&&!s.CameraActive(4));
@@ -92,8 +93,8 @@ int main(int argc,char** argv){
  unsigned roles[5]{};for(std::size_t i=0;i<m.indices.size();i+=3){const auto role=static_cast<unsigned>(m.vertices[m.indices[i]].role);roles[role]++;
   CHECK(m.vertices[m.indices[i+1]].role==role&&m.vertices[m.indices[i+2]].role==role);}
  CHECK(roles[0]&&roles[2]&&roles[3]);
- CHECK(m.indices.size()/3+roles[3]+64+4==3470); // clean video layer, circle, crosshair
- CHECK(m.indices.size()/3+64+4==3290); // active screen replaces the black surface
+ CHECK(m.indices.size()/3+roles[3]+256+64+4==3726); // collapse, CRT, circle, crosshair
+ CHECK(m.indices.size()/3+256+64+4==3546); // active screen replaces the black surface
  CHECK(!m.Load(bytes.data(),bytes.size()-1));bytes[0]=0;CHECK(!m.Load(bytes.data(),bytes.size()));
  std::array<unsigned char,CannonStride> cannonBytes{};const std::uint32_t id=123;const std::int16_t current=2;
  std::memcpy(cannonBytes.data(),&id,4);std::memcpy(cannonBytes.data()+4,&current,2);
@@ -115,5 +116,25 @@ int main(int argc,char** argv){
  cannon=ReadCannon(originalCannon.data(),originalCannon.size());cannon.positions[current].x=std::numeric_limits<float>::quiet_NaN();
  AppendWater(cannon,{0,1,0},{1,0,0},clear,water);for(const auto& v:water.vertices)CHECK(finite(v.position));
  CHECK(ReadCannon(cannonBytes.data(),10).id==0);cannonBytes[4]=255;cannonBytes[5]=255;CHECK(ReadCannon(cannonBytes.data(),cannonBytes.size()).id==0);
+ for(float press:{0.f,.35f,1.f}){const auto animation=PistolPose(press);
+  const auto weapon=handanimation::Select(1.f,press,{false,false,false,false,false,true,22,0});
+  CHECK(animation.first==weapon.first&&animation.second==weapon.second&&animation.progress==weapon.progress&&animation.blend==weapon.blend);}
+ float referenceRange=0;
+ for(int hz:{15,20,30,36,60,72,90,120,144}){
+  std::array<unsigned char,CannonStride> data{};const std::uint32_t identity=99,birth=1;
+  std::memcpy(data.data(),&identity,4);std::memcpy(data.data()+8,&birth,4);
+  Sampling clock;const Vec p{0,0,2},v{0,.5f,.05f};const float dt=50.f/hz;
+  const auto emit=[&](unsigned frame){std::int16_t index{};std::memcpy(&index,data.data()+4,2);
+   std::memcpy(data.data()+0xc+index*12,&p,12);std::memcpy(data.data()+0x18c+index*12,&v,12);data[0x30c+index]=1;
+   clock.Input(identity,birth,frame,p,v);};
+  const auto native=[&](){for(int i=0;i<32;++i)if(data[0x30c+i]){Vec a{},speed{};std::memcpy(&a,data.data()+0xc+i*12,12);std::memcpy(&speed,data.data()+0x18c+i*12,12);
+   speed.z-=.004f*dt;a=a+speed*dt;std::memcpy(data.data()+0xc+i*12,&a,12);std::memcpy(data.data()+0x18c+i*12,&speed,12);}};
+  emit(0);for(int frame=1;frame<=hz*4;++frame){clock.Prepare(data.data(),dt,frame,true);native();emit(frame);}
+  float range=0;for(const auto& point:ReadCannon(data.data(),data.size()).positions)range=std::max(range,point.y);
+  if(hz==15)referenceRange=range;CHECK(near(range,referenceRange,.002f)&&near(range,25.833333f,.002f));
+  CHECK(clock.Matches(data.data()));
+  for(int frame=hz*4+1;frame<=hz*6;++frame){clock.Prepare(data.data(),dt,frame,false);native();}
+  const auto stopped=ReadCannon(data.data(),data.size());CHECK(std::all_of(stopped.active.begin(),stopped.active.end(),[](auto flag){return flag==0;}));
+ }
  std::printf("Water monitor: %d checks passed; 3222 asset triangles, %u screen triangles\n",checks,roles[3]);
 }

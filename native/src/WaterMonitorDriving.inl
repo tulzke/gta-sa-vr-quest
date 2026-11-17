@@ -29,7 +29,7 @@ void PublishWaterMonitor(WheelVisualState& visual,double now){
   const auto settings=it==g_modelCalibration.end()?watermonitor::DefaultCamera:it->second.monitorCamera;
   std::copy(settings.begin(),settings.end(),v.cameraSettings);}
  v.cameraWorld=v.nozzleWorld.Point({v.cameraSettings[0]*.01f,v.cameraSettings[1]*.01f,v.cameraSettings[2]*.01f});
- v.owner=g_waterMonitor.owner;v.fire=g_waterMonitor.fire;v.screen=g_waterMonitor.Display(now);v.cameraActive=g_waterMonitor.CameraActive(now);
+ v.owner=g_waterMonitor.owner;v.fire=g_waterMonitor.fire;v.press=g_waterMonitor.press;v.screen=g_waterMonitor.Display(now);v.cameraActive=g_waterMonitor.CameraActive(now);
  if(v.owner>=0)v.body=g_waterMonitor.held;
  else if(g_waterMonitor.returnUntil>now)v.body=watermonitor::Blend(v.dock,g_waterMonitor.released,static_cast<float>((g_waterMonitor.returnUntil-now)/watermonitor::ReturnSeconds));
  else v.body=v.dock;
