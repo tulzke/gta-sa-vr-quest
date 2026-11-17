@@ -23,7 +23,10 @@ bool BuildWeaponOpticFrame(int type, const RwMat& weapon, WeaponOpticFrame& out)
     const int* v=profile.value;
     const V3 barrel=Normalized(V3{weapon.r[0],weapon.r[1],weapon.r[2]});
     const V3 top=Normalized(V3{weapon.u[0],weapon.u[1],weapon.u[2]});
-    const V3 side=Normalized(V3{weapon.a[0],weapon.a[1],weapon.a[2]});
+    // The camera's lens and screen use the same authored side in both hands.
+    // The model matrix's third axis can reverse when the held mesh is mirrored.
+    const V3 side = type == weaponoptic::PhotoCamera ? Normalized(Cross(top, barrel)) :
+        Normalized(V3{weapon.a[0],weapon.a[1],weapon.a[2]});
     const V3 pivot{weapon.t[0],weapon.t[1],weapon.t[2]};
     const V3 position=pivot+barrel*(v[0]*.001f)+top*(v[1]*.001f)+side*(v[2]*.001f);
     constexpr float rad=.001745329252f;

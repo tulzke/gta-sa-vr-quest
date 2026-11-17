@@ -8587,12 +8587,12 @@ void BuildCalibMenu() {
                 const int size = field == 6 ? profile.value[6] : weaponoptic::PhotoHeightMm(profile);
                 std::snprintf(row, sizeof(row), "SCREEN %s   < %.1f CM >",
                               field == 6 ? "WIDTH" : "HEIGHT", size * .1f);
-            } else if (photoScreen && field >= 3 && field <= 5) {
-                std::snprintf(row, sizeof(row), "SCREEN ROT %c   < TURN >",
-                              "XYZ"[field - 3]);
             } else {
+                const bool screenAngle = photoScreen && field >= 3 && field <= 5;
+                const int value = screenAngle ? weaponoptic::PhotoAngleSteps(profile, field - 3) :
+                                               profile.value[field];
                 std::snprintf(row,sizeof(row),"%s%s   < %+.1f %s >",photoScreen ? "SCREEN " : "",
-                    calib::OpticFieldLabel(field) + (photoScreen ? 6 : 0),profile.value[field]*.1f,
+                    calib::OpticFieldLabel(field) + (photoScreen ? 6 : 0),value*.1f,
                     field>=3 && field<=5 ? "DEG" : "CM");
             }
         } else if (r == 24) {

@@ -48,6 +48,24 @@
     cameraModel.a[2]=1; // Opposite handed model uses the same upright basis.
     CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,photoAfter));
     CHECK(photoAfter.surface.up.z>.999f&&photoAfter.surface.right.x<-.999f);
+    int screenSet{}, screenType{};
+    CHECK(ParseProfile("optic2 1 43 17 55 28 900 0 0 100 75 1 1 0 1",
+                       screenSet,screenType,calib::opticProfile));
+    RwMat mirroredCamera = cameraModel;
+    mirroredCamera.a[2] = -1;
+    CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,photoBefore));
+    CHECK(BuildWeaponOpticFrame(PhotoCamera,mirroredCamera,photoAfter));
+    CHECK(photoBefore.surface.up.z>.999f&&photoBefore.surface.right.x<-.999f);
+    CHECK(std::memcmp(&photoBefore.surface,&photoAfter.surface,sizeof(CamBasis))==0);
+    CHECK(std::memcmp(&photoBefore.camera,&photoAfter.camera,sizeof(CamBasis))==0);
+    TurnPhotoScreen(calib::opticProfile, 1, 350);
+    TurnPhotoScreen(calib::opticProfile, 2, -185);
+    CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,photoBefore));
+    CHECK(BuildWeaponOpticFrame(PhotoCamera,mirroredCamera,photoAfter));
+    CHECK(std::memcmp(&photoBefore.surface,&photoAfter.surface,sizeof(CamBasis))==0);
+    CHECK(PhotoAngleSteps(calib::opticProfile,0)==900);
+    CHECK(PhotoAngleSteps(calib::opticProfile,1)==350);
+    CHECK(PhotoAngleSteps(calib::opticProfile,2)==-185);
     for (bool legacy : {false,true}) {
         auto profile = Defaults(PhotoCamera);
         profile.legacyPhotoMount = legacy;
@@ -173,6 +191,12 @@
     CHECK(parsed.value[3]==900&&parsed.legacyPhotoMount&&parsed.imageQuarterTurns==3);
     CHECK(std::abs(parsed.photoRotation.y-std::sqrt(.5f))<1e-5f);
     CHECK(std::abs(parsed.photoRotation.w-std::sqrt(.5f))<1e-5f);
+    CHECK(PhotoAngleSteps(parsed,0)==900&&PhotoAngleSteps(parsed,1)==900);
+    CHECK(ParseProfile("optic2 0 43 -60 0 0 900 0 0 100 68 1 0 3 1 0 1 0 1 45 900 -75",
+                       parsedSet,parsedType,parsed));
+    CHECK(PhotoAngleSteps(parsed,0)==945&&PhotoAngleSteps(parsed,1)==900&&PhotoAngleSteps(parsed,2)==-75);
+    TurnPhotoScreen(parsed,1,-50);
+    CHECK(PhotoAngleSteps(parsed,0)==945&&PhotoAngleSteps(parsed,1)==850&&PhotoAngleSteps(parsed,2)==-75);
     CHECK(ParseProfile("optic2 0 43 -60 0 0 900 0 0 100 68 1 0 3 1 0 0 0 0",parsedSet,parsedType,parsed));
     CHECK(parsed.photoRotation.w==1.f&&parsed.value[3]==900);
     CHECK(!ParseProfile("optic2 0 34 -60 0 0 0 0 0 60 150 1 0 3 1 0 0 0 1",parsedSet,parsedType,parsed));

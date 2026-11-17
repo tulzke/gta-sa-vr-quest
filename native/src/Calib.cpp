@@ -482,9 +482,10 @@ void Save() {
         for (int value : profile.value) std::fprintf(f, " %d", value);
         if (type == weaponoptic::PhotoCamera) {
             const auto q = profile.photoRotation;
-            std::fprintf(f, " %d %d %.9g %.9g %.9g %.9g",
+            std::fprintf(f, " %d %d %.9g %.9g %.9g %.9g %d %d %d",
                          profile.imageQuarterTurns, profile.legacyPhotoMount ? 1 : 0,
-                         q.x, q.y, q.z, q.w);
+                         q.x, q.y, q.z, q.w, profile.photoTurnSteps[0],
+                         profile.photoTurnSteps[1], profile.photoTurnSteps[2]);
         }
         std::fputc('\n', f);
     }

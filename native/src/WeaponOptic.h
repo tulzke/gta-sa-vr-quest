@@ -20,12 +20,17 @@ struct Profile {
     int imageQuarterTurns{};
     bool legacyPhotoMount{};
     PhotoRotation photoRotation{};
+    int photoTurnSteps[3]{}; // Menu increments in tenths of a degree by local axis.
 };
 
 inline PhotoRotation NormalizePhotoRotation(PhotoRotation q) {
     const float length = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
     if (!std::isfinite(length) || length < 1e-6f) return {};
     return {q.x/length, q.y/length, q.z/length, q.w/length};
+}
+
+constexpr int PhotoAngleSteps(const Profile& profile, int axis) {
+    return (profile.value[3 + axis] + profile.photoTurnSteps[axis]) % 3600;
 }
 
 // Postmultiply by one turn around the current screen's local axis.
@@ -43,6 +48,7 @@ inline void TurnPhotoScreen(Profile& profile, int axis, int steps) {
         q.w*turn[2] + q.z*w + q.x*turn[1] - q.y*turn[0],
         q.w*w - q.x*turn[0] - q.y*turn[1] - q.z*turn[2]
     });
+    profile.photoTurnSteps[axis] = (profile.photoTurnSteps[axis] + steps) % 3600;
 }
 inline Profile Defaults(int type) {
     Profile p;
@@ -77,12 +83,15 @@ inline bool ParseProfile(const char* line,int& set,int& type,Profile& p) {
     if(!fine && std::strncmp(line,"optic ",6)!=0) return false;
     p=Profile{};
     int legacyMount = 0;
-    const int fields=std::sscanf(line+(fine?6:5)," %d %d %d %d %d %d %d %d %d %d %d %d %d %d %f %f %f %f",
+    const int fields=std::sscanf(line+(fine?6:5),
+        " %d %d %d %d %d %d %d %d %d %d %d %d %d %d %f %f %f %f %d %d %d",
         &set,&type,&p.value[0],&p.value[1],&p.value[2],&p.value[3],&p.value[4],
         &p.value[5],&p.value[6],&p.value[7],&p.value[8],&p.value[9],
         &p.imageQuarterTurns,&legacyMount,
-        &p.photoRotation.x,&p.photoRotation.y,&p.photoRotation.z,&p.photoRotation.w);
-    const bool photoFormat = fine && type == PhotoCamera && (fields == 14 || fields == 18);
+        &p.photoRotation.x,&p.photoRotation.y,&p.photoRotation.z,&p.photoRotation.w,
+        &p.photoTurnSteps[0],&p.photoTurnSteps[1],&p.photoTurnSteps[2]);
+    const bool photoFormat = fine && type == PhotoCamera &&
+        (fields == 14 || fields == 18 || fields == 21);
     if((fields!=10 && fields!=12 && !photoFormat) || set<0 || set>1 || !Calibratable(type)) return false;
     for(int i=0;i<FieldCount;++i) {
         if (type == PhotoCamera && i == 7) continue;
@@ -96,6 +105,20 @@ inline bool ParseProfile(const char* line,int& set,int& type,Profile& p) {
             p.value[3] != 0 || p.value[4] != 0 || p.value[5] != 0;
         p.imageQuarterTurns = WrapQuarterTurns(p.imageQuarterTurns);
         p.photoRotation = NormalizePhotoRotation(p.photoRotation);
+        if (fields == 18) {
+            // Older quaternion profiles saved the pose without the menu readings.
+            // Seed the readings from the shortest axis-angle rotation.
+            const auto q = p.photoRotation;
+            const float sine = std::hypot(q.x, q.y, q.z);
+            if (sine > 1e-6f) {
+                const float sign = q.w < 0.f ? -1.f : 1.f;
+                const float scale = sign * std::atan2(sine, std::abs(q.w)) * 1145.91559f / sine;
+                p.photoTurnSteps[0] = static_cast<int>(std::lround(q.x * scale));
+                p.photoTurnSteps[1] = static_cast<int>(std::lround(q.y * scale));
+                p.photoTurnSteps[2] = static_cast<int>(std::lround(q.z * scale));
+            }
+        }
+        for (int& steps : p.photoTurnSteps) steps %= 3600;
     }
     return true;
 }
