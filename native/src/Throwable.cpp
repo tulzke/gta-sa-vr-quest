@@ -1,5 +1,6 @@
 #include "Throwable.h"
 
+#include "Calib.h"
 #include "Log.h"
 #include "PhysicalWeapon.h"
 #include "ScopeAim.h"
@@ -467,6 +468,7 @@ bool OnFireProjectile(void* weapon, void* shooter, Vec3* origin,
             shooter, projectileType, launchSource, force, &velocity,
             hasHeatTarget ? targetEntity : nullptr);
         if (fired) {
+            xr::TriggerWeaponShotHaptic(hand,type,calib::RecoilAmplitude());
             // SA 2.11 ignores AddProjectile's direction argument for rockets
             // fired by the player and seeds CPhysical::m_vecMoveSpeed from the
             // legacy camera instead. Identify only the newly-created object and

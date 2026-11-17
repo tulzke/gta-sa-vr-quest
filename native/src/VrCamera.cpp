@@ -3041,6 +3041,40 @@ bool CapturedTwoHandUsable(const xr::TwoHandVisualState& state, int hand) {
 // model frame, so rebuilding +Z with cross(+X,+Y) flips its local calibration.
 // This makes the shared RIGHT calibration mirror naturally on LEFT and, most
 // importantly, makes WEAPON OFFSET/ROT part of the ray transform.
+bool WeaponSightBasis(const physicalweapon::TrackingPose& pose,
+                      V3& barrel, V3& top, V3& lateral) {
+    barrel = Normalized(V3{pose.right[0], pose.right[1], pose.right[2]});
+    top = Normalized(V3{pose.forward[0], pose.forward[1], pose.forward[2]});
+    lateral = Normalized(V3{pose.up[0], pose.up[1], pose.up[2]});
+    top = Normalized(top - barrel * Dot(top, barrel));
+    lateral = Normalized(lateral - barrel * Dot(lateral, barrel) -
+                         top * Dot(lateral, top));
+    return Dot(barrel, barrel) >= .5f && Dot(top, top) >= .5f &&
+           Dot(lateral, lateral) >= .5f;
+}
+
+V3 WeaponSightOrigin(const physicalweapon::TrackingPose& pose,
+                     const calib::WeaponCalib& c, V3 barrel, V3 top, V3 lateral) {
+    constexpr float kUnitToMetres = .005f;
+    return V3{pose.position[0], pose.position[1], pose.position[2]} +
+        lateral * (c.aimOffX * kUnitToMetres) +
+        top * (c.aimOffY * kUnitToMetres) +
+        barrel * (.18f + c.aimOffZ * kUnitToMetres);
+}
+
+recoil::Transform BuildHeldRecoil(int hand, int weaponType,
+        const physicalweapon::TrackingPose& pose, const float grip[3],
+        const calib::WeaponCalib& c) {
+    const auto sample = recoil::Snapshot(hand, weaponType);
+    if (sample.pitch == 0 && sample.yaw == 0 && sample.rear == 0) return {};
+    V3 barrel{}, top{}, lateral{};
+    if (!WeaponSightBasis(pose, barrel, top, lateral))
+        return recoil::Build(sample, pose.right, pose.forward, grip);
+    const auto origin = WeaponSightOrigin(pose, c, barrel, top, lateral);
+    const float laserOrigin[]{origin.x, origin.y, origin.z};
+    return recoil::Build(sample, pose.right, pose.forward, grip, laserOrigin);
+}
+
 bool BuildModelBoundWeaponRayTracking(
         const xr::HandPose& renderedPose, int hand, int weaponType,
         const xr::TwoHandVisualState* capturedTwoHand,
@@ -3088,23 +3122,11 @@ bool BuildModelBoundWeaponRayTracking(
 
     const recoil::Transform kick = capturedTwoHand
         ? capturedTwoHand->weaponRecoil[hand]
-        : recoil::Build(recoil::Snapshot(hand,weaponType),weaponPose.right,
-                        weaponPose.forward,renderedPose.gripPos);
+        : BuildHeldRecoil(hand, weaponType, weaponPose, renderedPose.gripPos, c);
     kick.Apply(weaponPose);
 
-    V3 barrel = Normalized(V3{weaponPose.right[0], weaponPose.right[1],
-                              weaponPose.right[2]});
-    V3 top = Normalized(V3{weaponPose.forward[0], weaponPose.forward[1],
-                           weaponPose.forward[2]});
-    V3 lateral = Normalized(V3{weaponPose.up[0], weaponPose.up[1],
-                               weaponPose.up[2]});
-    top = Normalized(top - barrel * Dot(top, barrel));
-    lateral = Normalized(lateral - barrel * Dot(lateral, barrel) -
-                         top * Dot(lateral, top));
-    if (Dot(barrel, barrel) < 0.5f || Dot(top, top) < 0.5f ||
-        Dot(lateral, lateral) < 0.5f) {
-        return false;
-    }
+    V3 barrel{}, top{}, lateral{};
+    if (!WeaponSightBasis(weaponPose, barrel, top, lateral)) return false;
 
     // Use local coefficients rather than world-space axis rotations. LEFT has
     // an intentionally reflected model frame, which reverses pseudovector
@@ -3122,7 +3144,6 @@ bool BuildModelBoundWeaponRayTracking(
                         baseTop * std::tan(pitch));
     if (Dot(barrel, barrel) < 0.5f) return false;
 
-    constexpr float kUnitToMetres = 0.005f;
     const V3 weaponPosition{weaponPose.position[0], weaponPose.position[1],
                             weaponPose.position[2]};
     if (anchorOut) {
@@ -3130,10 +3151,7 @@ bool BuildModelBoundWeaponRayTracking(
         anchorOut[1] = weaponPosition.y;
         anchorOut[2] = weaponPosition.z;
     }
-    const V3 origin = weaponPosition +
-        baseLateral * (c.aimOffX * kUnitToMetres) +
-        baseTop * (c.aimOffY * kUnitToMetres) +
-        baseBarrel * (0.18f + c.aimOffZ * kUnitToMetres);
+    const V3 origin = WeaponSightOrigin(weaponPose, c, baseBarrel, baseTop, baseLateral);
     if (!Finite(origin) || !Finite(barrel) || Dot(barrel, barrel) < 0.5f)
         return false;
 
@@ -21821,8 +21839,8 @@ void OnRenderScene(bool underwater) {
             if (physicalweapon::HeldSlot(hand)==slot &&
                 physicalweapon::GetHandPosesSnapshot(recoilHands) &&
                 WeaponMatrixToTracking(heldMatrix,finalPose)) {
-                const auto kick=recoil::Build(recoil::Snapshot(hand,weaponType),
-                    finalPose.right,finalPose.forward,recoilHands[hand].gripPos);
+                const auto kick=BuildHeldRecoil(hand,weaponType,finalPose,
+                    recoilHands[hand].gripPos,calib::Snapshot(1,weaponType));
                 kick.Apply(finalPose);
                 RwMat kickedMatrix{};
                 if (TrackingWeaponMatrix(finalPose,kickedMatrix)) {
@@ -30483,7 +30501,8 @@ bool GetWeaponOpticRay(int hand,int type,float origin[3],float direction[3]) {
     xr::HandPose hands[2]{};
     if(!physicalweapon::GetHandPosesSnapshot(hands)) return false;
     RwMat matrix{};
-    if(!HandWeaponMatrixForPoseCalibrated(hand,type,hands[hand],calib::Snapshot(1,type),matrix)) return false;
+    const auto c=calib::Snapshot(1,type);
+    if(!HandWeaponMatrixForPoseCalibrated(hand,type,hands[hand],c,matrix)) return false;
     physicalweapon::TrackingPose pose{};
     float pivot[3]{},axis[3]{},angle{};
     if(physicalweapon::GetTwoHandTransformTracking(hand,pivot,axis,&angle)) {
@@ -30493,8 +30512,7 @@ bool GetWeaponOpticRay(int hand,int type,float origin[3],float direction[3]) {
     }
     // Match model and fire/laser rays, including one-handed optic use.
     if(!WeaponMatrixToTracking(matrix,pose)) return false;
-    recoil::Build(recoil::Snapshot(hand,type),pose.right,pose.forward,
-                  hands[hand].gripPos).Apply(pose);
+    BuildHeldRecoil(hand,type,pose,hands[hand].gripPos,c).Apply(pose);
     if(!TrackingWeaponMatrix(pose,matrix)) return false;
     WeaponOpticFrame frame{};
     if(!BuildWeaponOpticFrame(type,matrix,frame)) return false;
@@ -30632,6 +30650,15 @@ bool GetHeadWorldRay(float originOut[3], float directionOut[3]) {
     if (!Finite(eye)||!Finite(direction)) return false;
     originOut[0]=eye.x; originOut[1]=eye.y; originOut[2]=eye.z;
     directionOut[0]=direction.x; directionOut[1]=direction.y; directionOut[2]=direction.z;
+    return true;
+}
+
+bool WorldDirectionToTracking(const float worldDirection[3], float trackingDirection[3]) {
+    if (!g_vrBaseValid || !g_origin.valid) return false;
+    const V3 local = Normalized(GameVectorToTracking(
+        {worldDirection[0],worldDirection[1],worldDirection[2]}));
+    if (!Finite(local) || Dot(local,local)<.5f) return false;
+    trackingDirection[0]=local.x;trackingDirection[1]=local.y;trackingDirection[2]=local.z;
     return true;
 }
 

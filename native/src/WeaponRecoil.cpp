@@ -11,7 +11,7 @@ namespace savr::recoil {
 namespace {
 std::mutex mutex;
 struct Record { State state{}; int type{},slot{-1}; bool supported{},pendingDisarm{}; Sample disarmKick{}; } hands[2];
-struct ReleasedHand {State state{};Vec backward{};} released[2];
+State released[2];
 double previousTime{};
 std::uint64_t previousEpoch{};
 double Now(){timespec t{};clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
@@ -44,7 +44,7 @@ void Update(bool blocked){
     previousEpoch=epoch;
     for(int h=0;h<2;++h){
         if(reset || slots[h]>0 || !tracked[h].valid)released[h]={};
-        else released[h].state.Advance(dt);
+        else released[h].Advance(dt);
         auto& r=hands[h];
         if(reset || r.type!=types[h] || r.slot!=slots[h] || !Supported(types[h]))r={};
         if(blocked || !ped || !Supported(types[h]))continue;
@@ -52,7 +52,7 @@ void Update(bool blocked){
         r.state.Advance(reset?0.f:dt);
     }
 }
-void OnShot(int hand,int type,int skill){
+void OnShot(int hand,int type,int skill,Vec direction){
     if(hand<0 || hand>1 || !Supported(type))return;
     int profileSkill=std::clamp(skill,0,2);
     if((type==33 || type==34) && g.CStats_StatTypesFloat)
@@ -63,7 +63,7 @@ void OnShot(int hand,int type,int skill){
     auto& r=hands[hand];
     if(r.type!=type || r.slot<=0)return;
     const auto profile=ForWeapon(type,r.supported,calib::PhysicalRecoilLevel(),tuning);
-    r.state.Shot(profile);
+    r.state.Shot(profile,direction);
     if(tuning.disarmOneHanded && !r.supported){
         r.pendingDisarm=true;
         // Evaluate this very spring/jitter impulse at its nominal peak. This
@@ -86,12 +86,9 @@ void FinishShots(){
     // Disarm clears physical ownership, which calls Invalidate back into us.
     // The recoil mutex must be released before entering PhysicalWeapon.
     for(int h=0;h<2;++h)if(pending[h].slot>0){
-        physicalweapon::TrackingPose pose{};
-        const bool havePose=physicalweapon::GetHeldVisualPoseTracking(h,pending[h].slot,&pose);
         if(physicalweapon::DisarmAfterShot(h,pending[h].slot,pending[h].type,pending[h].kick)){
-            if(!havePose)physicalweapon::GetDroppedPoseTracking(h,&pose);
             std::lock_guard<std::mutex> lock(mutex);
-            released[h]={pending[h].wrist,Unit(Read(pose.right))*(-1.f)};
+            released[h]=pending[h].wrist;
         }
     }
 }
@@ -103,6 +100,6 @@ Sample Snapshot(int hand,int type){
 Vec ReleasedHandOffset(int hand){
     if(hand<0 || hand>1)return {};
     std::lock_guard<std::mutex> lock(mutex);
-    return released[hand].backward*released[hand].state.sample.rear;
+    return released[hand].sample.rearOffset;
 }
 }

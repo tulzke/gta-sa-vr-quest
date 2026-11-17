@@ -40,7 +40,7 @@ void* FindPed(int) { return ped; }
 void* GetPad(int) { return pad; }
 bool FakeFire(void*,void*,Vec3*,Vec3*,void*,Vec3*,Vec3*);
 void CorrectPhysicalReload(void*,void*,int,unsigned){}
-namespace vrcam {bool FirePhotograph(void*,void*,const float*){return true;}}
+namespace vrcam {bool FirePhotograph(void*,void*,int){return true;}}
 struct Symbols {
     void* TheCamera=camera;
     void* (*FindPlayerPed)(int)=FindPed;
@@ -53,6 +53,8 @@ std::atomic<bool> g_directTriggerDown[2]{};
 bool g_detonatorReleaseRequired[2]{true,true};
 std::uint32_t g_directNextFireMs[2]{};
 int g_directWeaponType[2]{-1,-1};
+namespace xr {void PublishFlameHaptic(int,float){}}
+void ResetReloadGesture(int hand){g_reloadGestures[hand].Reset();}
 int checks=0;
 void Check(bool condition,const char* name) {
     ++checks;
@@ -168,12 +170,13 @@ def main():
         r"kPadDisableFireOffset|kPedWeaponsOffset|kPedActiveSlotOffset|"
         r"kWeaponStride|kPedAttachedToOffset|kPlayerWeaponModeOffset|"
         r"kTriggerRelease) = .*?;", SOURCE, re.MULTILINE))
+    constants += "\n" + "\n".join(re.findall(r"^(?:struct ReloadObservation|ReloadObservation g_autoReload).*",SOURCE,re.MULTILINE))
     names = ["PlayerFireEnabled", "SupportedHitscan", "ResetDirectTrigger",
              "DetonatorTriggerReady", "IsScriptedWeaponCamera"]
     begin = SOURCE.index("    std::uint16_t* playerWeaponMode = nullptr;")
     end = SOURCE.index("    if (!fired) {", begin)
     fire = ("bool CallProductionFire(int weaponType) {\n"
-            "void* weapon=nullptr; void* ped=::ped; unsigned now=0; Vec3 origin{}; Vec3* target=nullptr;\n" +
+            "void* weapon=nullptr; void* ped=::ped; unsigned now=0; int hand=0; Vec3 origin{}; Vec3* target=nullptr;\n" +
             SOURCE[begin:end] + "\nreturn fired;\n}\n")
     output = ROOT / "build/mission-weapon-tests"
     output.mkdir(parents=True, exist_ok=True)

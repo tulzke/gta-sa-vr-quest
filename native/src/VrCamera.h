@@ -120,6 +120,7 @@ bool GetControllerThrowRay(int hand, float originOut[3], float directionOut[3]);
 // example a stereo bullet tracer). Converts a GTA world point into the same
 // OpenXR LOCAL frame used by rendered hands, lasers and the current eye ring.
 bool WorldPointToTracking(const float worldPoint[3], float trackingPoint[3]);
+bool WorldDirectionToTracking(const float worldDirection[3], float trackingDirection[3]);
 
 // Invalidate the yaw/position origin; the next live HMD pose becomes neutral.
 void RequestRecenter();

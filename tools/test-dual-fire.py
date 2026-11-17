@@ -85,10 +85,11 @@ struct Symbols {
     void* TheCamera=nullptr;
 } g;
 namespace physicalweapon {constexpr int kHandCount=2; int supportHands[2]{-1,-1};int SupportHand(int h){return supportHands[h];} int HeldSlot(int h){return held[h];} bool IsPrimaryDetached(int){return false;}}
-namespace driving {bool VehicleWeaponsImmersive(){return false;}}
-namespace scopeaim {bool IsActiveFor(int,int){return true;}}
+namespace driving {bool VehicleWeaponsImmersive(){return false;}bool WaterMonitorConsumesFire(){return false;}}
+namespace scopeaim {bool IsActiveFor(int,int){return true;}int PhotoHand(){return -1;}}
 namespace justbusiness {bool Active(){return false;}void RecordShot(int,int){}}
-namespace vrcam {bool FirePhotograph(void*,void*,const float*){return true;}}
+namespace calib {float RecoilAmplitude(){return .7f;}}
+namespace vrcam {bool FirePhotograph(void*,void*,int){return true;}}
 using WeaponUpdateFn=void(*)(void*,void*);
 void NativeUpdate(void*,void*){}
 WeaponUpdateFn g_origWeaponUpdate=NativeUpdate;
@@ -106,9 +107,11 @@ struct InputState {bool b=false;float triggers[2]{};};
 void GetInput(InputState& in){in.triggers[0]=::triggers[0];in.triggers[1]=::triggers[1];}
 struct HandPose {bool valid=true,aimValid=true;float gripPos[3]{},gripOri[4]{0,0,0,1};};
 HandPose tracked[2];bool focused=true,tracking=true;std::uint64_t epoch=1;int haptics[2]{};
-float hapticAmplitude[2]{},hapticDuration[2]{};
+float hapticAmplitude[2]{},hapticDuration[2]{},flameIntensity[2]{};
 bool IsSessionFocused(){return focused;}
 void TriggerHaptic(int hand,float amplitude,float,float duration){++haptics[hand];hapticAmplitude[hand]=amplitude;hapticDuration[hand]=duration;}
+void TriggerWeaponClick(int hand,float amplitude){TriggerHaptic(hand,amplitude,0,28);}
+void PublishFlameHaptic(int hand,float intensity){flameIntensity[hand]=intensity;}
 }
 namespace physicalweapon {
 struct TrackingPose {float right[3]{0,0,-1};};
@@ -157,9 +160,10 @@ def compile_run(source, name):
 def main():
     names=["PlayerFireEnabled","SupportedHitscan","AreaEffectWeapon","SupportedDirectFire",
            "AutomaticHitscan","PhysicalFireIntervalMs","PhysicalWeaponInfo","MagazineCapacity",
-           "OnWeaponUpdate","PhysicalReloadDuration","CorrectPhysicalReload","ResetReloadGesture","ReloadClick","UpdateReloadGesture","ResetDirectTrigger","UpdateReloadHints","DetonatorTriggerReady",
+           "OnWeaponUpdate","PhysicalReloadDuration","CorrectPhysicalReload","ResetReloadGesture","ObserveAutomaticReload","ReloadClick","UpdateReloadGesture","ResetDirectTrigger","UpdateReloadHints","DetonatorTriggerReady",
            "GetPhysicalTrigger","UpdateHand","Update"]
     constants="\n".join(re.findall(r"^constexpr (?:std::uintptr_t|float) \w+ = .*?;",SOURCE,re.M))
+    constants += "\n" + "\n".join(re.findall(r"^(?:struct ReloadObservation|ReloadObservation g_autoReload|enum class FlameActivity).*",SOURCE,re.M))
     output=ROOT/"build/dual-fire-tests";output.mkdir(parents=True,exist_ok=True)
     source=output/"mission_weapons.cpp"
     source.write_text(PRELUDE+constants+"\n"+function("QueryPhysicalFireHand",(ROOT/"native/src/main.cpp").read_text(encoding="utf-8"))+"\n"+"\n".join(function(n) for n in names)+TESTS,encoding="utf-8")

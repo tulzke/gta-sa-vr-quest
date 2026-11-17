@@ -364,6 +364,7 @@ void ResetRuntimeLocked() {
     xr::SetRadialHolsterMenu({});
     for (auto& intent : gReachIntent) intent.Invalidate();
     for (int hand = 0; hand < kHandCount; ++hand) {
+        xr::PublishHolsterHaptic(hand, -1, 0, 0);
         gHeldSlot[hand] = -1;
         gSupportHand[hand] = -1;
         gPrimaryDetached[hand] = false;
@@ -606,7 +607,7 @@ bool VehicleSidearmWeaponType(int weaponType) {
 int ClosestAvailableHolsterSlotLocked(
     void* ped, int hand,
     const float (*anchors)[3], const bool* anchorValid,
-    float* distanceOut = nullptr) {
+    float* distanceOut = nullptr, int* pointOut = nullptr) {
     if (!ValidHand(hand) || !gHands[hand].valid || anchors == nullptr ||
         anchorValid == nullptr)
         return -1;
@@ -631,6 +632,7 @@ int ClosestAvailableHolsterSlotLocked(
         if (distance < closestDistance) {
             closestDistance = distance;
             closestSlot = slot;
+            if (pointOut) *pointOut = point;
         }
     }
     if (distanceOut != nullptr) *distanceOut = closestDistance;
@@ -1278,6 +1280,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                     Distance(GripPosition(gHands[primary]),PositionOf(target))<=.12f) {
                     gPrimaryDetached[primary]=false;
                     gGripLatched[primary]=true;
+                    xr::TriggerWeaponClick(primary, .22f);
                 }
                 handledHands |= 1u<<primary;
                 continue;
@@ -1330,6 +1333,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             gSupportStartedAt[primary] = NowSeconds();
             gGripLatched[support] = true;
             handledHands |= 1u << support;
+            xr::TriggerWeaponClick(support, .22f);
             LOGI("[physwpn] support grabbed slot=%d %s supports %s reach=%.3f",
                  slot, support == 0 ? "LEFT" : "RIGHT",
                  primary == 0 ? "LEFT" : "RIGHT", reach);
@@ -1388,6 +1392,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             const int slot = gHeldSlot[source];
             ClearHeldLocked(source);
             GiveToHandLocked(ped, receiver, slot, "transferred");
+            xr::TriggerWeaponClick(receiver, .22f);
             // Preserve the exact reflected final basis until the renderer publishes
             // the receiver's newly calibrated model pose on the next render pass.
             gHeldVisualPose[receiver] = transferredPose;
@@ -1421,6 +1426,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 const int slot = gDropped[source].slot;
                 gDropped[source] = DroppedWeapon{};
                 GiveToHandLocked(ped, receiver, slot, "caught");
+                xr::TriggerWeaponClick(receiver, .22f);
                 gHeldVisualPose[receiver] = flying;
                 gHeldVisualSlot[receiver] = slot;
                 gHeldVisualValid[receiver] = true;
@@ -1464,6 +1470,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 ped, hand, anchors, anchorValid, &closestDistance);
             if (closestSlot >= 0 && grabarbitration::Allows(hand,grabarbitration::Kind::Holster)) {
                 GiveToHandLocked(ped, hand, closestSlot, "grabbed");
+                xr::TriggerWeaponClick(hand, .22f);
                 gGripLatched[hand] = true;
                 LOGI("[physwpn] holster grab reach=%.3f", closestDistance);
             }
@@ -1488,6 +1495,36 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     } else {
         const int held = AnyHeldHandLocked();
         if (held >= 0) SelectCurrentSlot(ped, gHeldSlot[held]);
+    }
+
+    const unsigned busyHands = doorHands | basketball::HeldHandMask();
+    for (int hand = 0; hand < kHandCount; ++hand) {
+        const bool drivingBusy = vehicleImmersive &&
+            (seatWheel.grabbed[hand] || seatWheel.ignitionGrabbed[hand] || seatWheel.radioGrabbed[hand]);
+        int point = -1;
+        float proximity = 0;
+        if (!interactionsBlocked && gHands[hand].valid && gHands[hand].positionTracked &&
+            !drivingBusy && !(busyHands & (1u << hand)) && !gRadialMenus[hand].open &&
+            !gPrimaryDetached[hand] && !ValidHand(gSupportHand[hand])) {
+            const int supportFor = PrimaryHandForSupportLocked(hand);
+            const int slot = ValidHand(supportFor) && gPrimaryDetached[supportFor]
+                ? gHeldSlot[supportFor] : gHeldSlot[hand];
+            const float grabRadius = holster::GrabRadiusMetres();
+            if (ValidSlot(slot)) {
+                const int home = holster::FindPointForSlot(slot);
+                if (home>=0 && anchorValid[home] && holster::PointGrabbable(home)) {
+                    const float radius = std::min(kHolsterReturnRadius, .75f*grabRadius);
+                    const float distance = Distance(GripPosition(gHands[hand]),
+                        {anchors[home][0],anchors[home][1],anchors[home][2]});
+                    if (distance<radius) { point=home; proximity=1.f-distance/radius; }
+                }
+            } else if (!ValidHand(supportFor) && (gDualHoldEnabled || AnyHeldHandLocked()<0)) {
+                float distance = grabRadius;
+                if (ClosestAvailableHolsterSlotLocked(ped,hand,anchors,anchorValid,&distance,&point)>=0)
+                    proximity=1.f-distance/grabRadius;
+            }
+        }
+        xr::PublishHolsterHaptic(hand,point,proximity,trackingEpoch);
     }
 
     holstermarker::Marker markers[holster::POINT_COUNT + 1]{};
@@ -1616,6 +1653,7 @@ void ResetTracking() {
     for (auto& intent : gReachIntent) intent.Invalidate();
     std::memcpy(gHands,latest,sizeof(gHands));
     for(int h=0;h<kHandCount;++h) {
+        xr::PublishHolsterHaptic(h, -1, 0, 0);
         gPreviousPoseValid[h]=false;gHandVelocity[h]={};gHandAngularVelocity[h]={};
         ClearVisualPoseLocked(h);
         gDropped[h]=DroppedWeapon{};

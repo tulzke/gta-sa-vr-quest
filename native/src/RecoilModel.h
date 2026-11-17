@@ -8,7 +8,20 @@ constexpr float kRad = .01745329252f;
 constexpr float kReturnOmega = 20.f;
 inline bool Supported(int type) { return (type >= 22 && type <= 34) || type == 38; }
 
-struct Sample { float pitch{}, yaw{}, rear{}; };
+struct Vec {
+    float x{},y{},z{};
+    Vec operator+(Vec b)const{return{x+b.x,y+b.y,z+b.z};}
+    Vec operator-(Vec b)const{return{x-b.x,y-b.y,z-b.z};}
+    Vec operator*(float s)const{return{x*s,y*s,z*s};}
+};
+inline Vec Read(const float* p){return{p[0],p[1],p[2]};}
+inline void Write(float* p,Vec v){p[0]=v.x;p[1]=v.y;p[2]=v.z;}
+inline float Dot(Vec a,Vec b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+inline Vec Cross(Vec a,Vec b){return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
+inline float Length(Vec a){return std::sqrt(Dot(a,a));}
+inline Vec Unit(Vec a){const float n=Length(a);return std::isfinite(n)&&n>1e-6f?a*(1.f/n):Vec{};}
+
+struct Sample { float pitch{}, yaw{}, rear{}; Vec rearOffset{}; };
 struct Profile {
     float kick{}, limit{}, sideways{}, back{}, backLimit{}, omega{kReturnOmega};
 };
@@ -83,18 +96,24 @@ struct Spring {
     }
 };
 struct State {
-    Spring angle{}, back{};
+    Spring angle{};
+    Vec rearPosition{}, rearVelocity{};
     Profile target{}, live{};
     float heat{}, phase{};
-    bool initialized{};
+    bool initialized{}, directional{};
     Sample sample{}; // Published only by Advance, never by Shot or a reader.
-    void Shot(Profile p) {
+    void Shot(Profile p, Vec shotDirection = {}) {
         if (p.kick<=0 && p.sideways<=0 && p.back<=0) return;
         if (!initialized) { live=p;initialized=true; }
         target=p;
         constexpr float e=2.718281828f;
         angle.v=std::min(angle.v+p.kick*p.omega*e, p.limit*p.omega*3.f);
-        back.v=std::min(back.v+p.back*p.omega*e, p.backLimit*p.omega*3.f);
+        const Vec forward=Unit(shotDirection);
+        directional=Dot(forward,forward)>.5f;
+        const Vec backward=directional?forward*(-1.f):Vec{-1,0,0};
+        rearVelocity=rearVelocity+backward*(p.back*p.omega*e);
+        const float speed=Length(rearVelocity), limit=p.backLimit*p.omega*3.f;
+        if (speed>limit) rearVelocity=rearVelocity*(limit/speed);
         heat=std::min(heat+.8f,1.f);
     }
     void Advance(float dt) {
@@ -106,7 +125,10 @@ struct State {
         live.sideways+=(target.sideways-live.sideways)*blend;
         live.omega+=(target.omega-live.omega)*blend;
         angle.Advance(dt,live.omega);
-        back.Advance(dt,live.omega);
+        const Vec c=rearVelocity+rearPosition*live.omega;
+        const float decay=std::exp(-live.omega*dt);
+        rearVelocity=(rearVelocity-c*(live.omega*dt))*decay;
+        rearPosition=(rearPosition+c*dt)*decay;
         heat*=std::exp(-8.f*dt);
         phase=std::fmod(phase+dt,60.f);
         // Reserve headroom for jitter: the mean approaches a soft ceiling,
@@ -118,22 +140,13 @@ struct State {
         sample.pitch=std::max(0.f,mean+jitter);
         sample.yaw=live.sideways*heat*(.6f*std::sin(phase*53.f)+
                                                 .4f*std::sin(phase*89.f));
-        sample.rear=live.backLimit>1e-8f ? live.backLimit*std::tanh(back.x/live.backLimit):0.f;
-        if (heat<.001f && angle.x<.00001f && back.x<.000001f) *this={};
+        const float displacement=Length(rearPosition);
+        sample.rear=live.backLimit>1e-8f ? live.backLimit*std::tanh(displacement/live.backLimit):0.f;
+        sample.rearOffset=directional&&displacement>0?rearPosition*(sample.rear/displacement):Vec{};
+        if (heat<.001f && angle.x<.00001f && displacement<.000001f && Length(rearVelocity)<.00002f) *this={};
     }
 };
 
-struct Vec {
-    float x{},y{},z{};
-    Vec operator+(Vec b)const{return{x+b.x,y+b.y,z+b.z};}
-    Vec operator-(Vec b)const{return{x-b.x,y-b.y,z-b.z};}
-    Vec operator*(float s)const{return{x*s,y*s,z*s};}
-};
-inline Vec Read(const float* p){return{p[0],p[1],p[2]};}
-inline void Write(float* p,Vec v){p[0]=v.x;p[1]=v.y;p[2]=v.z;}
-inline float Dot(Vec a,Vec b){return a.x*b.x+a.y*b.y+a.z*b.z;}
-inline Vec Cross(Vec a,Vec b){return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
-inline Vec Unit(Vec a){const float n=std::sqrt(Dot(a,a));return n>1e-6f?a*(1.f/n):Vec{};}
 inline Vec Rotate(Vec v,Vec axis,float angle){
     const float c=std::cos(angle),s=std::sin(angle);
     return v*c+Cross(axis,v)*s+axis*(Dot(axis,v)*(1.f-c));
@@ -155,21 +168,28 @@ struct Transform {
         Write(p.up,Vector(Read(p.up)));
     }
 };
-inline Transform Build(Sample s,const float* barrel,const float* modelTop,const float* pivot){
+inline Transform Build(Sample s,const float* barrel,const float* modelTop,const float* pivot,
+                       const float* laserOrigin=nullptr){
     const Vec b=Unit(Read(barrel));
-    // OpenXR LOCAL is Y-up. A calibrated model's named "forward/top" axis
-    // can actually point sideways: it must not define the pitch direction.
-    // Project gravity-up perpendicular to the barrel; only an almost vertical
-    // barrel needs the model axis as a fallback (no unique upward pitch there).
-    Vec u=Vec{0,1,0}-b*b.y;
-    if(Dot(u,u)<.0001f){
-        const Vec fallback=Read(modelTop);
-        u=fallback-b*Dot(fallback,b);
-    }
-    u=Unit(u);
-    const Vec axis=Unit(Cross(b,u));
-    if (Dot(axis,axis)<.5f || (s.pitch==0 && s.yaw==0 && s.rear==0)) return {};
-    return {Read(pivot),axis,u,b*(-s.rear),s.pitch,s.yaw,true};
+    const Vec rotationCenter=Read(pivot);
+    Vec lever=laserOrigin?Unit(Read(laserOrigin)-rotationCenter):b;
+    if (Dot(lever,lever)<.5f) lever=b;
+    // The horizontal pitch axis lifts the laser exit around the grip. A
+    // near-vertical lever has no unique up direction, so use the model top.
+    const auto upFor=[modelTop](Vec direction){
+        Vec up=Vec{0,1,0}-direction*direction.y;
+        if (Dot(up,up)<.0001f) {
+            const Vec fallback=Read(modelTop);
+            up=fallback-direction*Dot(fallback,direction);
+        }
+        return Unit(up);
+    };
+    const Vec axis=Unit(Cross(lever,upFor(lever)));
+    const Vec yawAxis=upFor(b);
+    const Vec translation=Dot(s.rearOffset,s.rearOffset)>0?s.rearOffset:b*(-s.rear);
+    const float pitch=Dot(axis,axis)>.5f?s.pitch:0.f;
+    const float yaw=Dot(yawAxis,yawAxis)>.5f?s.yaw:0.f;
+    return {rotationCenter,axis,yawAxis,translation,pitch,yaw,pitch!=0 || yaw!=0 || s.rear!=0};
 }
 struct Launch {Vec velocity{},spinAxis{};float spinSpeed{};};
 inline Launch DisarmLaunch(Sample kick,const float* barrel,const float* modelTop,const float* pivot){
@@ -188,8 +208,8 @@ inline Launch DisarmLaunch(Sample kick,const float* barrel,const float* modelTop
     // stronger shoulder setting flattens the launch toward the shooter instead
     // of increasing an upward throw. Pitch/yaw still supply their deflection.
     constexpr float e=2.718281828f;
-    const float shoulderVelocity=std::max(0.f,kick.rear)*kReturnOmega*e;
-    const Vec velocity=back.Vector(b*(-1.f))*(2.f*strength)-b*shoulderVelocity;
+    const Vec shoulder=Dot(kick.rearOffset,kick.rearOffset)>0?kick.rearOffset:b*(-std::max(0.f,kick.rear));
+    const Vec velocity=back.Vector(b*(-1.f))*(2.f*strength)+shoulder*(kReturnOmega*e);
     return {velocity,axis,
             Dot(axis,axis)>.5f?6.f*strength:0.f};
 }

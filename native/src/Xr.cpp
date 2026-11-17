@@ -5175,6 +5175,57 @@ void PublishPickupHaptic(int hand,float amplitude,std::uint64_t epoch) {
     g_hapticHands[hand].pickup={haptics::Source::Pickup,std::clamp(amplitude,0.f,.35f),
         0,HapticNow()+.10,++g_hapticSerial,epoch};
 }
+void TriggerWeaponShotHaptic(int hand, int type, float intensity) {
+    const auto profile=haptics::ForShot(type);
+    if (hand<0 || hand>1 || !IsSessionFocused() || profile.seconds<=0 ||
+        !std::isfinite(intensity) || intensity<=0) return;
+    const auto epoch=CaptureTrackingSnapshot().epoch;
+    std::lock_guard<std::mutex> lock(g_hapticMutex);
+    g_hapticHands[hand].shot={haptics::Source::Shot,
+        profile.amplitude*std::min(intensity,1.f),0,HapticNow()+.10,
+        ++g_hapticSerial,epoch,profile.seconds,profile.envelope};
+}
+void TriggerWeaponClick(int hand, float amplitude) {
+    if (hand<0 || hand>1 || !IsSessionFocused() ||
+        !std::isfinite(amplitude) || amplitude<=0) return;
+    const auto epoch=CaptureTrackingSnapshot().epoch;
+    std::lock_guard<std::mutex> lock(g_hapticMutex);
+    g_hapticHands[hand].click={haptics::Source::WeaponClick,
+        std::min(amplitude,1.f),0,HapticNow()+.10,++g_hapticSerial,epoch,.028};
+}
+void PublishFlameHaptic(int hand, float intensity) {
+    if (hand<0 || hand>1) return;
+    const auto epoch=CaptureTrackingSnapshot().epoch;
+    std::lock_guard<std::mutex> lock(g_hapticMutex);
+    auto& flame=g_hapticHands[hand].flame;
+    if (!IsSessionFocused() || !std::isfinite(intensity) || intensity<=0) {
+        flame={}; return;
+    }
+    const double now=HapticNow();
+    const float amplitude=.56f*std::min(intensity,1.f);
+    if (!flame.Active(now) || flame.epoch!=epoch) {
+        flame={haptics::Source::Flame,amplitude,0,now+.085,++g_hapticSerial,
+            epoch,0,haptics::Envelope::Irregular,now};
+    } else {
+        flame.amplitude=amplitude;
+        flame.until=now+.085;
+    }
+}
+void PublishHolsterHaptic(int hand, int point, float proximity, std::uint64_t epoch) {
+    if (hand<0 || hand>1) return;
+    std::lock_guard<std::mutex> lock(g_hapticMutex);
+    auto& requests=g_hapticHands[hand];
+    if (!IsSessionFocused() || point<0 || !std::isfinite(proximity)) {
+        requests.holster={};
+        requests.holsterPacer={};
+        requests.holsterPulse={};
+        requests.holsterPoint=-1;
+        return;
+    }
+    requests.holsterPoint=point;
+    requests.holster={haptics::Source::Holster,std::clamp(proximity,0.f,1.f),
+        0,HapticNow()+.10,0,epoch};
+}
 void PublishHudText(const std::int16_t* brief, int briefCapacity,
                     const std::int16_t* bigMessages, int bigStyleCount,
                     int bigStyleCapacity,

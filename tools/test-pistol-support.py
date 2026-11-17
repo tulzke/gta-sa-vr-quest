@@ -73,6 +73,7 @@ void StartDropLocked(int,int,double,int velocityHand=-1){++dropCount;dropVelocit
 int ClosestAvailableHolsterSlotLocked(void*,int,const float[][3],const bool*){return availableHolster;}
 void ClearHeldLocked(int h){ClearSupportForHandLocked(h);gHeldSlot[h]=-1;}
 void GiveToHandLocked(void*,int h,int slot,const char*){gHeldSlot[h]=slot;}
+namespace savr::xr {void TriggerWeaponClick(int,float){}}
 void Tick(){void* ped=FindPlayerPed(-1);unsigned handledHands=0;float anchors[7][3]{};bool anchorValid[7]{};
 '''+physical[physical.index('        // Keep/release an established support grip first.'):physical.index('        // Explicit hand-to-hand transfer at the final rendered gun body.')]+r'''
 }

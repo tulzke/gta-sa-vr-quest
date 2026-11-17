@@ -59,7 +59,7 @@ prefix = r'''
 #include <cstdlib>
 using namespace savr;
 std::uint64_t trackingEpoch=1;
-namespace savr::xr {void SetAmmoHolsters(const holstermarker::Frame&) {}}
+namespace savr::xr {void SetAmmoHolsters(const holstermarker::Frame&) {} void TriggerWeaponClick(int,float){}}
 #define LOGI(...) ((void)0)
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 constexpr int kHandCount=2;

@@ -98,5 +98,43 @@ int main(){
     menu=true;FlushHaptics();menu=false;FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None);
     PublishPickupHaptic(1,.2f,3);s.sessionState=XR_SESSION_STATE_VISIBLE;PublishPickupHaptic(1,.2f,3);
     CHECK(g_hapticHands[1].pickup.source==Source::None);
-    std::puts("production XR adapter: ordinary vibration, stop, priorities and pickup ramps: PASS");
+
+    ResetHapticOutput();s.sessionState=XR_SESSION_STATE_FOCUSED;clockTime=6;
+    CHECK(ForShot(24).amplitude>ForShot(30).amplitude);
+    CHECK(ForShot(30).amplitude>ForShot(22).amplitude);
+    TriggerWeaponShotHaptic(0,24,1.f);TriggerWeaponShotHaptic(1,28,1.f);
+    TriggerWeaponClick(0,.22f);PublishHolsterHaptic(0,0,1.f,3);
+    FlushHaptics();CHECK(amplitudes[0]==.95f&&amplitudes[1]==.28f);
+    clockTime+=.075;FlushHaptics();CHECK(amplitudes[0]==.22f);
+    CHECK(g_hapticApplied[0].source==Source::WeaponClick);
+    CHECK(g_hapticApplied[1].source==Source::None);
+
+    clockTime=7;TriggerWeaponShotHaptic(0,35,1.f);FlushHaptics();
+    CHECK(amplitudes[0]==1.f);
+    clockTime+=.10;FlushHaptics();const float tail=amplitudes[0];
+    CHECK(tail>0&&tail<1.f);
+    clockTime+=.10;FlushHaptics();CHECK(amplitudes[0]<tail);
+    clockTime+=.12;FlushHaptics();CHECK(g_hapticApplied[0].source==Source::None);
+    clockTime=8;PublishFlameHaptic(1,1.f);FlushHaptics();const auto flame=amplitudes[1];
+    clockTime+=.073;PublishFlameHaptic(1,1.f);FlushHaptics();CHECK(amplitudes[1]>flame);
+    clockTime+=.12;PublishFlameHaptic(1,1.f);FlushHaptics();
+    CHECK(g_hapticApplied[1].source==Source::Flame);
+    PublishFlameHaptic(1,0);FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None);
+
+    HolsterPacer far,near;
+    int farPulses{},nearPulses{};
+    for (int i=0;i<=100;++i) {
+        farPulses+=(far.Step(1,.05f,i*.01).amplitude>0);
+        nearPulses+=(near.Step(1,.84f,i*.01).amplitude>0);
+    }
+    CHECK(farPulses>=1&&nearPulses>=farPulses*2);
+    CHECK(near.Step(1,.98f,1.01).amplitude==.22f);
+    CHECK(near.Step(1,.98f,1.02).amplitude==0);
+    CHECK(near.Step(1,.85f,1.03).amplitude==0);
+    CHECK(near.Step(1,.70f,1.04).amplitude>0);
+    CHECK(near.Step(-1,0,1.05).amplitude==0);
+    clockTime=9;PublishHolsterHaptic(1,1,1.f,3);FlushHaptics();
+    CHECK(g_hapticApplied[1].source==Source::Holster);
+    ++tracking.epoch;FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None);
+    std::puts("production XR adapter: shot profiles, rocket fade, flame, and holster cadence: PASS");
 }

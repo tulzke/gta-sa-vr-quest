@@ -71,50 +71,51 @@ bool DisarmAfterShot(int h,int slot,int type,const recoil::Sample& kick){
 ''' + runtime + r'''
 int main(){
  using namespace savr;using namespace savr::recoil;
+ auto shot=[](int hand,int type,int skill){OnShot(hand,type,skill,{1,0,0});};
  inventory[0x730/4+2*8]=22;inventory[0x730/4+5*8]=30;
  for(int type=0;type<64;++type)for(int skill=0;skill<3;++skill)
      calib::tuning[type][skill]=Defaults(type,skill);
  auto step=[] {testTime+=1./90;Update(false);};
  step();step();
- OnShot(0,22,0);assert(Snapshot(0,22).pitch==0);
+ shot(0,22,0);assert(Snapshot(0,22).pitch==0);
  step();assert(Snapshot(0,22).pitch>0);assert(Snapshot(1,30).pitch==0);
  const Sample same=Snapshot(0,22);
  for(int i=0;i<100;++i)assert(Snapshot(0,22).pitch==same.pitch); // reads don't advance
- OnShot(1,30,2);step();assert(Snapshot(1,30).pitch>0);
+ shot(1,30,2);step();assert(Snapshot(1,30).pitch>0);
  Invalidate(0);assert(Snapshot(0,22).pitch==0);assert(Snapshot(1,30).pitch>0);
  Update(true);assert(Snapshot(1,30).pitch==0);
- OnShot(1,30,0);assert(Snapshot(1,30).pitch==0); // menu cannot queue impulses
- step();OnShot(1,30,0);step();assert(Snapshot(1,30).pitch>0);
+ shot(1,30,0);assert(Snapshot(1,30).pitch==0); // menu cannot queue impulses
+ step();shot(1,30,0);step();assert(Snapshot(1,30).pitch>0);
  physicalweapon::detached[1]=true;step();assert(Snapshot(1,30).pitch==0);
- physicalweapon::detached[1]=false;step();OnShot(1,30,0);step();
+ physicalweapon::detached[1]=false;step();shot(1,30,0);step();
  ++physicalweapon::epoch;step();assert(Snapshot(1,30).pitch==0);
- step();OnShot(1,30,0);step();
+ step();shot(1,30,0);step();
  inventory[0x730/4+5*8]=31;step();assert(Snapshot(1,31).pitch==0);
- OnShot(1,30,0);step();assert(Snapshot(1,31).pitch==0); // stale shot identity
- OnShot(1,31,0);step();assert(Snapshot(1,31).pitch>0);
+ shot(1,30,0);step();assert(Snapshot(1,31).pitch==0); // stale shot identity
+ shot(1,31,0);step();assert(Snapshot(1,31).pitch>0);
  inventory[0x730/4+2*8]=25;step();
- OnShot(0,25,0);assert(physicalweapon::disarmCalls[0]==0);
+ shot(0,25,0);assert(physicalweapon::disarmCalls[0]==0);
  FinishShots();assert(physicalweapon::disarmCalls[0]==1); // deferred until native fire returned
  FinishShots();assert(physicalweapon::disarmCalls[0]==1); // one request, not one per pellet
  step();assert(ReleasedHandOffset(0).x<0); // clearing ownership preserves wrist shoulder kick
  for(int i=0;i<120;++i)step();assert(ReleasedHandOffset(0).x==0);
- physicalweapon::slots[0]=2;step();physicalweapon::support[0]=1;step();OnShot(0,25,0);FinishShots();
+ physicalweapon::slots[0]=2;step();physicalweapon::support[0]=1;step();shot(0,25,0);FinishShots();
  assert(physicalweapon::disarmCalls[0]==1);
  physicalweapon::support[0]=-1;step();calib::tuning[25][0].disarmOneHanded=false;
- OnShot(0,25,0);FinishShots();assert(physicalweapon::disarmCalls[0]==1);
- calib::tuning[25][0].disarmOneHanded=true;OnShot(0,25,0);Invalidate(0);FinishShots();
+ shot(0,25,0);FinishShots();assert(physicalweapon::disarmCalls[0]==1);
+ calib::tuning[25][0].disarmOneHanded=true;shot(0,25,0);Invalidate(0);FinishShots();
  assert(physicalweapon::disarmCalls[0]==1);
  calib::level=0;step();assert(Snapshot(1,31).pitch==0);
- calib::level=2;step();OnShot(1,31,0);step();testTime+=1;step();
+ calib::level=2;step();shot(1,31,0);step();testTime+=1;step();
  assert(Snapshot(1,31).pitch==0);
- physicalweapon::valid=false;step();OnShot(1,31,0);
+ physicalweapon::valid=false;step();shot(1,31,0);
  assert(Snapshot(1,31).pitch==0);
  physicalweapon::valid=true;step();Invalidate(1);step();
  // The actual native tier selects an independent profile, even when it is
  // intentionally stronger than POOR. Never apply a hidden skill multiplier.
  calib::tuning[31][2]={0,0,0,65};
- OnShot(1,31,2);step();assert(Snapshot(1,31).pitch==0);
- OnShot(1,31,0);step();assert(Snapshot(1,31).pitch>0);
+ shot(1,31,2);step();assert(Snapshot(1,31).pitch==0);
+ shot(1,31,0);step();assert(Snapshot(1,31).pitch>0);
 }
 '''
 owner = OUT/'runtime.cpp'
@@ -256,6 +257,7 @@ disarm = r'''
 #include "PhysicalWeapon.h"
 #include "PairedWeapons.h"
 #include "RecoilModel.h"
+#include "GrabArbitration.h"
 #include <atomic>
 #include <cassert>
 #include <mutex>
@@ -263,8 +265,9 @@ disarm = r'''
 namespace disarm_test {
 using savr::physicalweapon::TrackingPose;
 namespace recoil=savr::recoil;
+namespace grabarbitration=savr::grabarbitration;
 constexpr int kHandCount=2;
-constexpr float kMaximumThrowSpeed=6,kReleaseUpwardImpulse=1,kGripOpen=.2f,kGripCatch=.7f,kCatchRadius=.2f;
+constexpr float kMaximumThrowSpeed=6,kReleaseUpwardImpulse=1,kGripOpen=.2f,kGripCatch=.7f,kGripClose=.65f,kGripBlockedLatch=.3f,kCatchRadius=.2f;
 struct V3{float x{},y{},z{};};
 V3 Add(V3 a,V3 b){return{a.x+b.x,a.y+b.y,a.z+b.z};}
 V3 Scale(V3 a,float s){return{a.x*s,a.y*s,a.z*s};}
@@ -291,6 +294,8 @@ TrackingPose RawGripFallbackPose(const Hand&){return {};}
 void ClearHeldLocked(int h){gHeldSlot[h]=-1;}
 void SelectCurrentSlot(void*,int s){selectedSlot=s;}
 void GiveToHandLocked(void*,int h,int slot,const char*){gHeldSlot[h]=slot;gDisarmCatchBlocked[h]=false;++caught;}
+int gripClicks[2]{};
+namespace xr { void TriggerWeaponClick(int hand,float){++gripClicks[hand];} }
 bool DroppedPoseAtLocked(int h,double,TrackingPose* out){
  if(!ValidSlot(gDropped[h].slot))return false;*out=gDropped[h].startPose;return true;
 }
@@ -299,8 +304,9 @@ disarm += function(physical, 'void StartDropLocked(')
 disarm += function(physical, 'bool DisarmAfterShot(')
 catch_start = physical.index('// Recoil-ejected weapons cannot snap back')
 catch_end = physical.index('// Release returns at the matching socket', catch_start)
-disarm += 'void CatchTick(){void* ped=Find(-1);double now=1;unsigned handledHands=0;\n'
-disarm += physical[catch_start:catch_end] + '\n}\n}\n'
+disarm += 'void CatchTick(){void* ped=Find(-1);double now=1;unsigned handledHands=0;bool interactionsBlocked=false;\n'
+disarm += physical[catch_start:catch_end]
+disarm += function(physical, 'for (int hand = 0; hand < kHandCount; ++hand) {\n        if (interactionsBlocked)') + '\n}\n}\n'
 disarm += r'''
 int main(){
  using namespace disarm_test;
@@ -316,9 +322,11 @@ int main(){
   assert(gDropped[hand].velocity.y>1 && gDropped[hand].velocity.x<0);
   assert(gDropped[hand].angularSpeed>0);
   const int old=caught;
+  const int clicks=gripClicks[hand];
   CatchTick();assert(caught==old); // closed grip cannot immediately recatch
   gHands[hand].grip=0;CatchTick();assert(!gDisarmCatchBlocked[hand] && caught==old);
   gHands[hand].grip=1;CatchTick();assert(caught==old+1 && gHeldSlot[hand]==3);
+  CatchTick();assert(gripClicks[hand]==clicks+1);
  }
  gHeldSlot[0]=3;gHands[0].valid=true;gSupportHand[0]=1;
  assert(!DisarmAfterShot(0,3,25,{.8f,0,0}));assert(gHeldSlot[0]==3);
@@ -353,12 +361,13 @@ struct XrVector3f{float x{},y{},z{};};
 struct Captured{recoil::Transform weaponRecoil[2];};
 void Apply(int hand,const Captured& twoHand,XrVector3f& pos,XrVector3f& right,
            XrVector3f& forward,XrVector3f& up){
+    const bool monitorHand=false,serviceHand=false;
 ''' + xr[hand_start:hand_end] + r'''
 }
 int main(){
  for(bool support:{false,true}){
   recoil::State state;
-  state.Shot(recoil::ForWeapon(25,support,3,{0,0,50,92,false}));
+  state.Shot(recoil::ForWeapon(25,support,3,{0,0,50,92,false}),{0,0,-1});
   state.Advance(.05f);
   assert(state.sample.rear>0);
   const float barrel[]{0,0,-1},top[]{0,1,0},pivot[]{0,1,-.4f};

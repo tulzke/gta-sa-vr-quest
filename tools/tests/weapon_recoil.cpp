@@ -146,6 +146,32 @@ int main(){
     // The ejection angle is derived from recoil pitch/yaw, not a constant
     // upward/backward velocity ratio. Zero pitch has no upward launch.
     const float barrel[]{0,0,-1},modelTop[]{1,0,0};
+    {
+        const float grip[]{0,0,0}, exit[]{.09f,.12f,-.33f};
+        const Vec ray=Unit({.19f,.37f,-1.f});
+        const Profile shoulder=ForWeapon(30,false,2,{0,0,60,65});
+        State state;
+        state.Shot(shoulder,ray);
+        for(int frame=0;frame<10;++frame){
+            state.Advance(1.f/90);
+            const auto kick=Build(state.sample,barrel,modelTop,grip,exit);
+            assert(Near(Length(kick.Point(Read(exit))-Read(exit)-kick.translation),0));
+            assert(Near(Length(kick.Point(Read(grip))-Read(grip)-kick.translation),0));
+            assert(Near(Length(Cross(kick.translation,ray)),0));
+            assert(Dot(kick.translation,ray)<0);
+        }
+        const Vec previousOffset=state.sample.rearOffset;
+        const Vec turn=Unit(Cross(ray,{0,1,0}));
+        state.Shot(shoulder,turn);
+        assert(Near(Length(state.sample.rearOffset-previousOffset),0));
+        state.Advance(.016f);
+        assert(Dot(state.sample.rearOffset,ray)<0 && Dot(state.sample.rearOffset,turn)<0);
+        const auto pitch=Build({.2f,0,0},barrel,modelTop,grip,exit);
+        assert(Near(Length(pitch.Point(Read(grip))-Read(grip)),0));
+        assert(pitch.Point(Read(exit)).y>exit[1]);
+        assert(Near(Dot(pitch.pitchAxis,Read(exit)-Read(grip)),0));
+        assert(Near(pitch.pitchAxis.y,0));
+    }
     for(float pitch:{0.f,.1f,.4f,.8f}){
         const auto launch=DisarmLaunch({pitch,0,0},barrel,modelTop,pivot);
         const Vec direction=Unit(launch.velocity);

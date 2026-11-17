@@ -55,6 +55,8 @@ std::atomic<bool> g_directTriggerDown[2]{};
 bool g_detonatorReleaseRequired[2]{true, true};
 std::uint32_t g_directNextFireMs[2]{};
 int g_directWeaponType[2]{-1, -1};
+struct ReloadObservation { int slot{-1}, type{}; bool waiting{}; };
+ReloadObservation g_autoReload[2];
 arcadereload::Gesture g_reloadGestures[2];
 pumpreload::Pump g_pumps[2];
 std::atomic<float> g_pumpTravel[2]{};
@@ -230,6 +232,17 @@ void ResetReloadGesture(int hand) {
     g_pumpTravel[hand].store(0,std::memory_order_relaxed);
 }
 
+void ObserveAutomaticReload(int hand, int type, std::uint8_t* weapon) {
+    auto& observed=g_autoReload[hand];
+    if (arcadereload::Manual(type)) { observed={}; return; }
+    const int slot=physicalweapon::HeldSlot(hand);
+    const auto clip=pairedweapon::Field(weapon,8);
+    const auto total=pairedweapon::Field(weapon,12);
+    if (observed.slot==slot && observed.type==type && observed.waiting && clip>0)
+        xr::TriggerWeaponClick(hand,.38f);
+    observed={slot,type,clip==0 && total>0};
+}
+
 void ReloadClick(void* ped) {
     const int soundEvent=arcadereload::SoundEvent();
     if (soundEvent && g.AudioEngine && g.CAudioEngine_ReportWeaponEvent)
@@ -268,7 +281,7 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
             arcadereload::Reload(type,pairedweapon::Field(weapon,4),pairedweapon::Field(weapon,8),total,
                 pairedweapon::Field(weapon,16),now,MagazineCapacity(ped,type))) {
             g_directNextFireMs[hand]=0;
-            xr::TriggerHaptic(hand,.65f,0,55);
+            xr::TriggerWeaponClick(hand,.38f);
         }
         return;
     }
@@ -290,7 +303,7 @@ void UpdateReloadGesture(void* ped, std::uint8_t* weapon, int type, int hand,
     if (arcadereload::Reload(type,pairedweapon::Field(weapon,4),pairedweapon::Field(weapon,8),total,
             pairedweapon::Field(weapon,16),now,MagazineCapacity(ped,type))) {
         g_directNextFireMs[hand]=0;
-        xr::TriggerHaptic(hand,.65f,0,55);
+        xr::TriggerWeaponClick(hand,.38f);
         ReloadClick(ped);
         LOGI("[vr.reload] instant gesture mode=%d hand=%d type=%d slot=%d",
              mode,hand,type,slot);
@@ -304,6 +317,8 @@ void ResetDirectTrigger() {
         g_directWeaponType[hand] = -1;
         g_detonatorReleaseRequired[hand] = true;
         ResetReloadGesture(hand);
+        g_autoReload[hand]={};
+        xr::PublishFlameHaptic(hand,0);
     }
 }
 
@@ -353,7 +368,8 @@ Vec3 Normalize(Vec3 v) {
 }
 
 bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction,
-                    bool* suppressShot = nullptr, Vec3* anchor = nullptr) {
+                    bool* suppressShot = nullptr, Vec3* anchor = nullptr,
+                    int* shotHand = nullptr) {
     if (suppressShot) *suppressShot = false;
     // Every direct-fire family aims with the tracked hand: hitscan guns,
     // the AREA sprayers (flamethrower/spraycan/extinguisher) and the camera.
@@ -404,6 +420,7 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
     direction = Normalize({d[0], d[1], d[2]});
     const bool valid = Finite(origin) && Finite(direction) &&
                        LengthSquared(direction) > 0.9f;
+    if (valid && shotHand) *shotHand=hand;
     return valid;
 }
 
@@ -592,7 +609,7 @@ float PelletSpreadForWeapon(int weaponType) {
 }
 
 bool FireControllerRay(void* weapon, void* shooter, int weaponType,
-                       Vec3 origin, Vec3 direction, Vec3 anchor) {
+                       Vec3 origin, Vec3 direction, Vec3 anchor, int shotHand) {
     int skill = g.CPed_GetWeaponSkill(shooter, weaponType);
     if (skill < 0 || skill > 3) skill = 1;
     void* wi = g.CWeaponInfo_GetWeaponInfo(weaponType,
@@ -604,15 +621,9 @@ bool FireControllerRay(void* weapon, void* shooter, int weaponType,
     if (!std::isfinite(range)) return false;
     range = std::clamp(range, 1.0f, 300.0f);
 
-    const float recoilAmp = calib::RecoilAmplitude();
-    if (recoilAmp > 0.0f) {
-        const PhysicalFireQuery recoilQuery =
-            g_physicalFireQuery.load(std::memory_order_acquire);
-        int recoilHand = -1;
-        if (recoilQuery && recoilQuery(weaponType, &recoilHand) &&
-            recoilHand >= 0 && recoilHand <= 1)
-            xr::TriggerHaptic(recoilHand, recoilAmp, 120.0f, 60.0f);
-    }
+    const float worldDirection[]{direction.x,direction.y,direction.z};
+    float trackingDirection[3]{};
+    const bool haveTrackingDirection=vrcam::WorldDirectionToTracking(worldDirection,trackingDirection);
     const Vec3 end{origin.x + direction.x * range,
                    origin.y + direction.y * range,
                    origin.z + direction.z * range};
@@ -722,10 +733,9 @@ bool FireControllerRay(void* weapon, void* shooter, int weaponType,
     // One impulse after the complete shot (all pellets), never on a trigger
     // press or again at the outer CWeapon::Fire call. This shot used the pose
     // published before the impulse; its velocity moves subsequent frames.
-    const PhysicalFireQuery recoilQuery = g_physicalFireQuery.load(std::memory_order_acquire);
-    int shotHand = -1;
-    if (recoilQuery && recoilQuery(weaponType, &shotHand))
-        recoil::OnShot(shotHand, weaponType, skill);
+    if (haveTrackingDirection)
+        recoil::OnShot(shotHand,weaponType,skill,recoil::Read(trackingDirection));
+    xr::TriggerWeaponShotHaptic(shotHand,weaponType,calib::RecoilAmplitude());
     const bool hit = anyHit;
 
     static std::atomic<unsigned> shotCount{0};
@@ -757,9 +767,10 @@ bool OnFireInstantHit(void* weapon, void* firingEntity,
     Vec3 vrOrigin{};
     Vec3 vrDirection{};
     Vec3 vrAnchor{};
+    int shotHand=-1;
     bool suppressShot = false;
     if (!GetPhysicalRay(firingEntity, weaponType, vrOrigin, vrDirection,
-                        &suppressShot, &vrAnchor)) {
+                        &suppressShot, &vrAnchor, &shotHand)) {
         if (suppressShot) return false;
         if (origin && target)
             basketball::OnBulletShot(&origin->x, &target->x, true);
@@ -773,7 +784,7 @@ bool OnFireInstantHit(void* weapon, void* firingEntity,
 
     g_insideHook = true;
     const bool fired = FireControllerRay(
-        weapon, firingEntity, weaponType, vrOrigin, vrDirection, vrAnchor);
+        weapon, firingEntity, weaponType, vrOrigin, vrDirection, vrAnchor, shotHand);
     g_insideHook = false;
     if (fired) return true;
     if (suppressShot) return false;
@@ -794,17 +805,18 @@ bool OnFireSniper(void* weapon, void* shooter, void* targetEntity, Vec3* target)
     Vec3 vrOrigin{};
     Vec3 vrDirection{};
     Vec3 vrAnchor{};
+    int shotHand=-1;
     bool suppressShot = false;
     if (weaponType != 34 ||
         !GetPhysicalRay(shooter, weaponType, vrOrigin, vrDirection,
-                        &suppressShot, &vrAnchor)) {
+                        &suppressShot, &vrAnchor, &shotHand)) {
         if (suppressShot) return false;
         return g_origFireSniper(weapon, shooter, targetEntity, target);
     }
 
     g_insideHook = true;
     const bool fired = FireControllerRay(
-        weapon, shooter, weaponType, vrOrigin, vrDirection, vrAnchor);
+        weapon, shooter, weaponType, vrOrigin, vrDirection, vrAnchor, shotHand);
     g_insideHook = false;
     if (fired) return true;
     if (suppressShot) return false;
@@ -939,13 +951,16 @@ bool IsScriptedWeaponCamera() {
     return SupportedHitscan(type);
 }
 
-void UpdateHand(int requestedHand) {
+enum class FlameActivity { Stop, Continue, Fired };
+
+void UpdateHand(int requestedHand, FlameActivity& flame) {
     const auto resetHand = [requestedHand] {
         g_directTriggerDown[requestedHand].store(false, std::memory_order_relaxed);
         g_directNextFireMs[requestedHand] = 0;
         g_directWeaponType[requestedHand] = -1;
         g_detonatorReleaseRequired[requestedHand] = true;
         ResetReloadGesture(requestedHand);
+        g_autoReload[requestedHand]={};
     };
     if (!g_installed.load(std::memory_order_acquire) ||
         !PlayerFireEnabled() ||
@@ -987,6 +1002,7 @@ void UpdateHand(int requestedHand) {
         }
         g_managedGunType[slot] = weaponType;
         OnWeaponUpdate(weapon, ped);
+        ObserveAutomaticReload(hand,weaponType,weapon);
     }
     UpdateReloadGesture(ped,weapon,weaponType,hand,trigger,*g.CTimer_m_snTimeInMilliseconds);
     if (!DetonatorTriggerReady(weaponType, hand, trigger)) return;
@@ -1000,6 +1016,8 @@ void UpdateHand(int requestedHand) {
         g_directWeaponType[hand] = weaponType;
         return;
     }
+    if (weaponType==37 && pairedweapon::Field(weapon,12)>0)
+        flame=FlameActivity::Continue;
 
     const bool freshPress = !wasDown || g_directWeaponType[hand] != weaponType;
     g_directWeaponType[hand] = weaponType;
@@ -1102,6 +1120,8 @@ void UpdateHand(int requestedHand) {
         return;
     }
 
+    if (SupportedHitscan(weaponType)) ObserveAutomaticReload(hand,weaponType,weapon);
+    if (weaponType==37) flame=FlameActivity::Fired;
     justbusiness::RecordShot(weaponType,hand);
     g_directNextFireMs[hand] = now + PhysicalFireIntervalMs(ped, weaponType);
     static std::atomic<unsigned> directCount{0};
@@ -1127,16 +1147,27 @@ void Update(bool blocked) {
             g_directWeaponType[hand] = -1;
             g_detonatorReleaseRequired[hand] = true;
             ResetReloadGesture(hand);
+            g_autoReload[hand]={};
+            xr::PublishFlameHaptic(hand,0);
             continue;
         }
         const int type = pairedweapon::Type(ped,slot);
-        if (!SupportedDirectFire(type)) { ResetReloadGesture(hand); continue; }
+        if (!SupportedDirectFire(type)) {
+            ResetReloadGesture(hand);
+            g_autoReload[hand]={};
+            xr::PublishFlameHaptic(hand,0);
+            continue;
+        }
+        if (!SupportedHitscan(type)) g_autoReload[hand]={};
         active = static_cast<std::int8_t>(pairedweapon::Base(slot));
         g_directHand = hand;
+        FlameActivity flame=FlameActivity::Stop;
         {
             pairedweapon::Shot shot(ped,slot);
-            UpdateHand(hand);
+            UpdateHand(hand,flame);
         }
+        if (flame!=FlameActivity::Continue)
+            xr::PublishFlameHaptic(hand,flame==FlameActivity::Fired?calib::RecoilAmplitude():0);
         g_directHand = -1;
         active = saved;
     }

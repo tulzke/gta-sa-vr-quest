@@ -5,7 +5,7 @@ namespace savr::recoil {
 // GameThread once, before scope/fire queries. Shot only changes spring velocity;
 // every consumer in this game frame sees the same published sample.
 void Update(bool blocked);
-void OnShot(int hand,int weaponType,int skill);
+void OnShot(int hand,int weaponType,int skill,Vec direction);
 // Complete queued disarms after native CWeapon::Fire has returned. Never change
 // the active slot while the engine is still finishing ammo/state for that shot.
 void FinishShots();

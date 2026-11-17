@@ -30,7 +30,7 @@ int main(){
     Check(Field(2,8)==17 && Field(2,4)==0,"sidearm reloads immediately on downward motion without brake or return");
     Check(Field(4,8)==0,"sidearm nod leaves long gun empty");
     Check(reloadSounds[0]==1 && reloadSounds[1]==0 && lastReloadEvent==147,"configured bolt sound plays once on the correct hand");
-    Check(xr::hapticAmplitude[0]>=.6f && xr::hapticDuration[0]>=45 && xr::hapticDuration[0]<=65,"short distinct confirmation pulse is retained");
+    Check(xr::hapticAmplitude[0]>=.3f && xr::hapticDuration[0]>=20 && xr::hapticDuration[0]<=35,"short distinct confirmation pulse is retained");
     Nod(1);
     Check(Field(4,8)==0 && reloadSounds[1]==0,"long gun cannot be reloaded by the sidearm nod");
     SetPose(1);HoldStill();Roll(1);
@@ -120,10 +120,18 @@ int main(){
         Setup(0,type==22?2:type==25?3:type==29?4:6,type,0,30,type==22?17:7,1200);
         const int slot=held[0];Field(slot,4)=2;Field(slot,16)=tick+500;
         physicalweapon::supportHands[0]=1;SetPose(0);SetPose(1);sounds=reloadSounds[0];
-        Frame();Check(Field(slot,8)==0 && g_pumpTravel[0]==0,"automatic reload waits for its native timer and never moves the pump");
+        const int reloadPulses=xr::haptics[0];
+        Frame();Check(Field(slot,8)==0 && g_pumpTravel[0]==0 && xr::haptics[0]==reloadPulses,"automatic reload waits for its native timer");
         tick+=501;Frame();
-        Check(Field(slot,8)>0 && reloadSounds[0]==sounds,"all supported families reload automatically without arcade feedback");
+        Check(Field(slot,8)>0 && reloadSounds[0]==sounds && xr::haptics[0]==reloadPulses+1,"automatic reload confirms refill once without arcade audio");
+        Frame();Check(xr::haptics[0]==reloadPulses+1,"a loaded magazine cannot repeat the confirmation");
     }
     physicalweapon::supportHands[0]=-1;SetType(TYPE_ARCADE);ResetDirectTrigger();
+    Setup(0,7,37,0,0,10,500);triggers[0]=1;Frame();
+    Check(xr::flameIntensity[0]==0,"empty flamethrower cannot start its vibration");
+    Field(7,8)=Field(7,12)=5;Frame();
+    Check(xr::flameIntensity[0]>0 && xr::flameIntensity[1]==0,"confirmed flame feeds its own hand");
+    triggers[0]=0;Frame();
+    Check(xr::flameIntensity[0]==0,"trigger release clears the flame vibration");
     std::printf("PASS: %d production dual-fire checks\n",checks);
 }

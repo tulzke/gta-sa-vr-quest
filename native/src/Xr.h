@@ -65,6 +65,10 @@ void TriggerHaptic(int hand, float amplitude, float frequencyHz,
 void PublishWheelHaptic(int hand, float amplitude);
 // Continuous pickup progress; zero clears only this source, never game pulses.
 void PublishPickupHaptic(int hand, float amplitude, std::uint64_t epoch);
+void TriggerWeaponShotHaptic(int hand, int type, float intensity);
+void TriggerWeaponClick(int hand, float amplitude);
+void PublishFlameHaptic(int hand, float intensity);
+void PublishHolsterHaptic(int hand, int point, float proximity, std::uint64_t epoch);
 
 // Publish the already-formatted stock text buffers after CMessages::Display.
 // The compositor renders these strings with the APK's own font files onto

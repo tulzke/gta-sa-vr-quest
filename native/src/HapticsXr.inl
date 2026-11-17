@@ -33,29 +33,38 @@ void FlushHaptics() {
     std::lock_guard<std::mutex> lock(g_hapticMutex);
     for (int hand=0;hand<2;++hand) {
         auto& requests=g_hapticHands[hand];
-        if (menu) { requests.game={}; requests.wheel={}; requests.pickup={}; }
-        if (requests.game.until>now && requests.game.pendingDuration>0) {
-            requests.game.until=now+requests.game.pendingDuration;
-            requests.game.pendingDuration=0;
+        if (menu) requests={};
+        for (auto* effect : {&requests.wheel, &requests.pickup, &requests.shot,
+                            &requests.click, &requests.flame, &requests.holster}) {
+            if (effect->epoch!=tracking.epoch || !tracking.valid ||
+                !tracking.hands[hand].positionTracked) *effect={};
         }
-        auto desired=g_hapticHands[hand].Select(now,true,menu);
-        if ((desired.source==haptics::Source::Wheel ||
-             desired.source==haptics::Source::Pickup) &&
-            (desired.epoch!=tracking.epoch || !tracking.valid || !tracking.hands[hand].positionTracked)) {
-            requests.wheel={}; requests.pickup={}; desired={};
+        for (auto* pulse : {&requests.game, &requests.shot, &requests.click}) {
+            if (pulse->until<=now || pulse->pendingDuration<=0) continue;
+            if (pulse==&requests.click && requests.shot.Active(now)) continue;
+            pulse->started=now;
+            pulse->until=now+pulse->pendingDuration;
+            pulse->pendingDuration=0;
         }
+        const int point=requests.holster.until>now?requests.holsterPoint:-1;
+        if (point!=requests.holsterPacer.point) requests.holsterPulse={};
+        const auto pulse=requests.holsterPacer.Step(point, requests.holster.amplitude, now);
+        if (pulse.seconds>0) requests.holsterPulse={haptics::Source::Holster,
+            pulse.amplitude,0,now+pulse.seconds,++g_hapticSerial,0,0,pulse.envelope,now};
+
+        const auto desired=requests.Select(now,true,menu);
         if (desired.amplitude<=0 || desired.source==haptics::Source::None) {
             StopHapticOutput(hand); continue;
         }
         const auto& last=g_hapticApplied[hand];
         const bool same=last.source==desired.source &&
             (desired.source==haptics::Source::Wheel || desired.source==haptics::Source::Pickup || last.serial==desired.serial);
-        if (same && (desired.source==haptics::Source::Game || now-g_hapticAppliedAt[hand]<.025)) continue;
+        if (same && (!desired.Streamed() || now-g_hapticAppliedAt[hand]<.025)) continue;
         auto info=HapticInfo(hand);
         XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
-        vibration.amplitude=desired.amplitude;
-        vibration.frequency=desired.source==haptics::Source::Game?desired.frequency:XR_FREQUENCY_UNSPECIFIED;
-        const double duration=desired.source==haptics::Source::Game?desired.until-now:.05;
+        vibration.amplitude=desired.AmplitudeAt(now);
+        vibration.frequency=desired.frequency;
+        const double duration=desired.Streamed()?std::min(desired.until-now,.05):desired.until-now;
         vibration.duration=static_cast<XrDuration>(std::max(.001,duration)*1e9);
         const auto applied=xrApplyHapticFeedback(s.session,&info,
             reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
