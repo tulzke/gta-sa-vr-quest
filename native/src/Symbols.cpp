@@ -179,6 +179,7 @@ bool ResolveGameSymbols(void* handle) {
         {"_ZN4CPad12JumpJustDownEv",                                             reinterpret_cast<void**>(&g.CPad_JumpJustDown),                     false},
         {"_ZN11CWeaponInfo13GetWeaponInfoE11eWeaponTypea",                       reinterpret_cast<void**>(&g.CWeaponInfo_GetWeaponInfo),             false},
         {"_ZN10CModelInfo16ms_modelInfoPtrsE",                                   reinterpret_cast<void**>(&g.CModelInfo_ms_modelInfoPtrs),           false},
+        {"_ZN6CWorld15ms_aLodPtrListsE",                                          reinterpret_cast<void**>(&g.CWorld_ms_aLodPtrLists),               false},
         {"_ZN17CVehicleModelInfo18IsUpgradeAvailableE18VehicleUpgradePosn", reinterpret_cast<void**>(&g.CVehicleModelInfo_IsUpgradeAvailable),false},
         {"_ZN10CModelInfo10IsCarModelEi",reinterpret_cast<void**>(&g.CModelInfo_IsCarModel),false},
         {"_ZN8CVehicle10GetUpgradeEi",reinterpret_cast<void**>(&g.CVehicle_GetUpgrade),false},

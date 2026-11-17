@@ -57,8 +57,19 @@ production += (ROOT / 'native/src/WeaponOpticFrame.inl').read_text(encoding='utf
 production += mirror + (ROOT / 'native/src/WeaponOpticRender.inl').read_text(encoding='utf8')
 photo = (ROOT / 'native/src/PhotoRender.inl').read_text(encoding='utf8')
 production += 'constexpr float kVrFovX = 105.f;\n'
+production += r'''
+double NowMs() { return 0.; }
+namespace photocapture {
+bool TextureBusy() { return false; }
+void ReportFailure(const char*) { CHECK(false); }
+bool QueueReadback(int, unsigned, int, int, bool, bool) { return true; }
+}
+namespace water_monitor_render { void RenderSceneEffects(void*) {} }
+'''
 production += photo[:photo.index('void Request(')]
-production += function(photo, 'Prepare') + function(photo, 'PrepareRasters') + '\n}\n'
+for name in ('Prepare', 'PrepareRasters', 'Render'):
+    production += function(photo, name)
+production += '\n}\n'
 production += r'''
 namespace vrcam {bool TrackingPointToWorld(const float* a,float* b){std::copy_n(a,3,b);return true;}}
 namespace driving {

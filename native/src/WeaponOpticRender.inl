@@ -56,8 +56,8 @@ bool First(void* entity) {
     }
     return false;
 }
-void Consider(void* entity,const Optic& optic) {
-    if(!entity || entity==optic.excluded || !First(entity) || (g.FindPlayerPed && entity==g.FindPlayerPed(-1))) return;
+void Consider(void* entity,const Optic& optic,bool worldLod=false) {
+    if(!entity || entity==optic.excluded) return;
     const int type=Read<unsigned char>(entity,0x5a)&7;
     if(type<1 || type>5 || !(Read<std::uint32_t>(entity,0x28)&(1u<<7))) return;
     void* model=rear_mirror_render::Model(entity);
@@ -78,13 +78,15 @@ void Consider(void* entity,const Optic& optic) {
     const float sideLimit=depth*optic.tanFov+radius*std::sqrt(1.f+optic.tanFov*optic.tanFov);
     if(!Finite(position) || !std::isfinite(radius) || depth+radius<.1f || depth-radius>optic.farClip ||
         std::abs(Dot(delta,camera.right))>sideLimit || std::abs(Dot(delta,camera.up))>sideLimit) return;
+    if(!First(entity) || (g.FindPlayerPed && entity==g.FindPlayerPed(-1))) return;
     if(!Read<void*>(entity,0x20)) {
-        // Asynchronous, bounded supplementation only in the eye-close frustum.
+        // Bounded supplementation for detailed optics and the photo's world LODs.
         // The engine owns loading/unloading; never run LoadAllRequestedModels,
         // simulation or PreRender again for the optic.
-        if(!optic.detailed || type==2 || type==3) return;
-        if(Read<void*>(model,0x40) && creates<4) {
-            ++creates;rear_mirror_render::api.createObject(entity);
+        if((!optic.detailed && !worldLod) || type==2 || type==3 ||
+           (worldLod && !rear_mirror_render::StaticAllowed(entity,model))) return;
+        if(Read<void*>(model,0x40)) {
+            if(creates<4) {++creates;rear_mirror_render::api.createObject(entity);}
         } else if(requests<4 && g.CStreaming_RequestModel) {
             ++requests;g.CStreaming_RequestModel(Read<std::int16_t>(entity,0x32),0);
         }
@@ -97,13 +99,37 @@ void Consider(void* entity,const Optic& optic) {
 }
 void Collect(const Optic& optic) {
     candidateCount=requests=creates=0;seen.fill(nullptr);
-    const auto index=[](float p){return std::clamp(static_cast<int>(std::floor((p+3000.f)/50.f)),0,119);};
+    const auto index=[](float p,float size,int last){
+        return static_cast<int>(std::clamp((p+3000.f)/size,0.f,static_cast<float>(last)));
+    };
     const V3 pos=optic.frame.camera.pos;
+    const float far=optic.farClip;
+    constexpr int MaxVisited=65536;
     int visited=0;
-    for(int y=index(pos.y-optic.farClip);y<=index(pos.y+optic.farClip);++y)
-    for(int x=index(pos.x-optic.farClip);x<=index(pos.x+optic.farClip);++x) {
-        const V3 forward=optic.frame.camera.forward;
-        const float planar=std::hypot(forward.x,forward.y);
+    const auto visit=[&](const void* node,bool worldLod=false) {
+        while(node && visited<MaxVisited) {
+            ++visited;
+            Consider(Read<void*>(node,0),optic,worldLod);
+            const void* next=Read<void*>(node,8);
+            if(next==node) break;
+            node=next;
+        }
+    };
+    // Retail ScanBigBuildingList uses a separate grid of 200 m sectors.
+    // Reserve room for coarse scenery before collecting ground-level detail.
+    constexpr std::uintptr_t LodSectorsOffset=0xa54508u;
+    if(optic.type==weaponoptic::PhotoCamera && g.CWorld_ms_aLodPtrLists &&
+       reinterpret_cast<std::uintptr_t>(g.CWorld_ms_aLodPtrLists)==g.LoadBase+LodSectorsOffset) {
+        for(int y=index(pos.y-far,200.f,29);y<=index(pos.y+far,200.f,29);++y)
+        for(int x=index(pos.x-far,200.f,29);x<=index(pos.x+far,200.f,29);++x)
+            visit(g.CWorld_ms_aLodPtrLists[y*30+x],true);
+    }
+    const V3 forward=optic.frame.camera.forward;
+    const float planar=std::hypot(forward.x,forward.y);
+    std::array<bool,16*16> repeatVisited{};
+    for(int y=index(pos.y-far,50.f,119);y<=index(pos.y+far,50.f,119);++y)
+    for(int x=index(pos.x-far,50.f,119);x<=index(pos.x+far,50.f,119);++x) {
+        if(visited>=MaxVisited) return;
         if(planar>.85f && optic.tanFov<.35f) {
             const float dx=x*50.f-2975.f-pos.x,dy=y*50.f-2975.f-pos.y;
             const float along=(dx*forward.x+dy*forward.y)/planar;
@@ -111,13 +137,15 @@ void Collect(const Optic& optic) {
             if(along < -50.f || across>std::max(0.f,along)*optic.tanFov*1.5f+50.f) continue;
         }
         const auto* normal=reinterpret_cast<const char*>(g.LoadBase+kRetailWorldSectorsOffset)+(y*120+x)*0x10;
-        const auto* repeat=reinterpret_cast<const char*>(g.LoadBase+kRetailWorldRepeatSectorsOffset)+((x&15)|((y&15)<<4))*0x18;
-        const void* lists[]={Read<void*>(normal,0),Read<void*>(normal,8),Read<void*>(repeat,0),Read<void*>(repeat,8),Read<void*>(repeat,0x10)};
-        for(const void* list:lists) for(const void* node=list;node;) {
-            if(++visited>65536) return;
-            Consider(Read<void*>(node,0),optic);
-            const void* next=Read<void*>(node,8);if(next==node)break;node=next;
-        }
+        visit(Read<void*>(normal,0));
+        visit(Read<void*>(normal,8));
+        const int bucket=(x&15)|((y&15)<<4);
+        if(repeatVisited[bucket]) continue;
+        repeatVisited[bucket]=true;
+        const auto* repeat=reinterpret_cast<const char*>(g.LoadBase+kRetailWorldRepeatSectorsOffset)+bucket*0x18;
+        visit(Read<void*>(repeat,0));
+        visit(Read<void*>(repeat,8));
+        visit(Read<void*>(repeat,0x10));
     }
 }
 void* DrawPedAtomic(void* atomic,void*) {

@@ -82,7 +82,7 @@ int main() {
     CHECK(InView(0,0,72,4,tx));CHECK(SmallProp(.5f,30));
     CHECK(!SmallProp(6,30));CHECK(TanX(0)==TanX(40));CHECK(TanX(180)==TanX(120));
 
-    std::vector<char> world(0xa56000);g.LoadBase=reinterpret_cast<std::uintptr_t>(world.data());
+    std::vector<char> world(0xa57000);g.LoadBase=reinterpret_cast<std::uintptr_t>(world.data());
     std::array<void*,20000> models{};g.CModelInfo_ms_modelInfoPtrs=models.data();
     r::rear={{1,0,0},{0,-1,0},{0,0,1},{0,0,0}};r::tanX=tx;
     Entity road(1,{0,-30,0}),child(2,{0,-35,0}),parent(3,{0,-32,0},1,12),car(400,{0,-20,0},2),front(5,{0,30,0}),tiny(6,{0,-35,0},5,.5f);

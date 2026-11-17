@@ -264,6 +264,7 @@ struct GameSymbols {
     //   numTris = *(int32*)(geom + 0x18);  numVerts = *(int32*)(geom + 0x1C)
     void* (*CWeaponInfo_GetWeaponInfo)(int weaponType, signed char skill);
     void** CModelInfo_ms_modelInfoPtrs;   // base of the CBaseModelInfo* array
+    void** CWorld_ms_aLodPtrLists;        // 30×30 sector list heads for distant world models
     bool (*CVehicleModelInfo_IsUpgradeAvailable)(void*,int);
     bool (*CModelInfo_IsCarModel)(int);
     int (*CVehicle_GetUpgrade)(void*,int);

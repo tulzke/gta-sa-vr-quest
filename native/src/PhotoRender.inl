@@ -3,8 +3,8 @@
 namespace photo_render {
 using weapon_optic_render::Optic;
 
-Optic preview;
-Optic capture;
+Optic preview{.extendFog = true, .type = weaponoptic::PhotoCamera};
+Optic capture{.detailed = true, .type = weaponoptic::PhotoCamera};
 float screenHalfHeight{};
 int imageQuarterTurns{};
 double pressedAt{-1};
@@ -43,8 +43,6 @@ void Prepare(const RwMat& model) {
     preview.visible = true;
     preview.width = photoscreen::PreviewWidth;
     preview.height = photoscreen::PreviewHeight;
-    preview.farClip = photoscreen::PreviewFarClip;
-    preview.extendFog = true;
     preview.tanFov = std::tan(scopeaim::PhotoFovX(kVrFovX) * 3.14159265f / 360.f);
     preview.flipHorizontal = profile.value[8] != 0;
     preview.flipVertical = profile.value[9] != 0;
@@ -58,13 +56,11 @@ void PrepareRasters() {
     if (pending && !capture.raster) {
         capture.width = photoscreen::CaptureWidth;
         capture.height = photoscreen::CaptureHeight;
-        capture.detailed = true;
-        capture.farClip = photoscreen::CaptureFarClip;
         capture.raster = g.RwRasterCreate(capture.width, capture.height, 32, 5);
     }
 }
 
-void Render(void* scene, std::uintptr_t camera, int sequence) {
+void Render(void* scene, std::uintptr_t camera, int sequence, float hmdFarClip) {
     const bool readbackBusy = photocapture::TextureBusy();
     if (pending && (NowMs() - pressedAt > 1500.0 ||
                     FormalCutsceneRunning() || ScriptedCutsceneRunning())) {
@@ -73,6 +69,9 @@ void Render(void* scene, std::uintptr_t camera, int sequence) {
         photocapture::ReportFailure("photograph render unavailable");
     }
     if (!rear_mirror_render::Resolve()) return;
+    const float farClip = hmdFarClip * photoscreen::FarClipScale;
+    preview.farClip = capture.farClip = std::isfinite(farClip) && farClip > .1f
+        ? farClip : weaponoptic::DetailedFar;
     weapon_optic_render::RenderOne(preview, scene, camera, false, nullptr);
     if (!pending || readbackBusy) return;
     capture.visible = true;

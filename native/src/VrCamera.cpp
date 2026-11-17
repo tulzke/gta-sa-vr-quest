@@ -22061,7 +22061,6 @@ void OnRenderScene(bool underwater) {
     weapon_optic_render::Render(sc,camU);
     if (photo_render::NeedsRaster()) closeEnginePreFinish();
     photo_render::PrepareRasters();
-    photo_render::Render(sc, camU, g_recordCounter);
 
     // Pull the near clip in for the eye pass so the close weapon grip isn't clipped
     // (the game default clips it -> a hole that shows the sky through). Restore after.
@@ -22153,6 +22152,7 @@ void OnRenderScene(bool underwater) {
             :savedFogPlane);
     const float eyeFogEnd=groundFogActive
         ?g_aircraftGroundFogBaseline.end:eyeFarClip;
+    photo_render::Render(sc, camU, g_recordCounter, eyeFarClip);
     // FOG DISTANCE (JETPACK menu): step the fog volume outward while FLYING so
     // the draw-distance headroom that already exists becomes visible. This never
     // touches the far clip, so no extra geometry is drawn or streamed; the fade
