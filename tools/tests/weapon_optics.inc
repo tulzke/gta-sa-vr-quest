@@ -48,6 +48,25 @@
     cameraModel.a[2]=1; // Opposite handed model uses the same upright basis.
     CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,photoAfter));
     CHECK(photoAfter.surface.up.z>.999f&&photoAfter.surface.right.x<-.999f);
+    for (bool legacy : {false,true}) {
+        auto profile = Defaults(PhotoCamera);
+        profile.legacyPhotoMount = legacy;
+        if (legacy) profile.value[3] = 900; // Already saved at the pole.
+        else TurnPhotoScreen(profile, 0, 900);
+        WeaponOpticFrame base{}, turnedY{}, turnedZ{};
+        calib::opticProfile = profile;
+        CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,base));
+        TurnPhotoScreen(calib::opticProfile, 1, 300);
+        CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,turnedY));
+        calib::opticProfile = profile;
+        TurnPhotoScreen(calib::opticProfile, 2, 300);
+        CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,turnedZ));
+        CHECK(Dot(base.surface.up,turnedY.surface.up)>.999f);
+        CHECK(Dot(base.surface.right,turnedZ.surface.right)>.999f);
+        CHECK(Dot(turnedY.surface.forward,turnedZ.surface.forward)<.8f);
+        CHECK(std::memcmp(&base.camera,&turnedY.camera,sizeof(CamBasis))==0);
+        CHECK(std::memcmp(&base.camera,&turnedZ.camera,sizeof(CamBasis))==0);
+    }
     namespace opt=savr::weapon_optic_render;
     opt::Optic optic{};optic.type=34;optic.tanFov=.15f;
     optic.frame.camera={{-1,0,0},{0,-1,0},{0,0,1},{0,0,0}};
@@ -150,6 +169,13 @@
     CHECK(parsed.legacyPhotoMount&&PhotoHeightMm(parsed)==68&&parsed.imageQuarterTurns==3);
     CHECK(ParseProfile("optic2 0 43 -60 0 0 0 0 0 100 0 1 0 -1 0",parsedSet,parsedType,parsed));
     CHECK(!parsed.legacyPhotoMount&&PhotoHeightMm(parsed)==75&&parsed.imageQuarterTurns==3);
+    CHECK(ParseProfile("optic2 0 43 -60 0 0 900 0 0 100 68 1 0 3 1 0 1 0 1",parsedSet,parsedType,parsed));
+    CHECK(parsed.value[3]==900&&parsed.legacyPhotoMount&&parsed.imageQuarterTurns==3);
+    CHECK(std::abs(parsed.photoRotation.y-std::sqrt(.5f))<1e-5f);
+    CHECK(std::abs(parsed.photoRotation.w-std::sqrt(.5f))<1e-5f);
+    CHECK(ParseProfile("optic2 0 43 -60 0 0 900 0 0 100 68 1 0 3 1 0 0 0 0",parsedSet,parsedType,parsed));
+    CHECK(parsed.photoRotation.w==1.f&&parsed.value[3]==900);
+    CHECK(!ParseProfile("optic2 0 34 -60 0 0 0 0 0 60 150 1 0 3 1 0 0 0 1",parsedSet,parsedType,parsed));
     CHECK(!ParseProfile("optic2 2 34 0 0 0 0 0 0 60 150 1 0",parsedSet,parsedType,parsed));
     CHECK(!ParseProfile("optic2 0 35 0 0 0 0 0 0 60 150 1 0",parsedSet,parsedType,parsed));
     CHECK(!ParseProfile("optic2 0 34 0 0 0",parsedSet,parsedType,parsed));

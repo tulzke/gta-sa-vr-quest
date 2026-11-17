@@ -10,12 +10,40 @@ constexpr int PhotoCamera = 43;
 constexpr bool Calibratable(int type) { return Supported(type) || type == PhotoCamera; }
 constexpr int FieldCount = 10;
 constexpr int ImageQuarterTurnsField = FieldCount;
+struct PhotoRotation {
+    float x{}, y{}, z{}, w{1.f};
+};
+
 // Tenths of centimetres/degrees, diameter/width, length, image flips.
 struct Profile {
     int value[FieldCount]{0, 0, 0, 0, 0, 0, 60, 150, 1, 0};
     int imageQuarterTurns{};
     bool legacyPhotoMount{};
+    PhotoRotation photoRotation{};
 };
+
+inline PhotoRotation NormalizePhotoRotation(PhotoRotation q) {
+    const float length = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+    if (!std::isfinite(length) || length < 1e-6f) return {};
+    return {q.x/length, q.y/length, q.z/length, q.w/length};
+}
+
+// Postmultiply by one turn around the current screen's local axis.
+inline void TurnPhotoScreen(Profile& profile, int axis, int steps) {
+    if (axis < 0 || axis > 2) return;
+    constexpr float HalfRadiansPerStep = .000872664626f;
+    const float half = steps * HalfRadiansPerStep;
+    float turn[3]{};
+    turn[axis] = std::sin(half);
+    const float w = std::cos(half);
+    const auto q = profile.photoRotation;
+    profile.photoRotation = NormalizePhotoRotation({
+        q.w*turn[0] + q.x*w + q.y*turn[2] - q.z*turn[1],
+        q.w*turn[1] + q.y*w + q.z*turn[0] - q.x*turn[2],
+        q.w*turn[2] + q.z*w + q.x*turn[1] - q.y*turn[0],
+        q.w*w - q.x*turn[0] - q.y*turn[1] - q.z*turn[2]
+    });
+}
 inline Profile Defaults(int type) {
     Profile p;
     if (type == PhotoCamera) {
@@ -49,11 +77,12 @@ inline bool ParseProfile(const char* line,int& set,int& type,Profile& p) {
     if(!fine && std::strncmp(line,"optic ",6)!=0) return false;
     p=Profile{};
     int legacyMount = 0;
-    const int fields=std::sscanf(line+(fine?6:5)," %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
+    const int fields=std::sscanf(line+(fine?6:5)," %d %d %d %d %d %d %d %d %d %d %d %d %d %d %f %f %f %f",
         &set,&type,&p.value[0],&p.value[1],&p.value[2],&p.value[3],&p.value[4],
         &p.value[5],&p.value[6],&p.value[7],&p.value[8],&p.value[9],
-        &p.imageQuarterTurns,&legacyMount);
-    const bool photoFormat = fine && type == PhotoCamera && fields == 14;
+        &p.imageQuarterTurns,&legacyMount,
+        &p.photoRotation.x,&p.photoRotation.y,&p.photoRotation.z,&p.photoRotation.w);
+    const bool photoFormat = fine && type == PhotoCamera && (fields == 14 || fields == 18);
     if((fields!=10 && fields!=12 && !photoFormat) || set<0 || set>1 || !Calibratable(type)) return false;
     for(int i=0;i<FieldCount;++i) {
         if (type == PhotoCamera && i == 7) continue;
@@ -66,6 +95,7 @@ inline bool ParseProfile(const char* line,int& set,int& type,Profile& p) {
         p.legacyPhotoMount = photoFormat ? legacyMount != 0 :
             p.value[3] != 0 || p.value[4] != 0 || p.value[5] != 0;
         p.imageQuarterTurns = WrapQuarterTurns(p.imageQuarterTurns);
+        p.photoRotation = NormalizePhotoRotation(p.photoRotation);
     }
     return true;
 }

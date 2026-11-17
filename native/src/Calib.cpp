@@ -480,8 +480,12 @@ void Save() {
         std::fprintf(f, "optic2 %d %d", set, type);
         const auto& profile = g_optics[set][type];
         for (int value : profile.value) std::fprintf(f, " %d", value);
-        if (type == weaponoptic::PhotoCamera)
-            std::fprintf(f, " %d %d", profile.imageQuarterTurns, profile.legacyPhotoMount ? 1 : 0);
+        if (type == weaponoptic::PhotoCamera) {
+            const auto q = profile.photoRotation;
+            std::fprintf(f, " %d %d %.9g %.9g %.9g %.9g",
+                         profile.imageQuarterTurns, profile.legacyPhotoMount ? 1 : 0,
+                         q.x, q.y, q.z, q.w);
+        }
         std::fputc('\n', f);
     }
     for (int t = 0; t < kMaxWeapons; ++t) {
@@ -761,6 +765,8 @@ void AdjustOptic(int type, int field, int steps) {
         auto& profile = g_optics[set][type];
         if (field == weaponoptic::ImageQuarterTurnsField) {
             profile.imageQuarterTurns = weaponoptic::WrapQuarterTurns(profile.imageQuarterTurns + steps);
+        } else if (photo && field >= 3 && field <= 5) {
+            weaponoptic::TurnPhotoScreen(profile, field - 3, steps);
         } else if (photo && field == 7) {
             profile.value[7] = weaponoptic::ClampPhotoHeightMm(weaponoptic::PhotoHeightMm(profile) + steps);
         } else {

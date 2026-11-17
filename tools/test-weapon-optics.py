@@ -27,6 +27,7 @@ end = mirror.index('\nvoid* raster{};', start)
 mirror = mirror[:start] + 'bool Resolve() {return api.ready;}\n' + mirror[end:]
 helpers = r'''
 V3 Normalized(V3 v) {float l=std::sqrt(Dot(v,v));return l>.000001f?v*(1.f/l):V3{};}
+struct Q{float x{}, y{}, z{}, w{1.f};};
 struct RwMat {float r[3];unsigned flags;float u[3];unsigned p1;float a[3];unsigned p2;float t[3];unsigned p3;};
 struct Mat34 {V3 right,fwd,up,pos;};
 namespace calib {
@@ -39,7 +40,7 @@ HeatLockState HeatLockSnapshot(){return {};}
 }
 void RenderWorldStableSkyPolys(std::uintptr_t,const MobileDistanceFogSnapshot&){}
 '''
-production = helpers + function(camera, 'MatMul34') + function(camera, 'SetRotate34')
+production = helpers + function(camera, 'Rotate') + function(camera, 'MatMul34') + function(camera, 'SetRotate34')
 production += (ROOT / 'native/src/WeaponOpticFrame.inl').read_text(encoding='utf8')
 production += mirror + (ROOT / 'native/src/WeaponOpticRender.inl').read_text(encoding='utf8')
 production += r'''

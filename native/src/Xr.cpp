@@ -8587,6 +8587,9 @@ void BuildCalibMenu() {
                 const int size = field == 6 ? profile.value[6] : weaponoptic::PhotoHeightMm(profile);
                 std::snprintf(row, sizeof(row), "SCREEN %s   < %.1f CM >",
                               field == 6 ? "WIDTH" : "HEIGHT", size * .1f);
+            } else if (photoScreen && field >= 3 && field <= 5) {
+                std::snprintf(row, sizeof(row), "SCREEN ROT %c   < TURN >",
+                              "XYZ"[field - 3]);
             } else {
                 std::snprintf(row,sizeof(row),"%s%s   < %+.1f %s >",photoScreen ? "SCREEN " : "",
                     calib::OpticFieldLabel(field) + (photoScreen ? 6 : 0),profile.value[field]*.1f,

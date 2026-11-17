@@ -29,10 +29,21 @@ bool BuildWeaponOpticFrame(int type, const RwMat& weapon, WeaponOpticFrame& out)
     constexpr float rad=.001745329252f;
     Mat34 local{barrel,top,side,position};
     local=MatMul34(local,SetRotate34(v[3]*rad,v[4]*rad,v[5]*rad));
-    const V3 forward=Normalized(local.right);
+    V3 forward=Normalized(local.right);
     V3 up=Normalized(local.fwd-forward*Dot(local.fwd,forward));
-    if (type == weaponoptic::PhotoCamera && !profile.legacyPhotoMount)
-        up = Normalized(Cross(up, forward));
+    if (type == weaponoptic::PhotoCamera) {
+        if (!profile.legacyPhotoMount)
+            up = Normalized(Cross(up, forward));
+        const V3 right = Cross(forward, up);
+        const auto screenVector = [&](V3 v) {
+            return forward*v.x + up*v.y + right*v.z;
+        };
+        const auto r = profile.photoRotation;
+        const Q turn{r.x, r.y, r.z, r.w};
+        const V3 rotatedForward = screenVector(Rotate(turn, {1, 0, 0}));
+        up = screenVector(Rotate(turn, {0, 1, 0}));
+        forward = rotatedForward;
+    }
     const V3 left=Normalized(Cross(up,forward));
     if(!Finite(position)||!Finite(forward)||Dot(forward,forward)<.9f||Dot(left,left)<.9f) return false;
     out.halfSize=v[6]*.0005f;
