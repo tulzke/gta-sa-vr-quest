@@ -243,6 +243,7 @@ std::atomic<float> g_value[F_COUNT] = {
 wheelhaptics::State g_wheelHapticState[2];
 double g_wheelHapticTime{};
 std::atomic<bool> g_wheelVisible{true};
+std::atomic<bool> g_wheelHandGuide{true};
 std::atomic<bool> g_highlights{true};
 std::atomic<bool> g_bikeHandsFollowTilt{true};
 std::atomic<bool> g_bikeBlockWheelie{false};
@@ -717,6 +718,7 @@ void Save() {
     std::fprintf(file, "BikeDistanceCm=%.7g\n", g_value[F_BIKE_DISTANCE].load());
     std::fprintf(file, "BikeHeightCm=%.7g\n", g_value[F_BIKE_HEIGHT].load());
     std::fprintf(file, "ImmersiveWheelVisible=%d\n", g_wheelVisible.load()?1:0);
+    std::fprintf(file, "WheelHandGuide=%d\n", g_wheelHandGuide.load()?1:0);
     std::fprintf(file, "HandleHighlights=%d\n", g_highlights.load()?1:0);
     std::fprintf(file, "BikeHandsFollowTilt=%d\n",
                  g_bikeHandsFollowTilt.load()?1:0);
@@ -838,6 +840,7 @@ void Load() {
     float values[F_COUNT];
     std::copy(std::begin(kDefaults), std::end(kDefaults), values);
     int visible = 1, highlights = 1, bikeHandsFollowTilt = 1;
+    int wheelHandGuide = 1;
     int bikeLockHorizon = 1, bikeVisualLeanPercent = 50;
     int bikeLeanSteering = 1, bikeLeanSensitivity = 100;
     int keepRiderOnFlips = 0;
@@ -975,6 +978,7 @@ void Load() {
             else if (std::sscanf(line, "BikeDistanceCm=%d", &value)==1) values[F_BIKE_DISTANCE]=value;
             else if (std::sscanf(line, "BikeHeightCm=%d", &value)==1) values[F_BIKE_HEIGHT]=value;
             else if (std::sscanf(line, "ImmersiveWheelVisible=%d", &value)==1) visible=value;
+            else if (std::sscanf(line, "WheelHandGuide=%d", &value)==1) wheelHandGuide=value;
             else if (std::sscanf(line, "HandleHighlights=%d", &value)==1) highlights=value;
             else if (std::sscanf(line, "BikeHandsFollowTilt=%d", &value)==1)
                 bikeHandsFollowTilt=value;
@@ -1186,6 +1190,7 @@ void Load() {
     for (int field=0; field<F_COUNT; ++field)
         g_value[field].store(ClampField(field, values[field]));
     g_wheelVisible.store(visible!=0);
+    g_wheelHandGuide.store(wheelHandGuide!=0);
     g_highlights.store(highlights!=0);
     g_bikeHandsFollowTilt.store(bikeHandsFollowTilt!=0);
     g_bikeHorizonLocked.store(bikeLockHorizon!=0);
@@ -4212,7 +4217,7 @@ constexpr int kImmersiveCarItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS,
+    MENU_WHEEL_VISIBLE, MENU_WHEEL_HAND_GUIDE, MENU_INTERIOR_GLASS,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
     MENU_RESET, MENU_BACK
 };
@@ -4245,7 +4250,7 @@ constexpr int kImmersiveBoatItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_RESET, MENU_BACK
+    MENU_WHEEL_VISIBLE, MENU_WHEEL_HAND_GUIDE, MENU_RESET, MENU_BACK
 };
 
 void MenuTableForType(int vehicleType, const int** items, int* count) {
@@ -4893,6 +4898,8 @@ void ResetVehiclePreset(int vehicleType) {
 }
 bool IsWheelVisible() { EnsureInit(); return g_wheelVisible.load(); }
 void ToggleWheelVisible() { EnsureInit(); g_wheelVisible.store(!g_wheelVisible.load()); Save(); }
+bool IsWheelHandGuideEnabled() { EnsureInit(); return g_wheelHandGuide.load(); }
+void ToggleWheelHandGuide() { EnsureInit(); g_wheelHandGuide.store(!g_wheelHandGuide.load()); Save(); }
 bool AreHandleHighlightsEnabled() { EnsureInit(); return g_highlights.load(); }
 void ToggleHandleHighlights() { EnsureInit(); g_highlights.store(!g_highlights.load()); Save(); }
 bool DoBikeHandsFollowTilt() { EnsureInit(); return g_bikeHandsFollowTilt.load(); }

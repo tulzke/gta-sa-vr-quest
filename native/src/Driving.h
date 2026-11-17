@@ -212,6 +212,7 @@ enum MenuItem {
     MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET,
     MENU_WATER_CAMERA_X, MENU_WATER_CAMERA_Y, MENU_WATER_CAMERA_Z,
     MENU_WATER_CAMERA_PITCH, MENU_WATER_CAMERA_YAW, MENU_WATER_CAMERA_ROLL, MENU_WATER_CAMERA_RESET,
+    MENU_WHEEL_HAND_GUIDE,
 };
 
 bool RearMirrorEnabled();
@@ -392,6 +393,8 @@ void AdjustYokeSensitivity(int direction);
 
 bool IsWheelVisible();
 void ToggleWheelVisible();
+bool IsWheelHandGuideEnabled();
+void ToggleWheelHandGuide();
 bool AreHandleHighlightsEnabled();
 void ToggleHandleHighlights();
 bool DoBikeHandsFollowTilt();

@@ -829,6 +829,18 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
+      "id": 135,
+      "title": "Смещение рук на руле и указатель хвата",
+      "file": "135-smeshchenie-ruk-na-rule-pri-avariyakh.md",
+      "categories": [
+        "vehicle-controls",
+        "bugs",
+        "hud"
+      ],
+      "priority": "medium",
+      "status": "in_progress"
+    },
+    {
       "id": 136,
       "title": "Пространственное закрепление VR-меню без вращения вслед за игроком",
       "file": "136-prostranstvennoe-zakreplenie-vr-menyu.md",

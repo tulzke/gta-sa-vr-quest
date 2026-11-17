@@ -1553,6 +1553,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::ToggleKeepRiderOnFlips();
             } else if (item==savr::driving::MENU_WHEEL_VISIBLE&&enter) {
                 savr::driving::ToggleWheelVisible();
+            } else if (item==savr::driving::MENU_WHEEL_HAND_GUIDE&&(enter||step)) {
+                savr::driving::ToggleWheelHandGuide();
             } else if (item==savr::driving::MENU_CAR_CAMERA_TILT&&
                        (enter||step)) {
                 savr::driving::ToggleCarCameraTilt();

@@ -8004,6 +8004,11 @@ void BuildDrivingMenu() {
                     "VIRTUAL STEERING WHEEL   < %s >",
                     driving::IsWheelVisible()?"VISIBLE":"HIDDEN");
                 break;
+            case driving::MENU_WHEEL_HAND_GUIDE:
+                std::snprintf(rows[row],sizeof(rows[row]),
+                    "WHEEL HAND GUIDE   < %s >",
+                    driving::IsWheelHandGuideEnabled()?"ON":"OFF");
+                break;
             case driving::MENU_INTERIOR_GLASS:
                 std::snprintf(rows[row],sizeof(rows[row]),
                     "INTERIOR WINDOW TINT   < %s >",
@@ -9016,9 +9021,25 @@ bool GetPointingFingertip(const HandPose& pose,int hand,float out[3]){
     out[0]=p.x;out[1]=p.y;out[2]=p.z;
     return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);
 }
+struct WheelHandGuide {
+    XrVector3f controller{}, pinned{};
+    float opacity{};
+};
+
+WheelHandGuide MakeWheelHandGuide(const HandPose& pose, XrVector3f pinned) {
+    if (!pose.valid || !pose.positionTracked) return {};
+    const XrVector3f controller{pose.gripPos[0],pose.gripPos[1],pose.gripPos[2]};
+    const auto delta=vsub(pinned,controller);
+    const float distance=std::sqrt(vdot(delta,delta));
+    if (!std::isfinite(distance) || distance<=.15f) return {};
+    const float t=std::clamp((distance-.15f)/.13f,0.f,1.f);
+    return {controller,pinned,.23f*t*t*(3.f-2.f*t)};
+}
+
 struct SkeletalHandFrame {
     handskeleton::Palette palette{};
     handskeleton::Mat model{}, wrist{};
+    WheelHandGuide wheelGuide{};
     bool valid=false, ledge=false;
 };
 SkeletalHandFrame g_skeletalHands[2];
@@ -9053,7 +9074,10 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
                      const driving::WheelVisualState& drivingWheel,
                      const BallHandLock& ballLock, unsigned int weaponHandMask,
                      const float pinchAmounts[2], const int weaponTypes[2], unsigned debugPinchHands) {
-    for(auto& frame:g_skeletalHands)frame.valid=false;
+    for (auto& frame:g_skeletalHands) {
+        frame.valid=false;
+        frame.wheelGuide={};
+    }
     static radio::HandAttachment radioHands[2];
     static hydrocontrol::HandAttachment hydroHands[2];
     static std::uint64_t previousHandNs{};
@@ -9066,6 +9090,8 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         if(!hud::ShouldRenderWristHud()&&!g_hudActive.load(std::memory_order_relaxed))return;
     }
     EnsureHandAssets();
+    const bool wheelGuideEnabled=drivingWheel.trackedHandsEnabled && drivingWheel.active &&
+        !drivingWheel.bike && !drivingWheel.yoke && driving::IsWheelHandGuideEnabled();
     for (int hand = 0; hand < 2; ++hand) {
         if (!drivingWheel.radioGrabbed[hand] || !hp[hand].valid) radioHands[hand].Reset();
         if(!hp[hand].valid)hydroHands[hand].Reset();
@@ -9079,6 +9105,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         float grip = std::clamp(hp[hand].grip, 0.0f, 1.0f);
         float trig = std::clamp(hp[hand].trigger, 0.0f, 1.0f);
         bool basketballFlatPalm = false;
+        bool guideHand = false;
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
         const bool monitorHand=drivingWheel.monitor.visible&&drivingWheel.monitor.owner==hand;
@@ -9196,6 +9223,8 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             }
             grip=trig=0.0f;
         } else if (steeringHand) {
+            guideHand=wheelGuideEnabled && drivingWheel.rimGrip[hand] &&
+                !monitorHand && !hp[hand].climbGrip && !(debugPinchHands&(1u<<hand));
             // reference Quest build's car socket is a RenderWare matrix whose Right axis lies
             // along the rim and Forward axis is the wheel normal. Reproduce its
             // final UltimateXR anatomical decode, including LEFT parity, rather
@@ -9379,6 +9408,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         if(monitorHand)selected=watermonitor::PistolPose(drivingWheel.monitor.press);
         if(serviceHand)selected={handanimation::Gesture::HandleRadio,handanimation::Gesture::HandleRadio,drivingWheel.servicePress,0.f};
         auto& frame=g_skeletalHands[hand];
+        if (guideHand) frame.wheelGuide=MakeWheelHandGuide(hp[hand],pos);
         g_handSkeleton.Evaluate(selected,pinchAmount,pinchWeight,frame.palette);
         const auto model=[](XrVector3f p,XrVector3f f,XrVector3f r,XrVector3f u) {
             return handskeleton::Mat{f.x,f.y,f.z,0,-u.x,-u.y,-u.z,0,r.x,r.y,r.z,0,
@@ -11246,6 +11276,42 @@ void DrawDrivingBoxes(const float* mvp, const float* vertices, int vertexCount,
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
+void DrawWheelHandGuides(const float* mvp, XrVector3f headPosition) {
+    if (g_skeletalHands[0].wheelGuide.opacity<=0.f &&
+        g_skeletalHands[1].wheelGuide.opacity<=0.f) return;
+
+    glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    for (const auto& frame:g_skeletalHands) {
+        const auto& guide=frame.wheelGuide;
+        if (guide.opacity<=0.f) continue;
+        const auto axis=vnorm(vsub(guide.pinned,guide.controller));
+        const auto side=vcross(axis,vsub(headPosition,guide.controller));
+        if (vdot(side,side)<1e-8f) continue;
+        // A flat ribbon keeps a single layer of alpha. Use the same facing
+        // direction for both eyes to keep the fine arrow stable in stereo.
+        const auto across=vnorm(side);
+        const auto stem=vscale(across,.00075f);
+        const auto head=vscale(across,.0025f);
+        const auto base=vsub(guide.pinned,vscale(axis,.009f));
+        const XrVector3f points[]{vsub(guide.controller,stem),vadd(guide.controller,stem),
+            vsub(base,stem),vadd(base,stem),vsub(base,head),vadd(base,head),guide.pinned};
+        float vertices[std::size(points)*3];
+        for (std::size_t i=0;i<std::size(points);++i) {
+            vertices[i*3]=points[i].x;
+            vertices[i*3+1]=points[i].y;
+            vertices[i*3+2]=points[i].z;
+        }
+        constexpr unsigned short triangles[]{0,1,2,2,1,3,4,5,6};
+        DrawDrivingBoxes(mvp,vertices,std::size(points),triangles,std::size(triangles),
+                         .88f,.92f,.96f,guide.opacity);
+    }
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+}
+
 #include "RadioLabelRender.inl"
 
 extern "C" {
@@ -12377,6 +12443,8 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawWeaponForEye(mvp);     // active weapon mesh pinned to the hand (Stage 1)
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
+    if (usingGameDepth && haveHands && IsSessionFocused() && !IsMenuVisible())
+        DrawWheelHandGuides(mvp,rp.position);
     if(usingGameDepth)DrawRadioLabel(mvp,drivingWheel);
     if (usingGameDepth) DrawVehicleDoorMarkers(mvp,bakedDoors,rp);
     if (usingGameDepth) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,rp,false,true);
