@@ -1,4 +1,5 @@
 #include "VehicleClimb.h"
+#include "GrabArbitration.h"
 #include "VehicleClimbProfiles.h"
 #include "VehicleClimbGeometry.h"
 #include "VehicleDebugDrag.h"
@@ -207,6 +208,41 @@ void Append(MarkerFrame& frame){
         frame.markers[frame.count++]=m;
     }
 }
+void ProbeGrabs(const xr::HandPose hands[2]) {
+    void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    void* pool=g.CPools_ms_pVehiclePool?*g.CPools_ms_pVehiclePool:nullptr;
+    if(!grabarbitration::current.enabled||!ped||!removeEntity||!addEntity||!ltm||!healthy||!healthy(ped)||
+       !pool||Read<int>(pool,0x10)!=110)return;
+    auto objects=Read<char*>(pool,0);auto flags=Read<std::uint8_t*>(pool,8);
+    float eyeRaw[3]{},forward[3]{};if(!objects||!flags||!vrcam::GetHeadWorldRay(eyeRaw,forward))return;
+    Vec eye{eyeRaw[0],eyeRaw[1],eyeRaw[2]};
+    void* car=nullptr;int carSlot=-1,side=activeSide;
+    if(activeCar) {
+        if(pool!=activePool||activeSlot<0||activeSlot>=110||flags[activeSlot]!=generation||objects+activeSlot*0xc68!=activeCar)return;
+        car=activeCar;carSlot=activeSlot;
+    } else {
+        float best=5.f;
+        for(int i=0;i<110;++i)if(!(flags[i]&0x80)) {
+            void* candidate=objects+i*0xc68;
+            if(!FindProfile(Read<std::uint16_t>(candidate,0x32)))continue;
+            const float distance=Length(Position(candidate)-eye);
+            if(distance<best){best=distance;car=candidate;carSlot=i;}
+        }
+    }
+    void* matrix=car?Read<void*>(car,0x18):nullptr;if(!matrix)return;
+    const Basis b{Read<Vec>(matrix,0),Read<Vec>(matrix,0x10),Read<Vec>(matrix,0x20),Read<Vec>(matrix,0x30)};
+    if(!activeCar)side=b.Local(eye).x>0?1:0;
+    if(!b.Valid()||b.up.z<.98f||!Finite(Read<Vec>(car,0x68))||!Finite(Read<Vec>(car,0x74))||Length(Position(ped)-b.position)>6)return;
+    void* node=Read<void*>(car,0x800+(side?8:10)*8);void* door=node?ltm(node):nullptr;if(!door)return;
+    const int model=Read<std::uint16_t>(car,0x32);const auto* profile=FindProfile(model);if(!profile)return;
+    float c[12]{};driving::GetClimbCalibration(model,side,c);
+    const Geometry shape=Shape(b.Local(Read<Vec>(door,0x30)),side,c,profile->pipeX);if(!shape.pipe.Valid())return;
+    for(int h=0;h<2;++h){Vec world{};if(!hands[h].valid||held[h]||!World(Raw(hands[h]),world))continue;
+        const float distance=shape.pipe.Distance(b.Local(world));
+        if(distance<.12f)grabarbitration::current.Offer(h,grabarbitration::Kind::VehicleClimb,carSlot,distance);
+    }
+}
+
 void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned occupied){
     const double now=Now();const float dt=float(now-lastTime);lastTime=now;
     markers={};markers.epoch=epoch;claimed=0;
@@ -286,7 +322,7 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
     Vec motion{};int count=0;
     for(int h=0;h<2;++h){
         if(!valid[h]||(occupied&(1u<<h))||hands[h].grip<=.35f)held[h]=false;
-        if(valid[h]&&fresh[h]&&!(occupied&(1u<<h))&&shape.pipe.Distance(b.Local(world[h]))<.12f){
+        if(valid[h]&&fresh[h]&&grabarbitration::Allows(h,grabarbitration::Kind::VehicleClimb)&&!(occupied&(1u<<h))&&shape.pipe.Distance(b.Local(world[h]))<.12f){
             if(!held[0]&&!held[1])targetRoot=root;
             held[h]=true;previous[h]=Raw(hands[h]);xr::TriggerHaptic(h,.25f,0,30);
             SuspendPhysics(ped);

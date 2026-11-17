@@ -1,4 +1,5 @@
 #include "LedgeClimb.h"
+#include "GrabArbitration.h"
 #include "Symbols.h"
 #include "VrCamera.h"
 #include "Xr.h"
@@ -320,6 +321,32 @@ void ApplyHandVisuals(xr::HandPose hands[2]){
  }
 }
 
+namespace {
+struct GrabProbe {bool valid{},found{};Vec world{},point{},tangent{},lineA{},lineB{},normal{};};
+GrabProbe grabProbes[2];
+}
+void ProbeGrabs(const xr::HandPose hands[2]) {
+ for(auto& probe:grabProbes)probe={};
+ void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+ if(!grabarbitration::current.enabled||!hooksReady||!ped||!removeEntity||!addEntity||!canClimb||!surfaces||
+    !g.CWorld_ProcessLineOfSight||!g.CWorld_TestSphereAgainstWorld||!g.CWorld_pIgnoreEntity||!vrcam::GroundWalkControlsActive()||
+    (g.CPed_IsAlive&&!g.CPed_IsAlive(ped)))return;
+ float a[3]{},f[3]{};if(!vrcam::GetHeadWorldRay(a,f))return;
+ Vec forward{f[0],f[1],0};const float n=Length(forward);forward=n>.1f?forward*(1.f/n):Vec{0,1,0};
+ const Vec speed=Read<Vec>(ped,0x68);
+ const Reach reach=ReachFor(speed,(Read<std::uint8_t>(ped,0x584)&1)==0||std::abs(speed.z)>.015f);
+ void* saved=*g.CWorld_pIgnoreEntity;*g.CWorld_pIgnoreEntity=ped;
+ for(int h=0;h<2;++h){
+  auto& probe=grabProbes[h];
+  if(!hands[h].valid||held[h]||(grabarbitration::current.occupied&(1u<<h))||
+     !World({hands[h].gripPos[0],hands[h].gripPos[1],hands[h].gripPos[2]},probe.world))continue;
+  probe.valid=true;probe.found=Find(probe.world,forward,probe.point,probe.tangent,reach,&probe.lineA,&probe.lineB,&probe.normal);
+  const float distance=Length(probe.point-probe.world);
+  if(probe.found&&distance<reach.grab)grabarbitration::current.Offer(h,grabarbitration::Kind::Ledge,0,distance);
+ }
+ *g.CWorld_pIgnoreEntity=saved;
+}
+
 void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned occupied){
  const double now=Now();const float dt=float(now-last);last=now;markers={};markers.epoch=epoch;
  void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
@@ -356,9 +383,16 @@ void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned
    held[h]=false;
   }
   Vec point{},tangent{},lineA{},lineB{},normal{};
-  if(valid&&!held[h]&&Find(world,forward,point,tangent,reach,&lineA,&lineB,&normal)){
+  const auto probe=grabProbes[h];grabProbes[h].valid=false;
+  bool found=false;
+  if(valid&&!held[h]) {
+   if(probe.valid&&Length(world-probe.world)<.001f) {
+    found=probe.found;point=probe.point;tangent=probe.tangent;lineA=probe.lineA;lineB=probe.lineB;normal=probe.normal;
+   } else found=Find(world,forward,point,tangent,reach,&lineA,&lineB,&normal);
+  }
+  if(found){
    Marker m{(lineA+lineB)*.5f+normal*.006f,tangent,normal,false};m.bikeGrip=true;m.climbPipe=true;m.ledge=true;m.pipeLength=Length(lineB-lineA);m.opacity=.45f;if(m.pipeLength>.01f)markers.markers[markers.count++]=m;
-   if(fresh[h]&&Length(point-world)<reach.grab){if(!wasHeld){pullVelocity={};velocityTime=0;}held[h]=true;anchor[h]=point;gripAxis[h]=tangent;gripNormal[h]=normal;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
+   if(fresh[h]&&grabarbitration::Allows(h,grabarbitration::Kind::Ledge)&&Length(point-world)<reach.grab){if(!wasHeld){pullVelocity={};velocityTime=0;}held[h]=true;anchor[h]=point;gripAxis[h]=tangent;gripNormal[h]=normal;inward[h]=forward;previous[h]=raw;xr::TriggerHaptic(h,.25f,0,30);}
   }
   if(!held[h])continue;
   if(dt>.15f){previous[h]=raw;pullVelocity={};velocityTime=0;}

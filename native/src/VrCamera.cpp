@@ -2850,7 +2850,7 @@ void PoseToGame(const float p[3], const float o[4], V3& gpos, Q& gori) {
 bool HandWeaponMatrixForPoseCalibrated(int hand, int weaponType,
                                        const xr::HandPose& h,
                                        const savr::calib::WeaponCalib& cal,
-                                       RwMat& out) {
+                                       RwMat& out,bool diagnostics=true) {
     if (!g_vrBaseValid || !g_origin.valid || hand < 0 || hand > 1 || weaponType == 0)
         return false;
     if (!h.valid) return false;
@@ -2906,7 +2906,7 @@ bool HandWeaponMatrixForPoseCalibrated(int hand, int weaponType,
     if (!Finite(tw.right) || !Finite(tw.fwd) || !Finite(tw.up) || !Finite(tw.pos)) return false;
 
     static int dbg = 0;
-    if ((++dbg % 90) == 1) {
+    if (diagnostics && (++dbg % 90) == 1) {
         LOGI("[wpn.b] pos(%.2f,%.2f,%.2f) barrel(%.2f,%.2f,%.2f) up(%.2f,%.2f,%.2f)",
              tw.pos.x, tw.pos.y, tw.pos.z, forward.x, forward.y, forward.z, up.x, up.y, up.z);
     }
@@ -30384,6 +30384,21 @@ bool TrackingPointToWorld(const float trackingPoint[3], float worldPoint[3]) {
     worldPoint[1] = world.y;
     worldPoint[2] = world.z;
     return true;
+}
+
+bool WeaponPickupGripWorld(int weaponType,const void* matrix,float out[3]) {
+    if(!matrix||!out)return false;
+    xr::HandPose neutral{};neutral.valid=true;neutral.gripOri[3]=1;
+    RwMat model{};
+    if(!HandWeaponMatrixForPoseCalibrated(1,weaponType,neutral,calib::Snapshot(1,weaponType),model,false))return false;
+    const V3 grip=TrackingPointToGame({0,0,0});
+    const V3 delta=grip-V3{model.t[0],model.t[1],model.t[2]};
+    const float local[]={Dot(delta,{model.r[0],model.r[1],model.r[2]}),
+        Dot(delta,{model.u[0],model.u[1],model.u[2]}),
+        Dot(delta,{model.a[0],model.a[1],model.a[2]})};
+    const auto* m=static_cast<const float*>(matrix);
+    for(int i=0;i<3;++i)out[i]=m[12+i]+m[i]*local[0]+m[4+i]*local[1]+m[8+i]*local[2];
+    return std::isfinite(out[0])&&std::isfinite(out[1])&&std::isfinite(out[2]);
 }
 
 bool GetNeutralVehicleEyeWorld(float out[3]) {

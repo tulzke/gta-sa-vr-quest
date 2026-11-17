@@ -1,5 +1,6 @@
 #include "VehicleClimbGeometry.h"
 #include "VehicleClimb.h"
+#include "GrabArbitration.h"
 #include "VehicleClimbProfiles.h"
 #include "VehicleDebugDrag.h"
 #include "Symbols.h"

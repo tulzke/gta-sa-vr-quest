@@ -3,6 +3,7 @@
 namespace savr::xr { struct HandPose; }
 namespace savr::ledgeclimb {
 inline constexpr float kSafeFallHeight = 4.f;
+void ProbeGrabs(const xr::HandPose hands[2]);
 void Install(void* handle);
 void Update(bool usable,const xr::HandPose hands[2],std::uint64_t epoch,unsigned occupied);
 unsigned ClaimedHands();

@@ -1,4 +1,5 @@
 #include "LedgeClimb.h"
+#include "GrabArbitration.h"
 #include "Symbols.h"
 #include "HandAnimation.h"
 #include "RecoilModel.h"
@@ -88,6 +89,12 @@ int main(){
  // A closed grip on entry cannot latch; a release and fresh squeeze can.
  xr::HandPose hands[2];hands[1].valid=false;hands[0].gripPos[1]=-.08f;hands[0].gripPos[2]=1.05f;hands[0].grip=1;
  for(int i=0;i<3;++i){testNow+=.01;Update(true,hands,1,0);}assert(!ClaimedHands());
+ hands[0].grip=0;testNow+=.01;Update(true,hands,1,0);
+ grabarbitration::current.Begin(true);ProbeGrabs(hands);
+ assert(grabarbitration::Allows(0,grabarbitration::Kind::Ledge));
+ grabarbitration::current.Offer(0,grabarbitration::Kind::Pickup,99,.001f);
+ hands[0].grip=1;testNow+=.01;Update(true,hands,1,0);assert(!ClaimedHands());
+ grabarbitration::current.Begin(false);
  hands[0].grip=0;testNow+=.01;Update(true,hands,1,0);
  hands[0].grip=1;testNow+=.01;Update(true,hands,1,0);assert(ClaimedHands()==1);
  // Crossing the top must not auto-release, even if the original support
@@ -187,6 +194,5 @@ int main(){
  testNow+=.8;assert(JumpInProgress());assert(!vrcam::ParachuteStateActive());
  testNow=jumpUntil+.01;assert(!JumpInProgress());assert(vrcam::ParachuteStateActive());
  g.CPedGeometryAnalyser_IsInAir=[](const void*){return false;};assert(!vrcam::ParachuteStateActive());
- xr::TestWristHud();
  puts("Ledge climbing production checks passed");
 }

@@ -15,7 +15,7 @@ namespace savr::xr { struct HandPose; }
 //   HELD --fresh grip at gun body--> HELD(other hand)
 //   HELD --release at its socket--> HOLSTER
 //   HELD --release elsewhere--> DROPPED(source hand)
-//   DROPPED --closed free hand nearby--> HELD(catching hand)
+//   DROPPED --fresh grip nearby--> HELD(catching hand)
 //   DROPPED --1.8 seconds--> HOLSTER
 //
 // The game inventory is never removed or duplicated.  A state transition only
@@ -94,12 +94,15 @@ void AutoAssignGadgetPoint();
 // the grip lock off, an open grip releases it on the next tick as usual.
 // A newly supplied detonator waits for the first squeeze before releasing.
 bool ForceHold(int hand, int slot);
+// Pickup completion: never replace an owner or accept the previous slot type.
+bool HoldCollectedWeapon(int hand,int slot,int expectedType);
 
 // Lock-free bitmask of hands currently holding a weapon (bit0 = LEFT,
 // bit1 = RIGHT), refreshed once per Update. Safe from any lock context —
 // Driving reads it inside its own state lock to keep a weapon hand off the
 // steering wheel.
 unsigned int HeldHandMaskRelaxed();
+unsigned RadialMenuHandMask();
 
 // PreferredHeldHand is the most recently grabbed/transferred/triggered hand.
 // ActiveHeldSlot is its slot, or -1 if nothing is held.

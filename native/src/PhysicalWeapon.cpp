@@ -1,4 +1,6 @@
 #include "PhysicalWeapon.h"
+#include "GrabArbitration.h"
+#include "Pickups.h"
 #include "WeaponRecoil.h"
 
 #include "Calib.h"
@@ -873,6 +875,65 @@ TrackingPose NormalizedTrackingPose(const TrackingPose& pose) {
     return normalized;
 }
 
+void PrepareGrabSelection(bool blocked,const xr::HandPose hands[2],bool headValid,std::uint64_t epoch,double now) {
+    void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    const bool onFoot=ped&&g.FindPlayerVehicle&&!g.FindPlayerVehicle(-1,false);
+    const unsigned occupied=vehicledoors::ClaimedHands()|npcgrab::ClaimedHands()|
+        basketball::HeldHandMask()|HeldHandMaskRelaxed()|RadialMenuHandMask()|pickups::ClaimedHands()|
+        driving::ServiceRadioClaimedHands()|driving::WaterMonitorClaimedHands();
+    grabarbitration::current.Begin(!blocked&&headValid&&onFoot&&xr::IsSessionFocused()&&
+        gHolsterTrackingReady&&epoch==gInteractionEpoch&&vrcam::GroundWalkControlsActive(),occupied);
+    if(!grabarbitration::current.enabled)return;
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        const auto occupiedSlots=OccupiedSlotMaskLocked();
+        for(int h=0;h<2;++h)if(hands[h].valid) {
+            const V3 p=GripPosition(hands[h]);
+            const bool canDraw=!ValidSlot(gHeldSlot[h])&&!IsSupportHandLocked(h)&&
+                (gDualHoldEnabled||AnyHeldHandLocked()<0);
+            for(int point=0;point<holster::PointCount();++point){
+                const int slot=holster::PointSlot(point);float anchor[3]{};
+                if(!canDraw||!holster::PointGrabbable(point)||!OwnedConfiguredSlot(ped,slot)||
+                   (occupiedSlots&(1u<<slot))||!vrcam::GetHolsterAnchorTracking(point,anchor))continue;
+                const float distance=Distance(p,{anchor[0],anchor[1],anchor[2]});
+                if(distance<holster::GrabRadiusMetres())
+                    grabarbitration::current.Offer(h,grabarbitration::Kind::Holster,point,distance);
+            }
+            for(int source=0;source<2;++source){
+                TrackingPose flying{};
+                if(!gDisarmCatchBlocked[h]&&DroppedPoseAtLocked(source,now,&flying)) {
+                    const float distance=Distance(p,PositionOf(flying));
+                    if(distance<kCatchRadius)grabarbitration::current.Offer(h,grabarbitration::Kind::Dropped,source,distance);
+                }
+                const int slot=gHeldSlot[source];if(source==h||!ValidSlot(slot))continue;
+                TrackingPose support{};
+                if(!ValidHand(gSupportHand[source])&&IsTwoHandedWeaponTypeInternal(WeaponTypeInSlot(ped,slot))&&BuildSupportAnchorLocked(source,&support)){
+                    const float distance=Distance(p,PositionOf(support));
+                    if(distance<kSupportGrabRadius)grabarbitration::current.Offer(h,grabarbitration::Kind::Weapon,source,distance);
+                }
+                const TrackingPose model=gHeldVisualValid[source]&&gHeldVisualSlot[source]==slot?
+                    gHeldVisualPose[source]:RawGripFallbackPose(hands[source]);
+                const float distance=std::min(Distance(p,PositionOf(model)),Distance(p,GripPosition(hands[source])));
+                if(distance<kTransferRadius)grabarbitration::current.Offer(h,grabarbitration::Kind::Weapon,source,distance);
+            }
+        }
+    }
+    pickups::ProbeGrabs(hands);
+    // World geometry probes are needed while squeezing a free hand or while
+    // previewing a nearby pickup. Ordinary open-hand walking and firing pay
+    // no additional ped/door/ledge searches.
+    bool probeWorld=false;
+    for(int h=0;h<2;++h)if(hands[h].valid&&!(occupied&(1u<<h)))
+        probeWorld|=hands[h].grip>=.5f||grabarbitration::current.hands[h].kind==grabarbitration::Kind::Pickup;
+    if(!probeWorld)return;
+    npcgrab::ProbeGrabs(hands);
+    vehicledoors::ProbeGrabs(hands);
+    vehicleclimb::ProbeGrabs(hands);
+    ledgeclimb::ProbeGrabs(hands);
+    basketball::ProbeGrabs(hands);
+    pickups::FinishProbes();
+}
+
 }  // namespace
 
 void Init() {
@@ -895,9 +956,11 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     // Run outside gMutex: the door module queries existing weapon/support owners.
     const bool navigationClaimed=testarea::UpdateNavigation(interactionsBlocked,latest,
         headPosition,headOrientation,headValid,trackingEpoch);
+    PrepareGrabSelection(interactionsBlocked||navigationClaimed||driving::GetVehicleDebugMode()!=0,
+        latest,headValid,trackingEpoch,now);
     npcgrab::Update(interactionsBlocked||navigationClaimed||driving::GetVehicleDebugMode()!=0, latest, headValid, trackingEpoch);
     vehicledoors::Update(interactionsBlocked||navigationClaimed, latest, headValid, trackingEpoch);
-    const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands() | vehicleentry::ClaimedHands() | (driving::ServiceRadioClaimedHands()|driving::WaterMonitorClaimedHands());
+    const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands() | vehicleentry::ClaimedHands() | pickups::ClaimedHands() | (driving::ServiceRadioClaimedHands()|driving::WaterMonitorClaimedHands());
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));
     std::copy_n(headPosition,3,gInteractionHead);
@@ -1250,7 +1313,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 (handledHands & (1u << support)) != 0 ||
                 !IsTwoHandedWeaponTypeInternal(weaponType) ||
                 !gHands[support].valid || gHands[support].grip < kGripClose ||
-                gGripLatched[support])
+                gGripLatched[support] || !grabarbitration::Allows(support,grabarbitration::Kind::Weapon))
                 continue;
             if (ClosestAvailableHolsterSlotLocked(
                     ped, support, anchors, anchorValid) >= 0)
@@ -1297,7 +1360,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 IsSupportHandLocked(receiver) ||
                 (handledHands & (1u << receiver)) != 0 ||
                 !gHands[receiver].valid || gHands[receiver].grip < kGripClose ||
-                gGripLatched[receiver])
+                gGripLatched[receiver] || !grabarbitration::Allows(receiver,grabarbitration::Kind::Weapon))
                 continue;
             // A free hand intentionally reaching an available body socket wants
             // that second weapon.  Do not steal the already-held gun merely
@@ -1339,13 +1402,14 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         // hand. A deliberate release restores catching; the other hand is free.
         for(int h=0;h<kHandCount;++h)
             if(gHands[h].valid && gHands[h].grip<=kGripOpen)gDisarmCatchBlocked[h]=false;
-        // A flying weapon can be caught by either free, closed hand.
+        // A flying weapon can be caught by either free hand with a fresh grip.
         for (int receiver = 0; receiver < kHandCount; ++receiver) {
             if (ValidSlot(gHeldSlot[receiver]) || !gHands[receiver].valid ||
                 gDisarmCatchBlocked[receiver] ||
                 IsSupportHandLocked(receiver) ||
                 (handledHands & (1u << receiver)) != 0 ||
                 gHands[receiver].grip < kGripCatch ||
+                gGripLatched[receiver] || !grabarbitration::Allows(receiver,grabarbitration::Kind::Dropped) ||
                 (!gDualHoldEnabled && AnyHeldHandLocked() >= 0))
                 continue;
             for (int source = 0; source < kHandCount; ++source) {
@@ -1397,7 +1461,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             float closestDistance = holster::GrabRadiusMetres();
             const int closestSlot = ClosestAvailableHolsterSlotLocked(
                 ped, hand, anchors, anchorValid, &closestDistance);
-            if (closestSlot >= 0) {
+            if (closestSlot >= 0 && grabarbitration::Allows(hand,grabarbitration::Kind::Holster)) {
                 GiveToHandLocked(ped, hand, closestSlot, "grabbed");
                 gGripLatched[hand] = true;
                 LOGI("[physwpn] holster grab reach=%.3f", closestDistance);
@@ -1585,6 +1649,24 @@ bool GetInteractionTrackingSnapshot(float head[3], float orientation[4],
 
 bool IsVehicleSidearmWeaponType(int weaponType) {
     return VehicleSidearmWeaponType(weaponType);
+}
+
+unsigned RadialMenuHandMask() {
+    std::lock_guard<std::mutex> lock(gMutex);
+    return (gRadialMenus[0].open?1u:0u)|(gRadialMenus[1].open?2u:0u);
+}
+
+bool HoldCollectedWeapon(int hand,int slot,int expectedType) {
+    void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    std::lock_guard<std::mutex> lock(gMutex);
+    if(!ped||!ValidHand(hand)||!ValidSlot(slot)||gInteractionsBlocked||
+       !gHands[hand].valid||gHands[hand].grip<=kGripOpen||AnyHeldHandLocked()>=0||
+       IsSupportHandLocked(hand)||gRadialMenus[hand].open||DroppedSourceForSlotLocked(slot)>=0||
+       WeaponTypeInSlot(ped,slot)!=expectedType)return false;
+    GiveToHandLocked(ped,hand,slot,"world pickup");
+    gGripLatched[hand]=true;
+    gHeldMaskRelaxed.fetch_or(1u<<hand,std::memory_order_relaxed);
+    return true;
 }
 
 bool ForceHold(int hand, int slot) {

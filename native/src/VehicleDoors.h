@@ -2,6 +2,7 @@
 #include <cstdint>
 namespace savr::xr { struct HandPose; }
 namespace savr::vehicledoors {
+void ProbeGrabs(const xr::HandPose hands[2]);
 void Install(void* gameHandle);
 bool QuadBarPosition(void* vehicle, float out[3]);
 // Called before weapon ownership, using that update's exact tracking snapshot.

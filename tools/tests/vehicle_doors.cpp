@@ -1,5 +1,6 @@
 #include "VehicleDoorMotion.h"
 #include "VehicleDoors.h"
+#include "GrabArbitration.h"
 #include "VehicleDebugDrag.h"
 #include "PdaDashboardPlacement.h"
 #include "Driving.h"
@@ -19,6 +20,7 @@
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); std::exit(1); } } while(0)
 #define LOGI(...) ((void)0)
 namespace savr::vehicleclimb { unsigned ClaimedHands(){return 0;} bool Editing(){return false;} void Update(bool,const xr::HandPose*,std::uint64_t,unsigned){} void Append(vehicledoors::MarkerFrame&){} }
+namespace savr::pickups {void Append(vehicledoors::MarkerFrame&) {}}
 namespace savr::ledgeclimb { unsigned ClaimedHands(){return 0;} void Reset(){} void Update(bool,const xr::HandPose*,std::uint64_t,unsigned){} void Append(vehicledoors::MarkerFrame&){} }
 namespace savr::npcgrab {
 int stopsRequested{};unsigned claimedHands{};
@@ -321,6 +323,18 @@ void CheckStickyDoorAdapter() {
 }
 int main() {
     CheckStickyDoorAdapter();
+    // The real door probe participates in the shared nearest-target choice.
+    Setup();Ready();hands[0].gripPos[0]-=.02f;
+    grabarbitration::current.Begin(true);ProbeGrabs(hands);
+    CHECK(grabarbitration::Allows(0,grabarbitration::Kind::Door));
+    CHECK(grabarbitration::current.hands[0].distance>.001f);
+    grabarbitration::current.Offer(0,grabarbitration::Kind::Pickup,99,.001f);
+    hands[0].grip=1;Tick();CHECK(ClaimedHands()==0);
+    grabarbitration::current.Begin(false);
+    Setup();Ready();grabarbitration::current.Begin(true);ProbeGrabs(hands);
+    grabarbitration::current.Offer(0,grabarbitration::Kind::Holster,0,.26f);
+    hands[0].grip=1;Tick();CHECK(ClaimedHands()==0);
+    grabarbitration::current.Begin(false);
     {
         float d[5]{1e6f,.08f,.05f,.07f,.06f};
         CHECK(driving::SelectCockpitTarget(d,0)==2);

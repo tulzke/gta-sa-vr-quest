@@ -166,6 +166,7 @@ add_library(savr SHARED
     src/PerfTelemetry.cpp
     src/PhysicalWeapon.cpp
     src/Pickups.cpp
+    src/PickupContactGate.S
     src/ScopeAim.cpp
     src/Throwable.cpp
     src/TrafficCensus.cpp

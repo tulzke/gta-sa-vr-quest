@@ -50,6 +50,7 @@ transitions = transitions[:-1]
 markers = physical[physical.index('    holstermarker::Marker markers['):physical.index('        // Only calibration exposes the model-bound foregrip cube.')]
 prefix = r'''
 #include "HolsterMarker.h"
+#include "GrabArbitration.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>

@@ -10608,6 +10608,26 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
                     glBufferData(GL_ARRAY_BUFFER,mesh.count*sizeof(vehicledoors::Vec),mesh.vertices.data(),GL_DYNAMIC_DRAW);
                     glDrawArrays(GL_TRIANGLES,0,mesh.count);
                 }
+                if(marker.pickupHold) {
+                    // Same clockwise 64-segment progress as the boarding icon,
+                    // around the existing door grab sprite, facing the player.
+                    const auto ring=[&](int segments,float alpha) {
+                        std::vector<vehicledoors::Vec> vertices;
+                        for(int n=0;n<segments;++n) {
+                            const float a=6.2831853f*n/64,b=6.2831853f*(n+1)/64;
+                            const auto point=[&](float angle,float radius){return hint.position+
+                                (hint.direction*std::sin(angle)+hint.up*std::cos(angle))*radius;};
+                            const auto p=point(a,.10f),q=point(b,.10f),r=point(a,.092f),s=point(b,.092f);
+                            vertices.insert(vertices.end(),{p,q,r,r,q,s});
+                        }
+                        if(vertices.empty())return;
+                        glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.opacity*alpha);
+                        glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(vehicledoors::Vec),vertices.data(),GL_DYNAMIC_DRAW);
+                        glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(vertices.size()));
+                    };
+                    ring(64,.25f);
+                    ring(int(std::clamp(marker.progress,0.f,1.f)*64),.95f);
+                }
             }
         }
         if (palms&&vehicledoors::Length(marker.strikeDirection)>.1f) {

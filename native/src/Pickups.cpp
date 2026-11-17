@@ -1,24 +1,22 @@
-// VR world-pickup interaction (layer 1: physical rise).
-//
-// CPickup::Update(CPlayerPed*, CVehicle*, int) runs once per near-the-player
-// pickup each frame and refreshes the visible object's world position from the
-// compressed CPickup::m_vecPos. We trampoline-hook it, let the original run,
-// then lift the object while the player stands inside the pickup's zone so map
-// items rise up to be grabbed. A later layer turns the rise into a hand-grab
-// collection.
-//
-// Verified Android (GTA:SA 2.11.311 arm64) CPickup layout, from the retail
-// libGame.so disassembly of CPickup::Update/GiveUsAPickUpObject/GetRidOfObjects:
-//   +0x04  CObject*  m_pObject          (packed 8-byte pointer)
-//   +0x14  int16     m_vecPos.x         (world = value / 8)
-//   +0x16  int16     m_vecPos.y
-//   +0x18  int16     m_vecPos.z
-//   +0x1c  int16     m_nModelIndex
-//   +0x20  uint8     m_nPickupType
-// CEntity matrix pointer at entity+0x18; its translation at matrix+0x30/34/38.
+// Retail world pickups keep their object lifecycle, sounds and grant rules.
+// Only the contact predicate is gated; new weapon types require a deliberate
+// one-second hand gesture. Non-weapon pickups keep their previous behaviour.
 #include "Pickups.h"
-
-#include <atomic>
+#include "PickupGesture.h"
+#include "GrabArbitration.h"
+#include "PhysicalWeapon.h"
+#include "VehicleDoors.h"
+#include "VehicleDoorMotion.h"
+#include "NpcGrab.h"
+#include "Basketball.h"
+#include "Driving.h"
+#include "Symbols.h"
+#include "VrCamera.h"
+#include "Xr.h"
+#include "Log.h"
+#include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -26,183 +24,137 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "Log.h"
-#include "PhysicalWeapon.h"
-#include "VrCamera.h"
-#include "Xr.h"
-#include "VehicleDoors.h"
-
+extern "C" {
+__attribute__((visibility("hidden"))) void* g_savrPickupGateContinue=nullptr;
+void SavrPickupContactGate();
+}
 namespace savr::pickups {
 namespace {
+constexpr int kObjOff=4,kPosXOff=0x14,kPosYOff=0x16,kPosZOff=0x18;
+constexpr int kEntityMatrix=0x18,kMatrixPos=0x30,kPoolCount=620,kStride=0x24;
+constexpr float kRiseZoneM=3.5f,kRiseHeightM=.80f,kBobM=.06f;
+using UpdateFn=bool(*)(void*,void*,void*,int);
+UpdateFn g_origUpdate{};
+const std::uint32_t* g_timeMs{};
+std::int32_t* g_collectBuffer{};
+int (*g_weaponForModel)(int){};
+std::uint8_t* g_pool{};
+thread_local void* g_authorizedPickup{};
+Gesture g_gestures[2];
+vehicledoors::MarkerFrame g_markers;
+struct Item {void* pickup{};void* object{};std::uint64_t id{};int type{},slot{-1};float point[3]{};};
+Item g_targets[2];
+struct Pending {void* player{};int hand{-1},type{},slot{-1};std::uint64_t epoch{};double until{};} g_pending;
 
-constexpr int kObjOff        = 0x04;   // CPickup::m_pObject
-constexpr int kPosXOff       = 0x14;   // CPickup::m_vecPos.x (int16 /8)
-constexpr int kPosYOff       = 0x16;
-constexpr int kPosZOff       = 0x18;
-constexpr int kEntityMatrix  = 0x18;   // CEntity::m_matrix pointer
-constexpr int kMatrixPos     = 0x30;   // CMatrix translation x (y +4, z +8)
-
-constexpr float kRiseZoneM   = 3.5f;   // player distance where the rise begins
-constexpr float kRiseHeightM = 0.80f;  // full lift when the player is on top
-constexpr float kBobM        = 0.06f;  // gentle bob amplitude
-
-// Layer 2: hand-grab collection. A squeezed grip within this range of the
-// risen item collects it through the RETAIL pickup handler (money, ammo,
-// weapon rules, sounds, regeneration all stay stock).
-constexpr float kGrabRangeM  = 0.32f;
-constexpr float kGrabGrip    = 0.60f;
-
-using UpdateFn = bool (*)(void* self, void* player, void* vehicle, int playerId);
-UpdateFn g_origUpdate = nullptr;
-const std::uint32_t* g_timeMs = nullptr;   // CTimer::m_snTimeInMilliseconds
-// Weapon-swap gate: standing on a weapon pickup with that slot occupied only
-// collects while this engine global is armed (the flat game arms it from the
-// "collect weapon" button; VR arms it from the physical grab).
-std::int32_t* g_collectBuffer = nullptr;   // ::CollectPickupBuffer
-int (*g_weaponForModel)(int modelId) = nullptr;   // CPickups::WeaponForModel
-
-// A weapon grabbed by hand should end up IN that hand. The game grants the
-// weapon a few frames after collection (GiveDelayedWeapon), so the ForceHold
-// is retried from Tick() until it lands or times out.
-std::atomic<int>           g_pendingHoldHand{-1};
-std::atomic<int>           g_pendingHoldSlot{-1};
-std::atomic<std::uint32_t> g_pendingHoldUntilMs{0};
-
-// SA weapon-slot layout (eWeaponType -> ped weapon slot) — same table the
-// cheat give-to-hand path uses.
-int SlotForWeaponType(int type) {
-    if (type==0||type==1) return 0;
-    if (type>=2&&type<=9) return 1;
-    if (type>=10&&type<=15) return 10;
-    if (type==16||type==17||type==18||type==39) return 8;
-    if (type>=22&&type<=24) return 2;
-    if (type>=25&&type<=27) return 3;
-    if (type==28||type==29||type==32) return 4;
-    if (type==30||type==31) return 5;
-    if (type==33||type==34) return 6;
-    if (type>=35&&type<=38) return 7;
-    if (type==40) return 12;
-    if (type>=41&&type<=43) return 9;
-    if (type>=44&&type<=46) return 11;
+double Now(){return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
+template<class T>T Read(const void* p,int off){T v{};if(p)std::memcpy(&v,static_cast<const std::uint8_t*>(p)+off,sizeof(v));return v;}
+template<class T>void Write(void* p,int off,T v){std::memcpy(static_cast<std::uint8_t*>(p)+off,&v,sizeof(v));}
+void* MatrixOf(const void* entity){return Read<void*>(entity,kEntityMatrix);}
+int SlotForWeaponType(int type){
+    if(type==1)return 0;
+    if(type>=2&&type<=9)return 1;
+    if(type>=10&&type<=15)return 10;
+    if(type==16||type==17||type==18||type==39)return 8;
+    if(type>=22&&type<=24)return 2;
+    if(type>=25&&type<=27)return 3;
+    if(type==28||type==29||type==32)return 4;
+    if(type==30||type==31)return 5;
+    if(type==33||type==34)return 6;
+    if(type>=35&&type<=38)return 7;
+    if(type==40)return 12;
+    if(type>=41&&type<=43)return 9;
+    if(type>=44&&type<=46)return 11;
     return -1;
 }
-
-float ReadPos16(const void* base, int off) {
-    return static_cast<float>(*reinterpret_cast<const std::int16_t*>(
-               reinterpret_cast<const std::uint8_t*>(base) + off)) / 8.0f;
+int WeaponType(const void* pickup){
+    const int type=g_weaponForModel?g_weaponForModel(Read<std::int16_t>(pickup,0x1c)):0;
+    return SlotForWeaponType(type)>=0?type:0;
 }
-
-void* MatrixOf(const void* entity) {
-    if (!entity) return nullptr;
-    return *reinterpret_cast<void* const*>(
-        reinterpret_cast<const std::uint8_t*>(entity) + kEntityMatrix);
+int OwnedType(const void* player,int slot){return slot>=0&&slot<13?Read<int>(player,0x730+slot*0x20):0;}
+float ReadPos16(const void* p,int off){return Read<std::int16_t>(p,off)*.125f;}
+float Lift(void* pickup,void* player){
+    const void* matrix=MatrixOf(player);if(!matrix)return 0;
+    float sum=0;for(int i=0;i<3;++i){const float d=Read<float>(matrix,kMatrixPos+i*4)-ReadPos16(pickup,kPosXOff+i*2);sum+=d*d;}
+    const float distance=std::sqrt(sum);if(!std::isfinite(distance)||distance>kRiseZoneM)return 0;
+    const float bob=g_timeMs?std::sin(float(*g_timeMs)*.003f)*kBobM:0;
+    return (1.f-distance/kRiseZoneM)*(kRiseHeightM+bob);
 }
+std::uint64_t Identity(void* pickup){
+    if(!g_pool)return 0;
+    const auto delta=reinterpret_cast<std::uintptr_t>(pickup)-reinterpret_cast<std::uintptr_t>(g_pool);
+    if(delta>=kPoolCount*kStride||delta%kStride)return 0;
+    return (delta/kStride+1)|(std::uint64_t(Read<std::uint16_t>(pickup,0x1e))<<16)|
+        (std::uint64_t(Read<std::uint16_t>(pickup,0x1c))<<32)|
+        (std::uint64_t(Read<std::uint8_t>(pickup,0x20))<<48);
+}
+bool Live(const Item& item){return item.id&&Identity(item.pickup)==item.id&&
+    Read<void*>(item.pickup,kObjOff)==item.object&&!(Read<std::uint8_t>(item.pickup,0x21)&1)&&
+    Read<std::uint8_t>(item.pickup,0x20)!=0;}
+bool LoadItem(void* pickup,void* player,Item& item){
+    if(!Read<std::uint8_t>(pickup,0x20)||(Read<std::uint8_t>(pickup,0x21)&1))return false;
+    const int type=WeaponType(pickup),slot=SlotForWeaponType(type);
+    void* obj=Read<void*>(pickup,kObjOff);void* matrix=MatrixOf(obj);
+    if(!type||!matrix||physicalweapon::IsSlotDropped(slot))return false;
+    // Identical inventory weapons are ammunition sources, handled by walking.
+    if(CanWalkCollect(type,OwnedType(player,slot)))return false;
+    std::array<float,16> pose{};std::memcpy(pose.data(),matrix,sizeof(pose));
+    for(int i=0;i<3;++i)pose[12+i]=ReadPos16(pickup,kPosXOff+i*2);
+    pose[14]+=Lift(pickup,player);
+    item={pickup,obj,Identity(pickup),type,slot,{}};
+    return item.id&&vrcam::WeaponPickupGripWorld(type,pose.data(),item.point);
+}
+unsigned OtherOwners(){return vehicledoors::ClaimedHands()|npcgrab::ClaimedHands()|
+    basketball::HeldHandMask()|physicalweapon::RadialMenuHandMask()|driving::ServiceRadioClaimedHands()|driving::WaterMonitorClaimedHands();}
 
-bool OnPickupUpdate(void* self, void* player, void* vehicle, int playerId) {
-    const bool result = g_origUpdate
-        ? g_origUpdate(self, player, vehicle, playerId)
-        : false;
-    if (!self || !player) return result;
-
-    // The visible object is null while the pickup is out of range or waiting to
-    // regenerate; nothing to lift then.
-    void* obj = *reinterpret_cast<void* const*>(
-        reinterpret_cast<const std::uint8_t*>(self) + kObjOff);
-    void* objMat = MatrixOf(obj);
-    if (!objMat) return result;
-
-    void* plMat = MatrixOf(player);
-    if (!plMat) return result;
-    const float* plT = reinterpret_cast<const float*>(
-        reinterpret_cast<std::uint8_t*>(plMat) + kMatrixPos);
-
-    const float px = ReadPos16(self, kPosXOff);
-    const float py = ReadPos16(self, kPosYOff);
-    const float pz = ReadPos16(self, kPosZOff);
-    const float dx = plT[0] - px, dy = plT[1] - py, dz = plT[2] - pz;
-    const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-    if (!std::isfinite(dist) || dist > kRiseZoneM) return result;
-
-    // Deeper inside the zone -> higher lift, plus a small time-based bob.
-    const float t = 1.0f - dist / kRiseZoneM;
-    float bob = 0.0f;
-    if (g_timeMs) {
-        const float sec = static_cast<float>(*g_timeMs) * 0.001f;
-        bob = std::sin(sec * 3.0f) * kBobM;
-    }
-    const float lift = t * kRiseHeightM + t * bob;
-
-    // The original wrote objMat.z = pickup.z this frame; add the lift for render.
-    float* objZ = reinterpret_cast<float*>(
-        reinterpret_cast<std::uint8_t*>(objMat) + kMatrixPos + 8);
-    *objZ += lift;
-
-    // ---- layer 2: hand grab ------------------------------------------------
-    // A squeezed grip touching the risen item collects it. Mechanism: the
-    // retail CPickup::Update collects when the PLAYER stands inside the
-    // pickup radius, so for one extra call the pickup's compressed position
-    // is moved onto the player and then restored. Collection, payment
-    // checks, sounds and the regeneration timer all stay retail; restoring
-    // the position keeps the respawn point (and the save state) at the
-    // authored spot even if the retail handler declines to collect.
+bool OnPickupUpdate(void* self,void* player,void* vehicle,int playerId){
+    const int type=self?WeaponType(self):0;
+    // Retail may auto-select a weapon even when only its ammunition was needed.
+    // Preserve both the active slot and the player's delayed desired slot.
+    const bool ammoOnly=type&&CanWalkCollect(type,OwnedType(player,SlotForWeaponType(type)))&&g_authorizedPickup!=self;
+    const auto active=Read<std::uint8_t>(player,0x8dc);
+    void* data=Read<void*>(player,0x540);const auto desired=Read<std::uint8_t>(data,0x2c);
+    const int collect=g_collectBuffer?*g_collectBuffer:0;
+    const bool result=g_origUpdate?g_origUpdate(self,player,vehicle,playerId):false;
+    if(type&&g_collectBuffer)*g_collectBuffer=collect;
+    if(ammoOnly&&player){Write(player,0x8dc,active);if(data)Write(data,0x2c,desired);}
+    if(!self||!player)return result;
+    void* obj=Read<void*>(self,kObjOff);void* matrix=MatrixOf(obj);
+    if(!matrix)return result;
+    Write(matrix,kMatrixPos+8,Read<float>(matrix,kMatrixPos+8)+Lift(self,player));
+    if(type)return result; // Weapon grabs are resolved once per input frame.
+    // Preserve the existing hand path for non-weapon pickups (e.g. property).
     xr::HandPose hands[2]{};
-    if (!physicalweapon::GetHandPosesSnapshot(hands)) return result;
-    const float* objT = reinterpret_cast<const float*>(
-        reinterpret_cast<std::uint8_t*>(objMat) + kMatrixPos);
-    int grabHand = -1;
-    for (int hand = 0; hand < 2 && grabHand < 0; ++hand) {
-        if (!hands[hand].valid || hands[hand].grip < kGrabGrip ||
-            (vehicledoors::ClaimedHands() & (1u << hand))) continue;
-        float world[3]{};
-        if (!vrcam::TrackingPointToWorld(hands[hand].gripPos, world)) break;
-        const float hx = world[0] - objT[0];
-        const float hy = world[1] - objT[1];
-        const float hz = world[2] - objT[2];
-        const float handDist = std::sqrt(hx * hx + hy * hy + hz * hz);
-        if (std::isfinite(handDist) && handDist <= kGrabRangeM) grabHand = hand;
+    if(!physicalweapon::GetHandPosesSnapshot(hands)||!g_origUpdate)return result;
+    int hand=-1;
+    for(int h=0;h<2&&hand<0;++h){
+        if(!hands[h].valid||hands[h].grip<.60f||(vehicledoors::ClaimedHands()&(1u<<h)))continue;
+        float p[3]{};if(!vrcam::TrackingPointToWorld(hands[h].gripPos,p))continue;
+        float sum=0;for(int i=0;i<3;++i){float d=p[i]-Read<float>(matrix,kMatrixPos+i*4);sum+=d*d;}
+        if(std::isfinite(sum)&&sum<=.32f*.32f)hand=h;
     }
-    if (grabHand < 0 || !g_origUpdate) return result;
-
-    const std::int16_t model = *reinterpret_cast<const std::int16_t*>(
-        reinterpret_cast<const std::uint8_t*>(self) + 0x1c);
-
-    auto* posWords = reinterpret_cast<std::int16_t*>(
-        reinterpret_cast<std::uint8_t*>(self) + kPosXOff);
-    const std::int16_t saved[3] = {posWords[0], posWords[1], posWords[2]};
-    posWords[0] = static_cast<std::int16_t>(plT[0] * 8.0f);
-    posWords[1] = static_cast<std::int16_t>(plT[1] * 8.0f);
-    posWords[2] = static_cast<std::int16_t>(plT[2] * 8.0f);
-    // Weapon-swap pickups (bat in the slot, grabbing a shovel) refuse to
-    // collect until the engine's collect button is armed - the physical
-    // grab IS that press. The engine decrements the buffer on its own.
-    if (g_collectBuffer) *g_collectBuffer = 6;
-    const bool collected = g_origUpdate(self, player, vehicle, playerId);
-    posWords[0] = saved[0];
-    posWords[1] = saved[1];
-    posWords[2] = saved[2];
-
-    if (collected) {
-        // Land the collected weapon in the hand that grabbed it. The grant
-        // is delayed (GiveDelayedWeapon), so Tick() retries the hold.
-        const int weaponType = g_weaponForModel ? g_weaponForModel(model) : 0;
-        const int slot = weaponType > 0 ? SlotForWeaponType(weaponType) : -1;
-        if (slot > 0 && g_timeMs) {
-            g_pendingHoldHand.store(grabHand, std::memory_order_relaxed);
-            g_pendingHoldSlot.store(slot, std::memory_order_relaxed);
-            g_pendingHoldUntilMs.store(*g_timeMs + 1500u,
-                                       std::memory_order_release);
-        }
-    }
-    static unsigned grabLogCount = 0;
-    if (++grabLogCount <= 20 || (grabLogCount % 50) == 0) {
-        const int pickupType = *reinterpret_cast<const std::uint8_t*>(
-            reinterpret_cast<const std::uint8_t*>(self) + 0x20);
-        // type 18 = PROPERTY_FORSALE: the retail handler buys the house on
-        // this same armed-collect path (money/mission checks stay stock).
-        LOGI("[pickups] hand grab: hand=%d model=%d type=%d collected=%d",
-             grabHand, model, pickupType, collected ? 1 : 0);
-    }
+    void* plMat=MatrixOf(player);if(hand<0||!plMat)return result;
+    std::int16_t saved[3]{};std::memcpy(saved,static_cast<std::uint8_t*>(self)+kPosXOff,sizeof(saved));
+    for(int i=0;i<3;++i)Write(self,kPosXOff+i*2,static_cast<std::int16_t>(Read<float>(plMat,kMatrixPos+i*4)*8));
+    if(g_collectBuffer)*g_collectBuffer=6;
+    const bool collected=g_origUpdate(self,player,vehicle,playerId);
+    std::memcpy(static_cast<std::uint8_t*>(self)+kPosXOff,saved,sizeof(saved));
     return collected;
+}
+
+bool InstallContactGate(void* update){
+    auto* code=reinterpret_cast<std::uint32_t*>(static_cast<std::uint8_t*>(update)+0x65c);
+    constexpr std::uint32_t expected[]={0xf9400288u,0xb941a508u,0x7207011fu,0x1a9f17e8u};
+    if(std::memcmp(code,expected,sizeof(expected))){LOGE("[pickups] contact gate ABI mismatch");return false;}
+    const long page=sysconf(_SC_PAGESIZE);if(page<=0)return false;
+    const auto start=reinterpret_cast<std::uintptr_t>(code)&~(std::uintptr_t(page)-1);
+    const auto end=(reinterpret_cast<std::uintptr_t>(code)+16+page-1)&~(std::uintptr_t(page)-1);
+    if(mprotect(reinterpret_cast<void*>(start),end-start,PROT_READ|PROT_WRITE|PROT_EXEC))return false;
+    g_savrPickupGateContinue=reinterpret_cast<std::uint8_t*>(code)+16;
+    void* target=reinterpret_cast<void*>(&SavrPickupContactGate);
+    std::memcpy(code+2,&target,sizeof(target));code[1]=0xD61F0220u;
+    __atomic_store_n(code,0x58000051u,__ATOMIC_RELEASE);
+    __builtin___clear_cache(reinterpret_cast<char*>(code),reinterpret_cast<char*>(code)+16);
+    return true;
 }
 
 bool InstallUpdateHook(void* target) {
@@ -257,40 +209,126 @@ bool InstallUpdateHook(void* target) {
     return true;
 }
 
-}  // namespace
 
-void Install(void* handle) {
-    if (!handle) return;
-    void* target = dlsym(handle, "_ZN7CPickup6UpdateEP10CPlayerPedP8CVehiclei");
-    if (!target) {
-        LOGE("[pickups] CPickup::Update symbol not found");
-        return;
-    }
-    g_timeMs = reinterpret_cast<const std::uint32_t*>(
-        dlsym(handle, "_ZN6CTimer21m_snTimeInMillisecondsE"));
-    g_collectBuffer = reinterpret_cast<std::int32_t*>(
-        dlsym(handle, "CollectPickupBuffer"));
-    g_weaponForModel = reinterpret_cast<int (*)(int)>(
-        dlsym(handle, "_ZN8CPickups14WeaponForModelEi"));
-    if (!g_collectBuffer)
-        LOGW("[pickups] CollectPickupBuffer missing - weapon swaps stay gated");
-    InstallUpdateHook(target);
+} // namespace
+
+// Called from the ARM64 bridge after retail computes spatial contact, before
+// any extraction, grant, purchase or regeneration changes. Newly created
+// objects pass through this same gate on their very first update.
+extern "C" __attribute__((visibility("hidden"))) bool SavrPickupContactAllowed(void* self,void* player){
+    if(!g_origUpdate)return true; // Installer failure leaves retail collection usable.
+    const int type=WeaponType(self);
+    if(!type)return true;
+    if(!player||Read<int>(player,0x8d4)!=55)return false; // retail delayed-grant queue occupied
+    return self==g_authorizedPickup||CanWalkCollect(type,OwnedType(player,SlotForWeaponType(type)));
 }
 
-void Tick() {
-    const int hand = g_pendingHoldHand.load(std::memory_order_relaxed);
-    const int slot = g_pendingHoldSlot.load(std::memory_order_relaxed);
-    if (hand < 0 || slot <= 0 || !g_timeMs) return;
-    if (*g_timeMs > g_pendingHoldUntilMs.load(std::memory_order_acquire)) {
-        g_pendingHoldHand.store(-1, std::memory_order_relaxed);
-        g_pendingHoldSlot.store(-1, std::memory_order_relaxed);
-        return;
+void Install(void* handle){
+    if(!handle||g_origUpdate)return;
+    void* target=dlsym(handle,"_ZN7CPickup6UpdateEP10CPlayerPedP8CVehiclei");
+    g_timeMs=static_cast<const std::uint32_t*>(dlsym(handle,"_ZN6CTimer21m_snTimeInMillisecondsE"));
+    g_collectBuffer=static_cast<std::int32_t*>(dlsym(handle,"CollectPickupBuffer"));
+    g_weaponForModel=reinterpret_cast<int(*)(int)>(dlsym(handle,"_ZN8CPickups14WeaponForModelEi"));
+    g_pool=static_cast<std::uint8_t*>(dlsym(handle,"_ZN8CPickups8aPickUpsE"));
+    if(!target||!g_pool||!g_weaponForModel||!g_collectBuffer||!g_timeMs||!InstallContactGate(target)||!InstallUpdateHook(target)){
+        LOGE("[pickups] required retail ABI unavailable; manual weapon pickup disabled");return;
     }
-    if (physicalweapon::ForceHold(hand, slot)) {
-        LOGI("[pickups] grabbed weapon now held: hand=%d slot=%d", hand, slot);
-        g_pendingHoldHand.store(-1, std::memory_order_relaxed);
-        g_pendingHoldSlot.store(-1, std::memory_order_relaxed);
-    }
+    LOGI("[pickups] deliberate weapon pickup installed (1 second hold)");
 }
 
-}  // namespace savr::pickups
+void ProbeGrabs(const xr::HandPose hands[2]){
+    g_targets[0]={};g_targets[1]={};
+    void* player=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    if(!g_origUpdate||!g_pool||!player||g_pending.hand>=0||physicalweapon::HeldHandMaskRelaxed()||
+       Read<int>(player,0x8d4)!=55||!grabarbitration::current.enabled)return;
+    const unsigned occupied=OtherOwners();
+    float world[2][3]{};bool valid[2]{};float best[2]={kGrabRangeM,kGrabRangeM};
+    for(int h=0;h<2;++h)valid[h]=hands[h].valid&&!(occupied&(1u<<h))&&
+        vrcam::TrackingPointToWorld(hands[h].gripPos,world[h]);
+    for(int i=0;i<kPoolCount;++i){
+        Item item{};if(!LoadItem(g_pool+i*kStride,player,item))continue;
+        for(int h=0;h<2;++h)if(valid[h]){
+            float sum=0;for(int j=0;j<3;++j){float d=world[h][j]-item.point[j];sum+=d*d;}
+            const float distance=std::sqrt(sum);
+            if(distance<best[h]||(distance==best[h]&&item.id<g_targets[h].id)){
+                best[h]=distance;g_targets[h]=item;
+            }
+        }
+    }
+    for(int h=0;h<2;++h)if(g_targets[h].id)
+        grabarbitration::current.Offer(h,grabarbitration::Kind::Pickup,g_targets[h].id,best[h]);
+}
+
+void FinishProbes(){
+    auto& selection=grabarbitration::current;
+    if(!g_targets[0].id||g_targets[0].id!=g_targets[1].id||
+       !selection.Allows(0,grabarbitration::Kind::Pickup)||!selection.Allows(1,grabarbitration::Kind::Pickup))return;
+    // Decide after holster/door/etc. eligibility. An unavailable closer hand
+    // must not hide an otherwise reachable weapon from the other hand.
+    const bool holding0=g_gestures[0].active&&g_gestures[0].target==g_targets[0].id;
+    const bool holding1=g_gestures[1].active&&g_gestures[1].target==g_targets[1].id;
+    const int loser=holding0?1:holding1?0:selection.hands[0].distance<=selection.hands[1].distance?1:0;
+    g_targets[loser]={};selection.Reject(loser,grabarbitration::Kind::Pickup);
+}
+
+unsigned ClaimedHands(){return g_pending.hand>=0?1u<<g_pending.hand:0;}
+void Reset(){g_pending={};for(auto& gesture:g_gestures)gesture=Gesture{};g_targets[0]={};g_targets[1]={};g_markers={};}
+void Append(vehicledoors::MarkerFrame& frame){if(frame.epoch==g_markers.epoch)
+    for(int i=0;i<g_markers.count&&frame.count<frame.kCapacity;++i)frame.markers[frame.count++]=g_markers.markers[i];}
+
+void Tick(){
+    const double now=Now();float head[3]{},orientation[4]{};xr::HandPose hands[2]{};std::uint64_t epoch{};
+    void* player=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    const bool usable=player&&physicalweapon::GetInteractionTrackingSnapshot(head,orientation,hands,&epoch)&&
+        xr::IsSessionFocused()&&grabarbitration::current.enabled&&
+        !(g.FindPlayerVehicle&&g.FindPlayerVehicle(-1,false));
+    g_markers={};g_markers.epoch=epoch;
+    const unsigned occupied=OtherOwners();
+    const bool empty=physicalweapon::HeldHandMaskRelaxed()==0;
+    if(g_pending.hand>=0){
+        const int h=g_pending.hand;
+        if(!usable||!empty||g_pending.player!=player||g_pending.epoch!=epoch||now>g_pending.until||
+           !hands[h].valid||hands[h].grip<=kGripOpen||(occupied&(1u<<h)))g_pending={};
+        else if(OwnedType(player,g_pending.slot)==g_pending.type&&Read<int>(player,0x8d4)==55&&
+                physicalweapon::HoldCollectedWeapon(h,g_pending.slot,g_pending.type)){
+            xr::TriggerHaptic(h,.4f,0,35);g_pending={};
+        }
+    }
+    for(int h=0;h<2;++h){
+        Item item=g_targets[h];
+        const bool available=usable&&empty&&g_pending.hand<0&&hands[h].valid&&!(occupied&(1u<<h))&&
+            grabarbitration::Allows(h,grabarbitration::Kind::Pickup)&&Live(item);
+        const bool completed=g_gestures[h].Step(available?item.id:0,hands[h].grip,
+            usable&&empty&&!(occupied&(1u<<h)),epoch,now);
+        if(available){
+            using namespace vehicledoors;
+            Marker marker{{item.point[0],item.point[1],item.point[2]},{1,0,0},{0,0,1}};
+            marker.doorGrab=true;marker.hideArrow=true;marker.pickupHold=true;
+            marker.progress=g_gestures[h].progress;marker.held=g_gestures[h].active;
+            g_markers.markers[g_markers.count++]=marker;
+        }
+        if(!completed||!available||!g_origUpdate||Read<int>(player,0x8d4)!=55)continue;
+        Item live{};if(!LoadItem(item.pickup,player,live)||live.id!=item.id||live.object!=item.object)continue;
+        float world[3]{};if(!vrcam::TrackingPointToWorld(hands[h].gripPos,world))continue;
+        float sum=0;for(int j=0;j<3;++j){float d=world[j]-live.point[j];sum+=d*d;}
+        if(!std::isfinite(sum)||sum>kGrabRangeM*kGrabRangeM)continue;
+        void* matrix=MatrixOf(player);if(!matrix)continue;
+        std::int16_t saved[3]{};std::memcpy(saved,static_cast<std::uint8_t*>(item.pickup)+kPosXOff,sizeof(saved));
+        const int buffer=*g_collectBuffer;
+        for(int j=0;j<3;++j)Write(item.pickup,kPosXOff+j*2,static_cast<std::int16_t>(Read<float>(matrix,kMatrixPos+j*4)*8));
+        *g_collectBuffer=6;g_authorizedPickup=item.pickup;
+        const bool collected=g_origUpdate(item.pickup,player,nullptr,0);
+        g_authorizedPickup=nullptr;*g_collectBuffer=buffer;
+        std::memcpy(static_cast<std::uint8_t*>(item.pickup)+kPosXOff,saved,sizeof(saved));
+        // Restore the visible position too if retail declined to consume it.
+        if(Live(item)){void* objMat=MatrixOf(item.object);if(objMat)
+            for(int j=0;j<3;++j)Write(objMat,kMatrixPos+j*4,ReadPos16(item.pickup,kPosXOff+j*2)+(j==2?Lift(item.pickup,player):0));}
+        if(collected&&item.slot>0&&(Read<int>(player,0x8d4)==item.type||OwnedType(player,item.slot)==item.type)){
+            g_pending={player,h,item.type,item.slot,epoch,now+1.5};
+            for(auto& gesture:g_gestures){gesture.Cancel();gesture.latched=true;}
+            g_markers={};g_markers.epoch=epoch;
+        }
+        LOGI("[pickups] deliberate grab hand=%d type=%d collected=%d",h,item.type,collected);
+    }
+}
+} // namespace savr::pickups

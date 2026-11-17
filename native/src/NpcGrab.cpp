@@ -1,4 +1,5 @@
 #include "NpcGrab.h"
+#include "GrabArbitration.h"
 #include "JabCombo.h"
 #include "Basketball.h"
 #include "PhysicalWeapon.h"
@@ -1205,6 +1206,59 @@ void Reset() {
     claimed.store(0,std::memory_order_relaxed);
     worldMarkers={};xr::SetNpcGrabMarkers({});
 }
+static Hold ClosestGrab(Pool& pool,void* player,Vec eye,Vec p,int hand,float& best) {
+Hold chosen{};
+for (int slot=0;slot<pool.size;++slot) {
+    if (pool.flags[slot]&128) continue;
+    const int ref=(slot<<8)|pool.flags[slot];
+    void* ped=getPed(ref);
+    if (!ped||ped==player||ped==holds[1-hand].ped||isPlayer(ped)||playerlife::Dead(ped)||
+        !Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f||Animating(ped)) continue;
+    const bool seated=Seated(ped);
+    const int door=seated?ExitDoor(ped,player):-1;
+    if (seated&&(!Waiting(ped)||door<0||!SeatReachable(ped,door,eye,p))) continue;
+    void* manager=Manager(ped);
+    if (!manager||Read<void*>(manager,0)) continue;
+    for (int bone:{3,4,5}) {
+        const Vec point=Bone(ped,bone);
+        float distance=Length(p-point);
+        if (seated&&bone==4&&Finite(point)) {
+            // The displayed palm sits 30 cm toward the viewer. Include
+            // the whole space between it and the chest in the grab area.
+            const Vec toward=eye-point;
+            const float length=Length(toward);
+            if (length>.001f) {
+                const Vec axis=toward*(1.f/length);
+                const Vec closest=point+axis*std::clamp(Dot(p-point,axis),0.f,.30f);
+                distance=std::min(distance,Length(p-closest));
+            }
+        }
+        void* ignored=seated?Read<void*>(ped,0x708):nullptr;
+        if (Finite(point)&&distance<best&&Visible(eye,point,ped,ignored)&&Visible(p,point,ped,ignored)) {
+            best=distance;chosen={ped,pool.identity,pool.objects,nullptr,ref,bone,p,{},p,seated};
+        }
+    }
+}
+    return chosen;
+}
+
+void ProbeGrabs(const xr::HandPose hands[2]) {
+    if(!grabarbitration::current.enabled||!ready)return;
+    void* player=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
+    Pool pool;float origin[3]{},forward[3]{};
+    if(!player||playerlife::Dead(player)||!pad||Read<std::uint16_t>(pad,0x110)||Read<std::uint8_t>(pad,0x12d)||
+       !pool.Load()||!vrcam::GroundWalkControlsActive()||!vrcam::GetHeadWorldRay(origin,forward))return;
+    const Vec eye{origin[0],origin[1],origin[2]};
+    for(int h=0;h<2;++h){
+        float world[3]{};
+        if(!hands[h].valid||(grabarbitration::current.occupied&(1u<<h))||!vrcam::TrackingPointToWorld(hands[h].gripPos,world))continue;
+        const Vec p{world[0],world[1],world[2]};if(!Finite(p)||Length(p-eye)>=1.6f)continue;
+        float distance=.35f;const auto chosen=ClosestGrab(pool,player,eye,p,h,distance);
+        if(chosen.ped)grabarbitration::current.Offer(h,grabarbitration::Kind::Npc,chosen.ref,distance);
+    }
+}
+
 void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uint64_t epoch) {
     const double now=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     const float dt=updated?float(now-updated):0;updated=now;
@@ -1235,11 +1289,13 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             vrcam::TrackingPointToWorld(hands[hand].gripPos,world);
         const Vec p{world[0],world[1],world[2]};
         const bool good=valid&&Finite(p)&&Finite(eye)&&Length(p-eye)<1.6f;
+        const bool npcContact=grabarbitration::current.hands[hand].kind==grabarbitration::Kind::None||
+            grabarbitration::Allows(hand,grabarbitration::Kind::Npc);
         // Reserve the punch corridor before the ordinary melee sweep reaches
         // a door/window collider, not only once the fist reaches the face.
-        approach[hand]=good&&hands[hand].grip>=.8f?
+        approach[hand]=good&&npcContact&&hands[hand].grip>=.8f?
             ApproachAtSeat(pool,player,eye,p):Hold{};
-        if (good&&hands[hand].grip>=.8f&&!approach[hand].ped)
+        if (good&&npcContact&&hands[hand].grip>=.8f&&!approach[hand].ped)
             approach[hand]=ApproachBike(pool,player,eye,p);
         const Vec previous=handMotion[hand].previous;
         const bool wasClenched=handMotion[hand].clenched;
@@ -1248,7 +1304,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         handMotion[hand]={p,good,good&&hands[hand].grip>=.8f};
         const bool fresh=edges[hand].Step(hands[hand].grip,good);
         if (fresh) intent[hand]=true;
-        if (!good||hands[hand].grip<=.35f) intent[hand]=false;
+        if (!good||hands[hand].grip<=.35f||!grabarbitration::Allows(hand,grabarbitration::Kind::Npc)) intent[hand]=false;
         if (extracted[hand]) {
             // Finish the same grab gesture before returning the hand to melee
             // or holsters; otherwise the extraction sweep becomes a punch.
@@ -1321,44 +1377,13 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 Write(h.ped,0x68,h.command);
                 if (Length(p-h.start)>.12f&&Length(h.velocity)>.6f) Aggression(h,player);
             }
-        } else if (good&&haveMotion&&wasClenched&&Length(p-previous)>=.01f&&hands[hand].grip>=.8f&&handSpeed>=1.25f&&
+        } else if (good&&npcContact&&haveMotion&&wasClenched&&Length(p-previous)>=.01f&&hands[hand].grip>=.8f&&handSpeed>=1.25f&&
                    (PunchBikeRider(pool,player,eye,p,previous)||PunchAtSeat(pool,player,eye,p,previous))) {
             intent[hand]=false;extracted[hand]=true;mask|=1u<<hand;
             xr::TriggerHaptic(hand,.6f,80.f,45.f);
         } else if (intent[hand]&&hands[hand].grip>=.65f&&good) {
             float best=.35f;
-            Hold chosen{};
-            for (int slot=0;slot<pool.size;++slot) {
-                if (pool.flags[slot]&128) continue;
-                const int ref=(slot<<8)|pool.flags[slot];
-                void* ped=getPed(ref);
-                if (!ped||ped==player||ped==holds[1-hand].ped||isPlayer(ped)||playerlife::Dead(ped)||
-                    !Finite(Position(ped))||Length(Position(ped)-Position(player))>3.f||Animating(ped)) continue;
-                const bool seated=Seated(ped);
-                const int door=seated?ExitDoor(ped,player):-1;
-                if (seated&&(!Waiting(ped)||door<0||!SeatReachable(ped,door,eye,p))) continue;
-                void* manager=Manager(ped);
-                if (!manager||Read<void*>(manager,0)) continue;
-                for (int bone:{3,4,5}) {
-                    const Vec point=Bone(ped,bone);
-                    float distance=Length(p-point);
-                    if (seated&&bone==4&&Finite(point)) {
-                        // The displayed palm sits 30 cm toward the viewer. Include
-                        // the whole space between it and the chest in the grab area.
-                        const Vec toward=eye-point;
-                        const float length=Length(toward);
-                        if (length>.001f) {
-                            const Vec axis=toward*(1.f/length);
-                            const Vec closest=point+axis*std::clamp(Dot(p-point,axis),0.f,.30f);
-                            distance=std::min(distance,Length(p-closest));
-                        }
-                    }
-                    void* ignored=seated?Read<void*>(ped,0x708):nullptr;
-                    if (Finite(point)&&distance<best&&Visible(eye,point,ped,ignored)&&Visible(p,point,ped,ignored)) {
-                        best=distance;chosen={ped,pool.identity,pool.objects,nullptr,ref,bone,p,{},p,seated};
-                    }
-                }
-            }
+            Hold chosen=ClosestGrab(pool,player,eye,p,hand,best);
             if (chosen.ped&&(chosen.seated||StartHold(chosen))) {
                 intent[hand]=false;
                 if (chosen.seated) {

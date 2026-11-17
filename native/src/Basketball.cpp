@@ -8,6 +8,7 @@
 //   CPhysical move speed @+0x68..0x73, turn speed @+0x74..0x7F
 //   (ApplyForce @0x4a12a8 writes the move vector at +0x68/+0x70)
 #include "Basketball.h"
+#include "GrabArbitration.h"
 #include "MenuPrecision.h"
 #include "VehicleDoors.h"
 #include "NpcGrab.h"
@@ -637,6 +638,7 @@ void UpdateHandTracking() {
         else if (grip < kReleaseGrip)
             g_grabIntent[hand] = false;           // fully released
         g_prevGrip[hand] = grip;
+        if(g_heldHand<0&&!grabarbitration::Allows(hand,grabarbitration::Kind::Ball))g_grabIntent[hand]=false;
     }
     const float dt = g_handSampleAt > 0.0
         ? static_cast<float>(now - g_handSampleAt) : 0.0f;
@@ -1435,6 +1437,17 @@ void OnBulletShot(const float origin[3], const float dir[3],
 }
 
 void SpawnBall() { g_deflated = false; g_spawnRequested.store(true, std::memory_order_release); }
+
+void ProbeGrabs(const xr::HandPose hands[2]) {
+    if(!grabarbitration::current.enabled||g_heldHand>=0||g_deflated||!BallValid())return;
+    const V3 ball=BallPosition();
+    const float range=std::max(Phys(PHYS_GRAB_RANGE,.01f),Phys(PHYS_MAGNET_RANGE,.01f));
+    for(int h=0;h<2;++h){
+        float world[3]{};if(!hands[h].valid||NowSeconds()<g_noTouchUntil[h]||!vrcam::TrackingPointToWorld(hands[h].gripPos,world))continue;
+        const float distance=Length(V3{world[0],world[1],world[2]}-ball);
+        if(distance<=range)grabarbitration::current.Offer(h,grabarbitration::Kind::Ball,0,distance);
+    }
+}
 
 void Update() {
     LoadPhysicsOnce();

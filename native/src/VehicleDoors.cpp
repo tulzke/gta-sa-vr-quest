@@ -1,4 +1,6 @@
 #include "VehicleDoors.h"
+#include "GrabArbitration.h"
+#include "Pickups.h"
 #include "VehicleClimb.h"
 #include "LedgeClimb.h"
 #include "VehicleEntry.h"
@@ -471,6 +473,7 @@ void PublishMarkers() {
     MarkerFrame worldFrame=g_worldMarkers;
     vehicleclimb::Append(worldFrame); ledgeclimb::Append(worldFrame);
     vehicleentry::Append(worldFrame);
+    pickups::Append(worldFrame);
     MarkerFrame frame;frame.epoch=worldFrame.epoch;
     for (int i=0;i<worldFrame.count;++i) {
         const auto& world=worldFrame.markers[i];Marker m=world;Vec tip,up;
@@ -501,6 +504,60 @@ void Reset() {
     g_worldMarkers={};
     xr::SetVehicleDoorMarkers({});
 }
+void ProbeGrabs(const xr::HandPose hands[2]) {
+    if(!g_ready||!grabarbitration::current.enabled||!vrcam::VehicleDoorControlsActive())return;
+    void* ped=g.FindPlayerPed?g.FindPlayerPed(-1):nullptr;
+    void* pad=g.CPad_GetPad?g.CPad_GetPad(0):nullptr;
+    Pool pool;float eyeRaw[3]{},forward[3]{};
+    if(!ped||!pad||Read<std::uint8_t>(pad,0x12d)||(g.PlayerIsEnteringCar&&g.PlayerIsEnteringCar())||
+       !pool.ReadCurrent()||!vrcam::GetHeadWorldRay(eyeRaw,forward))return;
+    const Vec eye{eyeRaw[0],eyeRaw[1],eyeRaw[2]};
+    // Match the displayed nearest car/side, then compare hand-to-panel distance.
+    float nearest=2.2f;int nearestSlot=-1;
+    for(int slot=0;slot<kPoolSize;++slot) {
+        if(pool.flags[slot]&0x80)continue;
+        void* vehicle=pool.objects+slot*kStride;
+        if((Read<std::uint8_t>(vehicle,0x5a)&7)!=2||g.CVehicle_GetVehicleAppearance(vehicle)!=1)continue;
+        void* matrix=Read<void*>(vehicle,0x18);
+        if(!matrix||!Finite(Read<Vec>(matrix,0x30))||Length(Read<Vec>(matrix,0x30)-eye)>4.5f)continue;
+        for(int i=0;i<4;++i) {
+            Target target{vehicle,pool.identity,pool.objects,pool.flags,slot,i+2,kNodes[i],pool.flags[slot]};Door door;
+            if(!ReadDoor(target,ped,door,false)||Dot(eye-door.car.position,door.car.right)*((i==0||i==2)?-1.f:1.f)<-.12f)continue;
+            const float distance=Length(door.handle-eye);
+            if(distance<nearest&&Visible(eye,door.handle,vehicle)){nearest=distance;nearestSlot=slot;}
+        }
+    }
+    if(g.CBike_GetComponentWorldPosition&&g.CBike_IsComponentPresent&&g_turnForce)
+    for(int slot=0;slot<kPoolSize;++slot) {
+        if(pool.flags[slot]&0x80)continue;void* bike=pool.objects+slot*kStride;
+        const int model=Read<std::uint16_t>(bike,0x32);
+        if((Read<std::uint8_t>(bike,0x5a)&7)!=2||(g.CVehicle_GetVehicleAppearance(bike)!=2&&model!=471)||
+           Read<void*>(bike,0x5a0)||Read<void*>(bike,0x5a8)||!Finite(Read<Vec>(bike,0x68))||Length(Read<Vec>(bike,0x68))>.02f)continue;
+        void* matrix=Read<void*>(bike,0x18);if(!matrix)continue;
+        const Basis b=Matrix(matrix);if(!b.Valid()||b.up.z>=kBikeStableUp)continue;
+        for(int side=0;side<2;++side) {
+            Basis frame{};Vec point{};
+            if(!BikeGripPoint(bike,side,frame,point)||Length(point-eye)>1.8f||!Visible(eye,point,bike))continue;
+            for(int h=0;h<2;++h){Vec world{};if(!hands[h].valid||!ToWorld(hands[h].gripPos,world))continue;
+                const float distance=Length(world-point);
+                if(distance<.2f)grabarbitration::current.Offer(h,grabarbitration::Kind::Bike,slot*2+side,distance);
+            }
+        }
+    }
+    if(nearestSlot<0)return;
+    for(int i=0;i<4;++i) {
+        const int slot=nearestSlot;
+        Target target{pool.objects+slot*kStride,pool.identity,pool.objects,pool.flags,slot,i+2,kNodes[i],pool.flags[slot]};Door door;
+        if(!ReadDoor(target,ped,door,false)||Length(eye-door.handle)>2.2f||
+           Dot(eye-door.car.position,door.car.right)*((i==0||i==2)?-1.f:1.f)<-.12f||!Visible(eye,door.handle,target.vehicle))continue;
+        for(int h=0;h<2;++h) {
+            Vec world{};if(!hands[h].valid||!ToWorld(hands[h].gripPos,world))continue;
+            const float distance=PanelDistance(door.panel.Local(world),door.panelX,door.ymin,door.ymax,door.zmin,door.zmax);
+            if(distance<door.thickness)grabarbitration::current.Offer(h,grabarbitration::Kind::Door,slot*4+i,distance);
+        }
+    }
+}
+
 bool DebugHandBasis(const xr::HandPose& hand,Vec world,const Basis& car,Basis& out) {
             const float* q=hand.gripOri;
             const float norm=q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3];
@@ -741,7 +798,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 Vec candidate{},base{};if(!bikePoint(bike,side,candidate,base)||Length(candidate-eye)>1.8f||!Visible(eye,candidate,bike))continue;
                 const Basis b=Matrix(Read<void*>(bike,0x18));
                 if(markers.count<MarkerFrame::kCapacity){Marker m{candidate,b.right,b.up};m.doorGrab=true;m.hideArrow=true;markers.markers[markers.count++]=m;}
-                for(int h=0;h<2;++h)if(valid[h]&&fresh[h]&&!(occupied&(1u<<h))){
+                for(int h=0;h<2;++h)if(valid[h]&&fresh[h]&&grabarbitration::Allows(h,grabarbitration::Kind::Bike)&&!(occupied&(1u<<h))){
                     const float distance=Length(world[h]-candidate);
                     if(distance<.2f&&distance<best){best=distance;target={bike,pool.identity,pool.objects,pool.flags,slot,0,0,pool.flags[slot]};point=candidate;origin=base;chosenSide=side;chosenHand=h;}
                 }
@@ -1187,7 +1244,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const float panelDistance=PanelDistance(local,d.panelX,d.ymin,d.ymax,d.zmin,d.zmax);
             const bool selected=!seated||!cabin.dashAnchorValid||cabin.interactionTarget[h]==4;
             if (selected&&panelDistance<d.thickness&&markerIndex>=0) markers.markers[markerIndex].highlight=1.f;
-            if (selected&&fresh[h]&&panelDistance<d.thickness&&panelDistance<best) { best=panelDistance;chosen=t;chosenDoor=d;chosenHand=h; }
+            if (selected&&fresh[h]&&grabarbitration::Allows(h,grabarbitration::Kind::Door)&&panelDistance<d.thickness&&panelDistance<best) { best=panelDistance;chosen=t;chosenDoor=d;chosenHand=h; }
             if (editMode&&editFresh[h]&&distance<bestEdit) {bestEdit=distance;editTarget=t;editDoor=d;editHand=h;editCorner=-1;}
             if(editMode&&editFresh[h]) for(int corner=0;corner<4;++corner) {
                 const float cd=Length(world[h]-PanelCorner(d,corner));

@@ -23,9 +23,11 @@ expected = {
     (515, 0): (67, -33, -8, 67, -33, 4),
     (515, 1): (-67, -34, -6, -67, -34, 2),
 }
-assert calibration == {f'Climb.{model}.{side}.{axis+6}': value
-                       for (model, side), values in expected.items()
-                       for axis, value in enumerate(values)}
+# More models have been calibrated since this fixture was authored. Preserve
+# the reference points below without rejecting additional valid profiles.
+for (model, side), values in expected.items():
+    for axis, value in enumerate(values):
+        assert calibration[f'Climb.{model}.{side}.{axis+6}'] == value
 OUT = ROOT / 'build/vehicle-climb-tests'
 OUT.mkdir(parents=True, exist_ok=True)
 source = (ROOT / 'native/src/VehicleClimb.cpp').read_text(encoding='utf8')

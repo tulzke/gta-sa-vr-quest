@@ -2101,6 +2101,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     }
     else {
         savr::physicalweapon::ResetTransient();
+        savr::pickups::Reset();
         savr::vehicledoors::Reset();
         savr::npcgrab::Reset();
         savr::melee::Reset();

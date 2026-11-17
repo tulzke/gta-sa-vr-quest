@@ -5,7 +5,9 @@
 // grabbed with a tracked hand, thrown with the hand's velocity and dribbled
 // off the ground through the engine's own bounce physics. Replaces the
 // story-locked basketb.scm minigame entirely.
+namespace savr::xr { struct HandPose; }
 namespace savr::basketball {
+void ProbeGrabs(const xr::HandPose hands[2]);
 
 // Resolve engine entry points. Call once with the libGame.so NOLOAD handle.
 void Install(void* handle);

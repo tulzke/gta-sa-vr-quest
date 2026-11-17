@@ -1,4 +1,5 @@
 #include "NpcGrab.h"
+#include "GrabArbitration.h"
 #include "JabCombo.h"
 #include "VehicleAccess.h"
 #include "NpcGrabVisual.h"
@@ -269,6 +270,11 @@ void ConfirmGrip() {hands[0].grip=1;hands[0].trigger=0;Tick();}
 
 }
 int main() {
+    Setup();Tick();grabarbitration::current.Begin(true);ProbeGrabs(hands);
+    CHECK(grabarbitration::Allows(0,grabarbitration::Kind::Npc));
+    grabarbitration::current.Offer(0,grabarbitration::Kind::Holster,0,.26f);
+    hands[0].grip=1;Tick();CHECK(npcgrab::ClaimedHands()==0&&!standCalls);
+    grabarbitration::current.Begin(false);
     // A kart hint must not start a task; the strike selects the player's side.
     for (int side:{-1,1}) {
         Setup();Seat();Write<std::uint16_t>(car,0x32,571);
