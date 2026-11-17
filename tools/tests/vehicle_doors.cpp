@@ -97,6 +97,8 @@ float servicePose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};
 void SetServiceRadioPose(int,const float* p){std::copy_n(p,12,servicePose);++serviceWrites;}
 void SetHydraulicsPose(int,const float*) {}
 unsigned ServiceRadioClaimedHands(){return 0;}
+unsigned WaterMonitorClaimedHands(){return 0;}
+void SetWaterMonitorPose(int,const float*) {}
 bool liftVisible{};int liftWrites{};
 float liftPose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};
 void SetLiftPose(int,const float* pose) {std::copy_n(pose,12,liftPose);++liftWrites;}
@@ -255,8 +257,63 @@ void GrabIt(int hand=0) {
     Ready(hand);hands[hand].grip=1;Tick();
     CHECK(ClaimedHands()==(1u<<hand));
 }
+void CheckStickyDoorAdapter() {
+    for(int h:{0,1}) for(bool inside:{false,true}) for(int index=0;index<4;++index) for(float span:{1.2f,2.8f}) {
+        Setup();hands[0]={};hands[1]={};
+        const int door=index+2;const float sign=index&1?1.f:-1.f;
+        const unsigned damaged=h?2u:0u;status[door]=damaged;
+        Write<float>(vehicle,0x770+door*0x18,sign*span);RefreshFrames();
+        if(inside) {
+            seated=vehicle;
+            if(index>0) {
+                Write<void*>(vehicle,0x5a0,nullptr);
+                Write(vehicle,0x5a8+(index-1)*8,static_cast<void*>(pedMemory));
+            }
+        }
+        vrcam::eye={sign*(inside?.35f:1.7f),-.3f,1.3f};
+        Target target{vehicle,poolMemory,vehicles.data(),flags,0,door,kNodes[index],flags[0]};
+        Door d;CHECK(ReadDoor(target,pedMemory,d,inside));
+        const Vec anchor=d.handle,pivot=d.car.Point(d.hinge);
+        const auto move=[&](float phase) {
+            const Vec p=pivot+Rotate(anchor-pivot,sign*phase);
+            std::memcpy(hands[h].gripPos,&p,12);Tick();
+            CHECK(ClaimedHands()==(1u<<h));
+        };
+        std::memcpy(hands[h].gripPos,&anchor,12);Tick();hands[h].grip=1;Tick();
+        CHECK(ClaimedHands()==(1u<<h)&&g_grab.target.door==door);
+        // Slow opening, closing and reopening without releasing the grip.
+        for(int i=1;i<=80;++i) move(.001f*i);
+        CHECK(std::abs(Read<float>(vehicle,0x77c+door*0x18)-sign*.08f)<1e-4f);
+        OnSwing(vehicle,kNodes[index],door);OnSwing(vehicle,kNodes[index],door);
+        CHECK(nativeSwings==0&&status[door]==(damaged|1u));
+        for(int i=79;i>=0;--i) move(.001f*i);
+        CHECK(Read<float>(vehicle,0x77c+door*0x18)==0&&status[door]==damaged);
+        for(int i=1;i<=80;++i) move(.001f*i);
+        CHECK(std::abs(g_grab.motion.angle-sign*.08f)<1e-4f);
+        // Reach the open stop and release after moving inside its sticky zone.
+        for(int i=1;i<=70;++i) move(.08f+(span-.08f)*i/70);
+        CHECK(g_grab.motion.AtOpenStop());
+        move(span-.025f);CHECK(g_grab.motion.AtOpenStop()&&g_grab.motion.velocity==0);
+        hands[h].grip=0;Tick();CHECK(g_openDetents[index].latched&&!g_release.active);
+        OnSwing(vehicle,kNodes[index],door);OnSwing(vehicle,kNodes[index],door);
+        CHECK(nativeSwings==0&&Read<float>(vehicle,0x77c+door*0x18)==sign*span);
+        // Regrab: small closing motion sticks; larger cumulative motion frees it.
+        vrcam::eye={hands[h].gripPos[0],hands[h].gripPos[1],hands[h].gripPos[2]+.5f};
+        Tick();hands[h].grip=1;Tick(); // release must arm a fresh squeeze after Reset
+        CHECK(ClaimedHands()==(1u<<h));
+        move(span-.05f);CHECK(g_grab.motion.AtOpenStop());
+        move(span-.062f);CHECK(!g_grab.motion.AtOpenStop());
+        CHECK(std::abs(g_grab.motion.angle-sign*(span-.037f))<1e-4f);
+        for(int i=0;i<60;++i) Tick();
+        hands[h].grip=0;Tick();CHECK(!g_openDetents[index].latched);
+        OnSwing(vehicle,kNodes[index],door);OnSwing(vehicle,kNodes[index],door);
+        CHECK(!g_openDetents[index].latched);
+        CHECK(std::abs(Read<float>(vehicle,0x77c+door*0x18)-sign*(span-.037f))<1e-4f);
+    }
+}
 }
 int main() {
+    CheckStickyDoorAdapter();
     {
         float d[5]{1e6f,.08f,.05f,.07f,.06f};
         CHECK(driving::SelectCockpitTarget(d,0)==2);
@@ -283,6 +340,50 @@ int main() {
     CHECK(DoorStatusAt(damage,3,1234)==1);
     CHECK(DoorStatusAt(damage,6,1234)==4);
     g_driveDoorStatusReturn=0;
+    // Position, not per-frame speed: tiny opening steps must accumulate.
+    for(float sign:{-1.f,1.f}) for(int hz:{36,72,90,120}) for(int steps:{1,hz,3*hz}) {
+        Motion m;CHECK(m.Begin({},{0,-1,0},0,0,sign*1.2f));
+        for(int i=1;i<=steps;++i) {
+            const Vec p=Rotate({0,-1,0},sign*.3f*i/steps);
+            CHECK(m.Step(p,1.f/hz));
+            if(i%5==0) CHECK(m.Step(p,.03f)); // pauses cannot consume progress
+        }
+        CHECK(std::abs(m.angle-sign*.3f)<1e-4f);
+        for(int i=0;i<100;++i) CHECK(m.Step(Rotate({0,-1,0},sign*.3f),.01f));
+        CHECK(m.ReleaseVelocity(.01f)==0);
+    }
+    // Both stops retain a small positional hysteresis, including on reversal.
+    for(float sign:{-1.f,1.f}) for(bool atOpen:{false,true}) {
+        Motion m;const float endpoint=atOpen?sign*1.2f:0;
+        const float inward=atOpen?-sign:sign;
+        CHECK(m.Begin({},{0,-1,0},endpoint,0,sign*1.2f));
+        const auto step=[&](float distance,float dt=.02f) {
+            CHECK(m.Step(Rotate({0,-1,0},inward*distance),dt));
+        };
+        step(.015f);CHECK(m.angle==endpoint&&m.ReleaseVelocity(.02f)==0);
+        step(.025f);CHECK(m.angle==endpoint&&m.ReleaseVelocity(.02f)==0);
+        step(.04f);CHECK(std::abs(m.angle-(endpoint+inward*.04f))<1e-4f);
+        step(.025f);CHECK(std::abs(m.angle-(endpoint+inward*.025f))<1e-4f);
+        step(.01f);CHECK(m.angle==endpoint&&m.ReleaseVelocity(.02f)==0);
+        step(.025f);CHECK(m.angle==endpoint);
+        step(.04f);CHECK(std::abs(m.angle-(endpoint+inward*.04f))<1e-4f);
+        // Beyond-stop motion is consumed, but only the sticky zone is needed to return.
+        step(-.4f);CHECK(m.angle==endpoint);
+        step(-.375f);CHECK(m.angle==endpoint);
+        step(-.36f);CHECK(std::abs(m.angle-(endpoint+inward*.04f))<1e-4f);
+    }
+    for(float sign:{-1.f,1.f}) {
+        Motion m;CHECK(m.Begin({},{0,-1,0},0,0,sign*1.2f));
+        for(int i=1;i<=80;++i) {
+            CHECK(m.Step(Rotate({0,-1,0},sign*.001f*i),i%2?.007f:.025f));
+        }
+        CHECK(std::abs(m.angle-sign*.08f)<1e-4f);
+        // A stationary regrab near either stop keeps the actual partial angle.
+        for(float current:{sign*.01f,sign*1.19f}) {
+            CHECK(m.Begin({},{0,-1,0},current,0,sign*1.2f));
+            CHECK(m.Step({0,-1,0},.02f)&&m.angle==current);
+        }
+    }
     for (float sign:{-1.f,1.f}) for (int hz:{36,72,90}) {
         Motion m;const float dt=1.f/hz;
         CHECK(m.Begin({},{0,-1,0},sign*.5f,0,sign*1.5f));
@@ -604,7 +705,11 @@ int main() {
     CHECK(Length(drag.delta-Vec{.1f,.1f,.1f})<1e-4f);
     CHECK(!drag.Step({NAN,0,0})&&!drag.Step({9,0,0}));
     // Full-open is a stable detent outside as well as inside the car.
-    Setup();GrabIt();g_grab.motion.angle=g_grab.motion.open;g_grab.motion.velocity=0;
+    Setup();GrabIt();
+    for(int i=1;i<=12;++i) {
+        const Vec p=hinge+Rotate(hand-hinge,-.1f*i);
+        std::memcpy(hands[0].gripPos,&p,12);Tick();
+    }
     hands[0].grip=0;Tick();CHECK(g_openDetents[0].latched);
     const float full=Read<float>(vehicle,0x770+2*0x18);
     const int swings=nativeSwings;OnSwing(vehicle,10,2);OnSwing(vehicle,10,2);

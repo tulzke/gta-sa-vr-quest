@@ -313,9 +313,9 @@ void OnSwing(void* vehicle,int node,int door) {
                     if(detent.latched){ApplyDoor(detent.target,1.f);return;}
                     const float angle=Read<float>(vehicle,0x77c+door*0x18);
                     const bool opening=Read<float>(vehicle,0x784+door*0x18)*open>=0;
-                    if(opening&&angle/open>=.985f){detent.latched=true;ApplyDoor(detent.target,1.f);return;}
+                    if(opening&&NearOpenStop(angle,open)){detent.latched=true;ApplyDoor(detent.target,1.f);return;}
                     g_swing(vehicle,node,door);
-                    if(opening&&Read<float>(vehicle,0x77c+door*0x18)/open>=.985f){detent.latched=true;ApplyDoor(detent.target,1.f);}
+                    if(opening&&NearOpenStop(Read<float>(vehicle,0x77c+door*0x18),open)){detent.latched=true;ApplyDoor(detent.target,1.f);}
                     return;
                 }
             }
@@ -551,7 +551,7 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         else {
             auto& m=g_release.motion;m.Step(dt);
             ApplyDoor(g_release.target,std::clamp((m.angle-m.closed)/(m.open-m.closed),0.f,1.f));
-            if ((m.angle-m.closed)/(m.open-m.closed)>=.985f) {LatchOpen(g_release.target);m.angle=m.open;m.velocity=0;}
+            if (m.velocity*(m.open-m.closed)>=0&&NearOpenStop(m.angle,m.open)) {LatchOpen(g_release.target);m.angle=m.open;m.velocity=0;}
             if (m.Done()) g_release={};
         }
     }
@@ -781,8 +781,8 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 Length(Read<Vec>(grab.target.vehicle,0x68))<=.02f&&
                 ReadDoor(grab.target,ped,d,true)&&grab.motion.Ratio()>0;
             Reset();
-            if(grab.motion.Ratio()>=.985f&&grab.target.Live(pool))LatchOpen(grab.target);
-            if (keep) {
+            if(grab.motion.AtOpenStop()&&grab.target.Live(pool))LatchOpen(grab.target);
+            if (keep&&!grab.motion.AtOpenStop()) {
                 g_release.target=grab.target;g_release.inside=true;g_release.active=true;
                 g_release.motion={grab.motion.angle,grab.motion.closed,grab.motion.open,0.f,false,true};
             }
@@ -793,9 +793,9 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const float velocity=g_grab.motion.ReleaseVelocity(dt);
             Write<float>(g_grab.target.vehicle,0x770+g_grab.target.door*0x18+0x14,velocity);
             const auto target=g_grab.target;const auto motion=g_grab.motion;const bool inside=g_grab.inside;
-            const bool slam=motion.velocity*(motion.open-motion.closed)<0&&std::abs(motion.velocity)>=.6f&&motion.Ratio()>0;
+            const bool slam=!motion.AtStop()&&motion.velocity*(motion.open-motion.closed)<0&&std::abs(motion.velocity)>=.6f&&motion.Ratio()>0;
             Reset();
-            if(motion.Ratio()>=.985f&&!slam){LatchOpen(target);ApplyDoor(target,1.f);return;}
+            if(motion.AtOpenStop()){LatchOpen(target);ApplyDoor(target,1.f);return;}
             if ((inside&&motion.Ratio()>0&&Length(Read<Vec>(target.vehicle,0x68))<=.02f)||slam) {
                 g_release.target=target;g_release.inside=inside;g_release.active=true;
                 // A slow closing movement stops where it is released; only a

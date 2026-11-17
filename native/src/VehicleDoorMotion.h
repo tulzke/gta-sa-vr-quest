@@ -50,9 +50,15 @@ struct GripEdge {
         latched=true;return true;
     }
 };
+inline constexpr float kStickyEnterAngle=.01745329252f; // one degree
+inline constexpr float kStickyExitAngle=2.f*kStickyEnterAngle;
+inline bool NearOpenStop(float angle,float open) { return std::abs(angle-open)<=kStickyEnterAngle; }
 struct Motion {
+    enum class Stop { Free, Closed, Open };
     bool active{};
     float angle{},closed{},open{},previousPhase{};
+    float targetAngle{}; // continuous hand position, independent of snapped output
+    Stop stop{Stop::Free};
     float velocity{}; // radians/second, measured in the vehicle frame
     Vec hinge{};
     bool Begin(Vec pivot,Vec hand,float current,float min,float max) {
@@ -62,6 +68,8 @@ struct Motion {
             std::abs(max-min)<.2f||std::abs(max-min)>2.8f) return false;
         hinge=pivot;closed=min;open=max;
         angle=std::clamp(current,std::min(min,max),std::max(min,max));
+        targetAngle=angle;
+        stop=angle==closed?Stop::Closed:angle==open?Stop::Open:Stop::Free;
         previousPhase=std::atan2(r.y,r.x);velocity=0;active=true;return true;
     }
     bool Step(Vec hand,float dt) {
@@ -72,19 +80,30 @@ struct Motion {
         const float delta=std::remainder(phase-previousPhase,6.28318530718f);
         if (std::abs(delta)>.8f) return false; // discontinuity, never a throw
         previousPhase=phase;
-        const float previousAngle=angle;
+        const float previousTarget=targetAngle;
         // Consume excess at the stops instead of accumulating an invisible
         // overshoot that the player must unwind before closing the door.
-        angle=std::clamp(angle+std::clamp(delta,-8.f*dt,8.f*dt),
-                         std::min(closed,open),std::max(closed,open));
-        if (std::abs(angle-closed)<.012f) angle=closed;
-        const float measured=(angle-previousAngle)/dt;
-        velocity+=(measured-velocity)*(1.f-std::exp(-dt/.045f));
+        targetAngle=std::clamp(targetAngle+delta,std::min(closed,open),std::max(closed,open));
+        const float fromClosed=std::abs(targetAngle-closed),fromOpen=std::abs(targetAngle-open);
+        if ((stop==Stop::Closed&&fromClosed>kStickyExitAngle)||
+            (stop==Stop::Open&&fromOpen>kStickyExitAngle)) stop=Stop::Free;
+        if (stop==Stop::Free) {
+            const float direction=(targetAngle-previousTarget)*(open-closed);
+            // A stationary regrab of a partly open door must not snap it.
+            if (targetAngle==closed||(direction<0&&fromClosed<=kStickyEnterAngle)) stop=Stop::Closed;
+            else if (targetAngle==open||(direction>0&&fromOpen<=kStickyEnterAngle)) stop=Stop::Open;
+        }
+        angle=stop==Stop::Closed?closed:stop==Stop::Open?open:targetAngle;
+        // Snapping adds no throw impulse. Progress within a sticky zone is
+        // retained in targetAngle, but a release there stays on the stop.
+        const float measured=(targetAngle-previousTarget)/dt;
+        if (AtStop()) velocity=0;
+        else velocity+=(measured-velocity)*(1.f-std::exp(-dt/.045f));
         return true;
     }
     float ReleaseVelocity(float dt) const {
         if (!active||!std::isfinite(dt)||dt<=0||dt>.15f||!std::isfinite(velocity)||
-            std::abs(angle-closed)<.012f||std::abs(velocity)<.12f) return 0;
+            AtStop()||std::abs(velocity)<.12f) return 0;
         // Retail CDoor::Process adds angular velocity once per update, without
         // multiplying by seconds. Convert using this input/physics tick duration.
         float native=std::clamp(velocity*std::clamp(dt,.005f,.05f),-.18f,.18f);
@@ -96,6 +115,8 @@ struct Motion {
             native=std::copysign(.125f,velocity);
         return native;
     }
+    bool AtStop() const { return stop!=Stop::Free; }
+    bool AtOpenStop() const { return stop==Stop::Open; }
     float Ratio() const { return std::clamp((angle-closed)/(open-closed),0.f,1.f); }
 };
 
