@@ -643,7 +643,7 @@ const BACKLOG_DATA = {
         "story"
       ],
       "priority": "high",
-      "status": "open"
+      "status": "in_progress"
     },
     {
       "id": 114,
