@@ -337,7 +337,7 @@ const BACKLOG_DATA = {
         "tooling"
       ],
       "priority": "critical",
-      "status": "open"
+      "status": "in_progress"
     },
     {
       "id": 85,
