@@ -585,6 +585,8 @@ const BACKLOG_DATA = {
       "categories": [
         "vehicle-content",
         "vehicle-calibration",
+        "graphics",
+        "hud",
         "story"
       ],
       "priority": "critical",
@@ -823,6 +825,7 @@ const BACKLOG_DATA = {
       "categories": [
         "vehicle-controls",
         "weapons",
+        "hud",
         "missions"
       ],
       "priority": "high",
