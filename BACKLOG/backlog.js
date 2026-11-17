@@ -384,7 +384,7 @@ const BACKLOG_DATA = {
         "bugs"
       ],
       "priority": "high",
-      "status": "open"
+      "status": "in_progress"
     },
     {
       "id": 90,
