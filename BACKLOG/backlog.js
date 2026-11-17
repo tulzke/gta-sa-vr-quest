@@ -624,22 +624,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 113,
-      "title": "Видеопульт управления водомётом Firetruck",
-      "file": "113-videopult-upravleniya-vodometom-firetruck.md",
-      "categories": [
-        "vehicle-controls",
-        "vehicle-calibration",
-        "weapons",
-        "graphics",
-        "bugs",
-        "hud",
-        "missions"
-      ],
-      "priority": "high",
-      "status": "in_progress"
-    },
-    {
       "id": 114,
       "title": "Управление сиреной служебного транспорта",
       "file": "114-upravlenie-sirenoy.md",
