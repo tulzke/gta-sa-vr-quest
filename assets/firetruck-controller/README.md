@@ -42,5 +42,12 @@ Build with `tools/build_firetruck_controller.py` in Blender 4.5 (add
 `-- --no-render` to skip product renders), verify with
 `tools/verify_firetruck_controller_blender.py`, and render additional angles
 with `tools/render_firetruck_controller_review.py`. Renders and verification
-output stay in `build/firetruck-controller-review/`. Game code, APKs and hand
-libraries have not changed.
+output stay in `build/firetruck-controller-review/`.
+
+Runtime integration uses `runtime/monitor.mesh` (Git LFS), exported by
+`tools/export_firetruck_controller_runtime.py` in Blender. It contains only
+the approved 3222 triangles, normals, vertex colours, UVs and assembly roles;
+the demonstration bitmap is omitted. The mesh is embedded in the native mod.
+The camera layer, CRT scan lines and two reticles bring the active display to
+3726 triangles, including the dock. Existing pistol hand poses are reused;
+grip fit and the initial overhead dock position still need Quest acceptance.

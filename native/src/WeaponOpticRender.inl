@@ -7,7 +7,9 @@ constexpr int Resolution=768;
 struct Optic {
     bool visible{}, imageReady{};
     bool flipHorizontal{true},flipVertical{};
-    bool detailed{};
+    bool detailed{},remote{};
+    int width{Resolution},height{Resolution};
+    void* excluded{};
     float farClip=weaponoptic::NormalFar;
     int type{};
     void* raster{};
@@ -15,7 +17,8 @@ struct Optic {
     float tanFov{};
     scopeaim::HeatLockState lock{};
 };
-Optic optics[2];
+void (*remoteEffects)(void*){};
+Optic optics[3]; // The third slot is the Firetruck remote camera.
 void ResetFrame() { for(auto& optic:optics) optic.visible=false; }
 bool HasRaster(int hand) { return optics[hand].raster!=nullptr; }
 void Prepare(int hand,int type,const RwMat& weapon,const CamBasis& head) {
@@ -54,7 +57,7 @@ bool First(void* entity) {
     return false;
 }
 void Consider(void* entity,const Optic& optic) {
-    if(!entity || !First(entity) || (g.FindPlayerPed && entity==g.FindPlayerPed(-1))) return;
+    if(!entity || entity==optic.excluded || !First(entity) || (g.FindPlayerPed && entity==g.FindPlayerPed(-1))) return;
     const int type=Read<unsigned char>(entity,0x5a)&7;
     if(type<1 || type>5 || !(Read<std::uint32_t>(entity,0x28)&(1u<<7))) return;
     void* model=rear_mirror_render::Model(entity);
@@ -160,7 +163,7 @@ void Render(void* sc,std::uintptr_t cam) {
         const CamBasis saved=ReadCam(cam);
         // Skip only images facing away from the headset. The physical body
         // remains drawn. There is no eye-proximity activation or screen mode.
-        if(Dot(saved.pos-optic.frame.surface.pos,optic.frame.surface.forward)>.03f) continue;
+        if(!optic.remote&&Dot(saved.pos-optic.frame.surface.pos,optic.frame.surface.forward)>.03f) continue;
         Collect(optic);
         auto* camera=static_cast<char*>(sc);
         std::array<std::uint8_t,0x34> fields{};
@@ -170,16 +173,16 @@ void Render(void* sc,std::uintptr_t cam) {
         const bool skipOpaque=g.skipNonblendRender && *g.skipNonblendRender;
         if(g.skipBlendRender)*g.skipBlendRender=false;
         if(g.skipNonblendRender)*g.skipNonblendRender=false;
-        ScopedScreenDimensions dimensions(g.RsGlobal);dimensions.Set(Resolution,Resolution);
+        ScopedScreenDimensions dimensions(g.RsGlobal);dimensions.Set(optic.width,optic.height);
         WriteCam(cam,optic.frame.camera);
         if(g.CCamera_CalculateDerivedValues)g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
         g_origCopy(g.TheCamera,false);
         *reinterpret_cast<void**>(camera+0x80)=optic.raster;
         *reinterpret_cast<void**>(camera+0x88)=nullptr;
         *reinterpret_cast<float*>(camera+0x90)=optic.tanFov;
-        *reinterpret_cast<float*>(camera+0x94)=optic.tanFov;
+        *reinterpret_cast<float*>(camera+0x94)=optic.tanFov*optic.height/optic.width;
         *reinterpret_cast<float*>(camera+0x98)=1.f/optic.tanFov;
-        *reinterpret_cast<float*>(camera+0x9c)=1.f/optic.tanFov;
+        *reinterpret_cast<float*>(camera+0x9c)=optic.width/(optic.tanFov*optic.height);
         *reinterpret_cast<float*>(camera+0xa0)=0.f;
         *reinterpret_cast<float*>(camera+0xa4)=0.f;
         g.RwCameraSetNearClipPlane(sc,.1f);g.RwCameraSetFarClipPlane(sc,optic.farClip);
@@ -200,6 +203,9 @@ void Render(void* sc,std::uintptr_t cam) {
             ApplyMobileDistanceFog(fog,fogStart,fogEnd);
             rear_mirror_render::api.directionalOff();rear_mirror_render::api.ambient();
             DrawEntities();
+            // FxManager::Render only submits existing fire/smoke. Never call
+            // CWaterCannons::Render here: it also advances native effects.
+            if(optic.remote&&remoteEffects)remoteEffects(sc);
             g.RwCameraEndUpdate(sc);
             optic.imageReady=true;
         }
@@ -227,7 +233,7 @@ void DrawSurfaces() {
     g.RwRenderStateSet(9,reinterpret_cast<void*>(2));g.RwRenderStateSet(12,nullptr);
     g.RwRenderStateSet(14,nullptr);g.RwRenderStateSet(20,reinterpret_cast<void*>(1));
     for(const auto& optic:optics) {
-        if(!optic.visible) continue;
+        if(!optic.visible||optic.remote) continue;
         const auto& surface=optic.frame.surface;
         const float size=optic.frame.halfSize,length=optic.frame.length;
         const auto vertex=[&](float x,float y,float z,std::uint32_t color) {

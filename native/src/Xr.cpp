@@ -9041,11 +9041,12 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         bool basketballFlatPalm = false;
         const bool steeringHand = drivingWheel.active &&
                                   drivingWheel.grabbed[hand];
+        const bool monitorHand=drivingWheel.monitor.visible&&drivingWheel.monitor.owner==hand;
         const bool serviceHand=drivingWheel.serviceVisible&&drivingWheel.serviceOwner==hand;
         const bool liftHand=drivingWheel.liftGrabbed[hand]||drivingWheel.nitroGrabbed[hand];
         const bool hydroHand=drivingWheel.hydroGrabbed[hand];
         if(!hydroHand){
-            const bool free=!serviceHand&&!liftHand&&!steeringHand&&!hp[hand].climbGrip&&
+            const bool free=!monitorHand&&!serviceHand&&!liftHand&&!steeringHand&&!hp[hand].climbGrip&&
                 !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
                 drivingWheel.horn[hand].weight<=0.f&&!(weaponHandMask&(1u<<hand))&&
                 !ballLock.locked[hand]&&!TwoHandStateUsable(twoHand)&&!(debugPinchHands&(1u<<hand));
@@ -9056,7 +9057,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             else hydroHands[hand].Reset();
         }
         const bool hornHand=drivingWheel.active&&drivingWheel.horn[hand].weight>0.f&&
-            !serviceHand&&!hp[hand].climbGrip&&!liftHand&&!hydroHand&&!steeringHand&&drivingWheel.hydroPoint[hand]<.01f&&
+            !monitorHand&&!serviceHand&&!hp[hand].climbGrip&&!liftHand&&!hydroHand&&!steeringHand&&drivingWheel.hydroPoint[hand]<.01f&&
             !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
             !(weaponHandMask&(1u<<hand))&&!ballLock.locked[hand]&&!TwoHandStateUsable(twoHand)&&
             !(debugPinchHands&(1u<<hand));
@@ -9302,7 +9303,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         const auto& kick=twoHand.weaponRecoil[hand];
         const auto recoilVector=[](XrVector3f v){return recoil::Vec{v.x,v.y,v.z};};
         const auto xrVector=[](recoil::Vec v){return XrVector3f{v.x,v.y,v.z};};
-        if(!serviceHand){
+        if(!monitorHand&&!serviceHand){
         pos=xrVector(kick.Point(recoilVector(pos)));
         right=xrVector(kick.Vector(recoilVector(right)));
         forward=xrVector(kick.Vector(recoilVector(forward)));
@@ -9310,7 +9311,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         }
         const bool debugPinch=(debugPinchHands&(1u<<hand))!=0;
         if (debugPinch) grip=trig=0.f;
-        const bool pinch = debugPinch || (!serviceHand&&!hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
+        const bool pinch = debugPinch || (!monitorHand&&!serviceHand&&!hp[hand].climbGrip && pinchAmounts[hand] > 0.0f && !(weaponHandMask & (1u << hand)) &&
             !steeringHand && !liftHand && !hydroHand && !hornHand && drivingWheel.hydroPoint[hand]<.01f &&
             !ballLock.locked[hand] && !TwoHandStateUsable(twoHand));
         const float pinchAmount = debugPinch ? 1.f : (pinch ? pinchAmounts[hand] : 0.0f);
@@ -9324,9 +9325,10 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             TwoHandStateUsable(twoHand) && hand==twoHand.supportHand
                 ? twoHand.weaponType : weaponTypes[hand],hornWeight});
         if(hydroHand)selected={handanimation::Gesture::Grip,handanimation::Gesture::Grip,1.f,0.f};
-        if(!serviceHand&&!hydroHand&&!liftHand&&!steeringHand&&!hornHand&&!hp[hand].climbGrip&&!debugPinch&&
+        if(!monitorHand&&!serviceHand&&!hydroHand&&!liftHand&&!steeringHand&&!hornHand&&!hp[hand].climbGrip&&!debugPinch&&
            !drivingWheel.radioGrabbed[hand]&&!drivingWheel.ignitionGrabbed[hand]&&
            !(weaponHandMask&(1u<<hand))&&!ballLock.locked[hand]&&!TwoHandStateUsable(twoHand))selected.pointBlend=drivingWheel.hydroPoint[hand];
+        if(monitorHand)selected={handanimation::Gesture::GripPistol,handanimation::Gesture::GripPistolShoot,drivingWheel.monitor.fire?1.f:0.f,0.f};
         if(serviceHand)selected={handanimation::Gesture::HandleRadio,handanimation::Gesture::HandleRadio,drivingWheel.servicePress,0.f};
         auto& frame=g_skeletalHands[hand];
         g_handSkeleton.Evaluate(selected,pinchAmount,pinchWeight,frame.palette);

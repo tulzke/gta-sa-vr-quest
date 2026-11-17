@@ -62,6 +62,7 @@ int AxisLeftRight(bool=false) { return 91; }
 void* seated=nullptr;
 int appearance=0;
 bool allowed=true, immersive=false;
+bool monitorConsumes{};bool WaterMonitorConsumesFire(){return monitorConsumes;}
 int debugMode{};int GetVehicleDebugMode() {return debugMode;}
 void* FindVehicle(int, bool) { return seated; }
 void* FindPed(int) { return reinterpret_cast<void*>(1); }
@@ -323,6 +324,10 @@ int main() {
     *reinterpret_cast<std::uint16_t*>(vehicle+0x32)=400;
     Check(OnGetCarGunUpDown(pad,1,vehicle,0,0)==73,"ordinary vehicle keeps retail axis");
     Check(OnGetCarGunFired(pad,1,1)==72,"ordinary vehicle keeps retail gun");
+    monitorConsumes=true;
+    Check(OnGetCarGunFired(pad,1,1)==0,"held/released water monitor consumes B");
+    monitorConsumes=false;
+    Check(OnGetCarGunFired(pad,1,1)==72,"water monitor restores retail fire after button release");
     Check(OnUseBomb(pad)==1,"car bomb edge");
     seated=nullptr;
     Check(OnUseBomb(pad)==71,"on foot bomb query keeps retail");

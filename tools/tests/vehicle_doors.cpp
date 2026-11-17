@@ -98,7 +98,9 @@ void SetServiceRadioPose(int,const float* p){std::copy_n(p,12,servicePose);++ser
 void SetHydraulicsPose(int,const float*) {}
 unsigned ServiceRadioClaimedHands(){return 0;}
 unsigned WaterMonitorClaimedHands(){return 0;}
-void SetWaterMonitorPose(int,const float*) {}
+bool monitorVisible{};int monitorWrites{};
+float monitorPose[12]{};
+void SetWaterMonitorPose(int,const float* p){std::copy_n(p,12,monitorPose);++monitorWrites;}
 bool liftVisible{};int liftWrites{};
 float liftPose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};
 void SetLiftPose(int,const float* pose) {std::copy_n(pose,12,liftPose);++liftWrites;}
@@ -133,6 +135,9 @@ bool GetWheelVisualState(WheelVisualState* out) {
     if(serviceVisible){out->serviceVisible=true;
         std::copy_n(servicePose,3,out->serviceCenter);std::copy_n(servicePose+3,3,out->serviceRight);
         std::copy_n(servicePose+6,3,out->serviceForward);std::copy_n(servicePose+9,3,out->serviceUp);}
+    if(monitorVisible){out->modelId=407;out->monitor.visible=true;
+        const auto v=[](const float* p){return watermonitor::Vec{p[0],p[1],p[2]};};
+        out->monitor.dock={v(monitorPose),v(monitorPose+3),v(monitorPose+6),v(monitorPose+9)};}
     if(nitroVisible){out->nitroVisible=true;out->nitroGhost=true;
         std::copy_n(nitroPose,3,out->nitroCenter);std::copy_n(nitroPose+3,3,out->nitroRight);
         std::copy_n(nitroPose+6,3,out->nitroForward);std::copy_n(nitroPose+9,3,out->nitroUp);}
@@ -199,6 +204,7 @@ bool FakeLos(const GameSymbols::Vec3*,const GameSymbols::Vec3*,void*,void** hit,
     *hit=wall?static_cast<void*>(pedMemory):vehicle;return true;
 }
 void Setup() {
+    driving::monitorVisible=false;driving::monitorWrites=0;
     driving::serviceVisible=false;driving::serviceWrites=0;
     driving::liftVisible=false;driving::liftWrites=0;driving::nitroVisible=false;driving::nitroWrites=0;
     for(auto& detent:g_openDetents)detent={};
@@ -919,6 +925,20 @@ int main() {
         CHECK(std::abs(driving::servicePose[3]-.866025f)<.001f&&std::abs(driving::servicePose[4]-.5f)<.001f);
         hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&driving::saves==1);
     }
+    for(int h:{0,1}){
+        Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+        Write<std::uint16_t>(vehicle,0x32,407);driving::monitorVisible=true;
+        const float pose[12]{.6f,.2f,.65f,1,0,0,0,1,0,0,0,1};std::copy_n(pose,12,driving::monitorPose);
+        hands[h].gripPos[0]=.6f;hands[h].gripPos[1]=.203f;hands[h].gripPos[2]=.715f;
+        Tick();hands[h].trigger=1;Tick();CHECK(g_editKind==15&&g_edit.hand==h&&ClaimedHands()==(1u<<h));
+        hands[h].gripPos[0]+=.06f;hands[h].gripPos[1]+=.04f;hands[h].gripPos[2]+=.03f;
+        hands[h].gripOri[2]=.258819f;hands[h].gripOri[3]=.965926f;Tick();
+        CHECK(driving::monitorWrites>0&&driving::saves==0);
+        CHECK(std::abs(driving::monitorPose[0]-.66f)<.001f&&std::abs(driving::monitorPose[1]-.24f)<.001f&&std::abs(driving::monitorPose[2]-.68f)<.001f);
+        CHECK(std::abs(driving::monitorPose[3]-.866025f)<.001f&&std::abs(driving::monitorPose[4]-.5f)<.001f);
+        hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&driving::saves==1);
+    }
+    std::puts("water monitor: both-hand dock translation/rotation, exclusive ownership and release save passed");
     std::puts("service radio: both-hand editor translation/rotation, exclusive ownership and release save passed");
     std::puts("vehicle nitro: uninstalled ghost editable with either hand; rigid translation/rotation, persistent ownership and release save passed");
     std::puts("vehicle lift: both hands, rigid position/rotation edit, ownership and release save passed");

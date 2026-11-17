@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include "VehicleHornVisual.h"
+#include "WaterMonitorLogic.h"
 
 namespace savr::xr {
 struct InputState;
@@ -83,6 +84,7 @@ enum OffsetField {
 
 // Published to the OpenXR present thread in LOCAL tracking space.
 struct WheelVisualState {
+    watermonitor::Visual monitor{};
     bool active{};
     bool visible{};
     bool bike{};
@@ -233,6 +235,10 @@ void SetIgnitionPose(int model,bool bike,const float pose[12]);
 void SetRadioPose(int model,const float pose[12]);
 void SetServiceRadioPose(int model,const float pose[12]);
 unsigned ServiceRadioClaimedHands();
+unsigned WaterMonitorClaimedHands();
+bool WaterMonitorConsumesFire();
+bool GetWaterMonitorVisual(watermonitor::Visual* out);
+void SetWaterMonitorPose(int model,const float pose[12]);
 bool ServiceRadioConsumesTrigger(int hand);
 bool ServiceRadioWidget(int widget);
 void SetLiftPose(int model,const float pose[12]);

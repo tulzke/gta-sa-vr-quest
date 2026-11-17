@@ -16,6 +16,7 @@
 #include "IgnitionState.h"
 #include "RadioKnobState.h"
 #include "ServiceRadio.h"
+#include "WaterMonitorHand.h"
 #include "ServiceRadioMission.h"
 #include "RadioLabel.h"
 #include "RadioRetune.h"
@@ -48,6 +49,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <dlfcn.h>
 #include <cstring>
 #include <ctime>
 #include <map>
@@ -310,6 +313,8 @@ struct ModelCalibration {
     float ignitionPose[12]{};
     bool ignitionPoseSet{};
     bool ignitionPoseLean{};
+    float monitorPose[12]{};
+    bool monitorPoseSet{};
     float servicePose[12]{};
     bool servicePoseSet{};
     float radioPose[12]{};
@@ -338,6 +343,14 @@ float ClampWheelCalibration(int field, float value) {
 std::mutex g_modelMutex;
 std::map<int, ModelCalibration> g_modelCalibration;
 
+watermonitor::State g_waterMonitor;
+std::atomic<unsigned> g_waterHandMask{};
+std::atomic<bool> g_waterConsumesB{};
+bool g_waterRawB{},g_waterRetailReady{};
+watermonitor::Vec g_waterActualWorld{},g_waterCameraWorld{};
+std::uint64_t g_waterTrackingEpoch{};
+void InstallWaterMonitorHook();
+void ResetWaterMonitor(){g_waterMonitor.Reset(g_waterMonitor.owner>=0&&g_waterRawB);g_waterHandMask.store(0);g_waterConsumesB.store(g_waterMonitor.ConsumesFire());}
 serviceradio::State g_serviceRadio;
 std::atomic<unsigned> g_serviceTriggerMask{},g_serviceHandMask{};
 int g_serviceReturnHand{-1};double g_serviceReturnUntil{};
@@ -714,6 +727,8 @@ void Save() {
             for (int field=0; field<6; ++field)
                 std::fprintf(file, "Ignition.%d.%d=%.7g\n", model, field,
                              calibration.ignition[field]);
+            if(calibration.monitorPoseSet)
+                for(int field=0;field<12;++field)std::fprintf(file,"WaterMonitorPose.%d.%d=%.9g\n",model,field,calibration.monitorPose[field]);
             if(calibration.servicePoseSet)
                 for(int field=0;field<12;++field)std::fprintf(file,"ServiceRadioPose.%d.%d=%.9g\n",model,field,calibration.servicePose[field]);
             if (calibration.radioPoseSet)
@@ -949,6 +964,10 @@ void Load() {
                     g_modelCalibration[model].liftPose[axis]=poseValue;
                     if(axis==11)g_modelCalibration[model].liftPoseSet=true;
                     continue;
+                }
+                if(std::sscanf(line,"WaterMonitorPose.%d.%d=%f",&model,&axis,&poseValue)==3&&model==407&&axis>=0&&axis<12&&std::isfinite(poseValue)&&std::abs(poseValue)<10){
+                    g_modelCalibration[model].monitorPose[axis]=poseValue;
+                    if(axis==11)g_modelCalibration[model].monitorPoseSet=true;continue;
                 }
                 if(std::sscanf(line,"ServiceRadioPose.%d.%d=%f",&model,&axis,&poseValue)==3&&
                    serviceradio::ForModel(model)!=serviceradio::Service::None&&axis>=0&&axis<12&&std::isfinite(poseValue)&&std::abs(poseValue)<=10.f){
@@ -1321,7 +1340,7 @@ void UpdateBicycleGestureLocked(const xr::HandPose poses[2]) {
 }
 
 void ClearInteractionLocked(bool preserveRadio=false) {
-    ResetServiceRadio();
+    ResetServiceRadio();ResetWaterMonitor();
     if(g_hydroLever.owner>=0)LOGI("[hydraulics.grip] cleared hand=%d cause=interaction_context blocked=%d",
         g_hydroLever.owner,g_inputBlocked.load(std::memory_order_relaxed));
     g_hydroLever.Reset();g_hydroLastTime=0;g_hydroWasPreview=false;g_hydroPreviewHigh=false;
@@ -2123,6 +2142,7 @@ void UpdateLiftLever(WheelVisualState& visual,void* vehicle,const xr::InputState
 }
 
 #include "ServiceRadioDriving.inl"
+#include "WaterMonitorDriving.inl"
 #include "VehicleNitroDriving.inl"
 #include "VehicleHydraulicsDriving.inl"
 
@@ -2428,18 +2448,20 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
     UpdateIgnition(geometry,vehicle,input,poses,occupied,true);
     UpdateRadioKnob(geometry,vehicle,input,poses,occupied,true,true);
     BuildServiceTracking(geometry,vehicle);
+    BuildWaterMonitor(geometry,vehicle);
     BuildLiftTracking(geometry,vehicle);
     BuildNitroTracking(geometry,vehicle);
     BuildHydraulicsTracking(geometry,vehicle);
     float doorDistance[2]{};
     vehicledoors::InteriorDistances(vehicle,poses,doorDistance);
-    unsigned serviceBlocked=occupied;
+    unsigned serviceBlocked=occupied,monitorBlocked=occupied;
     unsigned keyBlocked=occupied, radioBlocked=occupied,liftBlocked=occupied,nitroBlocked=occupied,hydroBlocked=occupied;
     for (int h=0;h<2;++h) {
         const unsigned bit=1u<<h;
-        if(g_serviceRadio.owner==h){visual.interactionTarget[h]=9;keyBlocked|=bit;radioBlocked|=bit;liftBlocked|=bit;nitroBlocked|=bit;hydroBlocked|=bit;continue;}
+        if(g_waterMonitor.owner==h){visual.interactionTarget[h]=10;serviceBlocked|=bit;keyBlocked|=bit;radioBlocked|=bit;liftBlocked|=bit;nitroBlocked|=bit;hydroBlocked|=bit;continue;}
+        if(g_serviceRadio.owner==h){monitorBlocked|=bit;visual.interactionTarget[h]=9;keyBlocked|=bit;radioBlocked|=bit;liftBlocked|=bit;nitroBlocked|=bit;hydroBlocked|=bit;continue;}
         const bool otherControl=(g_ignitionRotation.owners&bit)||g_radioKnobHand==h||g_liftLever.owner==h||g_nitroLever.owner==h||(g_grabbed[h]&&wheelAvailable);
-        if(otherControl||g_hydroLever.owner==h)serviceBlocked|=bit;
+        if(otherControl||g_hydroLever.owner==h){serviceBlocked|=bit;monitorBlocked|=bit;}
         if(otherControl)hydroBlocked|=bit;
         if(g_hydroLever.owner==h){visual.interactionTarget[h]=7;keyBlocked|=bit;radioBlocked|=bit;liftBlocked|=bit;nitroBlocked|=bit;continue;}
         if (g_ignitionRotation.owners&bit) { visual.interactionTarget[h]=1; radioBlocked|=bit;liftBlocked|=bit;nitroBlocked|=bit; continue; }
@@ -2455,7 +2477,8 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
         const V3 wheel{visual.handlePosition[h][0],visual.handlePosition[h][1],visual.handlePosition[h][2]};
         const V3 fingers=CockpitFingerPoint(poses[h],h);
         const V3 service{geometry.serviceCenter[0]+geometry.serviceUp[0]*.064f,geometry.serviceCenter[1]+geometry.serviceUp[1]*.064f,geometry.serviceCenter[2]+geometry.serviceUp[2]*.064f};
-        float d[10]{1e6f,geometry.ignitionVisible?Length(fingers-key):1e6f,
+        const auto mt=geometry.monitor.dock.Point({0,.003f,.065f});
+        float d[11]{1e6f,geometry.ignitionVisible?Length(fingers-key):1e6f,
                    geometry.radioVisible && g_radioKnobHand<0?Length(fingers-radio):1e6f,
                    wheelAvailable?Length(p-wheel):1e6f,doorDistance[h],
                    geometry.liftVisible&&g_liftLever.owner<0&&wheelAvailable?
@@ -2466,7 +2489,8 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
                        hydrocontrol::Distance(HydroHandPoint(geometry,poses[h]),g_hydroLever.visualX,g_hydroLever.visualY):1e6f,
                    geometry.hydroVisible&&!geometry.hydroGhost&&g_hydroLever.owner<0&&wheelAvailable?
                        HydroButtonDistance(geometry,poses[h],h):1e6f,
-                   geometry.serviceVisible&&g_serviceRadio.owner<0?Length(fingers-service):1e6f};
+                   geometry.serviceVisible&&g_serviceRadio.owner<0?Length(fingers-service):1e6f,
+                   geometry.monitor.visible&&g_waterMonitor.owner<0?Length(p-V3{mt.x,mt.y,mt.z}):1e6f};
         if (d[1]>=.12f) d[1]=1e6f;
         if (d[2]>=.10f) d[2]=1e6f;
         if (d[3]>(visual.bike?.17f:.23f)) d[3]=1e6f;
@@ -2475,11 +2499,13 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
         if(d[7]>=.055f)d[7]=1e6f;
         if(d[8]>=.065f)d[8]=1e6f;
         if(d[9]>=.085f)d[9]=1e6f;
+        if(d[10]>=.12f)d[10]=1e6f;
         // A free pointing finger over MODE keeps its target throughout the
         // press; the nearby ball must not steal it as the wrist moves down.
         const int best=d[8]<1e6f?8:SelectCockpitTarget(d,g_visual.interactionTarget[h]);
         visual.interactionTarget[h]=best;
         if(best!=9)serviceBlocked|=bit;
+        if(best!=10)monitorBlocked|=bit;
         if (best!=1) keyBlocked|=bit;
         if (best!=2) radioBlocked|=bit;
         if (best!=5) liftBlocked|=bit;
@@ -2493,6 +2519,7 @@ void UpdateCockpitControls(WheelVisualState& visual, void* vehicle,
     UpdateNitroLever(visual,vehicle,input,poses,nitroBlocked);
     UpdateHydraulicsJoystick(visual,vehicle,input,poses,hydroBlocked);
     UpdateServiceRadio(visual,vehicle,input,poses,serviceBlocked);
+    UpdateWaterMonitor(visual,vehicle,input,poses,monitorBlocked);
 }
 
 // Android SA 2.11 polls touch widgets inside these queries. Hook the queries,
@@ -3279,6 +3306,8 @@ void* InstallHandBrakeTrampoline(void* target,void* replacement) {
     return trampoline;
 }
 
+#include "WaterMonitorRetail.inl"
+
 void* InstallStationTrampoline(void* target, void* replacement,
                                const char* label="CPad::NextStationJustUp") {
     if (!target || !replacement) return nullptr;
@@ -3392,6 +3421,7 @@ using CarGunFiredFn = int (*)(void*, int, int);
 CarGunFiredFn g_origCarGunFired = nullptr;
 
 int OnGetCarGunFired(void* pad, int ignoreDucking, int useSecondary) {
+    if(WaterMonitorConsumesFire()&&g.CPad_GetPad&&pad==g.CPad_GetPad(0))return 0;
     const int appearance=ControlledVehicleAppearance();
     if (VrGameplayInputAllowed() && pad &&
         *reinterpret_cast<const std::uint16_t*>(
@@ -3682,6 +3712,7 @@ void InstallPadHooks() {
     InstallRadioRetuneTiming();
     InstallNitroHook();
     InstallHydraulicsHooks();
+    InstallWaterMonitorHook();
     InstallBicycleSwayHook();
     if (g.LoadBase) {
         constexpr std::uint32_t entry[4]={0xd101c3ffu,0xa9037bfdu,0xa9045ff8u,0xa90557f6u};
@@ -4355,6 +4386,18 @@ void SetIgnitionPose(int model,bool bike,const float pose[12]) {
     std::lock_guard<std::mutex> lock(g_modelMutex);
     auto& c=g_modelCalibration[model]; std::copy_n(pose,12,c.ignitionPose); c.ignitionPoseSet=true; c.ignitionPoseLean=bike&&!IsQuadBikeModelId(model);
 }
+unsigned WaterMonitorClaimedHands(){return g_waterHandMask.load(std::memory_order_acquire);}
+bool WaterMonitorConsumesFire(){return g_waterConsumesB.load(std::memory_order_acquire);}
+bool GetWaterMonitorVisual(watermonitor::Visual* out){
+    if(!out)return false;std::lock_guard<std::mutex> lock(g_stateMutex);
+    if(!CabinVisualContext()){*out={};return false;}*out=g_visual.monitor;return out->visible;
+}
+void SetWaterMonitorPose(int model,const float pose[12]){
+    if(model!=407||!pose)return;for(int i=0;i<12;++i)if(!std::isfinite(pose[i])||std::abs(pose[i])>10)return;
+    const V3 r{pose[3],pose[4],pose[5]},f{pose[6],pose[7],pose[8]},u{pose[9],pose[10],pose[11]};
+    if(std::abs(Length(r)-1)>.01f||std::abs(Length(f)-1)>.01f||std::abs(Length(u)-1)>.01f||Dot(Cross(r,f),u)<.99f)return;
+    {std::lock_guard<std::mutex> lock(g_modelMutex);auto& c=g_modelCalibration[407];std::copy_n(pose,12,c.monitorPose);c.monitorPoseSet=true;}Save();
+}
 unsigned ServiceRadioClaimedHands(){return g_serviceHandMask.load(std::memory_order_acquire);}
 bool ServiceRadioConsumesTrigger(int hand){return hand>=0&&hand<2&&(g_serviceTriggerMask.load(std::memory_order_acquire)&(1u<<hand));}
 bool ServiceRadioWidget(int widget){
@@ -4804,7 +4847,7 @@ void ResetVehiclePreset(int vehicleType) {
                             WHEEL_CAL_FIELD_COUNT,0);
         }
         calibration.radioPoseSet=false;
-        calibration.servicePoseSet=false;
+        calibration.servicePoseSet=false;calibration.monitorPoseSet=false;
         calibration.ignitionPoseSet=false;
         std::fill_n(calibration.ignition,6,0);
         calibration.acceleratorMode=BIKE_ACCEL_HOLD_TRIGGER;
@@ -5060,6 +5103,7 @@ void PublishBikePitchFeedback(bool enabled) {
 void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     g_liftAxis.store(0,std::memory_order_release);
     {std::lock_guard<std::mutex> lock(g_stateMutex);
+        g_waterRawB=rawInput.b;g_waterMonitor.Observe(rawInput.b);g_waterConsumesB.store(g_waterMonitor.ConsumesFire());
         g_serviceRadio.Observe(rawInput.triggers);
         g_serviceTriggerMask.store(g_serviceRadio.TriggerMask(),std::memory_order_release);}
     auto input=rawInput;
@@ -5224,6 +5268,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
                     UpdateIgnition(anchor,activeVehicle,input,hands,occupied,true);
                     UpdateRadioKnob(anchor,activeVehicle,input,hands,occupied,true);
                     BuildServiceTracking(anchor,activeVehicle);
+                    BuildWaterMonitor(anchor,activeVehicle);PublishWaterMonitor(anchor,MonotonicSeconds());
                     UpdateLiftLever(anchor,activeVehicle,input,hands,occupied,true);
                     UpdateNitroLever(anchor,activeVehicle,input,hands,occupied,true);
                     UpdateHydraulicsJoystick(anchor,activeVehicle,input,hands,occupied,true);
@@ -5286,6 +5331,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
             UpdateIgnition(visual,activeVehicle,input,hands,0,true);
             UpdateRadioKnob(visual,activeVehicle,input,hands,0,true);
             BuildServiceTracking(visual,activeVehicle);
+            BuildWaterMonitor(visual,activeVehicle);PublishWaterMonitor(visual,MonotonicSeconds());
             UpdateLiftLever(visual,activeVehicle,input,hands,0,true);
             const unsigned nitroOccupied=physicalweapon::HeldHandMaskRelaxed()|vehicledoors::ClaimedHands()|
                 (calibrationHand>=0&&calibrationHand<2?1u<<calibrationHand:0u);
@@ -5343,7 +5389,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
                          visual.handlePosition[hand][1],
                          visual.handlePosition[hand][2]};
         const float distance=poseValid[hand]?Length(positions[hand]-neutral):1000.0f;
-        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand] || visual.serviceOwner==hand || visual.liftGrabbed[hand] || visual.nitroGrabbed[hand] || visual.hydroGrabbed[hand] || visual.hydroPoint[hand]>.01f || g_hornState.hands[hand].visual.attached;
+        const bool holdsWeapon=(weaponHands&(1u<<hand))!=0 || visual.ignitionGrabbed[hand] || visual.radioGrabbed[hand] || visual.serviceOwner==hand || visual.monitor.owner==hand || visual.liftGrabbed[hand] || visual.nitroGrabbed[hand] || visual.hydroGrabbed[hand] || visual.hydroPoint[hand]>.01f || g_hornState.hands[hand].visual.attached;
         if (g_grabbed[hand]&&(!poseValid[hand]||input.grip[hand]<=0.30f||
                               holdsWeapon)) {
             g_grabbed[hand]=false; g_angleValid[hand]=false;
@@ -5367,7 +5413,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
             const auto frame=vehiclehorn::WheelFrame(visual);
             for (int hand=0;hand<2;++hand) {
                 const bool available=!(weaponHands&(1u<<hand))&&!g_grabbed[hand]&&
-                    !visual.ignitionGrabbed[hand]&&!visual.radioGrabbed[hand]&&visual.serviceOwner!=hand&&!visual.liftGrabbed[hand]&&!visual.nitroGrabbed[hand]&&!visual.hydroGrabbed[hand]&&visual.hydroPoint[hand]<.01f;
+                    !visual.ignitionGrabbed[hand]&&!visual.radioGrabbed[hand]&&visual.serviceOwner!=hand&&visual.monitor.owner!=hand&&!visual.liftGrabbed[hand]&&!visual.nitroGrabbed[hand]&&!visual.hydroGrabbed[hand]&&visual.hydroPoint[hand]<.01f;
                 auto& contact=g_hornState.hands[hand];
                 contact.Step(frame,poses[hand],hand,available,input.grip[hand],dt);
                 visual.horn[hand]=contact.visual;
@@ -5695,6 +5741,9 @@ void RefreshVisualTracking() {
     std::lock_guard<std::mutex> lock(g_stateMutex);
     if (!CabinVisualContext()) { ClearInteractionLocked(); return; }
     RefreshRadioTracking(g_visual);
+    if(g_visual.monitor.visible){void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+        if(!BuildWaterMonitor(g_visual,vehicle))ResetWaterMonitor();
+        PublishWaterMonitor(g_visual,MonotonicSeconds());}
     if(g_visual.serviceVisible){void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
         if(!BuildServiceTracking(g_visual,vehicle)||!(ServiceSeat(vehicle,g_visual.modelId)==g_serviceRadio.seat)){
             ResetServiceRadio();g_visual.serviceOwner=-1;g_visual.serviceReturnWeight=0;}}

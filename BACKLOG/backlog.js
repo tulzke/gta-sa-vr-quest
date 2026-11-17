@@ -640,6 +640,7 @@ const BACKLOG_DATA = {
       "file": "113-videopult-upravleniya-vodometom-firetruck.md",
       "categories": [
         "vehicle-controls",
+        "vehicle-calibration",
         "weapons",
         "graphics",
         "hud",

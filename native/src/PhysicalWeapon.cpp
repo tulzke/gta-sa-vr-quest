@@ -897,7 +897,7 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         headPosition,headOrientation,headValid,trackingEpoch);
     npcgrab::Update(interactionsBlocked||navigationClaimed||driving::GetVehicleDebugMode()!=0, latest, headValid, trackingEpoch);
     vehicledoors::Update(interactionsBlocked||navigationClaimed, latest, headValid, trackingEpoch);
-    const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands() | vehicleentry::ClaimedHands() | driving::ServiceRadioClaimedHands();
+    const unsigned int doorHands = vehicledoors::ClaimedHands() | npcgrab::ClaimedHands() | vehicleentry::ClaimedHands() | (driving::ServiceRadioClaimedHands()|driving::WaterMonitorClaimedHands());
     std::lock_guard<std::mutex> lock(gMutex);
     std::memcpy(gHands, latest, sizeof(gHands));
     std::copy_n(headPosition,3,gInteractionHead);

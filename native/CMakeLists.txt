@@ -60,6 +60,9 @@ configure_file(src/RadioAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" 
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/RadioAssets.S" PROPERTY OBJECT_DEPENDS "${RADIO_BASE_MESH};${RADIO_KNOB_MESH};${RADIO_BASE_RGBA};${RADIO_KNOB_RGBA}")
 
 set(SERVICE_RADIO_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/service-radio/runtime/service-radio.mesh")
+set(WATER_MONITOR_MESH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/firetruck-controller/runtime/monitor.mesh")
+configure_file(src/WaterMonitorAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/WaterMonitorAssets.S" @ONLY)
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/WaterMonitorAssets.S" PROPERTY OBJECT_DEPENDS "${WATER_MONITOR_MESH}")
 configure_file(src/ServiceRadioAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/ServiceRadioAssets.S" @ONLY)
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/ServiceRadioAssets.S" PROPERTY OBJECT_DEPENDS "${SERVICE_RADIO_MESH}")
 
@@ -96,6 +99,7 @@ configure_file(src/HeartbeatAssets.S.in "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAs
 set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/HeartbeatAssets.S" PROPERTY OBJECT_DEPENDS "${HEARTBEAT_WAV};${HEARTBEAT_ATTRIBUTION}")
 
 add_library(savr SHARED
+    "${CMAKE_CURRENT_BINARY_DIR}/WaterMonitorAssets.S"
     "${CMAKE_CURRENT_BINARY_DIR}/ServiceRadioAssets.S"
     src/CockpitClickAudio.cpp
     src/VehicleHydraulicsHandConfig.cpp

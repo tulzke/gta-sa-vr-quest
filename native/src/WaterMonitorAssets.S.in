@@ -1,0 +1,9 @@
+    .section .rodata.savr_water_monitor,"a",@progbits
+    .balign 16
+    .global savr_water_monitor_mesh
+    .hidden savr_water_monitor_mesh
+savr_water_monitor_mesh:
+    .incbin "@WATER_MONITOR_MESH@"
+    .global savr_water_monitor_mesh_end
+    .hidden savr_water_monitor_mesh_end
+savr_water_monitor_mesh_end:

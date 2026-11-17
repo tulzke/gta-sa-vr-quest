@@ -20,6 +20,7 @@
 #include "Calib.h"
 #include "HandAnimation.h"
 #include "Driving.h"
+#include "WaterMonitorModel.h"
 #include "RearMirrorPolicy.h"
 #include "EyeDepth.h"
 #include "GraphicsEffects.h"
@@ -4635,14 +4636,6 @@ bool MissionStartPressActive() {
     return in.a && in.grip[0] < 0.55f && in.grip[1] < 0.55f;
 }
 
-// Both grips + B quits the active minigame (mission/minigame cancel).
-bool MissionCancelChordActive() {
-    if (g_inputBlocked.load(std::memory_order_relaxed)) return false;
-    xr::InputState in{};
-    xr::GetInput(in);
-    return in.b && in.grip[0] >= 0.75f && in.grip[1] >= 0.75f;
-}
-
 // Accept/decline prompt bridge. Mobile yes/no prompts poll a PAIR of touch
 // widgets every frame via IsReleased; the ids vary per prompt, so track the
 // distinct ids polled in the last half second (excluding the pause and
@@ -4915,9 +4908,8 @@ bool OnWidgetReleased(int widgetId, void* outTouchPos, int touchIndex) {
         }
     }
 
-    // World start/quit prompts (basketball court, gym gear, minigame
-    // markers): A starts, both grips + B quits. Logged via the shared poll
-    // tracer so field captures show WHEN a court prompt goes live.
+    // World prompts keep their A start route. Cancellation belongs to the
+    // relevant physical control, without the legacy global grips+B chord.
     if (widgetId == kMissionStartWidget || widgetId == kMinigameStartWidget ||
         widgetId == kMissionCancelWidget ||
         widgetId == kMinigameCancelWidget) {
@@ -4929,13 +4921,6 @@ bool OnWidgetReleased(int widgetId, void* outTouchPos, int touchIndex) {
         LOGI("[vr.touch] start prompt widget=%d (A)", widgetId);
         return true;
     }
-    if ((widgetId == kMissionCancelWidget ||
-         widgetId == kMinigameCancelWidget) &&
-        !original && MissionCancelChordActive()) {
-        LOGI("[vr.touch] cancel prompt widget=%d (grips+B)", widgetId);
-        return true;
-    }
-
     if (widgetId != 161 && widgetId != kParachuteDeployWidget &&
         widgetId != 175 && widgetId != kPhoneAnswerWidget &&
         widgetId != kMissionStartWidget && widgetId != kMissionCancelWidget &&
@@ -18205,6 +18190,7 @@ void DrawNpcWeaponSnapshots() {
 
 namespace rear_mirror_render { void DrawSurface(); }
 namespace weapon_optic_render { void DrawSurfaces(); }
+namespace water_monitor_render { void DrawSurface(); }
 void OnCloudsRender() {
     if (!g_renderingStereoEye && g_origCloudsRender) {
         g_origCloudsRender();                              // retain vanilla non-VR/reflection passes
@@ -18234,6 +18220,7 @@ void OnCloudsRender() {
         // near plane. Share that exact depth projection with the cabin mesh.
         rear_mirror_render::DrawSurface();
         weapon_optic_render::DrawSurfaces();
+        water_monitor_render::DrawSurface();
     }
     for (int i = 0; i < g_pendingWeaponCount; ++i)
         if (g_pendingWeapons[i].clump)
@@ -21267,6 +21254,7 @@ private:
 
 #include "RearMirrorRender.inl"
 #include "WeaponOpticRender.inl"
+#include "WaterMonitorRender.inl"
 
 void OnRenderScene(bool underwater) {
     perf::NotifyRenderSceneEntry();
@@ -21564,6 +21552,8 @@ void OnRenderScene(bool underwater) {
         closeEnginePreFinish();
     rear_mirror_render::Prepare(base);
     weapon_optic_render::ResetFrame();
+    if(water_monitor_render::NeedsRaster())closeEnginePreFinish();
+    water_monitor_render::Prepare();
     unsigned char black[4] = {0, 0, 0, 255};
 
     // Build one eye-independent draw list from the physical ownership state. A
@@ -22174,6 +22164,7 @@ void OnRenderScene(bool underwater) {
         graphicsfx::RenderSkyEye(sc, e);
         if (!g_cloudsHooked) rear_mirror_render::DrawSurface();
         if (!g_cloudsHooked) weapon_optic_render::DrawSurfaces();
+        if (!g_cloudsHooked) water_monitor_render::DrawSurface();
         tSky[e] += NowMs() - tA;
         // Opaque path: the CClouds::Render hook (OnCloudsRender) suppresses the
         // flat eye backdrop and draws the weapon BEFORE world geometry. Fallback

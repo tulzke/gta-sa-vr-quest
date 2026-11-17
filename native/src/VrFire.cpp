@@ -417,6 +417,7 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
 }
 
 bool GetPhysicalTrigger(void* ped, int& weaponType, int& hand, float& level) {
+    if(driving::WaterMonitorConsumesFire())return false;
     if (!ped || !g.FindPlayerPed || ped != g.FindPlayerPed(-1)) return false;
     const bool inVehicle =
         g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false) != nullptr;
@@ -467,7 +468,7 @@ int OnPadGetWeapon(void* pad, void* ped, bool allowPassive) {
     // existing use-gun task. That is still the player pad, so resolve its ped
     // here; otherwise moving while firing can prematurely end the task.
     if (!g.CPad_GetPad || pad != g.CPad_GetPad(0)) return vanilla;
-    if (catalyst::Active()) { ResetPadTriggerLatch(); return 0; }
+    if (catalyst::Active()||driving::WaterMonitorConsumesFire()) { ResetPadTriggerLatch(); return 0; }
     void* const playerPed = ped ? ped : (g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr);
     int weaponType = 0;
     int hand = -1;

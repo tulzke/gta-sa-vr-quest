@@ -43,6 +43,20 @@ void RenderWorldStableSkyPolys(std::uintptr_t,const MobileDistanceFogSnapshot&){
 production = helpers + function(camera, 'MatMul34') + function(camera, 'SetRotate34')
 production += (ROOT / 'native/src/WeaponOpticFrame.inl').read_text(encoding='utf8')
 production += mirror + (ROOT / 'native/src/WeaponOpticRender.inl').read_text(encoding='utf8')
+production += r'''
+namespace vrcam {bool TrackingPointToWorld(const float* a,float* b){std::copy_n(a,3,b);return true;}}
+namespace driving {
+watermonitor::Visual monitorVisual{};
+bool GetWaterMonitorVisual(watermonitor::Visual* out){*out=monitorVisual;return out->visible;}
+}
+'''
+monitor = (ROOT / 'native/src/WaterMonitorRender.inl').read_text(encoding='utf8')
+start = monitor.index('void RenderEffects(')
+end = monitor.index('\nvoid Prepare()', start)
+monitor = monitor[:start] + 'void RenderEffects(void*){}\n' + monitor[end:]
+monitor = monitor.replace('static const bool loaded=model.Load(savr_water_monitor_mesh,static_cast<std::size_t>(savr_water_monitor_mesh_end-savr_water_monitor_mesh));',
+                          'const bool loaded=!model.vertices.empty(); // Host loads the same asset below.')
+production += monitor
 scope = (ROOT / 'native/src/ScopeAim.cpp').read_text(encoding='utf8')
 production += r'''
 namespace heat_test {
@@ -68,9 +82,10 @@ for name in ('ClearHeat', 'ValidHeatEntity', 'UpdateHeat', 'ApplyReticleAim'):
     production += function(scope, name)
 production += '\n}\n'
 harness = (ROOT / 'tools/tests/rear_mirror.cpp').read_text(encoding='utf8')
-harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n' + harness
+harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include <fstream>\n#include <iterator>\n' + harness
 harness = harness.replace('// PRODUCTION_ADAPTER', production)
 tests = (ROOT / 'tools/tests/weapon_optics.inc').read_text(encoding='utf8')
+tests += (ROOT / 'tools/tests/water_monitor_render.inc').read_text(encoding='utf8').replace('WATER_ASSET_PATH', (ROOT / 'assets/firetruck-controller/runtime/monitor.mesh').as_posix())
 harness = harness[:harness.rfind('}')] + tests + '\n}\n'
 cpp = OUT / 'weapon_optics.cpp'
 cpp.write_text(harness, encoding='utf8')
