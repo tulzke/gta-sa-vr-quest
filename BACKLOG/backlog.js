@@ -452,19 +452,6 @@ const BACKLOG_DATA = {
       "status": "in_progress"
     },
     {
-      "id": 101,
-      "title": "Работающий фотоаппарат с экраном и сохранением снимков через API",
-      "file": "101-fotoapparat-ekran-i-sokhranenie-snimkov.md",
-      "categories": [
-        "weapons",
-        "hud",
-        "missions",
-        "story"
-      ],
-      "priority": "high",
-      "status": "in_progress"
-    },
-    {
       "id": 102,
       "title": "Иммерсивные автоматы с газировкой и снеками",
       "file": "102-immersivnye-torgovye-avtomaty.md",
