@@ -66,7 +66,7 @@ inline Selection Select(float grip, float trigger, const Context& context) {
     if (context.steering) return fixed(Gesture::Grip,grip);
     if (context.ball) return fixed(Gesture::OpenPalm);
     if (context.support && context.weaponType == 43)
-        return fixed(Gesture::GripPistol, grip);
+        return fixed(Gesture::GripPistolOffhand, grip);
     if (context.support && Launcher(context.weaponType))
         return fixed(Gesture::GripPistolShoot,trigger);
     if (context.support && ShotgunOffhandWeapon(context.weaponType))
