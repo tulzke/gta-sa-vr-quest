@@ -36,9 +36,13 @@ struct CamBasis{V3 right,forward,up,pos;};
 struct RwMat{float r[3]{},u[3]{},a[3]{},t[3]{};};
 struct GameSymbols{using Vec3=V3;};
 using namespace savr;
+namespace savr::xr {
+struct InputState { float rightStick[2]{}; };
+float zoomAxis{};
+void GetInput(InputState& input) { input.rightStick[1] = zoomAxis; }
+}
 namespace scopeaim {
 int hand=1;
-float zoom=8;
 int PhotoHand(){return hand;}
 }
 namespace calib {
@@ -106,8 +110,11 @@ int(*g_origPhotoCommands)(void*,int)=NativeCommand;
 camera_source=(R/'native/src/VrCamera.cpp').read_text(encoding='utf8')
 screen_start=camera_source.index('class ScopedScreenDimensions')
 screen_end=camera_source.index('\n};',screen_start)+3
+scope_source=(R/'native/src/ScopeAim.cpp').read_text(encoding='utf8')
+zoom_state=re.search(r'^std::atomic<float> gCameraZoom\{[^\n]+',scope_source,re.M).group()
 code=code.replace('int PhotoHand(){return hand;}', 'int PhotoHand(){return hand;}\n'
-    + fn('ScopeAim.cpp','PhotoFovX').replace('gCameraZoom.load(std::memory_order_relaxed)', 'scopeaim::zoom'))
+    + zoom_state + '\nstd::uint64_t gCameraZoomTime{};\n'
+    + fn('ScopeAim.cpp','UpdateCameraZoom') + '\n' + fn('ScopeAim.cpp','PhotoFovX'))
 code+=camera_source[screen_start:screen_end]+fn('VrCamera.cpp','ApplyTwoHandRotation')+fn('WeaponOpticFrame.inl','BuildPhotoLens')+fn('VrCamera.cpp','BuildPhotoView')+fn('VrCamera.cpp','OnPhotoCommands')+fn('VrCamera.cpp','FirePhotograph')+r"""
 bool NativeFire(void*,void*,V3* origin,V3*,void*,V3*,V3*){
  ++fireCalls;unsigned a=camera[0x5f];CHECK(Read<std::uint16_t>(camera,a*0x228+0x186)==46);
@@ -121,13 +128,31 @@ bool NativeFire(void*,void*,V3* origin,V3*,void*,V3*,V3*){
  return fireResult;
 }
 void Test(){
+ CHECK(scopeaim::gCameraZoom.load()==1.8f);
+ xr::zoomAxis=-1.f;
+ scopeaim::UpdateCameraZoom(100);
+ scopeaim::UpdateCameraZoom(200);
+ CHECK(scopeaim::gCameraZoom.load()==1.8f);
+ xr::zoomAxis=1.f;
+ for (std::uint64_t now=300; now<=2700; now+=100) scopeaim::UpdateCameraZoom(now);
+ CHECK(scopeaim::gCameraZoom.load()==16.f);
+ CHECK(scopeaim::PhotoFovX(105)<10.f);
+ xr::zoomAxis=-1.f;
+ for (std::uint64_t now=2800; now<=5200; now+=100) scopeaim::UpdateCameraZoom(now);
+ CHECK(scopeaim::gCameraZoom.load()==1.8f);
  Put(camera,0x18,static_cast<void*>(placeable));CamBasis native{{-1,0,0},{0,1,0},{0,0,1},{400,500,600}};WriteCam((std::uintptr_t)camera,native);
  std::memset(placeable,0x42,sizeof(placeable));int dummy=0;
  for(unsigned active=0;active<3;++active){camera[0x5f]=active;Put<float>(camera,active*0x228+0x204,70);Put<std::uint16_t>(camera,active*0x228+0x186,4);
   const std::vector<unsigned char> before(camera,camera+sizeof(camera));const std::vector<unsigned char> beforeP(placeable,placeable+sizeof(placeable));
-  for(float z:{1.0f,1.8f,4.0f,8.0f}){scopeaim::zoom=z;CHECK(OnPhotoCommands(&dummy,0x801)==17);CHECK(std::abs(observedFov-scopeaim::PhotoFovX(105))<1e-5f);CHECK((observedFov<20)==(z==8));CHECK(std::memcmp(camera,before.data(),before.size())==0);}
+  for(float z:{photoscreen::MinZoom,4.0f,8.0f,photoscreen::MaxZoom}){
+   scopeaim::gCameraZoom.store(z);
+   CHECK(OnPhotoCommands(&dummy,0x801)==17);
+   CHECK(std::abs(observedFov-scopeaim::PhotoFovX(105))<1e-5f);
+   CHECK((observedFov<20)==(z>=8.f));
+   CHECK(std::memcmp(camera,before.data(),before.size())==0);
+  }
   for(int hand:{0,1})for(float yaw:{0.0f,1.5707963f,3.1415926f,-1.5707963f})for(bool ok:{false,true}){
-   scopeaim::zoom=8;scopeaim::hand=hand;handYaw=yaw;fireResult=ok;
+   scopeaim::gCameraZoom.store(photoscreen::MaxZoom);scopeaim::hand=hand;handYaw=yaw;fireResult=ok;
    const int beforeRequests=photo_render::requests;
    CHECK(FirePhotograph(&dummy,&dummy,hand)==ok);
    CHECK(std::memcmp(camera,before.data(),before.size())==0&&std::memcmp(placeable,beforeP.data(),beforeP.size())==0&&drawFov==70);

@@ -43,7 +43,8 @@ void Prepare(const RwMat& model) {
     preview.visible = true;
     preview.width = photoscreen::PreviewWidth;
     preview.height = photoscreen::PreviewHeight;
-    preview.farClip = weaponoptic::NormalFar;
+    preview.farClip = photoscreen::PreviewFarClip;
+    preview.extendFog = true;
     preview.tanFov = std::tan(scopeaim::PhotoFovX(kVrFovX) * 3.14159265f / 360.f);
     preview.flipHorizontal = profile.value[8] != 0;
     preview.flipVertical = profile.value[9] != 0;
@@ -58,7 +59,7 @@ void PrepareRasters() {
         capture.width = photoscreen::CaptureWidth;
         capture.height = photoscreen::CaptureHeight;
         capture.detailed = true;
-        capture.farClip = weaponoptic::DetailedFar;
+        capture.farClip = photoscreen::CaptureFarClip;
         capture.raster = g.RwRasterCreate(capture.width, capture.height, 32, 5);
     }
 }

@@ -37,6 +37,7 @@ weaponoptic::Profile SnapshotOptic(int){return opticProfile;}
 namespace scopeaim {
 float WeaponZoom(int type){return type==34?2.5f:1.8f;}
 HeatLockState HeatLockSnapshot(){return {};}
+float PhotoFovX(float){return 72.f;}
 }
 void RenderWorldStableSkyPolys(std::uintptr_t,const MobileDistanceFogSnapshot&){}
 '''
@@ -54,6 +55,10 @@ void PoseToGame(const float p[3], const float o[4], V3& position, Q& orientation
 production += function(camera, 'HandWeaponMatrixForPoseCalibrated')
 production += (ROOT / 'native/src/WeaponOpticFrame.inl').read_text(encoding='utf8')
 production += mirror + (ROOT / 'native/src/WeaponOpticRender.inl').read_text(encoding='utf8')
+photo = (ROOT / 'native/src/PhotoRender.inl').read_text(encoding='utf8')
+production += 'constexpr float kVrFovX = 105.f;\n'
+production += photo[:photo.index('void Request(')]
+production += function(photo, 'Prepare') + function(photo, 'PrepareRasters') + '\n}\n'
 production += r'''
 namespace vrcam {bool TrackingPointToWorld(const float* a,float* b){std::copy_n(a,3,b);return true;}}
 namespace driving {
@@ -94,7 +99,7 @@ for name in ('ClearHeat', 'ValidHeatEntity', 'UpdateHeat', 'ApplyReticleAim'):
     production += function(scope, name)
 production += '\n}\n'
 harness = (ROOT / 'tools/tests/rear_mirror.cpp').read_text(encoding='utf8')
-harness = '#include "Calib.h"\n#include "TrackingFrame.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include "WaterMonitorCamera.h"\n#include "WaterMonitorStream.h"\n#include <fstream>\n#include <iterator>\n' + harness
+harness = '#include "Calib.h"\n#include "PhotoScreen.h"\n#include "TrackingFrame.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include "WaterMonitorCamera.h"\n#include "WaterMonitorStream.h"\n#include <fstream>\n#include <iterator>\n' + harness
 harness = harness.replace('// PRODUCTION_ADAPTER', production)
 tests = (ROOT / 'tools/tests/weapon_optics.inc').read_text(encoding='utf8')
 tests += (ROOT / 'tools/tests/water_monitor_render.inc').read_text(encoding='utf8').replace('WATER_ASSET_PATH', (ROOT / 'assets/firetruck-controller/runtime/monitor.mesh').as_posix())

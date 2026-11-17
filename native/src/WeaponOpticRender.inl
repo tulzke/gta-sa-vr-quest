@@ -7,7 +7,7 @@ constexpr int Resolution=768;
 struct Optic {
     bool visible{}, imageReady{};
     bool flipHorizontal{true},flipVertical{};
-    bool detailed{},remote{};
+    bool detailed{},remote{},extendFog{};
     int width{Resolution},height{Resolution};
     void* excluded{};
     float farClip=weaponoptic::NormalFar;
@@ -187,9 +187,8 @@ bool RenderOne(Optic& optic, void* sc, std::uintptr_t cam, bool forceFacing,
         *reinterpret_cast<float*>(camera+0xa0)=0.f;
         *reinterpret_cast<float*>(camera+0xa4)=0.f;
         g.RwCameraSetNearClipPlane(sc,.1f);g.RwCameraSetFarClipPlane(sc,optic.farClip);
-        // Keep the weather's relative fog ramp, extending its range with the
-        // detailed camera so the old fog end does not hide the additional world.
-        const float fogScale=optic.detailed && fog.valid && fog.end>1.f
+        // Keep the weather's relative fog ramp over the extended camera range.
+        const float fogScale=(optic.detailed || optic.extendFog) && fog.valid && fog.end>1.f
             ? std::max(1.f,optic.farClip/fog.end) : 1.f;
         const float fogStart=fog.valid ? fog.start*fogScale : optic.farClip*.65f;
         const float fogEnd=fog.valid ? std::min(fog.end*fogScale,optic.farClip) : optic.farClip;

@@ -1,6 +1,7 @@
 #include "ScopeAim.h"
 
 #include "Log.h"
+#include "PhotoScreen.h"
 #include "PhysicalWeapon.h"
 #include "PairedWeapons.h"
 #include "Symbols.h"
@@ -25,9 +26,6 @@ constexpr int kSniperType = 34;
 constexpr int kRpgType = 35;
 constexpr int kHeatSeekerType = 36;
 constexpr int kCameraType = 43;
-constexpr float kCameraZoom = 1.8f;
-constexpr float kCameraMinZoom = 1.0f;
-constexpr float kCameraMaxZoom = 8.0f;
 struct V3 {
     float x{}, y{}, z{};
 };
@@ -61,7 +59,7 @@ std::uint64_t NowMs() {
 std::atomic<int> gCameraHand{-1};
 std::atomic<bool> gSniperFireAvailable{false};
 std::atomic<bool> gProjectileFireAvailable{false};
-std::atomic<float> gCameraZoom{kCameraZoom};
+std::atomic<float> gCameraZoom{photoscreen::MinZoom};
 std::atomic<float> gSniperZoom{2.5f}, gHeatZoom{1.8f};
 std::atomic<bool> gWeaponZoomInput{false};
 std::uint64_t gWeaponZoomTime{};
@@ -86,7 +84,7 @@ void UpdateCameraZoom(std::uint64_t now) {
         (std::min(std::abs(axis), 1.0f) - 0.25f) / 0.75f, axis);
     const float zoom = gCameraZoom.load(std::memory_order_relaxed);
     gCameraZoom.store(std::clamp(zoom * std::exp(rate * elapsed * 1.2f),
-                               kCameraMinZoom, kCameraMaxZoom),
+                               photoscreen::MinZoom, photoscreen::MaxZoom),
                       std::memory_order_relaxed);
 }
 

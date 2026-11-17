@@ -243,3 +243,23 @@
     nearHead.pos=nearFrame.surface.pos-nearFrame.surface.forward*.5f;
     opt::Prepare(0,34,gun,nearHead);CHECK(!opt::optics[0].detailed&&opt::optics[0].farClip==NormalFar);
     std::puts("optic range: eye-close 1200m, lowered 450m, hysteresis/front/side; legacy profile migration and 0.1-unit precision PASS");
+
+    calib::opticProfile = Defaults(PhotoCamera);
+    photo_render::Prepare(cameraModel);
+    CHECK(photo_render::preview.visible && !photo_render::preview.detailed);
+    photo_render::pending = true;
+    g.RwRasterCreate = [](int, int, int, int) -> void* { static int raster; return &raster; };
+    photo_render::PrepareRasters();
+    g.RwRasterCreate = nullptr;
+    auto& photoCapture = photo_render::capture;
+    photoCapture.visible = true;
+    photoCapture.frame.camera = photo_render::preview.frame.camera;
+    photoCapture.tanFov = photo_render::preview.tanFov;
+    g.RwCameraEndUpdate=[](void* c){detailedClip=r::Read<float>(c,0xac);detailedFog=fogState.end;};
+    CHECK(opt::RenderOne(photo_render::preview,camera.data(),reinterpret_cast<std::uintptr_t>(&head),true,nullptr));
+    CHECK(detailedClip==900.f && detailedFog==900.f);
+    CHECK(opt::RenderOne(photoCapture,camera.data(),reinterpret_cast<std::uintptr_t>(&head),true,nullptr));
+    CHECK(detailedClip==2400.f && detailedFog==2400.f);
+    CHECK(camera==originalCamera&&fogState.start==originalFog.start&&fogState.end==originalFog.end);
+    g.RwCameraEndUpdate=[](void*){};
+    std::puts("photo range: preview and still camera clips and fog, main camera restoration PASS");
