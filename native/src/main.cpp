@@ -1306,7 +1306,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             if (calibGroup==savr::weaponmenu::ROOT) {
                 calAdjDir=calAdjHeld=calAdjSince=0;
                 if (back || (enter && calibSel==ROWS-1)) menuPage=PG_MAIN;
-                else if (enter && (calibSel!=4 || savr::weaponoptic::Supported(type))) {
+                else if (enter && (calibSel!=4 || savr::weaponoptic::Calibratable(type))) {
                     calibGroup=calibSel+1; calibSel=0;
                 }
                 break;
