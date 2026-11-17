@@ -827,6 +827,16 @@ const BACKLOG_DATA = {
       ],
       "priority": "medium",
       "status": "open"
+    },
+    {
+      "id": 136,
+      "title": "Пространственное закрепление VR-меню без вращения вслед за игроком",
+      "file": "136-prostranstvennoe-zakreplenie-vr-menyu.md",
+      "categories": [
+        "hud"
+      ],
+      "priority": "medium",
+      "status": "open"
     }
   ]
 };
