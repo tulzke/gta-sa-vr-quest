@@ -174,23 +174,35 @@ int main(){
  p=SnapshotRecoil(22);assert(p.verticalDegrees==12.4f && p.supportReductionPercent==70.f);
  assert(SnapshotRecoil(32).verticalDegrees==6.7f);
  assert(SnapshotRecoil(22,2).verticalDegrees==22.1f);
- AdjustRecoilTuning(22,0,1,2);Init();
+ AdjustRecoilTuning(22,savr::recoil::Vertical,1,2);
+ AdjustRecoilTuning(22,savr::recoil::Shoulder,1,2);
+ AdjustRecoilTuning(22,savr::recoil::ReturnSpeed,1,2);Init();
  assert(SnapshotRecoil(22,2).verticalDegrees==22.2f && SnapshotRecoil(22,0).verticalDegrees==12.4f);
+ assert(SnapshotRecoil(22,2).shoulderMm==7.3f && SnapshotRecoil(22,0).shoulderMm==4.5f);
+ assert(SnapshotRecoil(22,2).returnSpeedPercent==105.f && SnapshotRecoil(22,0).returnSpeedPercent==100.f);
  {std::ifstream f("recoil-calib.ini");std::string text((std::istreambuf_iterator<char>(f)),{});
-  assert(text.find("recoil_weapon_skill 22 2 22.2 4.2 6.3 81.0")!=std::string::npos);}
+  assert(text.find("recoil_weapon_skill 22 2 22.2 4.2 7.3 81.0 105.0\n")!=std::string::npos);}
  {std::ofstream f("recoil-calib.ini");
-  f<<"recoil_weapon 22 -5 100 900 200\nrecoil_weapon 32 nan 2 3 nan\n";}
+  f<<"recoil_weapon 22 -5 100 900 200\nrecoil_weapon 32 nan 2 3 nan\n";
+  f<<"recoil_weapon_skill 30 0 10 10 70 85 -1\n";
+  f<<"recoil_weapon_skill 30 1 8 7 50.4 88 900\n";
+  f<<"recoil_weapon_skill 30 2 4 2.4 19 95 nan\n";}
  Init();p=SnapshotRecoil(22);tec=SnapshotRecoil(32);
  assert(p.verticalDegrees==0 && p.horizontalDegrees==20 && p.shoulderMm==200 && p.supportReductionPercent==100);
  assert(std::isfinite(tec.verticalDegrees) && std::isfinite(tec.supportReductionPercent));
+ assert(SnapshotRecoil(22,0).returnSpeedPercent==80 && SnapshotRecoil(22,2).returnSpeedPercent==130);
+ assert(SnapshotRecoil(30,0).returnSpeedPercent==25 && SnapshotRecoil(30,1).returnSpeedPercent==300);
+ assert(SnapshotRecoil(30,2).returnSpeedPercent==130);
  {std::ofstream f("recoil-calib.ini");f<<"recoil_weapon 22 1 2\nrecoil_weapon 80 1 2 3 4\n";}
  Init();assert(SnapshotRecoil(22).verticalDegrees==savr::recoil::Defaults(22).verticalDegrees);
  // Old four-component rows retain the shotgun's default disarm. Explicit
  // per-skill ON/OFF survives save/load and is independent of row order.
  {std::ofstream f("recoil-calib.ini");
-  f<<"recoil_one_hand_disarm 25 1 0\nrecoil_weapon_skill 25 1 38 12 6 95\n";}
+  f<<"recoil_one_hand_disarm 25 1 0\nrecoil_weapon_skill 25 1 38 12 6 95\n";
+  f<<"recoil_weapon_skill 25 2 30 20 90 80\n";}
  Init();assert(SnapshotRecoil(25,0).disarmOneHanded);
  assert(!SnapshotRecoil(25,1).disarmOneHanded);
+ assert(SnapshotRecoil(25,1).returnSpeedPercent==100 && SnapshotRecoil(25,2).returnSpeedPercent==130);
  assert(!SnapshotRecoil(22,0).disarmOneHanded);
  auto shotgun=SnapshotRecoil(25,2);shotgun.disarmOneHanded=false;
  SetRecoilTuning(25,shotgun,2);Init();

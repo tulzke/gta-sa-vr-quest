@@ -299,14 +299,17 @@ void Init() {
             continue;
         }
         int recoilType{},recoilSkill{};recoil::Tuning recoilTuning;
-        if(std::sscanf(line,"recoil_weapon_skill %d %d %f %f %f %f",&recoilType,&recoilSkill,
+        const int recoilFields=std::sscanf(line,"recoil_weapon_skill %d %d %f %f %f %f %f",&recoilType,&recoilSkill,
             &recoilTuning.verticalDegrees,&recoilTuning.horizontalDegrees,
-            &recoilTuning.shoulderMm,&recoilTuning.supportReductionPercent)==6) {
+            &recoilTuning.shoulderMm,&recoilTuning.supportReductionPercent,&recoilTuning.returnSpeedPercent);
+        if(recoilFields>=6) {
             if(recoilType>=0 && recoilType<kMaxWeapons && recoil::Supported(recoilType) &&
                recoilSkill>=0 && recoilSkill<3)
             {
-                recoilTuning.disarmOneHanded=g_recoilTuning[recoilType][recoilSkill].disarmOneHanded;
-                g_recoilTuning[recoilType][recoilSkill]=recoil::Sanitize(recoilTuning,recoilType,recoilSkill);
+                auto& profile=g_recoilTuning[recoilType][recoilSkill];
+                recoilTuning.disarmOneHanded=profile.disarmOneHanded;
+                if(recoilFields==6) recoilTuning.returnSpeedPercent=profile.returnSpeedPercent;
+                profile=recoil::Sanitize(recoilTuning,recoilType,recoilSkill);
             }
             continue;
         }
@@ -317,8 +320,10 @@ void Init() {
             if(recoilType>=0 && recoilType<kMaxWeapons && recoil::Supported(recoilType))
                 for(int skill=0;skill<3;++skill)
                 {
-                    recoilTuning.disarmOneHanded=g_recoilTuning[recoilType][skill].disarmOneHanded;
-                    g_recoilTuning[recoilType][skill]=recoil::Sanitize(recoilTuning,recoilType,skill);
+                    auto& profile=g_recoilTuning[recoilType][skill];
+                    recoilTuning.disarmOneHanded=profile.disarmOneHanded;
+                    recoilTuning.returnSpeedPercent=profile.returnSpeedPercent;
+                    profile=recoil::Sanitize(recoilTuning,recoilType,skill);
                 }
             continue;
         }
@@ -465,11 +470,11 @@ void Save() {
     std::fprintf(f, "recoil_level %d\n", RecoilLevel());
     std::fprintf(f, "physical_recoil_level %d\n", PhysicalRecoilLevel());
     std::fprintf(f, "reload_type %d\n", arcadereload::GetType());
-    std::fputs("# recoil_weapon_skill <type> <skill:0=poor,1=gangster,2=hitman> <vertical_deg> <jitter_deg> <shoulder_mm> <two_hand_reduction_pct>\n",f);
+    std::fputs("# recoil_weapon_skill <type> <skill:0=poor,1=gangster,2=hitman> <vertical_deg> <jitter_deg> <shoulder_mm> <two_hand_reduction_pct> <return_speed_pct>\n",f);
     for(int type=0;type<kMaxWeapons;++type)if(recoil::Supported(type))for(int skill=0;skill<3;++skill) {
         const auto& t=g_recoilTuning[type][skill];
-        std::fprintf(f,"recoil_weapon_skill %d %d %.1f %.1f %.1f %.1f\n",type,skill,
-            t.verticalDegrees,t.horizontalDegrees,t.shoulderMm,t.supportReductionPercent);
+        std::fprintf(f,"recoil_weapon_skill %d %d %.1f %.1f %.1f %.1f %.1f\n",type,skill,
+            t.verticalDegrees,t.horizontalDegrees,t.shoulderMm,t.supportReductionPercent,t.returnSpeedPercent);
         std::fprintf(f,"recoil_one_hand_disarm %d %d %d\n",type,skill,t.disarmOneHanded?1:0);
     }
     // Retain the compatibility row for readers that do not support per-weapon state.
@@ -647,11 +652,11 @@ void SetRecoilTuning(int weaponType,recoil::Tuning tuning,int skill) {
     Save();
 }
 void AdjustRecoilTuning(int weaponType,int field,int direction,int skill) {
-    if(field<0 || field>3 || !direction || !recoil::Supported(weaponType))return;
+    if(field<0 || field>=recoil::TuningFieldCount || !direction || !recoil::Supported(weaponType))return;
     auto t=SnapshotRecoil(weaponType,skill);
-    float* values[]{&t.verticalDegrees,&t.horizontalDegrees,&t.shoulderMm,&t.supportReductionPercent};
-    const float step=field==3 ? 1.f : .1f;
-    *values[field]=std::round((*values[field]+direction*step)*10.f)/10.f;
+    float* values[]{&t.verticalDegrees,&t.horizontalDegrees,&t.shoulderMm,&t.supportReductionPercent,&t.returnSpeedPercent};
+    constexpr float steps[]{.1f,.1f,1.f,1.f,5.f};
+    *values[field]=std::round((*values[field]+direction*steps[field])*10.f)/10.f;
     SetRecoilTuning(weaponType,t,skill);
 }
 const char* PhysicalRecoilLevelName() {

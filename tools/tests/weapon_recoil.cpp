@@ -43,6 +43,26 @@ int main(){
         assert(Near(s.sample.yaw,reference.yaw));
         assert(Near(s.sample.rear,reference.rear));
     }
+    {
+        Tuning tuning{10,3,20,65,false,50};
+        const Profile slow=ForWeapon(30,false,2,tuning);
+        tuning.returnSpeedPercent=200;
+        const Profile fast=ForWeapon(30,false,2,tuning);
+        assert(Near(slow.omega,10) && Near(fast.omega,40));
+        assert(Near(slow.kick,fast.kick) && Near(slow.back,fast.back));
+        State a,b;
+        a.Shot(slow,{0,0,-1});b.Shot(fast,{0,0,-1});
+        a.Advance(1.f/slow.omega);b.Advance(1.f/fast.omega);
+        assert(Near(a.sample.pitch,b.sample.pitch) && Near(a.sample.rear,b.sample.rear));
+        a={};b={};
+        a.Shot(slow);b.Shot(fast);
+        a.Advance(.15f);b.Advance(.15f);
+        assert(a.sample.pitch>b.sample.pitch && a.sample.rear>b.sample.rear);
+        assert(std::abs(a.sample.yaw)>std::abs(b.sample.yaw));
+        assert(Defaults(30,0).returnSpeedPercent==80);
+        assert(Defaults(30,1).returnSpeedPercent==100);
+        assert(Defaults(30,2).returnSpeedPercent==130);
+    }
     // Stress a long burst against the soft ceiling. Motion must remain alive
     // at saturation, without allowing the jitter to exceed the hard envelope.
     State burst;float lo=100,hi=0;
@@ -84,8 +104,9 @@ int main(){
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,1)==42);
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,2)==36);
     assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,3)==37);
-    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,7)==43);
-    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,8)==22);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,6)==savr::weaponmenu::RecoilReturnSpeed);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,8)==43);
+    assert(savr::weaponmenu::Field(savr::weaponmenu::EFFECTS,9)==22);
     assert(Defaults(25,0).disarmOneHanded && !Defaults(25,2).disarmOneHanded);
     assert(!Defaults(22).disarmOneHanded && !Defaults(38).disarmOneHanded);
     for(int skill=0;skill<3;++skill){

@@ -4,6 +4,7 @@
 namespace savr::weaponmenu {
 enum Group { ROOT, MODEL, AIM, SUPPORT, EFFECTS, OPTIC, AMMO };
 constexpr int PhotoImageRotation = 44;
+constexpr int RecoilReturnSpeed = 45;
 constexpr const char* Name(int group, int type = -1) {
     return group==MODEL?"WEAPON MODEL":group==AIM?"AIM / LASER":
            group==SUPPORT?"SUPPORT GRIP":group==EFFECTS?"RECOIL / TRACERS":
@@ -12,10 +13,14 @@ constexpr const char* Name(int group, int type = -1) {
 }
 constexpr int Rows(int group, int type = -1) {
     return group==ROOT?7:group==MODEL?7:group==AIM?10:group==SUPPORT?8:
-           group==EFFECTS?12:group==OPTIC?(type==weaponoptic::PhotoCamera?13:12):9;
+           group==EFFECTS?13:group==OPTIC?(type==weaponoptic::PhotoCamera?13:12):9;
 }
 // Stable legacy field/action identifiers shared by input and rendering.
 constexpr int Field(int group, int row, int type = -1) {
+    if (group == EFFECTS && row >= 6) {
+        if (row == 6) return RecoilReturnSpeed;
+        --row;
+    }
     if (group == OPTIC && type == weaponoptic::PhotoCamera) {
         if (row == 8) return PhotoImageRotation;
         if (row > 8) --row;
@@ -28,16 +33,19 @@ static_assert(Field(MODEL,5)==11 && Field(SUPPORT,6)==18);
 static_assert(Field(OPTIC,10)==35 && Rows(AMMO)==9);
 static_assert(Field(OPTIC,11,weaponoptic::PhotoCamera)==35 &&
               Rows(OPTIC,weaponoptic::PhotoCamera)==13);
-constexpr bool CompleteLegacyMapping() {
-    bool seen[44]{};
+static_assert(Field(EFFECTS,5)==39 && Field(EFFECTS,6)==RecoilReturnSpeed &&
+              Field(EFFECTS,7)==40 && Field(EFFECTS,11)==24);
+constexpr bool CompleteMapping() {
+    bool seen[RecoilReturnSpeed+1]{};
     for (int group=MODEL;group<=OPTIC;++group)
         for (int row=0;row<Rows(group)-1;++row) {
             const int field=Field(group,row);
-            if (field<0 || field>=44 || seen[field]) return false;
+            if (field<0 || field>RecoilReturnSpeed || field==PhotoImageRotation || seen[field]) return false;
             seen[field]=true;
         }
-    for (bool value:seen) if (!value) return false;
+    for (int field=0;field<=RecoilReturnSpeed;++field)
+        if (field!=PhotoImageRotation && !seen[field]) return false;
     return true;
 }
-static_assert(CompleteLegacyMapping(),"Every original calibration field/action must occur exactly once");
+static_assert(CompleteMapping(),"Every common calibration field/action must occur exactly once");
 }

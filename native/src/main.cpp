@@ -1371,8 +1371,12 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 else if(firstTick)savr::calib::CycleRecoilEditingSkill(dir);
             } else if (fieldRow == 42) {
                 if(enter)savr::cheats::ApplyWeaponSkillLevel(type,savr::calib::RecoilEditingSkill());
+            } else if (fieldRow == savr::weaponmenu::RecoilReturnSpeed) {
+                if(fire)savr::calib::AdjustRecoilTuning(type,savr::recoil::ReturnSpeed,dir*mult,savr::calib::RecoilEditingSkill());
             } else if (fieldRow >= 37 && fieldRow <= 40) {
-                if(fire)savr::calib::AdjustRecoilTuning(type,fieldRow-37,dir*mult,savr::calib::RecoilEditingSkill());
+                const int tuningField=fieldRow-37;
+                const int step=tuningField==savr::recoil::Shoulder?dir:dir*mult;
+                if(fire)savr::calib::AdjustRecoilTuning(type,tuningField,step,savr::calib::RecoilEditingSkill());
             } else if (fieldRow == 36) {
                 if (enter) savr::calib::CyclePhysicalRecoil(+1);
                 else if (firstTick) savr::calib::CyclePhysicalRecoil(dir);

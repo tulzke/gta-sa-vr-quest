@@ -127,7 +127,7 @@ void SetPhysicalRecoilLevel(int level);
 void CyclePhysicalRecoil(int direction);
 recoil::Tuning SnapshotRecoil(int weaponType,int skill=0);
 void SetRecoilTuning(int weaponType,recoil::Tuning tuning,int skill=0); // persists
-void AdjustRecoilTuning(int weaponType,int field,int direction,int skill=0); // 0..3
+void AdjustRecoilTuning(int weaponType,int field,int direction,int skill=0); // recoil::TuningField
 int RecoilEditingSkill();
 void CycleRecoilEditingSkill(int direction);
 const char* RecoilSkillName(int skill);

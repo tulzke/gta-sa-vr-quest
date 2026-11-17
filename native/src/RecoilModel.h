@@ -6,6 +6,8 @@
 namespace savr::recoil {
 constexpr float kRad = .01745329252f;
 constexpr float kReturnOmega = 20.f;
+constexpr float kMinReturnSpeedPercent = 25.f;
+constexpr float kMaxReturnSpeedPercent = 300.f;
 inline bool Supported(int type) { return (type >= 22 && type <= 34) || type == 38; }
 
 struct Vec {
@@ -28,7 +30,9 @@ struct Profile {
 struct Tuning {
     float verticalDegrees{}, horizontalDegrees{1.9f}, shoulderMm{2.f}, supportReductionPercent{65.f};
     bool disarmOneHanded{};
+    float returnSpeedPercent{100.f};
 };
+enum TuningField { Vertical, Horizontal, Shoulder, SupportReduction, ReturnSpeed, TuningFieldCount };
 #include "DefaultRecoilCalibration.inl"
 struct Shape {float kick,limit;};
 inline Shape WeaponShape(int type) {
@@ -51,19 +55,23 @@ inline Tuning Defaults(int type,int skill=0) {
     skill=std::clamp(skill,0,2);
     for(const auto& captured:kCapturedRecoil)
         if(captured.type==type && captured.skill==skill)return captured.tuning;
-    const float mastery=1.f-.2f*std::clamp(skill,0,2);
+    const float mastery=1.f-.2f*skill;
+    constexpr float returnSpeeds[]{80.f,100.f,130.f};
     return {std::round(WeaponShape(type).kick*50.f*mastery)*.1f,
-            std::round(19.f*mastery)*.1f,std::round(20.f*mastery)*.1f,65.f,type==25};
+            std::round(19.f*mastery)*.1f,std::round(20.f*mastery)*.1f,65.f,type==25,returnSpeeds[skill]};
 }
 inline Tuning Sanitize(Tuning t,int type,int skill=0) {
     const Tuning fallback=Defaults(type,skill);
     const auto clamp=[](float v,float fallback,float max){
         return std::isfinite(v)?std::clamp(v,0.f,max):fallback;
     };
+    const float speed=std::isfinite(t.returnSpeedPercent)
+        ? std::clamp(t.returnSpeedPercent,kMinReturnSpeedPercent,kMaxReturnSpeedPercent)
+        : fallback.returnSpeedPercent;
     return {clamp(t.verticalDegrees,fallback.verticalDegrees,45.f),
             clamp(t.horizontalDegrees,fallback.horizontalDegrees,20.f),
             clamp(t.shoulderMm,fallback.shoulderMm,200.f),
-            clamp(t.supportReductionPercent,fallback.supportReductionPercent,100.f),t.disarmOneHanded};
+            clamp(t.supportReductionPercent,fallback.supportReductionPercent,100.f),t.disarmOneHanded,speed};
 }
 inline Profile ForWeapon(int type, bool support, int level,Tuning tuning) {
     if (!Supported(type) || level <= 0) return {};
@@ -79,7 +87,7 @@ inline Profile ForWeapon(int type, bool support, int level,Tuning tuning) {
             tuning.horizontalDegrees*kRad*strength,
             tuning.shoulderMm*.001f*strength,
             tuning.shoulderMm*.003f*strength,
-            kReturnOmega}; // The configured percentage is the complete support modifier.
+            kReturnOmega*tuning.returnSpeedPercent*.01f};
 }
 inline Profile ForWeapon(int type,float skill,bool support,int level) {
     skill=std::isfinite(skill)?std::clamp(skill,0.f,1.f):.5f;
@@ -129,7 +137,7 @@ struct State {
         const float decay=std::exp(-live.omega*dt);
         rearVelocity=(rearVelocity-c*(live.omega*dt))*decay;
         rearPosition=(rearPosition+c*dt)*decay;
-        heat*=std::exp(-8.f*dt);
+        heat*=std::exp(-.4f*live.omega*dt);
         phase=std::fmod(phase+dt,60.f);
         // Reserve headroom for jitter: the mean approaches a soft ceiling,
         // while the total signal stays strictly inside the weapon's limit.
@@ -203,10 +211,9 @@ inline Launch DisarmLaunch(Sample kick,const float* barrel,const float* modelTop
     const float strength=std::clamp(magnitude/(30.f*kRad),.6f,1.8f);
     const Vec axis=Unit(muzzle.pitchAxis*kick.pitch+muzzle.yawAxis*kick.yaw);
     // The shoulder displacement contributes its own backward impulse. For a
-    // critically damped spring, peak x = initialVelocity / (omega * e). Convert
-    // that peak back to velocity and add it before the shared speed cap, so a
-    // stronger shoulder setting flattens the launch toward the shooter instead
-    // of increasing an upward throw. Pitch/yaw still supply their deflection.
+    // critically damped spring, peak x = initialVelocity / (omega * e).
+    // Use the baseline omega for launch so the return-speed setting controls
+    // only the held recoil and wrist recovery, independently of throw strength.
     constexpr float e=2.718281828f;
     const Vec shoulder=Dot(kick.rearOffset,kick.rearOffset)>0?kick.rearOffset:b*(-std::max(0.f,kick.rear));
     const Vec velocity=back.Vector(b*(-1.f))*(2.f*strength)+shoulder*(kReturnOmega*e);

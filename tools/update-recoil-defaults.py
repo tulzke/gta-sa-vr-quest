@@ -22,10 +22,10 @@ def generate():
         key = tuple(map(int, fields[1:3]))
         assert key[0] in SUPPORTED and 0 <= key[1] <= 2
         if fields[0] == 'recoil_weapon_skill':
-            assert len(fields) == 7 and key not in profiles
+            assert len(fields) == 8 and key not in profiles
             values = tuple(map(float, fields[3:]))
-            assert all(math.isfinite(v) and 0 <= v <= bound
-                       for v, bound in zip(values, (45, 20, 200, 100)))
+            assert all(math.isfinite(v) and lo <= v <= hi
+                       for v, (lo, hi) in zip(values, ((0, 45), (0, 20), (0, 200), (0, 100), (25, 300))))
             profiles[key] = values
         elif fields[0] == 'recoil_one_hand_disarm':
             assert len(fields) == 4 and key not in disarm and fields[3] in ('0', '1')
@@ -39,8 +39,9 @@ def generate():
             'struct CapturedRecoil { int type, skill; Tuning tuning; };',
             'constexpr CapturedRecoil kCapturedRecoil[] = {']
     for key in sorted(profiles):
-        values = ', '.join(f'{value:.1f}f' for value in profiles[key])
-        rows.append('    {%d, %d, {%s, %s}},' % (*key, values, 'true' if disarm[key] else 'false'))
+        *tuning, speed = profiles[key]
+        values = ', '.join(f'{value:.1f}f' for value in tuning)
+        rows.append('    {%d, %d, {%s, %s, %.1ff}},' % (*key, values, 'true' if disarm[key] else 'false', speed))
     return '\n'.join(rows + ['};', ''])
 
 

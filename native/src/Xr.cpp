@@ -8659,6 +8659,9 @@ void BuildCalibMenu() {
             std::snprintf(row,sizeof(row),"SKILL < %s >",calib::RecoilSkillName(calib::RecoilEditingSkill()));
         } else if (r == 42) {
             std::snprintf(row,sizeof(row),"%s",cheats::CanApplyWeaponSkillLevel(type)?"APPLY SKILL LEVEL":"SKILL NOT AVAILABLE");
+        } else if (r == weaponmenu::RecoilReturnSpeed) {
+            const auto tuning=calib::SnapshotRecoil(type,calib::RecoilEditingSkill());
+            std::snprintf(row,sizeof(row),"RETURN SPEED < %g%% >",tuning.returnSpeedPercent);
         } else if (r >= 37 && r <= 40) {
             const auto tuning=calib::SnapshotRecoil(type,calib::RecoilEditingSkill());
             const float values[]{tuning.verticalDegrees,tuning.horizontalDegrees,
