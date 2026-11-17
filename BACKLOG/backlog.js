@@ -397,17 +397,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 93,
-      "title": "Регрессия: не срабатывает жест блока",
-      "file": "93-ne-srabatyvaet-zhest-bloka.md",
-      "categories": [
-        "weapons",
-        "bugs"
-      ],
-      "priority": "high",
-      "status": "in_progress"
-    },
-    {
       "id": 94,
       "title": "Наклон вперёд/назад на квадроцикле с вибрацией и позой кистей",
       "file": "94-naklon-vpered-nazad-na-kvadrotsikle.md",
