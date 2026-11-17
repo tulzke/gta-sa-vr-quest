@@ -42,15 +42,17 @@ int main() {
     assert(Select(1,.5f,context).first==Gesture::GripPistolShoot);
     assert(Near(Select(1,.5f,context).progress,.5f));
     context.support=true;
-    assert(Select(.6f,1,context).first==Gesture::Grip);
+    assert(Select(.6f,1,context).first==Gesture::GripPistol);
     assert(Near(Select(.6f,1,context).progress,.6f));
+    assert(Near(Select(.6f,0,context).progress,.6f));
     context.support=true;context.weaponType=22;
     assert(Select(1,1,context).first==Gesture::GripPistolOffhand);
     for (int type=0;type<48;++type) {
         context.weaponType=type;
         const auto support=Select(.4f,1,context);
         const bool foregrip=(type>=25&&type<=27)||(type>=29&&type<=31)||type==33||type==34;
-        assert(support.first==((type==35||type==36)?Gesture::GripPistolShoot:
+        assert(support.first==(type==43?Gesture::GripPistol:
+            (type==35||type==36)?Gesture::GripPistolShoot:
             type==24?Gesture::GripDeagleOffhand:
             foregrip?Gesture::GripShotgunOffhand:
             PistolStyleSupport(type)?Gesture::GripPistolOffhand:Gesture::Grip));
