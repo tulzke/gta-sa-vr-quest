@@ -56,7 +56,8 @@ harness = r'''
 double testTime=1;
 namespace savr {
 std::uint8_t player[0x1000]{},data[0x100]{},object[2][0x200]{},pool[620*0x24]{};
-float playerMatrix[16]{},matrices[2][16]{};
+float playerMatrix[16]{},matrices[2][16]{},renderedPoses[2][16]{};
+int matrixSyncs=0,frameSyncs=0;
 xr::HandPose poses[2]{};bool usable=true,focused=true,accept=true,dropped=false;
 std::uint64_t trackingEpoch=1;unsigned owners=0,weaponMask=0;
 int holdCalls=0,grantCalls=0,holdType=0;
@@ -91,8 +92,19 @@ using namespace savr;
 using namespace savr::pickups;
 std::uint32_t timer=100;
 std::int32_t collect=0;
-int ModelType(int model){return model==346?22:model==347?23:0;}
+int ModelType(int model){return model==346?22:model==347?23:model==352?28:model==372?32:0;}
+void SyncMatrix(void* obj){
+ std::array<float,16> pose{};assert(EntityPose(obj,pose));++matrixSyncs;
+ for(int i=0;i<2;++i)if(obj==object[i])std::copy_n(pose.data(),16,renderedPoses[i]);
+}
+void SyncFrame(void*){++frameSyncs;}
 bool Retail(void* self,void* ped,void*,int){
+ // Retail resets the object and publishes its RenderWare frame BEFORE contact.
+ void* obj=Read<void*>(self,4);
+ if(obj){void* matrix=MatrixOf(obj);
+  for(int i=0;i<3;++i)Write(matrix?matrix:obj,(matrix?0x30:8)+i*4,ReadPos16(self,0x14+i*2));
+  SyncMatrix(obj);SyncFrame(obj);
+ }
  if(!SavrPickupContactAllowed(self,ped)||!accept)return false;
  const int type=WeaponType(self);++grantCalls;
  Write(ped,0x8d4,type); // engine will materialise the inventory later
@@ -105,6 +117,7 @@ void Setup(){
  playerMatrix[0]=playerMatrix[5]=playerMatrix[10]=1;
  Write(player,0x18,playerMatrix);Write(player,0x540,data);Write(player,0x8d4,55);
  g_pool=pool;g_weaponForModel=ModelType;g_collectBuffer=&collect;g_timeMs=&timer;g_origUpdate=Retail;
+ g_updateRwMatrix=SyncMatrix;g_updateRwFrame=SyncFrame;matrixSyncs=frameSyncs=0;
  poses[0]={};poses[0].valid=true;poses[1]={};
  usable=focused=accept=true;owners=weaponMask=0;dropped=false;holdCalls=grantCalls=holdType=0;
  testTime=1;trackingEpoch=1;collect=0;
@@ -112,6 +125,7 @@ void Setup(){
 void ItemAt(int index,int model,float x){
  void* self=pool+index*0x24;Write(self,4,static_cast<void*>(object[index]));
  Write(object[index],0x18,matrices[index]);matrices[index][0]=matrices[index][5]=matrices[index][10]=1;
+ matrices[index][12]=x;
  Write(self,0x14,std::int16_t(x*8));Write(self,0x1c,std::int16_t(model));
  Write(self,0x1e,std::uint16_t(7));Write(self,0x20,std::uint8_t(3));
  Item item{};assert(LoadItem(self,player,item));std::copy_n(item.point,3,poses[0].gripPos);
@@ -122,6 +136,37 @@ void Step(float grip){
 }
 void Hold(){Step(0);Step(0);for(int i=0;i<24;++i)Step(1);}
 int main(){
+ // Real pickups can have only CSimpleTransform. These same-slot replacements
+ // reproduce Colt versus Deagle and Uzi versus Tec without allocating CMatrix.
+ for(int incoming:{22,28}){
+  Setup();ItemAt(0,incoming==22?346:352,0);
+  const int slot=incoming==22?2:4,previous=incoming==22?24:32;
+  Write(player,0x730+slot*0x20,previous);
+  Write(object[0],0x18,static_cast<void*>(nullptr));Write(object[0],0x14,1.57079632679f);
+  std::array<float,16> simple{};assert(EntityPose(object[0],simple));
+  assert(std::abs(simple[0])<.0001f&&std::abs(simple[1]-1)<.0001f&&std::abs(simple[4]+1)<.0001f);
+  assert(!OnPickupUpdate(pool,player,nullptr,0)); // cannot collect by walking
+  Item item{};assert(LoadItem(pool,player,item));
+  assert(item.type==incoming&&item.point[2]>.5f);
+  for(int i=0;i<3;++i)assert(std::abs(item.point[i]-renderedPoses[0][12+i])<.0001f);
+  std::copy_n(item.point,3,poses[0].gripPos);Step(0);Step(0);
+  vehicledoors::MarkerFrame frame{};Append(frame);
+  assert(frame.count==1&&frame.epoch==trackingEpoch); // independent of door hint epoch
+  const auto p=frame.markers[0].position;const float markerPoint[]{p.x,p.y,p.z};
+  for(int i=0;i<3;++i)assert(std::abs(markerPoint[i]-renderedPoses[0][12+i])<.0001f);
+  Hold();assert(grantCalls==1&&g_pending.type==incoming&&holdCalls==0);
+  Write(player,0x730+slot*0x20,incoming);Write(player,0x8d4,55);Step(1);
+  assert(holdCalls==1&&holdType==incoming&&matrixSyncs==frameSyncs);
+ }
+ // Full CMatrix pickups also need a second RW publication after the VR lift.
+ Setup();ItemAt(0,346,0);assert(!OnPickupUpdate(pool,player,nullptr,0));
+ assert(matrices[0][14]>.5f&&matrixSyncs==2&&frameSyncs==2);
+ assert(std::abs(renderedPoses[0][14]-matrices[0][14])<.0001f);
+ // Candidate and icon follow visible pose, not compressed authoring coordinates.
+ matrices[0][12]=2.f;Item visible{};assert(LoadItem(pool,player,visible)&&visible.point[0]==2.f);
+ Setup();ItemAt(0,346,0);matrices[0][12]=1.5f;matrices[0][14]=.7f;
+ Item moved{};assert(LoadItem(pool,player,moved));std::copy_n(moved.point,3,poses[0].gripPos);
+ accept=false;Hold();assert(grantCalls==0&&matrices[0][12]==1.5f&&matrices[0][14]==.7f);
  // The actual producer follows progress, stops on every cancellation and only drives the grabbing hand.
  for(int mode=0;mode<6;++mode){
   Setup();ItemAt(0,346,0);Step(0);Step(0);Step(1);

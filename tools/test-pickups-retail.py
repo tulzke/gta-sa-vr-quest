@@ -18,6 +18,11 @@ for address, expected in {
     0x58db98: (0xb908da93,),
     # Selection side effect at CPlayerData+2c must be restored on ammo-only collection.
     0x4049fc: (0xf942a2a8, 0x3900b100),
+    # Pickups need not allocate CMatrix: +18 null selects CSimpleTransform at +8.
+    0x417950: (0xf9401009, 0xb40000e9, 0xf9400c08, 0xf9400529, 0xb40000a8),
+    0x417974: (0x91002000, 0x91008121),
+    0x48bfe0: (0xf9401008, 0xb4000068, 0xf9400500),
+    0x4ac9c4: (0xbd400c00,), # simple heading at entity+8+c
 }.items():
     actual = struct.unpack_from('<'+'I'*len(expected), data, address)
     assert actual == expected, f'pickup retail ABI mismatch at {address:#x}: {actual}'
@@ -39,6 +44,8 @@ for name, expected in {
     '_ZN8CPickups8aPickUpsE': (0x983b00, 620*0x24),
     'CollectPickupBuffer': (0x989524, 4),
     '_ZN4CPed17GiveDelayedWeaponE11eWeaponTypej': (0x58db2c, 0x90),
+    '_ZN7CEntity14UpdateRwMatrixEv': (0x417950, 0x30),
+    '_ZN7CEntity13UpdateRwFrameEv': (0x48bfe0, 0x14),
 }.items():
     assert symbols[name] == expected, name
 print('Retail pickup contact gate, pool identity and delayed grant ABI: passed')
