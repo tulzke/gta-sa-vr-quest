@@ -63,6 +63,8 @@ void TriggerHaptic(int hand, float amplitude, float frequencyHz,
                    float durationMs);
 
 void PublishWheelHaptic(int hand, float amplitude, bool pcm, int wave, float frequency);
+// Continuous pickup progress; zero clears only this source, never game pulses.
+void PublishPickupHaptic(int hand, float amplitude, std::uint64_t epoch);
 int PcmHapticStatus(int hand); // 0 unavailable, 1 ready, 2 failed; per controller
 void UpdatePcmHapticTest(bool held, int hand, float strength, int wave, float frequency);
 

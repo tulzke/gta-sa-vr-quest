@@ -15,6 +15,11 @@ struct Gesture {
     double started{},previous{};
     float progress{};
     void Cancel() { active=false;target=0;progress=0; }
+    float HapticAmplitude() const {
+        if(!active||!std::isfinite(progress))return 0;
+        const float t=std::clamp(progress,0.f,1.f);
+        return .35f*t*t*(3.f-2.f*t); // soft start/end, below the completion pulse
+    }
     bool Step(std::uint64_t candidate,float grip,bool usable,
               std::uint64_t trackingEpoch,double now) {
         const bool discontinuity=epoch!=trackingEpoch||!std::isfinite(now)||

@@ -62,7 +62,11 @@ std::uint64_t trackingEpoch=1;unsigned owners=0,weaponMask=0;
 int holdCalls=0,grantCalls=0,holdType=0;
 void* Find(int){return player;}void* Vehicle(int,bool){return nullptr;}
 struct {void*(*FindPlayerPed)(int)=Find;void*(*FindPlayerVehicle)(int,bool)=Vehicle;} g;
-namespace xr {bool IsSessionFocused(){return focused;}void TriggerHaptic(int,float,float,float){}}
+namespace xr {
+float pickupAmplitudes[2]{};
+bool IsSessionFocused(){return focused;}void TriggerHaptic(int,float,float,float){}
+void PublishPickupHaptic(int h,float amplitude,std::uint64_t){pickupAmplitudes[h]=amplitude;}
+}
 namespace vehicledoors {unsigned ClaimedHands(){return owners;}}
 namespace npcgrab {unsigned ClaimedHands(){return 0;}}
 namespace basketball {unsigned HeldHandMask(){return 0;}}
@@ -118,6 +122,19 @@ void Step(float grip){
 }
 void Hold(){Step(0);Step(0);for(int i=0;i<24;++i)Step(1);}
 int main(){
+ // The actual producer follows progress, stops on every cancellation and only drives the grabbing hand.
+ for(int mode=0;mode<6;++mode){
+  Setup();ItemAt(0,346,0);Step(0);Step(0);Step(1);
+  for(int i=0;i<10;++i)Step(1);
+  assert(xr::pickupAmplitudes[0]>.17f&&xr::pickupAmplitudes[0]<.18f&&xr::pickupAmplitudes[1]==0);
+  if(mode==0)poses[0].gripPos[0]+=1;
+  if(mode==1)usable=false;if(mode==2)owners=1;if(mode==3)++trackingEpoch;if(mode==4)weaponMask=2;
+  Step(mode==5?0.f:1.f);assert(xr::pickupAmplitudes[0]==0&&xr::pickupAmplitudes[1]==0);
+ }
+ Setup();ItemAt(0,346,0);poses[1]=poses[0];poses[0].valid=false;
+ Step(0);Step(0);poses[1].grip=1;for(int i=0;i<12;++i)Step(0);
+ assert(xr::pickupAmplitudes[0]==0&&xr::pickupAmplitudes[1]>0);
+ Reset();assert(xr::pickupAmplitudes[0]==0&&xr::pickupAmplitudes[1]==0);
  Setup();ItemAt(0,346,0);
  assert(!SavrPickupContactAllowed(pool,player)); // new weapon cannot be walked over
  Write(player,0x730+2*0x20,22);assert(SavrPickupContactAllowed(pool,player));
@@ -125,6 +142,7 @@ int main(){
  Write(player,0x730+2*0x20,0);Write(pool,0x1c,std::int16_t(346));
  for(int i=0;i<40;++i)Step(1);assert(grantCalls==0);
  Hold();assert(grantCalls==1&&g_pending.hand==0&&holdCalls==0&&collect==0);
+ assert(xr::pickupAmplitudes[0]==0&&xr::pickupAmplitudes[1]==0);
  Write(player,0x730+2*0x20,22);Write(player,0x8d4,55);Step(1);
  assert(holdCalls==1&&holdType==22&&g_pending.hand==-1);
  for(int i=0;i<40;++i)Step(1);assert(grantCalls==1&&holdCalls==1);

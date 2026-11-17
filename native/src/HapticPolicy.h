@@ -5,7 +5,7 @@
 #include <cstdint>
 
 namespace savr::haptics {
-enum class Source { None, Game, Wheel, Test };
+enum class Source { None, Game, Wheel, Test, Pickup };
 struct Effect {
     Source source{Source::None};
     float amplitude{}, frequency{};
@@ -17,11 +17,12 @@ struct Effect {
     double pendingDuration{}; // game pulse starts at consumption, with a short publication TTL
 };
 struct Hand {
-    Effect game{}, wheel{}, test{};
+    Effect game{}, wheel{}, test{}, pickup{};
     Effect Select(double now, bool focused, bool menu) const {
         if (!focused) return {};
         if (menu) return test.until>now?test:Effect{};
         if (game.until>now && game.amplitude>0) return game;
+        if (pickup.until>now && pickup.amplitude>0) return pickup;
         return wheel.until>now?wheel:Effect{};
     }
 };

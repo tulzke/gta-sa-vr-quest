@@ -17,7 +17,15 @@ int main() {
         assert(!gesture.Step(7,1,true,1,t+=dt));
         assert(gesture.active);
         int completed=0;
-        for(int i=0;i<fps*3;++i)completed+=gesture.Step(7,1,true,1,t+=dt);
+        float previous=0,peak=0;
+        for(int i=0;i<fps*3;++i){
+            completed+=gesture.Step(7,1,true,1,t+=dt);
+            const float amplitude=gesture.HapticAmplitude();
+            assert(amplitude>=0&&amplitude<=.35f);
+            if(gesture.active){assert(amplitude>=previous);previous=amplitude;peak=std::max(peak,amplitude);}
+            else assert(amplitude==0);
+        }
+        assert(peak>.34f);
         assert(completed==1&&!gesture.active&&gesture.progress==0);
         gesture.Step(0,0,true,1,t+=dt);
         gesture.Step(0,1,true,1,t+=dt);
@@ -37,6 +45,7 @@ int main() {
         if(interruption==3)step(7,1,true,2);           // recenter
         if(interruption==4){t+=2;step(7);}             // pause/stalled updates
         if(interruption==5)step(7,std::numeric_limits<float>::quiet_NaN());
+        assert(g.HapticAmplitude()==0);
         for(int i=0;i<40;++i)assert(!step(7));
         assert(!g.active);
         step(7,0);step(7);

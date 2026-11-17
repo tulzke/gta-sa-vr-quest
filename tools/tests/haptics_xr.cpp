@@ -113,5 +113,29 @@ int main(){
     tracking.hands[0].positionTracked=true;UpdatePcmHapticTest(true,0,.5f,3,40);
     CHECK(g_hapticHands[0].test.source==Source::None); // no queued test after tracking returns
     UpdatePcmHapticTest(false,0,.5f,3,40);CHECK(g_hapticHands[0].test.source==Source::None);
-    std::puts("production XR adapter: capabilities, PCM failure, partial buffers, stop and priorities: PASS");
+    // Pickup is a separate continuous source, bounded and refreshed at 40 Hz.
+    ResetHapticOutput();menu=false;clockTime=5;tracking.epoch=3;tracking.valid=true;
+    tracking.hands[0].positionTracked=tracking.hands[1].positionTracked=true;
+    PublishPickupHaptic(0,.1f,3);FlushHaptics();
+    CHECK(g_hapticApplied[0].source==Source::Pickup&&amplitudes[0]==.1f&&g_hapticApplied[1].source==Source::None);
+    clockTime+=.03;PublishPickupHaptic(0,.25f,3);FlushHaptics();CHECK(amplitudes[0]==.25f);
+    auto pickupCalls=applyCount[0];clockTime+=.01;PublishPickupHaptic(0,1.f,3);FlushHaptics();
+    CHECK(applyCount[0]==pickupCalls&&g_hapticHands[0].pickup.amplitude==.35f);
+    clockTime+=.02;FlushHaptics();CHECK(amplitudes[0]==.35f);
+    PublishPickupHaptic(0,0,3);FlushHaptics();CHECK(g_hapticApplied[0].source==Source::None);
+    // Cancelling pickup cannot cancel completion/damage/other game pulses.
+    TriggerHaptic(0,.8f,0,100);PublishPickupHaptic(0,.3f,3);FlushHaptics();CHECK(amplitudes[0]==.8f);
+    const auto gameStops=stopCount[0];PublishPickupHaptic(0,0,3);FlushHaptics();
+    CHECK(stopCount[0]==gameStops&&g_hapticApplied[0].source==Source::Game);
+    clockTime+=.11;FlushHaptics();CHECK(g_hapticApplied[0].source==Source::None);
+    PublishPickupHaptic(1,.2f,3);FlushHaptics();CHECK(g_hapticApplied[1].source==Source::Pickup);
+    clockTime+=.11;FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None); // publication timeout
+    PublishPickupHaptic(1,.2f,2);FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None); // stale epoch
+    PublishPickupHaptic(1,.2f,3);FlushHaptics();tracking.hands[1].positionTracked=false;FlushHaptics();
+    CHECK(g_hapticApplied[1].source==Source::None);
+    tracking.hands[1].positionTracked=true;PublishPickupHaptic(1,.2f,3);FlushHaptics();
+    menu=true;FlushHaptics();menu=false;FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None);
+    PublishPickupHaptic(1,.2f,3);s.sessionState=XR_SESSION_STATE_VISIBLE;PublishPickupHaptic(1,.2f,3);
+    CHECK(g_hapticHands[1].pickup.source==Source::None);
+    std::puts("production XR adapter: capabilities, PCM failure, stop, priorities and pickup ramps: PASS");
 }

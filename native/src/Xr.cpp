@@ -5157,6 +5157,15 @@ void PublishWheelHaptic(int hand, float amplitude, bool pcm, int wave, float fre
         std::isfinite(amplitude)?std::clamp(amplitude,0.f,.45f):0.f,frequency,
         HapticNow()+.10,pcm,std::clamp(wave,0,2),++g_hapticSerial,epoch};
 }
+void PublishPickupHaptic(int hand,float amplitude,std::uint64_t epoch) {
+    if(hand<0||hand>1)return;
+    std::lock_guard<std::mutex> lock(g_hapticMutex);
+    if(!IsSessionFocused()||!std::isfinite(amplitude)||amplitude<=0) {
+        g_hapticHands[hand].pickup={};return;
+    }
+    g_hapticHands[hand].pickup={haptics::Source::Pickup,std::clamp(amplitude,0.f,.35f),
+        0,HapticNow()+.10,false,0,++g_hapticSerial,epoch};
+}
 int PcmHapticStatus(int hand) { return hand>=0&&hand<2?g_pcmStatus[hand].load():0; }
 void UpdatePcmHapticTest(bool held, int hand, float strength, int wave, float frequency) {
     const auto epoch=CaptureTrackingSnapshot().epoch;

@@ -69,15 +69,16 @@ void FlushHaptics() {
     ProbePcm(now);
     for (int hand=0;hand<2;++hand) {
         auto& requests=g_hapticHands[hand];
-        if (menu) { requests.game={}; requests.wheel={}; }
+        if (menu) { requests.game={}; requests.wheel={}; requests.pickup={}; }
         if (requests.game.until>now && requests.game.pendingDuration>0) {
             requests.game.until=now+requests.game.pendingDuration;
             requests.game.pendingDuration=0;
         }
         auto desired=g_hapticHands[hand].Select(now,true,menu);
-        if ((desired.source==haptics::Source::Wheel || desired.source==haptics::Source::Test) &&
+        if ((desired.source==haptics::Source::Wheel || desired.source==haptics::Source::Test ||
+             desired.source==haptics::Source::Pickup) &&
             (desired.epoch!=tracking.epoch || !tracking.valid || !tracking.hands[hand].positionTracked)) {
-            requests.wheel={}; requests.test={}; desired={};
+            requests.wheel={}; requests.test={}; requests.pickup={}; desired={};
         }
         if (desired.amplitude<=0 || desired.source==haptics::Source::None) {
             StopHapticOutput(hand); continue;
@@ -87,7 +88,7 @@ void FlushHaptics() {
         if (desired.source==haptics::Source::Test && !pcm) { StopHapticOutput(hand); continue; }
         const auto& last=g_hapticApplied[hand];
         const bool same=last.source==desired.source && last.pcm==pcm &&
-            (desired.source==haptics::Source::Wheel || last.serial==desired.serial);
+            (desired.source==haptics::Source::Wheel || desired.source==haptics::Source::Pickup || last.serial==desired.serial);
         if (same && (desired.source==haptics::Source::Game || now-g_hapticAppliedAt[hand]<.025)) continue;
         auto info=HapticInfo(hand);
         XrResult applied=XR_SUCCESS;

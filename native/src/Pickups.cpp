@@ -272,7 +272,11 @@ void FinishProbes(){
 }
 
 unsigned ClaimedHands(){return g_pending.hand>=0?1u<<g_pending.hand:0;}
-void Reset(){g_pending={};for(auto& gesture:g_gestures)gesture=Gesture{};g_targets[0]={};g_targets[1]={};g_markers={};}
+void Reset(){
+    g_pending={};for(auto& gesture:g_gestures)gesture=Gesture{};
+    for(int h=0;h<2;++h)xr::PublishPickupHaptic(h,0,0);
+    g_targets[0]={};g_targets[1]={};g_markers={};
+}
 void Append(vehicledoors::MarkerFrame& frame){if(frame.epoch==g_markers.epoch)
     for(int i=0;i<g_markers.count&&frame.count<frame.kCapacity;++i)frame.markers[frame.count++]=g_markers.markers[i];}
 
@@ -300,6 +304,7 @@ void Tick(){
             grabarbitration::Allows(h,grabarbitration::Kind::Pickup)&&Live(item);
         const bool completed=g_gestures[h].Step(available?item.id:0,hands[h].grip,
             usable&&empty&&!(occupied&(1u<<h)),epoch,now);
+        xr::PublishPickupHaptic(h,available?g_gestures[h].HapticAmplitude():0,epoch);
         if(available){
             using namespace vehicledoors;
             Marker marker{{item.point[0],item.point[1],item.point[2]},{1,0,0},{0,0,1}};
@@ -326,6 +331,7 @@ void Tick(){
         if(collected&&item.slot>0&&(Read<int>(player,0x8d4)==item.type||OwnedType(player,item.slot)==item.type)){
             g_pending={player,h,item.type,item.slot,epoch,now+1.5};
             for(auto& gesture:g_gestures){gesture.Cancel();gesture.latched=true;}
+            for(int hand=0;hand<2;++hand)xr::PublishPickupHaptic(hand,0,epoch);
             g_markers={};g_markers.epoch=epoch;
         }
         LOGI("[pickups] deliberate grab hand=%d type=%d collected=%d",h,item.type,collected);
