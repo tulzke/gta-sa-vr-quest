@@ -188,8 +188,8 @@ std::atomic<float> g_value[F_COUNT] = {
 // Global preferences: no new per-model calibration requirement.
 constexpr const char* kWheelHapticKeys[]{"WheelHint","WheelHintFreeCm","WheelHintStrength",
     "WheelHintPcm","WheelHintWave","WheelHintFrequency","WheelHintTestHand"};
-constexpr int kWheelHapticMin[]{0,10,0,0,0,0,0};
-constexpr int kWheelHapticMax[]{1,15,100,1,3,1,1};
+constexpr int kWheelHapticMin[]{0,0,0,0,0,0,0};
+constexpr int kWheelHapticMax[]{1,15,100,1,3,wheelhaptics::kFrequencyCount-1,1};
 std::atomic<int> g_wheelHapticSettings[7]{0,15,60,0,0,0,1};
 wheelhaptics::State g_wheelHapticState[2];
 double g_wheelHapticTime{};
@@ -4852,11 +4852,13 @@ void ResetVehiclePreset(int vehicleType) {
 int GetWheelHapticSetting(int field) {
     EnsureInit(); return field>=0&&field<7?g_wheelHapticSettings[field].load():0;
 }
+int GetWheelHapticFrequency() { return wheelhaptics::Frequency(GetWheelHapticSetting(5)); }
 void AdjustWheelHapticSetting(int field,int direction) {
     EnsureInit(); if(field<0||field>=7||!direction)return;
     int value=g_wheelHapticSettings[field].load();
     if(field==1||field==2) value=std::clamp(value+(direction<0?-1:1)*(field==2?10:1),
         kWheelHapticMin[field],kWheelHapticMax[field]);
+    else if(field==5) value=wheelhaptics::CycleFrequency(value,direction);
     else value=(value+(direction<0?-1:1)+kWheelHapticMax[field]+1)%(kWheelHapticMax[field]+1);
     g_wheelHapticSettings[field]=value;
     ResetInteraction(); Save();
@@ -5204,7 +5206,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
             for(int hand=0;hand<2;++hand) {
                 if(!updated)g_wheelHapticState[hand]={};
                 xr::PublishWheelHaptic(hand,amplitudes[hand],g_wheelHapticSettings[3].load()!=0,
-                    std::min(g_wheelHapticSettings[4].load(),2),g_wheelHapticSettings[5].load()?75.f:40.f);
+                    std::min(g_wheelHapticSettings[4].load(),2),wheelhaptics::Frequency(g_wheelHapticSettings[5].load()));
             }
             if(!updated)g_wheelHapticTime=0;
         }

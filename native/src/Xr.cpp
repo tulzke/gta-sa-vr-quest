@@ -8026,7 +8026,7 @@ void BuildDrivingMenu() {
                 const char* names[]{"ASYMMETRIC +","ASYMMETRIC -","SYMMETRIC","BLIND TEST"};
                 std::snprintf(rows[row],sizeof(rows[row]),"PCM WAVE < %s >",names[driving::GetWheelHapticSetting(4)]); break; }
             case driving::MENU_WHEEL_HINT_FREQUENCY:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM FREQUENCY < %d HZ >",driving::GetWheelHapticSetting(5)?75:40); break;
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM FREQUENCY < %d HZ >",driving::GetWheelHapticFrequency()); break;
             case driving::MENU_WHEEL_HINT_TEST_HAND:
                 std::snprintf(rows[row],sizeof(rows[row]),"PCM TEST HAND < %s >",driving::GetWheelHapticSetting(6)?"RIGHT":"LEFT"); break;
             case driving::MENU_WHEEL_HINT_TEST:

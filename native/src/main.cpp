@@ -2010,7 +2010,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
         driving::GetWheelHapticSetting(3)!=0 && in.a && !grips && !in.b;
     xr::UpdatePcmHapticTest(hapticTest,driving::GetWheelHapticSetting(6),
         driving::GetWheelHapticSetting(2)*.01f,driving::GetWheelHapticSetting(4),
-        driving::GetWheelHapticSetting(5)?75.f:40.f);
+        driving::GetWheelHapticFrequency());
     audiodiag::Tick(xr::IsSessionFocused(), vrcam::IsStereoActive(), anyMenu,
         (g.CTimer_m_UserPause && *g.CTimer_m_UserPause) ||
         (g.CTimer_m_CodePause && *g.CTimer_m_CodePause));

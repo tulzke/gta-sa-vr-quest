@@ -393,6 +393,7 @@ int GetYokeSensitivityPercent();
 void AdjustYokeSensitivity(int direction);
 
 int GetWheelHapticSetting(int field);
+int GetWheelHapticFrequency();
 void AdjustWheelHapticSetting(int field, int direction);
 bool IsWheelVisible();
 void ToggleWheelVisible();

@@ -32,6 +32,36 @@ int main() {
     Frame moved{{1,2,3},{0,1,0},{0,0,1},{1,0,0},.18f};
     auto transformed=Measure(moved,{1.3f,2.5f,3.2f});
     CHECK(Near(original.radial,transformed.radial)&&Near(original.axial,transformed.axial));
+    // Equal departures from the arc have equal feedback: inward, outward,
+    // toward the driver and away. The centre must not be a silent special case.
+    auto response=[&](Vec p,float zone,Vec initial=Vec{.18f,0,0}) {
+        State a;a.Step(f,initial,true,true,true,1,0,zone,1);
+        for(int i=0;i<100;++i)a.Step(f,p,true,true,false,1,.02f,zone,1);
+        return a.amplitude;
+    };
+    for(float zone:{0.f,.01f,.05f}) {
+        const float outward=response({.28f,0,0},zone);
+        CHECK(outward>0);
+        CHECK(Near(outward,response({.08f,0,0},zone)));
+        CHECK(Near(outward,response({.18f,0,.1f},zone)));
+        CHECK(Near(outward,response({.18f,0,-.1f},zone)));
+    }
+    CHECK(response({0,0,0},.15f)>0);
+    CHECK(response({.17f,0,0},0)>0); // zero really means zero, not a hidden 10 cm floor
+    CHECK(response({.17f,0,0},.02f)==0);
+    CHECK(response({.18f,0,.14f},.15f)==0);
+    CHECK(response({.08f,0,0},0,{.03f,0,0})>0); // no exempt initial-grip-to-rim corridor
+    CHECK(response({.18f,0,0},0,{.03f,0,0})==0);
+    for(int i=0;i<360;++i) {
+        const float a=i*.0174532925f;
+        CHECK(Near(Distance(Measure(f,{.18f*std::cos(a),.18f*std::sin(a),0})),0));
+    }
+    CHECK(Frequency(0)==40&&Frequency(1)==75); // existing saved presets retain their meaning
+    const int ascending[]{20,30,40,50,60,75,90,110,150,200};
+    int preset=2;
+    for(int hz:ascending) { CHECK(Frequency(preset)==hz);preset=CycleFrequency(preset,1); }
+    CHECK(preset==2&&Frequency(CycleFrequency(2,-1))==200);
+    CHECK(Frequency(-1)==40&&Frequency(999)==200);
     float amplitudes[3]{};int j=0;
     for(int hz:{72,90,120}) { State a;a.Step(f,{.18f,0,0},true,true,true,1,0,.10f,1);
         for(int i=0;i<hz;++i)a.Step(f,{.18f,0,.3f},true,true,false,1,1.f/hz,.10f,1);
@@ -56,7 +86,7 @@ int main() {
     float out[4000];
     CHECK(Buffer(out,4000,0,40,.3f,0,0)==0);
     CHECK(Buffer(out,4000,100,75,.3f,0,0)==0);
-    for(float hz:{40.f,75.f})for(int wave:{0,1,2}){
+    for(float hz:savr::wheelhaptics::kFrequencies)for(int wave:{0,1,2}){
         const auto n=Buffer(out,4000,2000,hz,.3f,wave,0);CHECK(n>0&&n<=150);
         double sum=0;for(std::size_t i=0;i<n;++i){CHECK(std::abs(out[i])<=.3f);sum+=out[i];}
         CHECK(std::abs(sum/n)<.002);
