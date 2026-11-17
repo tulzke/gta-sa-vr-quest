@@ -232,7 +232,7 @@ int main(){
             const Basis car{rotate({1,0,0}),rotate({0,1,0}),up,{30,-10,5}};
             const auto frame=pda::Place(car.Point(wheel),car.Vector(right),car.Vector(up),car.Vector(normal),start);
             const auto moved=pda::Translate(start,frame,car.Vector(delta));
-            const auto result=pda::Place(car.Point(wheel),frame.right,frame.up,frame.normal,moved);
+            const auto result=pda::Place(car.Point(wheel),car.Vector(right),car.Vector(up),car.Vector(normal),moved);
             CHECK(Length(result.centre-frame.centre-car.Vector(delta))<.00001f);
             CHECK(moved.pitchDeg==start.pitchDeg&&moved.yawDeg==start.yawDeg&&moved.rollDeg==start.rollDeg&&moved.scaleTenths==10);
             CHECK(pda::Distance(frame,frame.centre,false,10)==0);
@@ -242,8 +242,38 @@ int main(){
             CHECK(drag.Step(car.Local(frame.centre+car.Vector(delta))));
             CHECK(Length(drag.delta-delta)<.00001f);
         }
+        for(float pitch:{-179.f,-90.f,-30.f,0.f,30.f,90.f,179.f}){
+            auto settings=start;settings.pitchDeg=pitch;
+            const auto frame=pda::Place(wheel,right,up,normal,settings);
+            CHECK(Length(frame.centre-initial.centre)<.00001f);
+            CHECK(Length(frame.right-right)<.00001f); // horizontal axis never rolls/yaws
+            CHECK(std::abs(vehicledoors::Dot(frame.up,frame.normal))<.00001f);
+            CHECK(std::abs(Length(frame.up)-1)<.00001f&&std::abs(Length(frame.normal)-1)<.00001f);
+            const auto atBase=pda::PlaceAtBase(wheel+right*pda::kAcross+up*pda::kUp,right,up,normal,settings);
+            CHECK(Length(atBase.up-frame.up)<.00001f&&Length(atBase.centre-frame.centre)<.00001f);
+        }
+        const auto rotateAxis=[](Vec v,Vec axis,float angle){
+            const float a=angle*.01745329252f;
+            return v*std::cos(a)+vehicledoors::Cross(axis,v)*std::sin(a)+axis*(vehicledoors::Dot(axis,v)*(1-std::cos(a)));
+        };
+        for(float grip:{0.f,37.f,91.f}){
+            const Basis hand{rotateAxis(right,up,grip),rotateAxis({0,1,0},up,grip),up,{}};
+            for(Vec axis:{right,up,normal})for(float angle:{-179.f,-90.f,-30.f,0.f,30.f,90.f,179.f}){
+                const Basis current{rotateAxis(hand.right,axis,angle),rotateAxis(hand.forward,axis,angle),rotateAxis(hand.up,axis,angle),{}};
+                float deltaPitch=999;
+                CHECK(pda::PitchDelta(hand,current,up,normal,deltaPitch));
+                CHECK(std::abs(deltaPitch-(axis.x==1?angle:0))<.001f);
+            }
+            const Basis singular{rotateAxis(hand.right,up,180),rotateAxis(hand.forward,up,180),rotateAxis(hand.up,up,180),{}};
+            float unchanged=25;CHECK(!pda::PitchDelta(hand,singular,up,normal,unchanged)&&unchanged==25);
+        }
+        // Hit testing follows the tilted screen rather than the old mount plane.
+        auto large=start;large.pitchDeg=90;large.scaleTenths=30;
+        const auto tilted=pda::Place(wheel,right,up,normal,large);
+        CHECK(pda::Distance(tilted,tilted.centre+tilted.up*.1f,false,30)<.0001f);
+        CHECK(pda::Distance(tilted,tilted.centre+up*.1f,false,30)>.08f);
     }
-    std::puts("PASS vehicle PDA translation on all axes, rotated vehicle basis, hit surface, fixed angles and debug displacement");
+    std::puts("PASS vehicle PDA mount-relative translation, pitch-only rotation, fixed horizon, arbitrary initial grip, singularity and tilted hit surface");
     std::puts("PASS map-only priority transaction, queue ownership, texel accounting and interior projection reset");
     std::puts("PASS visible-texture promotion from thumbnail queue; packed retail entry; full/pending/null cases");
     std::puts("PASS retained far-tile streaming across 100 stock unload/reacquire cycles; shared map passes and balanced releases");

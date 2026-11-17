@@ -45,6 +45,7 @@ WristSettings GetWristSettings(int,int,int model){
     const auto it=pdaPositions.find(model);return it==pdaPositions.end()?WristSettings{0,140,-60,0,0,0,10}:it->second;
 }
 void SetVehiclePdaPosition(int model,const WristSettings& s){pdaPositions[model]=s;}
+void SetVehiclePdaPose(int model,const WristSettings& s){pdaPositions[model]=s;}
 void SavePdaCalibration(){++pdaSaves;}
 }
 namespace physicalweapon {
@@ -881,10 +882,44 @@ int main() {
         const auto position=hud::pdaPositions[400];
         CHECK(std::abs(position.acrossMm-200)<.01f&&std::abs(position.alongMm+40)<.01f&&std::abs(position.liftMm+30)<.01f);
         CHECK(position.pitchDeg==0&&position.yawDeg==0&&position.rollDeg==0&&hud::pdaSaves==0);
+        // Pitch is relative to the acquisition orientation; the preceding yaw
+        // did not tilt the PDA and does not accumulate into this rotation.
+        hands[h].gripOri[2]=0;hands[h].gripOri[0]=.258819f;Tick();
+        auto tilted=hud::pdaPositions[400];
+        CHECK(std::abs(tilted.pitchDeg-30)<.001f&&tilted.yawDeg==0&&tilted.rollDeg==0);
+        CHECK(tilted.acrossMm==position.acrossMm&&tilted.alongMm==position.alongMm&&tilted.liftMm==position.liftMm);
+        bool markerFound=false;
+        for(int i=0;i<xr::published.count;++i)if(xr::published.markers[i].held){
+            markerFound=true;CHECK(std::abs(xr::published.markers[i].up.y+.5f)<.001f);
+        }
+        CHECK(markerFound);
+        hands[h].gripOri[0]=0;hands[h].gripOri[1]=.258819f;Tick();
+        CHECK(std::abs(hud::pdaPositions[400].pitchDeg)<.001f); // pure roll is ignored too
+        hands[h].gripOri[1]=0;hands[h].gripOri[0]=.258819f;Tick();
         hands[h].trigger=0;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&hud::pdaSaves==1&&driving::saves==0);
         Tick(); // common debug editor re-arms on an open frame after release
         hands[h].trigger=1;Tick();CHECK(g_editKind==10);
+        Tick();CHECK(std::abs(hud::pdaPositions[400].pitchDeg-30)<.001f); // regrab never snaps
+        hands[h].gripPos[1]+=.01f;Tick();
+        CHECK(std::abs(hud::pdaPositions[400].alongMm+50)<.001f); // mount axes after tilt
+        CHECK(std::abs(hud::pdaPositions[400].liftMm+30)<.001f);
         xr::pdaVisible=false;Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0);
+        CHECK(hud::pdaSaves==2&&std::abs(hud::pdaPositions[400].pitchDeg-30)<.001f);
+    }
+    for(int reason=0;reason<5;++reason){
+        Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
+        hud::pdaEnabled=true;xr::pdaVisible=true;
+        hands[0].gripPos[0]=-.58f;hands[0].gripPos[1]=.2f;hands[0].gripPos[2]=1.06f;
+        Tick();hands[0].trigger=1;Tick();CHECK(g_editKind==10);
+        hands[0].gripOri[0]=-.258819f;hands[0].gripOri[3]=.965926f;Tick();
+        CHECK(std::abs(hud::pdaPositions[400].pitchDeg+30)<.001f);
+        if(reason==0)hands[0].gripOri[0]=std::numeric_limits<float>::quiet_NaN();
+        if(reason==1)physicalweapon::mask=1;
+        if(reason==2)Write<std::uint16_t>(vehicle,0x32,401);
+        if(reason==3)driving::debugMode=0;
+        if(reason==4)seated=nullptr;
+        Tick();CHECK(g_edit.hand<0&&ClaimedHands()==0&&hud::pdaSaves==1);
+        CHECK(std::abs(hud::pdaPositions[400].pitchDeg+30)<.001f&&hud::pdaPositions.count(401)==0);
     }
     for(int h:{0,1}){
         Setup();driving::debugMode=1;seated=vehicle;hands[0]={};hands[1]={};
@@ -942,6 +977,6 @@ int main() {
     std::puts("service radio: both-hand editor translation/rotation, exclusive ownership and release save passed");
     std::puts("vehicle nitro: uninstalled ghost editable with either hand; rigid translation/rotation, persistent ownership and release save passed");
     std::puts("vehicle lift: both hands, rigid position/rotation edit, ownership and release save passed");
-    std::puts("vehicle PDA: both hands, three-axis trigger drag, fixed angles, model placement, release save and visibility cancellation passed");
+    std::puts("vehicle PDA: both hands, pitch-only drag, fixed horizon, regrab, mount offsets, marker orientation and interrupted save passed");
     std::puts("vehicle doors: production motion, momentum, selection, ownership, cancellation and native handoff passed");
 }

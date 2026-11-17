@@ -20,7 +20,10 @@ with tempfile.TemporaryDirectory(prefix='savr-watch-') as tmp:
     settings='#define _CRT_SECURE_NO_WARNINGS\n#include <fstream>\n#include <iterator>\n#include <cassert>\n'+settings+r'''
 int main(){
     using namespace savr::hud;
-    {std::ofstream file("watch-settings.ini");file<<"WatchHand=1\nWatchInside=1\nWatchMapZoomPercent=75\nHud.Watch.WristRollDeg=35\n";}
+    {std::ofstream file("watch-settings.ini");file<<"WatchHand=1\nWatchInside=1\nWatchMapZoomPercent=75\nHud.Watch.WristRollDeg=35\n"
+        "Hud.Radar.DashPitchDeg=25\nHud.Radar.DashYawDeg=45\nHud.Radar.DashRollDeg=60\n"
+        "Hud.Radar.DashM411.PitchDeg=35\nHud.Radar.DashM411.YawDeg=55\nHud.Radar.DashM411.RollDeg=65\n"
+        "Hud.Radar.DashM414.PdaPitchDeg=-12.5\nHud.Radar.DashM415.PdaPitchDeg=nan\n";}
     Init();assert(DeviceHand(WATCH)==1&&WatchInside());
     assert(WatchMapZoom()==.75f);
     SetWatchMapZoom(.25f,true);FlushWatchSettings();assert(WatchMapZoom()==.25f);
@@ -31,6 +34,11 @@ int main(){
     assert(DeviceHand(WATCH)==0&&!WatchInside());
     const auto other=GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,412);
     const auto original=GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,411);
+    assert(original.pitchDeg==0&&original.yawDeg==0&&original.rollDeg==0);
+    assert(other.pitchDeg==0&&other.yawDeg==0&&other.rollDeg==0);
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,-1).pitchDeg==0);
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,414).pitchDeg==-12.5f);
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,415).pitchDeg==0);
     auto moved=original;moved.alongMm=80;moved.acrossMm=-100;moved.liftMm=120;moved.yawDeg=90;
     SetVehiclePdaPosition(411,moved);
     const auto actual=GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,411);
@@ -45,6 +53,31 @@ int main(){
     assert(text.find("Hud.Radar.DashM411.AlongMm=80")!=text.npos);
     assert(text.find("Hud.Radar.DashM411.AcrossMm=-100")!=text.npos);
     assert(text.find("Hud.Radar.DashM411.LiftMm=120")!=text.npos);
+    assert(text.find("Hud.Radar.DashM411.PdaPitchDeg=")==text.npos); // translation never enables old angles
+    file.close();
+    moved.pitchDeg=32.5f;moved.rollDeg=70;
+    SetVehiclePdaPose(411,moved);
+    auto pose=GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,411);
+    assert(pose.pitchDeg==32.5f&&pose.yawDeg==0&&pose.rollDeg==0);
+    assert(pose.alongMm==80&&pose.acrossMm==-100&&pose.liftMm==120);
+    auto invalid=moved;invalid.pitchDeg=std::nanf("");invalid.alongMm=999;
+    SetVehiclePdaPose(411,invalid);
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,411).alongMm==80);
+    AdjustWristField(RADAR,WRIST_PITCH_DEG,1,WRIST_SLOT_VEHICLE,411);
+    AdjustWristField(RADAR,WRIST_YAW_DEG,1,WRIST_SLOT_VEHICLE,411);
+    AdjustWristField(RADAR,WRIST_ROLL_DEG,1,WRIST_SLOT_VEHICLE,411);
+    SavePdaCalibration();
+    Load(); // reload the actual persisted production settings
+    pose=GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,411);
+    assert(pose.pitchDeg==33&&pose.yawDeg==0&&pose.rollDeg==0);
+    assert(pose.alongMm==80&&pose.acrossMm==-100&&pose.liftMm==120);
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,412).pitchDeg==0);
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,414).pitchDeg==-12.5f);
+    assert(GetWristSettings(WATCH,WRIST_SLOT_HAND,-1).rollDeg==35);
+    ResetElement(RADAR);Load();
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,411).pitchDeg==0);
+    assert(GetWristSettings(RADAR,WRIST_SLOT_VEHICLE,414).pitchDeg==0);
+    std::puts("PASS vehicle PDA legacy migration, pitch-only pose, numeric edit, invalid input, reload, model isolation and reset");
     std::puts("PASS watch hand, side and rotation settings load/save");
 }
 '''

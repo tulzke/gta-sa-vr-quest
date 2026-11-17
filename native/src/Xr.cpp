@@ -8378,6 +8378,10 @@ void BuildHudMenu() {
                       wrist.yawDeg);
         std::snprintf(rows[5],sizeof(rows[5]),"ROLL   < %.1f DEG >",
                       wrist.rollDeg);
+        if(dash&&element==hud::RADAR){
+            std::snprintf(rows[4],sizeof(rows[4]),"YAW - FIXED");
+            std::snprintf(rows[5],sizeof(rows[5]),"ROLL - FIXED");
+        }
         std::snprintf(rows[6],sizeof(rows[6]),"SIZE   < %.1f X >",
                       static_cast<float>(wrist.scaleTenths)/10.0f);
         if (element==hud::RADAR || element==hud::WATCH)
@@ -9945,13 +9949,21 @@ void DrawWristPanel(int element, int panelIndex, bool calibrating, int slot,
     const hud::WristSettings wrist =
         hud::GetWristSettings(element, slot, vehicleModel);
 
-    const XrVector3f centre = vadd(base,
+    XrVector3f centre = vadd(base,
         vadd(vadd(vscale(alongAxis, wrist.alongMm * 0.001f),
                   vscale(acrossAxis, wrist.acrossMm * 0.001f)),
              vscale(liftAxis, wrist.liftMm * 0.001f)));
 
     constexpr float kToRadians = 3.14159265f / 180.0f;
     const bool fixedDashboard=element==hud::RADAR&&slot==hud::WRIST_SLOT_VEHICLE;
+    if(fixedDashboard){
+        const auto vec=[](XrVector3f v){return pda::Vec{v.x,v.y,v.z};};
+        const auto frame=pda::PlaceAtBase(vec(base),vec(right),vec(up),vec(normal),wrist);
+        centre={frame.centre.x,frame.centre.y,frame.centre.z};
+        right={frame.right.x,frame.right.y,frame.right.z};
+        up={frame.up.x,frame.up.y,frame.up.z};
+        normal={frame.normal.x,frame.normal.y,frame.normal.z};
+    }
     if (!fixedDashboard&&wrist.yawDeg)
         RotateWristAxes(normal, right, wrist.yawDeg * kToRadians);
     if (!fixedDashboard&&wrist.pitchDeg)

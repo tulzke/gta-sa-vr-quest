@@ -63,6 +63,9 @@ int g_panelCorner{};
 bool g_editDirty{};
 bool g_pdaEditDirty{};
 hud::WristSettings g_pdaStart{};
+pda::Frame g_pdaMountStart{};
+Basis g_pdaHandStart{};
+float g_pdaPitchDelta{};
 void* g_editVehicle{};
 
 
@@ -964,8 +967,13 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
             const float delta[]={g_edit.delta.x,g_edit.delta.y,g_edit.delta.z};
             for(int a=0;a<3;++a) value[a]=g_editBase[a]+std::lround(delta[a]*100.f);
             if(cockpitKind==10){
-                if(occupied&(1u<<h)){Reset();return;}
-                hud::SetVehiclePdaPosition(model,pda::Translate(g_pdaStart,pdaFrame,car.Vector(g_edit.delta)));
+                Basis current;if(!DebugHandBasis(hands[h],world[h],car,current)){Reset();return;}
+                float pitch{};
+                if(pda::PitchDelta(g_pdaHandStart,current,g_pdaMountStart.anchorUp,g_pdaMountStart.anchorNormal,pitch))
+                    g_pdaPitchDelta=pitch;
+                auto pose=pda::Translate(g_pdaStart,g_pdaMountStart,g_edit.delta);
+                pose.pitchDeg=std::remainder(g_pdaStart.pitchDeg+g_pdaPitchDelta,360.f);
+                hud::SetVehiclePdaPose(model,pose);
                 g_pdaEditDirty=true;
                 if(!PdaWorldFrame(wheel,pdaFrame)){Reset();return;}point=pdaFrame.centre;
             }
@@ -1053,7 +1061,12 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
                 g_editModel=model;g_editDrivingMode=mode;g_editSeat=seatIndex;g_editKind=cockpitKind;
                 g_editTarget={seated,pool.identity,pool.objects,pool.flags,slot,0,0,pool.flags[slot]};
                 if(cockpitKind==10){
+                    if(!DebugHandBasis(hands[h],world[h],car,g_pdaHandStart)){Reset();return;}
                     g_pdaStart=hud::GetWristSettings(hud::RADAR,hud::WRIST_SLOT_VEHICLE,model);
+                    const auto local=[&](Vec v){return Vec{Dot(v,car.right),Dot(v,car.forward),Dot(v,car.up)};};
+                    g_pdaMountStart={car.Local(pdaFrame.centre),local(pdaFrame.right),local(pdaFrame.up),
+                        local(pdaFrame.normal),local(pdaFrame.anchorUp),local(pdaFrame.anchorNormal)};
+                    g_pdaPitchDelta=0;
                 } else if(cockpitKind==3&&passengerEditor){
                     const Vec local=car.Local(point);
                     g_editBase[0]=std::lround(local.x*100.f);g_editBase[1]=std::lround(local.y*100.f);g_editBase[2]=std::lround(local.z*100.f);
@@ -1086,7 +1099,9 @@ void Update(bool blocked,const xr::HandPose hands[2],bool trackingValid,std::uin
         if(cockpitKind==8||cockpitKind==9||cockpitKind==11||cockpitKind==12||cockpitKind==13||cockpitKind==14||cockpitKind==15) { Publish(markers);return; }
         bool existing=false;
         for(int i=0;i<markers.count;++i) if(Length(markers.markers[i].position-point)<.001f) {
-            markers.markers[i].held=g_edit.hand>=0;existing=true;break;
+            markers.markers[i].held=g_edit.hand>=0;
+            if(cockpitKind==10){markers.markers[i].direction=pdaFrame.normal;markers.markers[i].up=pdaFrame.up;}
+            existing=true;break;
         }
         if(!existing&&markers.count<MarkerFrame::kCapacity) {
             Basis orientation=car;

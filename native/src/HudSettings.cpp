@@ -92,6 +92,9 @@ constexpr int kDashHealthDefaults[WRIST_FIELD_COUNT] =
 std::mutex g_dashModelMutex;
 std::map<int, std::array<float, WRIST_FIELD_COUNT>>
     g_dashModel[ELEMENT_COUNT];
+// A separate key prevents previously ignored dashboard angles from suddenly
+// rotating an existing calibration. Guarded by g_dashModelMutex.
+std::map<int,float> g_pdaPitch;
 
 int ClampElement(int element) {
     return std::clamp(element, 0, ELEMENT_COUNT - 1);
@@ -185,6 +188,7 @@ void Load() {
     {
         std::lock_guard<std::mutex> lock(g_dashModelMutex);
         for (auto& map : g_dashModel) map.clear();
+        g_pdaPitch.clear();
     }
     int preset = CLASSIC;
     int enabled = 1;
@@ -194,6 +198,13 @@ void Load() {
         char line[96];
         while (std::fgets(line, sizeof(line), file)) {
             int value = 0;
+            int pdaModel=-1;float pdaPitch{};
+            if(std::sscanf(line,"Hud.Radar.DashM%d.PdaPitchDeg=%f",&pdaModel,&pdaPitch)==2&&
+               pdaModel>=400&&pdaModel<=611&&std::isfinite(pdaPitch)){
+                std::lock_guard<std::mutex> lock(g_dashModelMutex);
+                g_pdaPitch[pdaModel]=ClampWristField(WRIST_PITCH_DEG,pdaPitch);
+                continue;
+            }
             if (std::sscanf(line, "HudPreset=%d", &value) == 1)
                 preset = ClampPreset(value);
             else if (std::sscanf(line, "GameplayHud=%d", &value) == 1)
@@ -334,6 +345,8 @@ void Save() {
                     std::fprintf(file, "Hud.%s.DashM%d.%s=%.7g\n",
                                  kElementKeys[element], model,
                                  kDashModelFieldKeys[field], values[field]);
+            if(element==RADAR)for(const auto& [model,pitch]:g_pdaPitch)
+                std::fprintf(file,"Hud.Radar.DashM%d.PdaPitchDeg=%.7g\n",model,pitch);
         }
         std::fclose(file);
     } else {
@@ -491,12 +504,23 @@ WristSettings GetWristSettings(int element, int slot, int vehicleModel) {
     EnsureLoaded();
     element = ClampElement(element);
     slot = ClampWristSlot(slot);
+    auto value = [element, slot](int field) {
+        return ClampWristField(field, g_wrist[slot][element][field].load(
+                                          std::memory_order_acquire));
+    };
+    WristSettings settings{
+        value(WRIST_ALONG_MM), value(WRIST_ACROSS_MM), value(WRIST_LIFT_MM),
+        value(WRIST_PITCH_DEG), value(WRIST_YAW_DEG), value(WRIST_ROLL_DEG),
+        value(WRIST_SCALE_TENTHS)
+    };
+    const bool pda=element==RADAR&&slot==WRIST_SLOT_VEHICLE;
+    if(pda)settings.pitchDeg=settings.yawDeg=settings.rollDeg=0;
     if (slot == WRIST_SLOT_VEHICLE && vehicleModel >= 0) {
         std::lock_guard<std::mutex> lock(g_dashModelMutex);
         const auto found = g_dashModel[element].find(vehicleModel);
         if (found != g_dashModel[element].end()) {
             const auto& v = found->second;
-            return WristSettings{
+            settings = WristSettings{
                 ClampWristField(WRIST_ALONG_MM, v[WRIST_ALONG_MM]),
                 ClampWristField(WRIST_ACROSS_MM, v[WRIST_ACROSS_MM]),
                 ClampWristField(WRIST_LIFT_MM, v[WRIST_LIFT_MM]),
@@ -506,28 +530,29 @@ WristSettings GetWristSettings(int element, int slot, int vehicleModel) {
                 ClampWristField(WRIST_SCALE_TENTHS, v[WRIST_SCALE_TENTHS])
             };
         }
+        if(pda){
+            const auto pitch=g_pdaPitch.find(vehicleModel);
+            settings.pitchDeg=pitch==g_pdaPitch.end()?0.f:pitch->second;
+            settings.yawDeg=settings.rollDeg=0;
+        }
     }
-    auto value = [element, slot](int field) {
-        return ClampWristField(field, g_wrist[slot][element][field].load(
-                                          std::memory_order_acquire));
-    };
-    return WristSettings{
-        value(WRIST_ALONG_MM), value(WRIST_ACROSS_MM), value(WRIST_LIFT_MM),
-        value(WRIST_PITCH_DEG), value(WRIST_YAW_DEG), value(WRIST_ROLL_DEG),
-        value(WRIST_SCALE_TENTHS)
-    };
+    return settings;
 }
 
-void SetVehiclePdaPosition(int model,const WristSettings& position){
+static void SetPdaCalibration(int model,const WristSettings& position,bool pitch){
     EnsureLoaded();if(model<400||model>611||!std::isfinite(position.alongMm)||
-        !std::isfinite(position.acrossMm)||!std::isfinite(position.liftMm))return;
+        !std::isfinite(position.acrossMm)||!std::isfinite(position.liftMm)||
+        (pitch&&!std::isfinite(position.pitchDeg)))return;
     std::lock_guard<std::mutex> lock(g_dashModelMutex);
     auto [it,inserted]=g_dashModel[RADAR].try_emplace(model);
     if(inserted)for(int f=0;f<WRIST_FIELD_COUNT;++f)it->second[f]=g_wrist[WRIST_SLOT_VEHICLE][RADAR][f].load();
     it->second[WRIST_ALONG_MM]=ClampWristField(WRIST_ALONG_MM,position.alongMm);
     it->second[WRIST_ACROSS_MM]=ClampWristField(WRIST_ACROSS_MM,position.acrossMm);
     it->second[WRIST_LIFT_MM]=ClampWristField(WRIST_LIFT_MM,position.liftMm);
+    if(pitch)g_pdaPitch[model]=ClampWristField(WRIST_PITCH_DEG,position.pitchDeg);
 }
+void SetVehiclePdaPosition(int model,const WristSettings& position){SetPdaCalibration(model,position,false);}
+void SetVehiclePdaPose(int model,const WristSettings& pose){SetPdaCalibration(model,pose,true);}
 void SavePdaCalibration(){Save();}
 void AdjustWristField(int element, int field, int direction, int slot,
                       int vehicleModel) {
@@ -535,11 +560,18 @@ void AdjustWristField(int element, int field, int direction, int slot,
     element = ClampElement(element);
     slot = ClampWristSlot(slot);
     if (!direction || field < 0 || field >= WRIST_FIELD_COUNT) return;
+    const bool pda=element==RADAR&&slot==WRIST_SLOT_VEHICLE;
+    if(pda&&(field==WRIST_YAW_DEG||field==WRIST_ROLL_DEG))return;
+    if(pda&&field==WRIST_PITCH_DEG&&(vehicleModel<400||vehicleModel>611))return;
     const auto adjusted=[field,direction](float current) {
         return field==WRIST_SCALE_TENTHS ? current+direction :
             menu::SpatialValue(current,direction,field<3?.1f:1.f);
     };
-    if (slot == WRIST_SLOT_VEHICLE && vehicleModel >= 0) {
+    if(pda&&field==WRIST_PITCH_DEG){
+        std::lock_guard<std::mutex> lock(g_dashModelMutex);
+        auto& pitch=g_pdaPitch[vehicleModel];
+        pitch=ClampWristField(field,adjusted(pitch));
+    } else if (slot == WRIST_SLOT_VEHICLE && vehicleModel >= 0) {
         // Per-vehicle override, seeded from the shared dash slot on first
         // touch so the calibrated defaults carry over.
         std::lock_guard<std::mutex> lock(g_dashModelMutex);
@@ -628,6 +660,7 @@ void ResetElement(int element) {
     {
         std::lock_guard<std::mutex> lock(g_dashModelMutex);
         g_dashModel[element].clear();
+        if(element==RADAR)g_pdaPitch.clear();
     }
     Save();
 }

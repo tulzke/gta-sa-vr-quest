@@ -155,6 +155,8 @@ ElementSettings GetElementSettings(int element);
 // are its defaults). Pass -1 (or any slot!=VEHICLE) for the shared values.
 WristSettings GetWristSettings(int element, int slot, int vehicleModel);
 void SetVehiclePdaPosition(int model,const WristSettings& position);
+// Position plus pitch, in mount coordinates. Yaw and roll are always fixed.
+void SetVehiclePdaPose(int model,const WristSettings& pose);
 void SavePdaCalibration();
 int CalibrationElement();
 void CycleCalibrationElement(int direction);
