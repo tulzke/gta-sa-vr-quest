@@ -25,6 +25,7 @@ PRELUDE = r'''
 #include "MenuPrecision.h"
 #include "IgnitionState.h"
 #include "RadioKnobState.h"
+#include "WaterMonitorCamera.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -272,9 +273,8 @@ def main():
     # replace only the game/Quest API and unrelated seat settings.
     math = SOURCE[SOURCE.index("struct V3 {"):SOURCE.index("double MonotonicSeconds()")]
     math += function("V3 RotateAroundAxis(")
-    pose = SOURCE[SOURCE.index("struct ModelCalibration {"):SOURCE.index("float ClampField(")]
-    # The pose slice also includes unrelated runtime mechanism state.
-    pose = pose.replace("liftlever::State g_liftLever;", "")
+    pose = SOURCE[SOURCE.index("struct ModelCalibration {"):SOURCE.index("watermonitor::State g_waterMonitor;")]
+    pose += SOURCE[SOURCE.index("struct ModelWheelPose {"):SOURCE.index("float ClampField(")]
     accessors = function("float ClampModelSeat(") + function("void GetDoorCalibration(") + function("void SetDoorCalibration(") + function("void SetDebugPosition(")
     accessors += function("float GetWheelCalibrationValue(")
     accessors += function("void AdjustWheelCalibrationValue(")

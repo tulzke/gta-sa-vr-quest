@@ -109,6 +109,60 @@ float UnwrapAngle(float angle, float reference) {
 float PlanarAngle(V3 vector, V3 right, V3 up) {
     return std::atan2(Dot(vector, up), Dot(vector, right));
 }
+
+struct RimSteering {
+    struct Hand {
+        float reference{};
+        float continuous{};
+        bool valid{};
+    } hands[2];
+    V3 center{}, right{}, up{};
+    int owners{};
+
+    float Update(int mask, float previousAngle, V3 wheelCenter, V3 wheelRight,
+                 V3 wheelUp, const V3 positions[2], const bool tracked[2]) {
+        if (mask==0) {
+            owners=0;
+            return previousAngle;
+        }
+        if (owners==0) {
+            // Keep the calibrated plane in OpenXR LOCAL until the last release.
+            // Suspension, yaw and camera motion don't move the physical reference.
+            center=wheelCenter;
+            right=wheelRight;
+            up=wheelUp;
+        }
+        if (mask!=owners) {
+            for (auto& hand:hands) hand={};
+            owners=mask;
+        }
+        float sum=0.0f;
+        int count=0;
+        for (int hand=0;hand<2;++hand) {
+            if (!(mask&(1<<hand))) continue;
+            const V3 d=positions[hand]-center;
+            const float x=Dot(d,right), y=Dot(d,up);
+            auto& h=hands[hand];
+            if (tracked[hand]&&x*x+y*y>=0.0025f) {
+                const float raw=std::atan2(y,x);
+                if (!h.valid) {
+                    h.reference=WrapAngle(raw-previousAngle);
+                    h.continuous=previousAngle;
+                    h.valid=true;
+                }
+                // Unwrap only to select the branch. The angle itself is still
+                // measured from the fixed reference, including past the stops.
+                h.continuous=UnwrapAngle(WrapAngle(raw-h.reference),h.continuous);
+            }
+            if (h.valid) {
+                sum+=h.continuous;
+                ++count;
+            }
+        }
+        return count?sum/count:previousAngle;
+    }
+};
+
 bool NormalizeQuaternion(const float input[4],float output[4]) {
     if (!input||!output) return false;
     const float length=std::sqrt(input[0]*input[0]+input[1]*input[1]+
@@ -266,7 +320,7 @@ double g_wheelSeatStableSince{0.0};
 bool g_grabbed[2]{};
 bool g_gripDown[2]{};
 float g_rimGripAngle[2]{};
-int g_rimOwnershipMask{};
+RimSteering g_rimSteering{};
 float g_grabReferenceAngle[2]{};
 float g_continuousAngle[2]{};
 bool g_angleValid[2]{};
@@ -1177,7 +1231,7 @@ void ClearGrabStateLocked() {
     g_wheelHapticTime=0;
     g_hornPressed.store(false,std::memory_order_release);
     g_hornState.Reset();g_hornLastTime=0;
-    g_rimOwnershipMask=0;
+    g_rimSteering={};
     for (int hand=0; hand<2; ++hand) {
         g_grabbed[hand]=false; g_gripDown[hand]=false;
         g_grabReferenceAngle[hand]=0.0f; g_continuousAngle[hand]=0.0f;
@@ -5224,7 +5278,8 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         (g_wheelSeatVehicle&&g_wheelSeatVehicle!=activeVehicle)) {
         ClearWheelSeatReferenceLocked();
     }
-    if (g_grabVehicle!=activeVehicle) {
+    const bool sameGrabVehicle=g_grabVehicle==activeVehicle;
+    if (!sameGrabVehicle) {
         ClearGrabStateLocked();
         g_grabVehicle=activeVehicle;
     }
@@ -5361,6 +5416,18 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         g_visual=visual;
         return;
     }
+    const bool circular=!visual.bike&&!visual.yoke;
+    const bool previousWheelValid=sameGrabVehicle&&g_visual.active&&
+        g_visual.modelId==visual.modelId&&g_visual.bike==visual.bike&&
+        g_visual.yoke==visual.yoke;
+    if (circular&&previousWheelValid) {
+        // Use the last late-projected frame for reach and the initial grab
+        // plane. At input time the vehicle can already be ahead of the camera.
+        std::copy_n(g_visual.center,3,visual.center);
+        std::copy_n(g_visual.right,3,visual.right);
+        std::copy_n(g_visual.up,3,visual.up);
+        std::copy_n(g_visual.normal,3,visual.normal);
+    }
     xr::HandPose poses[2]{}; xr::GetHandPoses(poses);
     const V3 center{visual.center[0],visual.center[1],visual.center[2]};
     V3 right{visual.right[0],visual.right[1],visual.right[2]};
@@ -5382,10 +5449,14 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     unsigned ignitionOccupied=weaponHands;
     for (int h=0;h<2;++h) if (g_grabbed[h]) ignitionOccupied|=1u<<h;
     ignitionOccupied|=g_hornState.Claimed();
-    const bool circular=!visual.bike&&!visual.yoke;
-    const float previousWheelAngle=(g_visual.active&&g_visual.bike==visual.bike)?g_visual.physicalAngle:0.0f;
+    const float previousWheelAngle=previousWheelValid?g_visual.physicalAngle:0.0f;
     visual.physicalAngle=previousWheelAngle;
     if (circular) for (int hand=0;hand<2;++hand) {
+        if (g_grabbed[hand]) {
+            visual.rimGrip[hand]=true;
+            visual.rimAngle[hand]=g_rimGripAngle[hand];
+            continue;
+        }
         const V3 p{poses[hand].gripPos[0],poses[hand].gripPos[1],poses[hand].gripPos[2]};
         const V3 d=p-center;
         const float x=Dot(d,right), y=Dot(d,up);
@@ -5397,7 +5468,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         else if (std::abs(WrapAngle(a-3.14159265358979323846f))<=sticky)
             a=3.14159265358979323846f;
         visual.rimGrip[hand]=true;
-        visual.rimAngle[hand]=g_grabbed[hand]?g_rimGripAngle[hand]:a;
+        visual.rimAngle[hand]=a;
     }
     FillHandleVisuals(&visual);
     UpdateCockpitControls(visual,activeVehicle,input,poses,ignitionOccupied,true);
@@ -5415,7 +5486,8 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
             g_grabbed[hand]=false; g_angleValid[hand]=false;
         }
         const float grabDistance=visual.bike?0.17f:0.23f;
-        if (!g_grabbed[hand]&&poseValid[hand]&&!holdsWeapon&&visual.interactionTarget[hand]==3&&
+        if (!g_grabbed[hand]&&poseValid[hand]&&(!circular||poses[hand].positionTracked)&&
+            !holdsWeapon&&visual.interactionTarget[hand]==3&&
             input.grip[hand]>=0.65f&&
             !g_gripDown[hand]&&distance<=grabDistance) {
             g_grabbed[hand]=true; justGrabbed[hand]=true;
@@ -5475,8 +5547,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         g_hornPressed.store(hornPressed,std::memory_order_release);
     }
     const bool left=g_grabbed[0]&&poseValid[0],rightGrabbed=g_grabbed[1]&&poseValid[1];
-    const float previousAngle=(g_visual.active&&g_visual.bike==visual.bike)?
-        g_visual.physicalAngle:0.0f;
+    const float previousAngle=previousWheelAngle;
     float steeringAngle=0.0f;
     if (visual.bike) {
         constexpr float bikeMax=35.0f*3.14159265358979323846f/180.0f;
@@ -5549,31 +5620,15 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     } else {
         g_bikeOneHandValid=false;
         g_bikeOwnershipMask=0;
-        for (int hand=0;hand<2;++hand) if (justGrabbed[hand]) {
+        for (int hand=0;hand<2;++hand) if (!circular&&justGrabbed[hand]) {
             const float angle=PlanarAngle(positions[hand]-center,right,up);
             g_grabReferenceAngle[hand]=WrapAngle(angle-previousAngle);
             g_continuousAngle[hand]=previousAngle; g_angleValid[hand]=true;
         }
         if (circular) {
-            float sum=0.0f; int count=0;
             const int mask=(left?1:0)|(rightGrabbed?2:0);
-            if (mask!=g_rimOwnershipMask) {
-                for (int hand=0;hand<2;++hand) g_angleValid[hand]=false;
-                g_rimOwnershipMask=mask;
-            }
-            for (int hand=0;hand<2;++hand) if (g_grabbed[hand]&&poseValid[hand]) {
-                const V3 d=positions[hand]-center;
-                const float x=Dot(d,right), y=Dot(d,up);
-                if (x*x+y*y<0.0025f) { g_angleValid[hand]=false; continue; }
-                const float raw=std::atan2(y,x);
-                if (!g_angleValid[hand]) {
-                    g_grabReferenceAngle[hand]=WrapAngle(raw-previousAngle);
-                    g_continuousAngle[hand]=previousAngle; g_angleValid[hand]=true;
-                }
-                const float angle=UnwrapAngle(WrapAngle(raw-g_grabReferenceAngle[hand]),g_continuousAngle[hand]);
-                g_continuousAngle[hand]=angle;
-                sum+=UnwrapAngle(WrapAngle(angle),previousAngle); ++count;
-            }
+            const bool tracked[2]{poses[0].positionTracked,poses[1].positionTracked};
+            steeringAngle=g_rimSteering.Update(mask,previousAngle,center,right,up,positions,tracked);
             if (mask==0) {
                 float forwardSpeed=0.0f;
                 V3 er,ef,eu,ep;
@@ -5586,9 +5641,6 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
                 }
                 steeringAngle=wheelreturn::ReleasedAngle(previousAngle,forwardSpeed,wheelReturnDt,
                     activeType==VEHICLE_CAR);
-            } else {
-                // A held wheel with hands near its axis must not self-centre.
-                steeringAngle=count?sum/count:previousAngle;
             }
             g_twoHandAngleValid=false;
         } else if (left&&rightGrabbed) {
@@ -5790,11 +5842,11 @@ void RefreshVisualTracking() {
         BuildHydraulicsTracking(g_visual,vehicle,GetVehicleDebugMode()!=0);}
     if(g_visual.nitroVisible){void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
         BuildNitroTracking(g_visual,vehicle,GetVehicleDebugMode()!=0);}
-    if (!g_visual.active||(!g_visual.bike&&g_visual.modelId!=532)) return;
+    if (!g_visual.active||g_visual.yoke) return;
     const WheelVisualState previous=g_visual;
     // Input runs before the camera publishes this frame's world-to-tracking
-    // transform. Reproject the combine wheel as well as bike bars afterwards;
-    // otherwise it uses the previous camera while the cab uses the current one.
+    // transform. Reproject the rim and held wrists together so they follow the
+    // same camera as the cabin. The stored steering angle is already solved.
     WheelVisualState refreshed=previous;
     if (!(previous.bike ? (IsQuadBikeModelId(previous.modelId)?BuildQuadTracking(&refreshed):BuildBikeTracking(&refreshed)) :
                          BuildWheelTracking(&refreshed))) return;

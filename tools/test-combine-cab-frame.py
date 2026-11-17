@@ -129,15 +129,27 @@ void TraceCombineCabin(float,const void*){}
 ''' + function(drive, 'void OnComponentRotation(') + r'''
 std::mutex g_stateMutex;WheelVisualState g_visual;
 std::mutex g_modelMutex;
-struct Calibration{float mirrorDefault[3]{};bool mirrorDefaultValid{};};
-std::map<int,Calibration>g_modelCalibration;
+struct ModelCalibration{float mirrorDefault[3]{};bool mirrorDefaultValid{};float control[2][CONTROL_FIELD_COUNT]{};};
+std::map<int,ModelCalibration>g_modelCalibration;
 struct{void Reset(){}}g_liftLever;std::atomic<float>g_liftAxis{};
 bool BuildLiftTracking(WheelVisualState&,void*){return false;}
+void RefreshRadioTracking(WheelVisualState&){}
+bool BuildWaterMonitor(WheelVisualState&,void*){return false;}
+void ResetWaterMonitor(){}
+void PublishWaterMonitor(WheelVisualState&,double){}
+double MonotonicSeconds(){return clockMs*.001;}
+bool BuildServiceTracking(WheelVisualState&,void*){return false;}
+int ServiceSeat(void*,int){return 0;}
+struct{int seat;}g_serviceRadio{};
+void ResetServiceRadio(){}
+bool BuildHydraulicsTracking(WheelVisualState&,void*,bool){return false;}
+bool BuildNitroTracking(WheelVisualState&,void*,bool){return false;}
+int GetVehicleDebugMode(){return 0;}
 bool IsQuadBikeModelId(int model){return model==471;}
 bool available=true;int wheelCalls=0,bikeCalls=0;bool g_wheelVisible=true;
 bool BuildWheelTracking(WheelVisualState* visual){
  ++wheelCalls;if(!available)return false;
- int modelId=532;
+ int modelId=0;std::memcpy(&modelId,entity+0x32,2);
  bool planeYoke=false;
  V3 worldNormal=vr*.0000001f+vf*.3818912f+vu*-.9242073f;
  V3 worldRight=vr,worldUp=Normalized(Cross(worldRight,worldNormal));
@@ -147,10 +159,10 @@ bool BuildWheelTracking(WheelVisualState* visual){
 }
 bool BuildBikeTracking(WheelVisualState* visual){++bikeCalls;return true;}
 bool BuildQuadTracking(WheelVisualState* visual){return BuildBikeTracking(visual);}
-void FillHandleVisuals(WheelVisualState* v){
- for(int h=0;h<2;++h)for(int a=0;a<3;++a)v->handlePosition[h][a]=v->center[a]+v->right[a]*(h?1:-1)*v->radius;
-}
-''' + 'bool CabinVisualContext(){return true;} void ClearInteractionLocked(){g_visual={};}\n'+function(drive, 'void RefreshVisualTracking()') + r'''
+''' + function(drive, 'V3 RotateAroundAxis(') + function(drive, 'void FillHandleVisuals(') + r'''
+bool CabinVisualContext(){return true;}
+void ClearInteractionLocked(){g_visual={};}
+''' + function(drive, 'void RefreshVisualTracking()') + r'''
 }
 void Frame(float yaw,float pitch,float roll,V3 pos){
  // Independent rigid-body composition Rz(yaw) Rx(pitch) Ry(roll).
@@ -236,7 +248,24 @@ int main(){
  CHECK(Near(Camera({0,0,1},{},true).up,{0,0,1}));
  CHECK(Near(Camera({0,0,1},{},false,true).up,{0,0,1}));
  CHECK(Near(Camera({0,0,1},{},false,false,false).up,{0,0,1}));
- int before=wheelCalls;g_visual.modelId=411;RefreshVisualTracking();CHECK(wheelCalls==before);
+ id=411;std::memcpy(entity+0x32,&id,2);
+ int before=wheelCalls;g_visual.modelId=411;
+ g_visual.rimGrip[0]=true;g_visual.rimAngle[0]=2.f;
+ g_visual.center[0]+=1.f; // Old pre-camera projection during impact.
+ const auto stale=g_visual;
+ g_vrBase=Camera({.028021f,2.540719f,2.810999f},{});
+ RefreshVisualTracking();CHECK(wheelCalls==before+1);
+ CHECK(g_visual.grabbed[0]&&g_visual.rimGrip[0]&&g_visual.rimAngle[0]==2.f);
+ CHECK(g_visual.physicalAngle==stale.physicalAngle&&g_visual.steering==stale.steering);
+ auto vec=[](const float* xyz){return V3{xyz[0],xyz[1],xyz[2]};};
+ const V3 wheelCenter=vec(g_visual.center);
+ CHECK(!Near(wheelCenter,vec(stale.center)));
+ const float grip=g_visual.rimAngle[0]+g_visual.physicalAngle;
+ const V3 radial=vec(g_visual.right)*std::cos(grip)+vec(g_visual.up)*std::sin(grip);
+ CHECK(Near(vec(g_visual.handlePosition[0]),wheelCenter+radial*g_visual.radius));
+ CHECK(Near(vec(g_visual.handleRight[0]),radial*-1.f));
+ g_visual.yoke=true;RefreshVisualTracking();CHECK(wheelCalls==before+1);
+ g_visual.yoke=false;
  g_visual.bike=true;RefreshVisualTracking();CHECK(bikeCalls==1);
  g_visual.active=false;RefreshVisualTracking();CHECK(bikeCalls==1);
  std::printf("PASS: %d production camera/wheel/render frames; native chassis self-level reproduced %.3fm of drift and removed by actual callback; NPC/other component/entry/chase/non-VR preserved; pitch/roll/bumps/turns, seat offsets, custom calibration, recenter and held-wheel state\n",frames,maxUnfixedDrift);

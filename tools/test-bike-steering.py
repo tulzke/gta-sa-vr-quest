@@ -222,7 +222,7 @@ def lifecycle():
     begin=SOURCE.index('bool g_grabbed[2]')
     end=SOURCE.index('struct ModelCalibration',begin)
     globals_text=SOURCE[begin:end]
-    begin=SOURCE.index('    if (g_grabVehicle!=activeVehicle)')
+    begin=SOURCE.index('    const bool sameGrabVehicle=')
     end=SOURCE.index('    if (!gameplay||!CabinVisualContext())',begin)
     guard=SOURCE[begin:end]
     begin=SOURCE.index('    const bool bicycleMotion=appearance==2')
@@ -233,14 +233,16 @@ def lifecycle():
 #include "BikeSteering.h"
 #include "IgnitionState.h"
 #include "VehicleHorn.h"
+#include "WheelHaptics.h"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 namespace savr::driving {
-struct V3 {float x{},y{},z{};};
-namespace xr {struct HandPose{};void GetHandPoses(HandPose*){}}
+''' + SOURCE[SOURCE.index('struct V3 {'):SOURCE.index('double MonotonicSeconds()')] + function('float WrapAngle(') + function('float UnwrapAngle(') + function('struct RimSteering {') + r''';
+namespace xr {struct HandPose{};void GetHandPoses(HandPose*){} void PublishWheelHaptic(int,float,bool,float,int){}}
 std::atomic<bool> g_hornPressed{false};
 vehiclehorn::State g_hornState;double g_hornLastTime{};
+wheelhaptics::State g_wheelHapticState[2];double g_wheelHapticTime{};
 std::atomic<int> g_bicycleMode{BICYCLE_MOTION};
 WheelVisualState g_visual;
 void* g_grabVehicle{};

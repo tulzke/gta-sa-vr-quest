@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 helpers = runpy.run_path(str(ROOT / 'tools/test-bike-steering.py'))
 source = helpers['SOURCE']
 function = helpers['function']
-start = source.index('        if (circular) {\n            float sum=')
+start = source.index('        if (circular) {\n            const int mask=')
 end = source.index(' else if (left&&rightGrabbed)', start)
 solver = source[start:end]
 start = source.index('    const float maxSteering=(visual.bike?35.0f:80.0f)')
@@ -23,22 +23,23 @@ using namespace savr::driving;
 #define CHECK(c) do {if(!(c)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);std::exit(1);}}while(false)
 bool Near(float a,float b){return std::abs(a-b)<0.0001f;}
 ''' + source[source.index('struct V3 {'):source.index('double MonotonicSeconds()')] + '\n'.join(
-    function(s) for s in ['float WrapAngle(', 'float UnwrapAngle(', 'float PlanarAngle(']
-) + r'''
-bool g_angleValid[2]{},g_grabbed[2]{},g_twoHandAngleValid{};
-float g_grabReferenceAngle[2]{},g_continuousAngle[2]{};
-int g_rimOwnershipMask{};
+    function(s) for s in ['float WrapAngle(', 'float UnwrapAngle(']
+) + function('struct RimSteering {') + r''';
+bool g_twoHandAngleValid{};
+RimSteering g_rimSteering{};
 V3 velocity{};
 bool ReadEntityMatrix(void*,V3*,V3* f,V3*,V3*){*f={0,1,0};return true;}
-WheelVisualState Solve(float previousAngle,int mask,float dt,V3 p0,V3 p1,int type=VEHICLE_CAR){
+WheelVisualState Solve(float previousAngle,int mask,float dt,V3 p0,V3 p1,
+                       int type=VEHICLE_CAR,V3 center={},V3 right={1,0,0},
+                       V3 up={0,1,0},bool tracking=true){
     alignas(16) char vehicle[256]{};
     *reinterpret_cast<V3*>(vehicle+0x68)=velocity;
     void* activeVehicle=vehicle;
     const int activeType=type;
     const bool circular=true,left=(mask&1)!=0,rightGrabbed=(mask&2)!=0;
-    g_grabbed[0]=left;g_grabbed[1]=rightGrabbed;
-    bool poseValid[2]={true,true};
-    V3 positions[2]={p0,p1},center{},right{1,0,0},up{0,1,0};
+    struct Pose {bool positionTracked;};
+    Pose poses[2]={{tracking},{tracking}};
+    V3 positions[2]={p0,p1};
     const float wheelReturnDt=dt;
     float steeringAngle=0;
     WheelVisualState visual{};
@@ -74,7 +75,7 @@ int main(){
         CHECK(Near(a,std::exp(-1.f*1.25f)));
     }
     for(int mask:{1,2,3})for(float sign:{-1.f,1.f}){
-        g_rimOwnershipMask=0;velocity={0,20.f/180,0};
+        g_rimSteering={};velocity={0,20.f/180,0};
         const V3 p0{-.2f,0,0},p1{.2f,0,0};
         auto v=Solve(sign,mask,.01f,p0,p1);
         CHECK(Near(v.physicalAngle,sign)); // first grab keeps current angle
@@ -104,11 +105,66 @@ int main(){
     velocity={0,20.f/180,0};const auto fullSpeed=Solve(1,0,.1f,{},{});
     CHECK(Near(-std::log(halfSpeed.physicalAngle),-.5f*std::log(fullSpeed.physicalAngle)));
     // 1 -> 2 -> 1 and restored valid angles keep current wheel orientation.
-    g_rimOwnershipMask=0;
+    g_rimSteering={};
     for(int mask:{1,3,2,3,1})CHECK(Near(Solve(.7f,mask,.01f,{-.2f,0,0},{.2f,0,0}).physicalAngle,.7f));
     CHECK(Near(Solve(.7f,1,.01f,{0,0,0},{}).physicalAngle,.7f));
-    CHECK(Near(Solve(.7f,1,.01f,{.1f,.2f,0},{}).physicalAngle,.7f));
-    std::puts("PASS: wheel return timing, speed, clock, production grip transitions and steering output");
+    CHECK(Near(Solve(.7f,1,.01f,{-.2f,0,0},{}).physicalAngle,.7f));
+
+    // A calibrated, tilted wheel starts at a nonzero angle. Translate and
+    // rotate its live cabin frame independently of the controller positions.
+    constexpr float pi=3.14159265358979323846f;
+    const float stop=80.f*pi/180.f;
+    const V3 center{.22f,1.1f,-.4f}, right{1,0,0}, up{0,.6f,.8f};
+    const V3 normal{0,-.8f,.6f};
+    const V3 bumpedCenter=center+V3{.32f,-.21f,.45f};
+    const V3 bumpedRight=up, bumpedUp=normal;
+    auto position=[&](float angle,float axial){
+        return center+(right*std::cos(angle)+up*std::sin(angle))*.20f+normal*axial;
+    };
+    for (int mask:{1,2,3}) {
+        g_rimSteering={};
+        const float startAngle=.2f;
+        const float leftStart=pi-.12f, rightStart=-.12f;
+        auto v=Solve(startAngle,mask,.01f,position(leftStart,0),position(rightStart,0),
+                     VEHICLE_CAR,center,right,up);
+        CHECK(Near(v.physicalAngle,startAngle));
+        for (int cycle=0;cycle<128;++cycle) {
+            for (float turn:{0.f,.35f,1.2f,1.8f,2.5f,3.05f,3.5f,3.05f,2.2f,1.5f,.8f,0.f,
+                             -.5f,-1.3f,-2.1f,-2.8f,-3.5f,-2.9f,-2.1f,-1.4f,-.7f,0.f}) {
+                v=Solve(v.physicalAngle,mask,.01f,position(leftStart+turn,.12f),
+                        position(rightStart+turn,-.08f),VEHICLE_CAR,bumpedCenter,
+                        bumpedRight,bumpedUp);
+                CHECK(Near(v.physicalAngle,std::clamp(startAngle+turn,-stop,stop)));
+            }
+        }
+        // A near-axis sample or valid-but-untracked pose must not reset the
+        // angle reference. On recovery, read the current absolute position.
+        v=Solve(v.physicalAngle,mask,.01f,center,center,VEHICLE_CAR,bumpedCenter,bumpedRight,bumpedUp);
+        CHECK(Near(v.physicalAngle,startAngle));
+        v=Solve(v.physicalAngle,mask,.01f,position(leftStart+1,0),position(rightStart+1,0),
+                VEHICLE_CAR,bumpedCenter,bumpedRight,bumpedUp,false);
+        CHECK(Near(v.physicalAngle,startAngle));
+        v=Solve(v.physicalAngle,mask,.01f,position(leftStart+.4f,0),position(rightStart+.4f,0),
+                VEHICLE_CAR,bumpedCenter,bumpedRight,bumpedUp);
+        CHECK(Near(v.physicalAngle,startAngle+.4f));
+        // Joining or releasing the other hand preserves the current angle
+        // while keeping the first plane through the handover.
+        for (int nextMask:{3,1,2}) {
+            v=Solve(v.physicalAngle,nextMask,.01f,position(leftStart+.4f,0),position(rightStart+.4f,0),
+                    VEHICLE_CAR,bumpedCenter,bumpedRight,bumpedUp);
+            CHECK(Near(v.physicalAngle,startAngle+.4f));
+        }
+        v=Solve(v.physicalAngle,2,.01f,position(leftStart+.6f,0),position(rightStart+.6f,0),
+                VEHICLE_CAR,bumpedCenter,bumpedRight,bumpedUp);
+        CHECK(Near(v.physicalAngle,startAngle+.6f));
+        Solve(v.physicalAngle,0,0,{},{});
+        v=Solve(v.physicalAngle,2,0,{},bumpedCenter+bumpedRight*.2f,
+                VEHICLE_CAR,bumpedCenter,bumpedRight,bumpedUp);
+        v=Solve(v.physicalAngle,2,0,{},bumpedCenter+bumpedUp*.2f,
+                VEHICLE_CAR,bumpedCenter,bumpedRight,bumpedUp);
+        CHECK(Near(v.physicalAngle,stop));
+    }
+    std::puts("PASS: wheel return, fixed grab plane, handovers, tracking recovery and both hard stops");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='savr-wheel-return-') as tmp:
