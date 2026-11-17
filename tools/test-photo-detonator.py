@@ -1,13 +1,16 @@
-"""Production tests for native photo FOV/frame and detonator lifetime."""
+"""Production tests for lens framing, shutter review and detonator lifetime."""
 from pathlib import Path
-import re,subprocess,sys
+import os,re,subprocess,sys
 R=Path(__file__).resolve().parents[1];O=R/'build/photo-detonator-tests';O.mkdir(parents=True,exist_ok=True)
 def fn(file,name):
- s=(R/'native/src'/file).read_text();m=re.search(r'^(?:bool|void|int|float|CamBasis) '+name+r'\(',s,re.M);assert m,name
+ s=(R/'native/src'/file).read_text(encoding='utf8');m=re.search(r'^(?:bool|void|int|float|CamBasis) '+name+r'\(',s,re.M);assert m,name
  a=m.start();i=s.index('{',a)+1;d=1
  while d:d+=(s[i]=='{')-(s[i]=='}');i+=1
  return s[a:i]
 code=r"""
+#include "PairedWeapons.h"
+#include "PhotoScreen.h"
+#include "WeaponOptic.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -18,62 +21,109 @@ code=r"""
 #include <vector>
 #define LOGI(...) ((void)0)
 #define CHECK(e) do{if(!(e)){std::fprintf(stderr,"FAIL %d %s\n",__LINE__,#e);std::exit(3);}}while(0)
-struct V3{float x{},y{},z{};V3 operator+(V3 b)const{return {x+b.x,y+b.y,z+b.z};}};
-struct Q{float x{},y{},z{},w{1};};
-V3 Rotate(Q q,V3 v){V3 t{2*(q.y*v.z-q.z*v.y),2*(q.z*v.x-q.x*v.z),2*(q.x*v.y-q.y*v.x)};return {v.x+q.w*t.x+q.y*t.z-q.z*t.y,v.y+q.w*t.y+q.z*t.x-q.x*t.z,v.z+q.w*t.z+q.x*t.y-q.y*t.x};}
+struct V3{
+ float x{},y{},z{};
+ V3 operator+(V3 b)const{return {x+b.x,y+b.y,z+b.z};}
+ V3 operator-(V3 b)const{return {x-b.x,y-b.y,z-b.z};}
+ V3 operator*(float k)const{return {x*k,y*k,z*k};}
+};
 V3 Cross(V3 a,V3 b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
 float Dot(V3 v,V3 b){return v.x*b.x+v.y*b.y+v.z*b.z;}
 V3 Normalized(V3 v){float n=std::sqrt(Dot(v,v));return n>1e-8f?V3{v.x/n,v.y/n,v.z/n}:V3{};}
 bool Finite(V3 v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 struct CamBasis{V3 right,forward,up,pos;};
-V3 TrackingToGame(const CamBasis& b,V3 v){return {-b.right.x*v.x+b.up.x*v.y-b.forward.x*v.z,-b.right.y*v.x+b.up.y*v.y-b.forward.y*v.z,-b.right.z*v.x+b.up.z*v.y-b.forward.z*v.z};}
+struct RwMat{float r[3]{},u[3]{},a[3]{},t[3]{};};
 struct GameSymbols{using Vec3=V3;};
-namespace scopeaim {struct VisualState{bool active=true;int hand=1,weaponType=43;float zoom=8;};VisualState state;VisualState Snapshot(){return state;}
-float RenderFovX(float f){return state.active?2*std::atan(std::tan(f*3.14159265359f/360)/state.zoom)*180/3.14159265359f:f;}}
-namespace xr {bool tracked=true;float yaw=0;int published=0;bool GetHeadPose(float*p,float*q){p[0]=.2f;p[1]=1.5f;p[2]=-.3f;q[0]=q[2]=0;q[1]=std::sin(yaw/2);q[3]=std::cos(yaw/2);return tracked;}void SetRenderHeadPose(float*,float*){++published;}}
+using namespace savr;
+namespace scopeaim {
+int hand=1;
+float zoom=8;
+int PhotoHand(){return hand;}
+}
+namespace calib {
+weaponoptic::Profile SnapshotOptic(int){return weaponoptic::Defaults(43);}
+}
 namespace photo {
 std::atomic<bool> g_stereoActive{true};bool g_vrBaseValid=true;struct{bool valid=true;}g_origin;
-CamBasis g_vrBase{{-1,0,0},{0,1,0},{0,0,1},{100,200,30}};
-void RelativePose(V3 p,Q q,V3& rp,Q& rq){rp=p;rq=q;}
+bool tracked=true;
+float handYaw=0;
+bool HandWeaponMatrix(int hand,int type,RwMat& matrix) {
+ if(!tracked || type!=43 || hand<0 || hand>1) return false;
+ matrix={{std::sin(handYaw),std::cos(handYaw),0},{0,0,1},{1,0,0},{float(hand),200,30}};
+ return true;
+}
 constexpr float kVrFovX=105;
-alignas(16) unsigned char camera[0x1200]{},placeable[0x40]{};float drawFov=70;int fireCalls=0,derivedCalls=0;bool fireResult=true;
+alignas(16) unsigned char camera[0x1200]{},placeable[0x40]{},scene[0x100]{};
+int screen[4]{0,0,1920,1080};
+void* SceneRwCamera(){return scene;}
+float drawFov=70;int fireCalls=0,derivedCalls=0;bool fireResult=true;
+namespace photo_render {
+int requests{};
+CamBasis queued{};
+float queuedFov{};
+void Request(const CamBasis& view,float fov,bool horizontal,bool vertical) {
+ CHECK(horizontal && !vertical);++requests;queued=view;queuedFov=fov;
+}
+}
 template<class T>void Put(void*p,unsigned off,T v){std::memcpy(static_cast<unsigned char*>(p)+off,&v,sizeof(v));}
 template<class T>T Read(void*p,unsigned off){T v;std::memcpy(&v,static_cast<unsigned char*>(p)+off,sizeof(v));return v;}
 CamBasis ReadCam(std::uintptr_t p){return {Read<V3>((void*)p,0x970),Read<V3>((void*)p,0x980),Read<V3>((void*)p,0x990),Read<V3>((void*)p,0x9a0)};}
 void WriteCam(std::uintptr_t p,const CamBasis& b){Put((void*)p,0x970,b.right);Put((void*)p,0x980,b.forward);Put((void*)p,0x990,b.up);Put((void*)p,0x9a0,b.pos);}
 void SetFov(float f,bool){drawFov=f;}void Derived(void*,bool,bool){++derivedCalls;}
 bool NativeFire(void*,void*,V3*,V3*,void*,V3*,V3*);
-struct{void* TheCamera=camera;bool(*CWeapon_Fire)(void*,void*,V3*,V3*,void*,V3*,V3*)=NativeFire;void(*CCamera_CalculateDerivedValues)(void*,bool,bool)=Derived;void(*CDraw_SetFOV)(float,bool)=SetFov;float* CDraw_ms_fFOV=&drawFov;}g;
+struct{void* TheCamera=camera;void* RsGlobal=screen;bool(*CWeapon_Fire)(void*,void*,V3*,V3*,void*,V3*,V3*)=NativeFire;void(*CCamera_CalculateDerivedValues)(void*,bool,bool)=Derived;void(*CDraw_SetFOV)(float,bool)=SetFov;float* CDraw_ms_fFOV=&drawFov;}g;
 float observedFov=0;
 int NativeCommand(void*,int){unsigned a=camera[0x5f];observedFov=a<3?Read<float>(camera,a*0x228+0x204):-1;return 17;}
 int(*g_origPhotoCommands)(void*,int)=NativeCommand;
-"""+fn('VrCamera.cpp','BuildVrCamera')+fn('VrCamera.cpp','PhotoViewActive')+fn('VrCamera.cpp','BuildPhotoView')+fn('VrCamera.cpp','OnPhotoCommands')+fn('VrCamera.cpp','FirePhotograph').replace('/sdcard/Android/data/com.rockstargames.gtasa/files/vr_photo.log','photo-test.log')+r"""
-bool NativeFire(void*,void*,V3*,V3*,void*,V3*,V3*){
+"""
+camera_source=(R/'native/src/VrCamera.cpp').read_text(encoding='utf8')
+screen_start=camera_source.index('class ScopedScreenDimensions')
+screen_end=camera_source.index('\n};',screen_start)+3
+code=code.replace('int PhotoHand(){return hand;}', 'int PhotoHand(){return hand;}\n'
+    + fn('ScopeAim.cpp','PhotoFovX').replace('gCameraZoom.load(std::memory_order_relaxed)', 'scopeaim::zoom'))
+code+=camera_source[screen_start:screen_end]+fn('WeaponOpticFrame.inl','BuildPhotoLens')+fn('VrCamera.cpp','BuildPhotoView')+fn('VrCamera.cpp','OnPhotoCommands')+fn('VrCamera.cpp','FirePhotograph')+r"""
+bool NativeFire(void*,void*,V3* origin,V3*,void*,V3*,V3*){
  ++fireCalls;unsigned a=camera[0x5f];CHECK(Read<std::uint16_t>(camera,a*0x228+0x186)==46);
  float f=Read<float>(camera,a*0x228+0x204);CHECK(f<20&&std::abs(f-drawFov)<1e-5f);
- CamBasis want;CHECK(BuildPhotoView(want,false));auto actual=ReadCam((std::uintptr_t)camera);
+ CamBasis want;CHECK(BuildPhotoView(scopeaim::hand,want));auto actual=ReadCam((std::uintptr_t)camera);
  CHECK(std::memcmp(&actual,&want,sizeof(want))==0);
+ CHECK(std::memcmp(origin,&want.pos,sizeof(*origin))==0);
  CHECK(std::memcmp(placeable+0x10,&want.forward,12)==0&&std::memcmp(placeable+0x30,&want.pos,12)==0);
+ CHECK(screen[2]==768&&screen[3]==576);
+ CHECK(std::abs(Read<float>(scene,0x90)/Read<float>(scene,0x94)-photoscreen::Aspect)<1e-5f);
  return fireResult;
 }
 void Test(){
  Put(camera,0x18,static_cast<void*>(placeable));CamBasis native{{-1,0,0},{0,1,0},{0,0,1},{400,500,600}};WriteCam((std::uintptr_t)camera,native);
- std::memset(placeable,0x42,sizeof(placeable));int dummy=0;float flash[3]{1,2,3};
+ std::memset(placeable,0x42,sizeof(placeable));int dummy=0;
  for(unsigned active=0;active<3;++active){camera[0x5f]=active;Put<float>(camera,active*0x228+0x204,70);Put<std::uint16_t>(camera,active*0x228+0x186,4);
   const std::vector<unsigned char> before(camera,camera+sizeof(camera));const std::vector<unsigned char> beforeP(placeable,placeable+sizeof(placeable));
-  for(float z:{1.0f,1.8f,4.0f,8.0f}){scopeaim::state.zoom=z;CHECK(OnPhotoCommands(&dummy,0x801)==17);CHECK(std::abs(observedFov-scopeaim::RenderFovX(105))<1e-5f);CHECK((observedFov<20)==(z==8));CHECK(std::memcmp(camera,before.data(),before.size())==0);}
-  scopeaim::state.zoom=8;
-  for(float yaw:{0.0f,1.5707963f,3.1415926f,-1.5707963f})for(bool ok:{false,true}){
-   xr::yaw=yaw;fireResult=ok;CHECK(FirePhotograph(&dummy,&dummy,flash)==ok);
+  for(float z:{1.0f,1.8f,4.0f,8.0f}){scopeaim::zoom=z;CHECK(OnPhotoCommands(&dummy,0x801)==17);CHECK(std::abs(observedFov-scopeaim::PhotoFovX(105))<1e-5f);CHECK((observedFov<20)==(z==8));CHECK(std::memcmp(camera,before.data(),before.size())==0);}
+  for(int hand:{0,1})for(float yaw:{0.0f,1.5707963f,3.1415926f,-1.5707963f})for(bool ok:{false,true}){
+   scopeaim::zoom=8;scopeaim::hand=hand;handYaw=yaw;fireResult=ok;
+   const int beforeRequests=photo_render::requests;
+   CHECK(FirePhotograph(&dummy,&dummy,hand)==ok);
    CHECK(std::memcmp(camera,before.data(),before.size())==0&&std::memcmp(placeable,beforeP.data(),beforeP.size())==0&&drawFov==70);
-   CamBasis low,high;scopeaim::state.zoom=1;CHECK(BuildPhotoView(low,true));scopeaim::state.zoom=8;CHECK(BuildPhotoView(high,true));CHECK(std::memcmp(&low,&high,sizeof(low))==0); // zoom cannot change head anchor or direction
+   CHECK(screen[2]==1920&&screen[3]==1080&&Read<float>(scene,0x90)==0.f);
+   CHECK(photo_render::requests==beforeRequests+(ok?1:0));
+   CamBasis view;CHECK(BuildPhotoView(hand,view));
+   CHECK(std::abs(view.forward.x-std::sin(yaw))<1e-5f);
+   if(ok) CHECK(std::memcmp(&photo_render::queued,&view,sizeof(view))==0&&photo_render::queuedFov<20.f);
+   CHECK(!BuildPhotoView(1-hand,view));
   }
   CHECK(OnPhotoCommands(&dummy,0x800)==17&&observedFov==70);
-  scopeaim::state.weaponType=34;OnPhotoCommands(&dummy,0x801);CHECK(observedFov==70);scopeaim::state.weaponType=43;
-  scopeaim::state.active=false;OnPhotoCommands(&dummy,0x801);CHECK(observedFov==70);scopeaim::state.active=true;
+  scopeaim::hand=-1;OnPhotoCommands(&dummy,0x801);CHECK(observedFov==70);scopeaim::hand=1;
  }
- int n=fireCalls;xr::tracked=false;CHECK(!FirePhotograph(&dummy,&dummy,flash));xr::tracked=true;camera[0x5f]=3;CHECK(!FirePhotograph(&dummy,&dummy,flash));CHECK(fireCalls==n);
- std::puts("PASS: native 0801 sees actual zoom and original 20-degree gate; all 3 cameras, other opcodes/optics preserved; head frame invariant across zoom/yaw; shutter success/failure restores matrices/mode/FOV; invalid tracking rejected");
+ int n=fireCalls;tracked=false;CHECK(!FirePhotograph(&dummy,&dummy,1));tracked=true;camera[0x5f]=3;CHECK(!FirePhotograph(&dummy,&dummy,1));CHECK(fireCalls==n);
+ using photoscreen::Sample;
+ CHECK(Sample(50,0,-1,false).shutter==.5f);
+ CHECK(Sample(200,0,-1,false).shutter==1.f);
+ CHECK(Sample(250,0,200,true).photo&&Sample(250,0,200,true).shutter==.5f);
+ CHECK(Sample(799,0,200,true).scale==1.f&&Sample(799,0,200,true).photo);
+ CHECK(Sample(850,0,200,true).scale<1.f&&Sample(850,0,200,true).offset==0.f);
+ CHECK(Sample(1000,0,200,true).offset>0.f&&!Sample(1100,0,200,true).photo);
+ CHECK(!Sample(250,0,200,false).photo&&Sample(250,0,200,false).shutter==.5f);
+ std::puts("PASS: both lens poses, native FOV and 20-degree gate, coherent 4:3 shot, engine restoration and shutter review timing");
 }
 }
 namespace charges {
@@ -103,6 +153,8 @@ void Test(){
 int main(){photo::Test();charges::Test();}
 """
 (O/'test.cpp').write_text(code)
-vc=Path(r'C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvars64.bat')
-c=O/'run.cmd';c.write_text(f'@echo off\ncall "{vc}" >nul\ncl /nologo /std:c++20 /EHsc /W3 /D_CRT_SECURE_NO_WARNINGS "{O / "test.cpp"}" /Fe:"{O / "test.exe"}" /Fo:"{O / "test.obj"}"\nif errorlevel 1 exit /b 1\n"{O / "test.exe"}"\n')
+vswhere=Path(os.environ.get('ProgramFiles(x86)',r'C:\Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
+vs=subprocess.check_output([str(vswhere),'-latest','-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-property','installationPath'],text=True).strip()
+vc=Path(vs)/'VC/Auxiliary/Build/vcvars64.bat'
+c=O/'run.cmd';c.write_text(f'@echo off\ncall "{vc}" >nul\ncl /nologo /std:c++20 /EHsc /W3 /D_CRT_SECURE_NO_WARNINGS /I"{R / "native/src"}" "{O / "test.cpp"}" /Fe:"{O / "test.exe"}" /Fo:"{O / "test.obj"}"\nif errorlevel 1 exit /b 1\n"{O / "test.exe"}"\n')
 p=subprocess.run(['cmd','/c',str(c)],cwd=O,capture_output=True,text=True,encoding='utf8',errors='replace');print(p.stdout);print(p.stderr);sys.exit(p.returncode)

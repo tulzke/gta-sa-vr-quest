@@ -121,6 +121,7 @@ add_library(savr SHARED
     src/SetupMapDrawDistanceBridge.S
     src/EyeDepth.cpp
     src/VrCamera.cpp
+    src/PhotoCapture.cpp
     src/VrFire.cpp
     src/WeaponRecoil.cpp
     src/Xr.cpp

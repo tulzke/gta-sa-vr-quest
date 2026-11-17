@@ -2,12 +2,17 @@ package com.savr;
 
 import android.app.Activity;
 import android.app.Application;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
@@ -18,6 +23,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.util.UUID;
 
 /**
  * Loads the VR layer before the game library and supplies the class loader
@@ -29,6 +37,7 @@ public final class SavrApplication extends Application {
     private static final String GAME_ACTIVITY = "com.rockstargames.gtasa.GameActivity";
 
     private static boolean nativeReady = false;
+    private static volatile SavrApplication application;
     private static final String[] DEFAULT_SETTINGS = {
             "vr_driving.ini",
             "vr_appearance.ini",
@@ -57,6 +66,7 @@ public final class SavrApplication extends Application {
         }
 
         installMissingDefaultSettings();
+        application = this;
         nativeOnApplicationCreate(SavrApplication.class.getClassLoader());
 
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
@@ -85,6 +95,71 @@ public final class SavrApplication extends Application {
                 }
             }
         });
+    }
+
+    /** Called on a native worker with pixels from the in-game camera texture. */
+    private static boolean savePhoto(ByteBuffer rgba, int width, int height,
+                                     boolean flipHorizontal, boolean flipVertical) {
+        final SavrApplication app = application;
+        if (app == null || Build.VERSION.SDK_INT < 29) {
+            return false;
+        }
+        final ContentResolver resolver = app.getContentResolver();
+        Uri uri = null;
+        Bitmap bitmap = null;
+        boolean published = false;
+        try {
+            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            final byte[] row = new byte[width * 4];
+            final int[] argb = new int[width];
+            for (int y = 0; y < height; ++y) {
+                final int sourceY = flipVertical ? height - 1 - y : y;
+                rgba.position(sourceY * row.length);
+                rgba.get(row);
+                for (int x = 0; x < width; ++x) {
+                    final int source = 4 * (flipHorizontal ? width - 1 - x : x);
+                    argb[x] = 0xff000000 | ((row[source] & 255) << 16)
+                            | ((row[source + 1] & 255) << 8) | (row[source + 2] & 255);
+                }
+                bitmap.setPixels(argb, 0, width, 0, y, width, 1);
+            }
+
+            final ContentValues values = new ContentValues();
+            final String suffix = UUID.randomUUID().toString().substring(0, 8);
+            values.put(MediaStore.Images.Media.DISPLAY_NAME,
+                    "SAVR_" + System.currentTimeMillis() + "_" + suffix + ".jpg");
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/SAVR");
+            values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            uri = resolver.insert(MediaStore.Images.Media.getContentUri(
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY), values);
+            if (uri == null) {
+                return false;
+            }
+            try (OutputStream output = resolver.openOutputStream(uri, "w")) {
+                if (output == null || !bitmap.compress(Bitmap.CompressFormat.JPEG, 96, output)) {
+                    return false;
+                }
+            }
+            final ContentValues ready = new ContentValues();
+            ready.put(MediaStore.Images.Media.IS_PENDING, 0);
+            published = resolver.update(uri, ready, null, null) == 1;
+            return published;
+        } catch (IOException | RuntimeException | OutOfMemoryError e) {
+            android.util.Log.w(TAG, "Could not save in-game photo", e);
+            return false;
+        } finally {
+            if (bitmap != null) {
+                bitmap.recycle();
+            }
+            if (!published && uri != null) {
+                try {
+                    resolver.delete(uri, null, null);
+                } catch (RuntimeException e) {
+                    android.util.Log.w(TAG, "Could not remove pending photo", e);
+                }
+            }
+        }
     }
 
     /** Installs default settings without replacing existing calibration files. */

@@ -45,6 +45,9 @@
 #include "TrackingRecovery.h"
 #include "VehicleCabin.h"
 #include "ScopeAim.h"
+#include "PhotoCapture.h"
+#include "PhotoScreen.h"
+#include "RadioLabel.h"
 #include "MissionControls.h"
 #include "Catalyst.h"
 #include "Swimming.h"
@@ -3691,29 +3694,17 @@ void RefreshCutsceneCameraState() {
 using PhotoCommandsFn = int (*)(void*,int);
 PhotoCommandsFn g_origPhotoCommands{};
 
-bool PhotoViewActive() {
-    const auto state=scopeaim::Snapshot();
-    return g_stereoActive.load(std::memory_order_relaxed) &&
-           state.active && state.weaponType==43;
-}
-
-bool BuildPhotoView(CamBasis& view, bool publishPose) {
-    if (!g_stereoActive.load(std::memory_order_relaxed) || !g_vrBaseValid || !g_origin.valid)
+bool BuildPhotoView(int hand, CamBasis& view) {
+    if (hand < 0 || hand != scopeaim::PhotoHand() ||
+        !g_stereoActive.load(std::memory_order_relaxed) || !g_vrBaseValid || !g_origin.valid)
         return false;
-    float p[3]{},q[4]{};
-    if (!xr::GetHeadPose(p,q)) return false;
-    V3 relPos;Q relOri;
-    RelativePose({p[0],p[1],p[2]},{q[0],q[1],q[2],q[3]},relPos,relOri);
-    const CamBasis candidate=BuildVrCamera(g_vrBase,relPos,relOri);
-    if (!Finite(candidate.pos)||!Finite(candidate.forward)||!Finite(candidate.right)||!Finite(candidate.up)) return false;
-    view=candidate;
-    // The same head pose must accompany these zoomed pixels into OpenXR.
-    if (publishPose) xr::SetRenderHeadPose(p,q);
-    return true;
+    RwMat matrix{};
+    return HandWeaponMatrix(hand, weaponoptic::PhotoCamera, matrix) &&
+           BuildPhotoLens(matrix, view);
 }
 
 int OnPhotoCommands(void* script,int opcode) {
-    if (opcode!=0x0801 || !PhotoViewActive() || !g.TheCamera)
+    if (opcode!=0x0801 || scopeaim::PhotoHand()<0 || !g.TheCamera)
         return g_origPhotoCommands(script,opcode);
     auto* bytes=static_cast<unsigned char*>(g.TheCamera);
     const unsigned active=bytes[0x5f];
@@ -3721,7 +3712,7 @@ int OnPhotoCommands(void* script,int opcode) {
     // Android GET_CAMERA_FOV reads CCam directly (@43e7f0), not CDraw's
     // render FOV. Supply the real optic angle only while that opcode runs.
     auto* fov=reinterpret_cast<float*>(bytes+active*0x228+0x204);
-    const float saved=*fov, zoomed=scopeaim::RenderFovX(kVrFovX);
+    const float saved=*fov, zoomed=scopeaim::PhotoFovX(kVrFovX);
     *fov=zoomed;
     const int result=g_origPhotoCommands(script,opcode);
     *fov=saved;
@@ -4632,14 +4623,9 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                 const auto resprayCue = ResprayPresentation();
                 if (respray::GetPhase(resprayCue) == respray::Phase::Reveal)
                     g_resprayCameraCue = resprayCue;
-                // Scope zoom narrows only the GAME render frustum. The projection
-                // layer remains at the normal 105-degree headset frustum below,
-                // stretching the narrow pixels over the full view for a real
-                // optical zoom instead of shrinking the OpenXR view itself.
-                const float renderFovX = scopeaim::RenderFovX(kVrFovX);
-                if (g.CDraw_SetFOV) g.CDraw_SetFOV(renderFovX, false);
-                if (g.CDraw_ms_fFOV) *g.CDraw_ms_fFOV = renderFovX;
-                xr::SetStereoRenderFovX(renderFovX);
+                if (g.CDraw_SetFOV) g.CDraw_SetFOV(kVrFovX, false);
+                if (g.CDraw_ms_fFOV) *g.CDraw_ms_fFOV = kVrFovX;
+                xr::SetStereoRenderFovX(kVrFovX);
                 if (g.CCamera_CalculateDerivedValues) {
                     g.CCamera_CalculateDerivedValues(self, false, true);
                 }
@@ -18298,6 +18284,7 @@ void DrawNpcWeaponSnapshots() {
 
 namespace rear_mirror_render { void DrawSurface(); }
 namespace weapon_optic_render { void DrawSurfaces(); }
+namespace photo_render { void Draw(); }
 namespace water_monitor_render { void DrawSurface(); }
 void OnCloudsRender() {
     if (!g_renderingStereoEye && g_origCloudsRender) {
@@ -18328,6 +18315,7 @@ void OnCloudsRender() {
         // near plane. Share that exact depth projection with the cabin mesh.
         rear_mirror_render::DrawSurface();
         weapon_optic_render::DrawSurfaces();
+        photo_render::Draw();
         water_monitor_render::DrawSurface();
     }
     for (int i = 0; i < g_pendingWeaponCount; ++i)
@@ -21363,6 +21351,7 @@ private:
 #include "RearMirrorRender.inl"
 #include "WeaponOpticRender.inl"
 #include "WaterMonitorRender.inl"
+#include "PhotoRender.inl"
 
 void OnRenderScene(bool underwater) {
     perf::NotifyRenderSceneEntry();
@@ -21651,15 +21640,12 @@ void OnRenderScene(bool underwater) {
     inHook = true;
     const std::uintptr_t camU = reinterpret_cast<std::uintptr_t>(g.TheCamera);
     CamBasis base = ReadCam(camU);
-    // A late native camera copy may contain the ped's heading. Rebuild the
-    // photographic eye basis from the actual head pose before narrowing it.
-    // Zoom affects only the frustum; it never moves or rotates this anchor.
-    if (PhotoViewActive()) BuildPhotoView(base,true);
     if (driving::RearMirrorEnabled() && !rear_mirror_render::raster &&
         driving::GetActiveVehicleType()==driving::VEHICLE_CAR && !driving::ThirdPersonViewActive())
         closeEnginePreFinish();
     rear_mirror_render::Prepare(base);
     weapon_optic_render::ResetFrame();
+    photo_render::ResetFrame();
     if(water_monitor_render::NeedsRaster())closeEnginePreFinish();
     water_monitor_render::Prepare();
     unsigned char black[4] = {0, 0, 0, 255};
@@ -21669,15 +21655,10 @@ void OnRenderScene(bool underwater) {
     // the holster-calibration page is open its preview temporarily wins over all
     // three, so editing can never create a second copy of the same gun.
     g_pendingWeaponCount = 0;
-    const bool scopedFrame = scopeaim::IsActive();
     const bool hideChuteWeapons =
         g_hideWeaponsForChuteDeploy.load(std::memory_order_relaxed);
-    auto queueWeapon = [scopedFrame,hideChuteWeapons](void* clump,
-                                                      const RwMat& matrix) {
-        // reference Quest build lets the optic own the complete view. Keep all tracked weapon
-        // poses current for firing/ownership, but do not bake held, flying or
-        // holstered models into a zoomed eye texture.
-        if (scopedFrame || hideChuteWeapons || !clump ||
+    auto queueWeapon = [hideChuteWeapons](void* clump, const RwMat& matrix) {
+        if (hideChuteWeapons || !clump ||
             g_pendingWeaponCount >= kMaxPendingWeapons) return;
         g_pendingWeapons[g_pendingWeaponCount++] = PendingWeaponDraw{clump, matrix};
     };
@@ -21846,7 +21827,9 @@ void OnRenderScene(bool underwater) {
             }
             void* heldClump = WeaponModelClumpForSlot(slot, weaponType);
             queueWeapon(heldClump, heldMatrix);
-            if(heldClump) {
+            if (heldClump && weaponType == weaponoptic::PhotoCamera && !hideChuteWeapons) {
+                photo_render::Prepare(heldMatrix);
+            } else if(heldClump) {
                 if(weaponoptic::Supported(weaponType) && !weapon_optic_render::HasRaster(hand)) closeEnginePreFinish();
                 weapon_optic_render::Prepare(hand,weaponType,heldMatrix,base);
             }
@@ -21915,7 +21898,8 @@ void OnRenderScene(bool underwater) {
                     }
                     const calib::WeaponCalib supportCalib = calib::Snapshot(1, weaponType);
                     twoHandVisualState.supportGestureValid = true;
-                    if (handanimation::PistolStyleSupport(weaponType) ||
+                    if (weaponType == weaponoptic::PhotoCamera ||
+                        handanimation::PistolStyleSupport(weaponType) ||
                         handanimation::ShotgunOffhandWeapon(weaponType)) {
                         twoHandVisualState.supportGestureGrip = supportCalibrationPreview
                             ? 1.0f : physicalweapon::SupportAnimationProgress(hand);
@@ -22050,6 +22034,9 @@ void OnRenderScene(bool underwater) {
     tA = NowMs(); g.RwCameraEndUpdate(sc); tEnd += NowMs() - tA;   // end the caller's surface pass
     rear_mirror_render::Render(sc,camU);
     weapon_optic_render::Render(sc,camU);
+    if (photo_render::NeedsRaster()) closeEnginePreFinish();
+    photo_render::PrepareRasters();
+    photo_render::Render(sc, camU, g_recordCounter);
 
     // Pull the near clip in for the eye pass so the close weapon grip isn't clipped
     // (the game default clips it -> a hole that shows the sky through). Restore after.
@@ -22271,7 +22258,10 @@ void OnRenderScene(bool underwater) {
         RenderWorldStableSkyPolys(camU, mobileFog);
         graphicsfx::RenderSkyEye(sc, e);
         if (!g_cloudsHooked) rear_mirror_render::DrawSurface();
-        if (!g_cloudsHooked) weapon_optic_render::DrawSurfaces();
+        if (!g_cloudsHooked) {
+            weapon_optic_render::DrawSurfaces();
+            photo_render::Draw();
+        }
         if (!g_cloudsHooked) water_monitor_render::DrawSurface();
         tSky[e] += NowMs() - tA;
         // Opaque path: the CClouds::Render hook (OnCloudsRender) suppresses the
@@ -22481,9 +22471,6 @@ void OnRenderScene(bool underwater) {
     g_origCopy(g.TheCamera, false);
     g.RwCameraBeginUpdate(sc);
 
-    // Submission deliberately stays at the normal headset frustum even when the
-    // GAME render above used ScopeAim's narrow frustum. The full-size blit is the
-    // 2.5x optic zoom; changing these tangents too would cancel that effect.
     const float tanX = std::tan(kVrFovX * 0.5f * 3.14159265f / 180.0f);
     const float tanY = tanX * static_cast<float>(g_eyeRasterH) / static_cast<float>(g_eyeRasterW);
     xr::SetStereoRenderFov(tanX, tanY);
@@ -30553,11 +30540,11 @@ bool GetNeutralVehicleEyeWorld(float out[3]) {
     return true;
 }
 
-bool FirePhotograph(void* weapon,void* ped,const float flashOrigin[3]) {
-    if (!weapon||!ped||!flashOrigin||!g.TheCamera||!g.CWeapon_Fire||
+bool FirePhotograph(void* weapon, void* ped, int hand) {
+    if (!weapon||!ped||!g.TheCamera||!g.CWeapon_Fire||
         !g.CCamera_CalculateDerivedValues) return false;
     CamBasis view;
-    if(!BuildPhotoView(view,false)) return false;
+    if(!BuildPhotoView(hand, view)) return false;
     const auto cam=reinterpret_cast<std::uintptr_t>(g.TheCamera);
     auto* bytes=static_cast<unsigned char*>(g.TheCamera);
     const unsigned active=bytes[0x5f];if(active>=3)return false;
@@ -30574,23 +30561,38 @@ bool FirePhotograph(void* weapon,void* ped,const float flashOrigin[3]) {
         auto* lane=static_cast<unsigned char*>(placeable)+i*0x10;
         std::memcpy(&savedAxes[i],lane,sizeof(V3));std::memcpy(lane,&axes[i],sizeof(V3));
     }
-    const float zoomed=scopeaim::RenderFovX(kVrFovX);
+    const float zoomed=scopeaim::PhotoFovX(kVrFovX);
     *mode=46;*fov=zoomed;WriteCam(cam,view);
     if(g.CDraw_SetFOV)g.CDraw_SetFOV(zoomed,false);
     if(g.CDraw_ms_fFOV)*g.CDraw_ms_fFOV=zoomed;
-    g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
-    GameSymbols::Vec3 origin{flashOrigin[0],flashOrigin[1],flashOrigin[2]};
-    const bool fired=g.CWeapon_Fire(weapon,ped,&origin,&origin,nullptr,nullptr,nullptr);
+    const bool fired = [&] {
+        ScopedScreenDimensions dimensions(g.RsGlobal);
+        dimensions.Set(photoscreen::PreviewWidth, photoscreen::PreviewHeight);
+        // Native target projection also reads the scene camera's view windows.
+        auto* scene = static_cast<char*>(SceneRwCamera());
+        float savedProjection[4]{};
+        if (scene) {
+            const float tanX = std::tan(zoomed * 3.14159265f / 360.f);
+            const float tanY = tanX / photoscreen::Aspect;
+            const float projection[]{tanX, tanY, 1.f / tanX, 1.f / tanY};
+            std::memcpy(savedProjection, scene + 0x90, sizeof(savedProjection));
+            std::memcpy(scene + 0x90, projection, sizeof(projection));
+        }
+        g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
+        GameSymbols::Vec3 origin{view.pos.x, view.pos.y, view.pos.z};
+        const bool result = g.CWeapon_Fire(weapon,ped,&origin,&origin,nullptr,nullptr,nullptr);
+        if (scene) std::memcpy(scene + 0x90, savedProjection, sizeof(savedProjection));
+        return result;
+    }();
     *mode=savedMode;*fov=savedFov;WriteCam(cam,saved);
     if(placeable)for(unsigned i=0;i<4;++i)
         std::memcpy(static_cast<unsigned char*>(placeable)+i*0x10,&savedAxes[i],sizeof(V3));
     if(g.CDraw_SetFOV)g.CDraw_SetFOV(savedDrawFov,false);
     if(g.CDraw_ms_fFOV)*g.CDraw_ms_fFOV=savedDrawFov;
     g.CCamera_CalculateDerivedValues(g.TheCamera,false,true);
-    if(FILE* log=std::fopen("/sdcard/Android/data/com.rockstargames.gtasa/files/vr_photo.log","a")){
-        std::fprintf(log,"shot=%d fov=%.3f head=(%.2f,%.2f,%.2f) dir=(%.3f,%.3f,%.3f)\n",
-            fired,zoomed,view.pos.x,view.pos.y,view.pos.z,view.forward.x,view.forward.y,view.forward.z);
-        std::fclose(log);
+    if (fired) {
+        const auto profile = calib::SnapshotOptic(weaponoptic::PhotoCamera);
+        photo_render::Request(view, zoomed, profile.value[8] != 0, profile.value[9] != 0);
     }
     return fired;
 }

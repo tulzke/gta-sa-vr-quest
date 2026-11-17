@@ -113,7 +113,7 @@ bool WeaponPickupGripWorld(int weaponType, const void* matrix, float out[3]);
 // Latest tracked eye and gaze in the same GTA frame as the stereo camera.
 bool GetHeadWorldRay(float originOut[3], float directionOut[3]);
 // Throw from the tracked hand along controller AIM, independent of model rotation.
-bool FirePhotograph(void* weapon,void* ped,const float flashOrigin[3]);
+bool FirePhotograph(void* weapon, void* ped, int hand);
 bool GetControllerThrowRay(int hand, float originOut[3], float directionOut[3]);
 
 // Inverse of TrackingPointToWorld for compositor-side world effects (for

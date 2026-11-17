@@ -46,6 +46,7 @@
 #include "PhysicalWeapon.h"
 #include "PairedWeapons.h"
 #include "ScopeAim.h"
+#include "PhotoCapture.h"
 #include "NpcAim.h"
 #include "Symbols.h"
 #include "Throwable.h"
@@ -1297,10 +1298,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
             break;
         }
         case PG_CALIB: {
-            const int ROWS=savr::weaponmenu::Rows(calibGroup);
+            const int type = calibWeaponType;
+            const int ROWS=savr::weaponmenu::Rows(calibGroup, type);
             if (navUp)   calibSel = (calibSel - 1 + ROWS) % ROWS;
             if (navDown) calibSel = (calibSel + 1) % ROWS;
-            const int type = calibWeaponType;
 
             if (calibGroup==savr::weaponmenu::ROOT) {
                 calAdjDir=calAdjHeld=calAdjSince=0;
@@ -1317,7 +1318,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 }
                 break;
             }
-            const int fieldRow=savr::weaponmenu::Field(calibGroup,calibSel);
+            const int fieldRow=savr::weaponmenu::Field(calibGroup,calibSel,type);
             // Value adjust (accelerated): L2 / stick-left = -1, R2 / stick-right = +1.
             const int dir = !grips && in.triggers[1] >= 0.55f ? +1
                           : !grips && in.triggers[0] >= 0.55f ? -1 : 0;
@@ -2765,8 +2766,10 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 }
 
 JNIEXPORT void JNICALL
-Java_com_savr_SavrApplication_nativeOnApplicationCreate(JNIEnv* env, jclass, jobject classLoader) {
+Java_com_savr_SavrApplication_nativeOnApplicationCreate(JNIEnv* env, jclass application,
+                                                      jobject classLoader) {
     savr::audiodiag::Configure();
+    savr::photocapture::InitializeStorage(env, application);
     savr::g_classLoader = env->NewGlobalRef(classLoader);
     LOGI("application created");
 }

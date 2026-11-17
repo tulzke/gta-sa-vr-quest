@@ -176,6 +176,16 @@ void ApplyEffectiveSupportDefaults(WeaponCalib& c, bool configured, int type) {
         c.supOffZ==-3 && c.supRotX==-180 && c.supRotY==-334 && c.supRotZ==0 &&
         c.supStyle==SUPPORT_MAGAZINE;
     if (configured && !legacyCompact && !oldPistolTec) return;
+    if (type == weaponoptic::PhotoCamera) {
+        c.supOffX = 0;
+        c.supOffY = 14;
+        c.supOffZ = -8;
+        c.supRotX = 0;
+        c.supRotY = 360;
+        c.supRotZ = 0;
+        c.supStyle = SUPPORT_FROM_BELOW;
+        return;
+    }
     if (handanimation::PistolStyleSupport(type)) {
         // BothHands.blend 2026-11-09: HandRight/GripPistolOffhand relative
         // to colt45_DFF, mirrored to canonical RIGHT primary / LEFT support.
@@ -465,8 +475,8 @@ void Save() {
     // Retain the compatibility row for readers that do not support per-weapon state.
     std::fprintf(f, "laser_locked %d\n", LaserLocked() ? 1 : 0);
     int saved = 0;
-    for (int set=0; set<2; ++set) for (int type : {34,36}) {
-        if (!g_opticConfigured[set][type]) continue;
+    for (int set=0; set<2; ++set) for (int type=0; type<kMaxWeapons; ++type) {
+        if (!weaponoptic::Calibratable(type) || !g_opticConfigured[set][type]) continue;
         std::fprintf(f, "optic2 %d %d", set, type);
         for (int value : g_optics[set][type].value) std::fprintf(f, " %d", value);
         std::fputc('\n', f);
@@ -733,11 +743,11 @@ int FieldCount() { return F_COUNT; }
 weaponoptic::Profile SnapshotOptic(int type) {
     std::lock_guard<std::mutex> guard(g_calibMutex);
     const int set=g_modelSet.load(std::memory_order_relaxed);
-    return weaponoptic::Supported(type) && g_opticConfigured[set][type]
+    return weaponoptic::Calibratable(type) && g_opticConfigured[set][type]
         ? g_optics[set][type] : weaponoptic::Defaults(type);
 }
 void AdjustOptic(int type, int field, int steps) {
-    if (!weaponoptic::Supported(type) || field<0 || field>=weaponoptic::FieldCount) return;
+    if (!weaponoptic::Calibratable(type) || field<0 || field>=weaponoptic::FieldCount) return;
     {
         std::lock_guard<std::mutex> guard(g_calibMutex);
         const int set=g_modelSet.load(std::memory_order_relaxed);
@@ -749,7 +759,7 @@ void AdjustOptic(int type, int field, int steps) {
     Save();
 }
 void ResetOptic(int type) {
-    if (!weaponoptic::Supported(type)) return;
+    if (!weaponoptic::Calibratable(type)) return;
     {
         std::lock_guard<std::mutex> guard(g_calibMutex);
         const int set=g_modelSet.load(std::memory_order_relaxed);

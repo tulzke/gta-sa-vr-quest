@@ -373,9 +373,6 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
             return false;
         }
     }
-    const scopeaim::VisualState scope = scopeaim::Snapshot();
-    const bool scopedType = scope.active && scope.weaponType == weaponType;
-    if (suppressShot) *suppressShot = scopedType;
     // On foot and — Vice City parity — while seated with IMMERSIVE driving:
     // the physically held sidearm aims with the tracked hand there too.
     // DEFAULT driving keeps the vanilla drive-by ownership rules.
@@ -390,9 +387,6 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
     if (!query || !query(weaponType, &hand) || hand < 0 || hand > 1)
         return false;
     if (suppressShot && SupportedHitscan(weaponType)) *suppressShot = true;
-    const bool scoped = scopedType && scope.hand == hand;
-    if (scopedType && !scoped) return false;
-    if (suppressShot) *suppressShot = scoped || SupportedHitscan(weaponType);
 
     float o[3]{};
     float d[3]{};
@@ -402,10 +396,7 @@ bool GetPhysicalRay(void* shooter, int weaponType, Vec3& origin, Vec3& direction
         return false;
     }
     if (!scopeaim::ApplyReticleAim(hand, weaponType, o, d)) {
-        // Never fall through to the native camera/barrel direction while the
-        // zoomed reticle is visible. A transient invalid HMD centre ray suppresses
-        // this shot, matching the current Quest VC implementation.
-        if (suppressShot) *suppressShot = scoped;
+        if (suppressShot) *suppressShot = false;
         return false;
     }
     origin = {o[0], o[1], o[2]};
@@ -1016,9 +1007,7 @@ void UpdateHand(int requestedHand) {
     if (!freshPress && !AutomaticHitscan(weaponType) &&
         !AreaEffectWeapon(weaponType))
         return;
-    // VC rule: the camera has no hip shutter — it only shoots after the
-    // viewfinder is physically at the eye (the scope optic is active).
-    if (weaponType == 43 && !scopeaim::IsActiveFor(hand, weaponType)) return;
+    if (weaponType == 43 && scopeaim::PhotoHand() != hand) return;
 
     const std::uint32_t now = *g.CTimer_m_snTimeInMilliseconds;
     // Sprayers are CONTINUOUS: retail's use-gun task calls CWeapon::Fire
@@ -1047,7 +1036,7 @@ void UpdateHand(int requestedHand) {
     // Retail type 40 calls CWorld::UseDetonator at 0x6f9f5c; it consumes
     // neither a muzzle position nor an aim direction. It must still work
     // when no calibrated detonator muzzle/model is available.
-    if (weaponType != 40 &&
+    if (weaponType != 40 && weaponType != 43 &&
         !GetPhysicalRay(ped, weaponType, origin, direction)) {
         static double lastRayLog = 0.0;
         timespec ts{};
@@ -1089,9 +1078,8 @@ void UpdateHand(int requestedHand) {
         g_insideScriptedFire = true;
         *playerWeaponMode = 0;
     }
-    const float photoOrigin[]{origin.x,origin.y,origin.z};
     const bool fired = weaponType==43
-        ? vrcam::FirePhotograph(weapon,ped,photoOrigin)
+        ? vrcam::FirePhotograph(weapon,ped,hand)
         : g.CWeapon_Fire(weapon, ped, &origin, &origin, nullptr, target, nullptr);
     if (playerWeaponMode) {
         *playerWeaponMode = savedPlayerWeaponMode;

@@ -26,7 +26,7 @@ int main() {
             (type==35||type==36)?Gesture::GripPistol:
             (type==25||type==26)?Gesture::GripShotgun:
             RifleGripWeapon(type)?Gesture::GripRifle:
-            firearm?Gesture::GripPistolShoot:Gesture::Grip));
+            (firearm||type==43)?Gesture::GripPistolShoot:Gesture::Grip));
         if(type==25||type==26||RifleGripWeapon(type)) {
             assert(selected.progress==1.f);
             assert(Select(1,0,{false,false,false,false,false,true,type}).first==selected.first);
@@ -38,6 +38,12 @@ int main() {
     assert(Near(Select(1,.5f,context).progress,.5f));
     context.weaponType=8; // Katana keeps the ordinary grip.
     assert(Select(1,1,context).first==Gesture::Grip);
+    context.weaponType=43;
+    assert(Select(1,.5f,context).first==Gesture::GripPistolShoot);
+    assert(Near(Select(1,.5f,context).progress,.5f));
+    context.support=true;
+    assert(Select(.6f,1,context).first==Gesture::Grip);
+    assert(Near(Select(.6f,1,context).progress,.6f));
     context.support=true;context.weaponType=22;
     assert(Select(1,1,context).first==Gesture::GripPistolOffhand);
     for (int type=0;type<48;++type) {

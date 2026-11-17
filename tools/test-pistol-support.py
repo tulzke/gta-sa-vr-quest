@@ -26,6 +26,8 @@ code = r'''
 #include "PhysicalWeapon.h"
 #include "Calib.h"
 #include "HandAnimation.h"
+#include "WeaponOptic.h"
+#include "GrabArbitration.h"
 #include "PairedWeapons.h"
 #include <algorithm>
 #include <cmath>
@@ -96,11 +98,21 @@ int main(){
   CHECK(LauncherTriggerHand(primary)==support);
  }
  for(int t=0;t<48;++t){
-  bool supported=t>=22&&t<=38;
+  bool supported=(t>=22&&t<=38)||t==43;
   CHECK(IsTwoHandedWeaponTypeInternal(t)==supported);
  }
  calib::WeaponCalib longGun;calib::ApplyEffectiveSupportDefaults(longGun,false,30);
  CHECK(longGun.supOffY==60&&longGun.supOffZ==-10&&longGun.supRotY==360);
+ for(int primary : {0,1}) {
+  Reset(primary,43);
+  gSupportHand[primary]=1-primary;
+  TrackingPose anchor{};
+  CHECK(BuildSupportAnchorLocked(primary,&anchor));
+  CHECK(anchor.position[0]>.06f&&anchor.position[1]<-.03f);
+  CHECK(calib::current.supStyle==calib::SUPPORT_FROM_BELOW);
+  V3 pivot,axis;float angle=-1;
+  CHECK(BuildTwoHandTransformLocked(primary,pivot,axis,angle)&&Near(angle,0));
+ }
  calib::WeaponCalib edited;edited.supOffX=17;calib::ApplyEffectiveSupportDefaults(edited,true,22);
  CHECK(edited.supOffX==17&&edited.supOffY==0&&edited.supRotX==0);
  for(int t:{28,32}){

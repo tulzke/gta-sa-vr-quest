@@ -22,7 +22,7 @@ Optic optics[3]; // The third slot is the Firetruck remote camera.
 void ResetFrame() { for(auto& optic:optics) optic.visible=false; }
 bool HasRaster(int hand) { return optics[hand].raster!=nullptr; }
 void Prepare(int hand,int type,const RwMat& weapon,const CamBasis& head) {
-    if(!weaponoptic::Supported(type) || PhotoViewActive() ||
+    if(!weaponoptic::Supported(type) ||
         FormalCutsceneRunning() || ScriptedCutsceneRunning() || !rear_mirror_render::Resolve()) return;
     auto& optic=optics[hand];
     if(!BuildWeaponOpticFrame(type,weapon,optic.frame)) return;
@@ -157,13 +157,14 @@ void DrawEntities() {
         }
     }
 }
-void Render(void* sc,std::uintptr_t cam) {
-    for(auto& optic:optics) {
-        if(!optic.visible || !optic.raster || !EyeRasterTexId(optic.raster)) continue;
+bool RenderOne(Optic& optic, void* sc, std::uintptr_t cam, bool forceFacing,
+               void (*effects)(void*)) {
+        if(!optic.visible || !optic.raster || !EyeRasterTexId(optic.raster)) return false;
         const CamBasis saved=ReadCam(cam);
         // Skip only images facing away from the headset. The physical body
         // remains drawn. There is no eye-proximity activation or screen mode.
-        if(!optic.remote&&Dot(saved.pos-optic.frame.surface.pos,optic.frame.surface.forward)>.03f) continue;
+        if(!forceFacing && Dot(saved.pos-optic.frame.surface.pos,optic.frame.surface.forward)>.03f)
+            return false;
         Collect(optic);
         auto* camera=static_cast<char*>(sc);
         std::array<std::uint8_t,0x34> fields{};
@@ -205,7 +206,7 @@ void Render(void* sc,std::uintptr_t cam) {
             DrawEntities();
             // FxManager::Render only submits existing fire/smoke. Never call
             // CWaterCannons::Render here: it also advances native effects.
-            if(optic.remote&&remoteEffects)remoteEffects(sc);
+            if(effects) effects(sc);
             g.RwCameraEndUpdate(sc);
             optic.imageReady=true;
         }
@@ -219,7 +220,11 @@ void Render(void* sc,std::uintptr_t cam) {
         if(g.skipBlendRender)*g.skipBlendRender=skipBlend;
         if(g.skipNonblendRender)*g.skipNonblendRender=skipOpaque;
         if(g.DefinedState)g.DefinedState();
-    }
+        return true;
+}
+void Render(void* sc,std::uintptr_t cam) {
+    for(auto& optic:optics)
+        RenderOne(optic, sc, cam, optic.remote, optic.remote ? remoteEffects : nullptr);
 }
 // All geometry is in world space with normal depth testing: walls, the other
 // eye and the weapon can occlude the lens. Quest's camera raster has reversed

@@ -37,7 +37,6 @@ namespace scopeaim {
 float WeaponZoom(int type){return type==34?2.5f:1.8f;}
 HeatLockState HeatLockSnapshot(){return {};}
 }
-bool PhotoViewActive(){return false;}
 void RenderWorldStableSkyPolys(std::uintptr_t,const MobileDistanceFogSnapshot&){}
 '''
 production = helpers + function(camera, 'MatMul34') + function(camera, 'SetRotate34')
@@ -54,7 +53,7 @@ monitor = (ROOT / 'native/src/WaterMonitorRender.inl').read_text(encoding='utf8'
 start = monitor.index('bool ResolveStreamApi(')
 end = monitor.index('\nvoid DrawWaterStream()', start)
 monitor = monitor[:start] + 'bool ResolveStreamApi(){return streamApi.cannons&&g.CWorld_ProcessLineOfSight;}\n' + monitor[end:]
-start = monitor.index('void RenderEffects(')
+start = monitor.index('void RenderSceneEffects(')
 end = monitor.index('\nvoid Prepare()', start)
 monitor = monitor[:start] + 'void RenderEffects(void*){}\n' + monitor[end:]
 monitor = monitor.replace('static const bool loaded=model.Load(savr_water_monitor_mesh,static_cast<std::size_t>(savr_water_monitor_mesh_end-savr_water_monitor_mesh));',
@@ -78,8 +77,6 @@ float LengthSquared(V3 v){return Dot(v,v);}
 namespace vrcam {
 bool GetWeaponOpticRay(int,int,float* o,float* d){o[0]=o[1]=o[2]=0;d[0]=d[2]=0;d[1]=-1;return true;}
 }
-bool IsActiveFor(int,int){return false;}
-bool BuildCentreTarget(V3&){return false;}
 '''
 for name in ('ClearHeat', 'ValidHeatEntity', 'UpdateHeat', 'ApplyReticleAim'):
     production += function(scope, name)

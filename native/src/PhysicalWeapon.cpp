@@ -236,6 +236,7 @@ bool IsTwoHandedWeaponTypeInternal(int weaponType) {
         case 36:  // heat-seeking RPG
         case 37:  // flamethrower
         case 38:  // minigun
+        case 43:  // photo camera
             return true;
         default:
             return false;
@@ -785,7 +786,8 @@ bool BuildTwoHandTransformLocked(int primaryHand, V3& pivot, V3& axis,
     const int weaponType = WeaponTypeInSlot(ped, gHeldSlot[primaryHand]);
     // Tec-9 keeps its pistol hand animation but aims from the fore-end support
     // exactly like an AK. Its saved support socket is the solver's reference.
-    if (weaponType != 32 && handanimation::PistolStyleSupport(weaponType)) {
+    if (weaponType == 43 ||
+        (weaponType != 32 && handanimation::PistolStyleSupport(weaponType))) {
         pivot = GripPosition(gHands[primaryHand]);
         axis = {0.0f, 1.0f, 0.0f};
         angle = 0.0f;

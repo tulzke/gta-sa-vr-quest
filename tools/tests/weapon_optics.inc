@@ -28,6 +28,17 @@
     CHECK(std::fabs(Dot(opticFrame.camera.forward,opticFrame.camera.up))<.0001f);
     CHECK(std::fabs(Dot(opticFrame.camera.forward,opticFrame.camera.forward)-1)<.0001f);
     CHECK(!BuildWeaponOpticFrame(35,gun,opticFrame));
+    CHECK(Calibratable(PhotoCamera) && !Supported(PhotoCamera));
+    calib::opticProfile=Defaults(PhotoCamera);
+    WeaponOpticFrame photoBefore{},photoAfter{};
+    CHECK(BuildWeaponOpticFrame(PhotoCamera,gun,photoBefore));
+    calib::opticProfile.value[0]+=30;
+    calib::opticProfile.value[4]+=45;
+    calib::opticProfile.value[6]+=20;
+    CHECK(BuildWeaponOpticFrame(PhotoCamera,gun,photoAfter));
+    CHECK(photoBefore.surface.pos.y < photoAfter.surface.pos.y);
+    CHECK(photoBefore.halfSize < photoAfter.halfSize);
+    CHECK(std::memcmp(&photoBefore.camera,&photoAfter.camera,sizeof(CamBasis))==0);
     namespace opt=savr::weapon_optic_render;
     opt::Optic optic{};optic.type=34;optic.tanFov=.15f;
     optic.frame.camera={{-1,0,0},{0,-1,0},{0,0,1},{0,0,0}};
@@ -121,6 +132,8 @@
     CHECK(parsed.value[0]==-120&&parsed.value[8]==1&&parsed.value[9]==0);
     CHECK(ParseProfile("optic2 0 34 -61 61 1 1 0 0 60 150 1 1",parsedSet,parsedType,parsed));
     CHECK(parsed.value[0]==-61&&parsed.value[1]==61&&parsed.value[2]==1&&parsed.value[3]==1);
+    CHECK(ParseProfile("optic2 1 43 -60 0 0 0 0 0 100 150 1 0",parsedSet,parsedType,parsed));
+    CHECK(parsedSet==1&&parsedType==43&&parsed.value[6]==100);
     CHECK(!ParseProfile("optic2 2 34 0 0 0 0 0 0 60 150 1 0",parsedSet,parsedType,parsed));
     CHECK(!ParseProfile("optic2 0 35 0 0 0 0 0 0 60 150 1 0",parsedSet,parsedType,parsed));
     CHECK(!ParseProfile("optic2 0 34 0 0 0",parsedSet,parsedType,parsed));

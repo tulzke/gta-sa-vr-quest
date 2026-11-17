@@ -49,7 +49,7 @@
 #include "Log.h"
 #include "RenderDiagnosticsGl.h"
 #include "PerfTelemetry.h"
-#include "ScopeAim.h"
+#include "PhotoCapture.h"
 #include "TrafficCensus.h"
 #include "VrCamera.h"
 #include "ResprayTransition.h"
@@ -717,7 +717,6 @@ reloadhint::VisualFrame g_stereoReloadHintFrame[kStereoSets]{};
 // Scope state is captured beside the exact eye pixels it affected. The consumer
 // runs one ring slot behind, so reading the live state here would flash hands or
 // a reticle for one mismatched frame at optic entry/exit.
-scopeaim::VisualState g_stereoScopeState[kStereoSets]{};
 // The virtual wheel and its snapped hand sockets are late GL geometry, but the
 // cockpit underneath comes from the delayed eye-texture ring. Capture the wheel
 // state beside those pixels so vehicle motion cannot make it swim relative to
@@ -6411,7 +6410,6 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
         g_stereoVehicleTestMarkers[ws] = g_vehicleTestMarkers;
         g_stereoRadialHolsterMenu[ws] = g_radialHolsterMenu;
         for (auto& frame : g_stereoRadialHolsterMenu[ws].hands) frame.atlasTexture = g_radialHolsterAtlas;
-        g_stereoScopeState[ws] = scopeaim::Snapshot();
         g_stereoDrivingWheelState[ws] = drivingWheel;
         g_stereoBallHandLock[ws] = g_ballHandLock;
         g_stereoMobileColor[ws] = g_pendingMobileColor;
@@ -8521,7 +8519,7 @@ void BuildCalibMenu() {
     const int sel  = g_calibSel.load(std::memory_order_relaxed);
     const int group=g_calibGroup.load(std::memory_order_relaxed);
 
-    PanelText(weaponmenu::Name(group), cx, 10, 3, 100, 225, 255);
+    PanelText(weaponmenu::Name(group, type), cx, 10, 3, 100, 225, 255);
     char hdr[64];
     std::snprintf(hdr, sizeof(hdr), "%s   RIGHT MASTER",
                   savr::calib::WeaponName(type));
@@ -8533,8 +8531,9 @@ void BuildCalibMenu() {
 
     // A scrolling window keeps selection centred, including optional optic rows, so the
     // fixed panel stays readable at arm's length instead of shrinking the font.
-    const bool hasOptic=weaponoptic::Supported(type);
-    const int kRows=weaponmenu::Rows(group);
+    const bool hasOptic=weaponoptic::Calibratable(type);
+    const bool photoScreen=type == weaponoptic::PhotoCamera;
+    const int kRows=weaponmenu::Rows(group, type);
     constexpr int kWin = 9;
     int start = sel - kWin / 2;
     if (start < 0)              start = 0;
@@ -8544,7 +8543,7 @@ void BuildCalibMenu() {
     const int top = 96, rowH = 38;
     for (int w = 0; w < kWin && start+w<kRows; ++w) {
         const int index=start+w;
-        const int r=weaponmenu::Field(group,index);
+        const int r=weaponmenu::Field(group,index,type);
         const int y = top + w * rowH;
         if (index == sel) PanelFillRect(18, y - 3, kPanelW - 18, y + 18, 120, 40, 110, 235);
         const int c = (index == sel) ? 255 : 200;
@@ -8552,7 +8551,7 @@ void BuildCalibMenu() {
         if (index == kRows-1) {
             std::snprintf(row, sizeof(row), "BACK");
         } else if (group==weaponmenu::ROOT) {
-            std::snprintf(row,sizeof(row),"%s%s",weaponmenu::Name(index+1),
+            std::snprintf(row,sizeof(row),"%s%s",weaponmenu::Name(index+1,type),
                           index==4 && !hasOptic?" (NOT AVAILABLE)":" ...");
         } else if (group==weaponmenu::AMMO) {
             const auto ammo=hud::GetWristSettings(hud::AMMO,hud::WRIST_SLOT_HAND,-1);
@@ -8564,17 +8563,19 @@ void BuildCalibMenu() {
             else if(index<=6) std::snprintf(row,sizeof(row),"%s   < %+.1f DEG >",names[index-1],values[index-1]);
             else std::snprintf(row,sizeof(row),"SIZE   < %.1f X >",ammo.scaleTenths/10.0f);
         } else if (group==weaponmenu::OPTIC && r == 35) {
-            std::snprintf(row,sizeof(row),"RESET SCOPE   < PRESS A >");
+            std::snprintf(row,sizeof(row),"RESET %s   < PRESS A >",
+                          weaponmenu::Name(weaponmenu::OPTIC, type));
         } else if (group==weaponmenu::OPTIC && (r == 33 || r == 34)) {
             const int field=r-25;
             const auto profile=calib::SnapshotOptic(type);
-            std::snprintf(row,sizeof(row),"%s   < %s >",calib::OpticFieldLabel(field),
+            std::snprintf(row,sizeof(row),"%s%s   < %s >",photoScreen ? "SCREEN " : "",
+                calib::OpticFieldLabel(field) + (photoScreen ? 6 : 0),
                 profile.value[field] ? "ON" : "OFF");
         } else if (group==weaponmenu::OPTIC && r >= 25) {
             const int field=r-25;
             const auto profile=calib::SnapshotOptic(type);
-            std::snprintf(row,sizeof(row),"%s   < %+.1f %s >",
-                calib::OpticFieldLabel(field),profile.value[field]*.1f,
+            std::snprintf(row,sizeof(row),"%s%s   < %+.1f %s >",photoScreen ? "SCREEN " : "",
+                calib::OpticFieldLabel(field) + (photoScreen ? 6 : 0),profile.value[field]*.1f,
                 field>=3 && field<=5 ? "DEG" : "CM");
         } else if (r == 24) {
             std::snprintf(row, sizeof(row), "TRACER SMOKE   < %d%% >",
@@ -10234,94 +10235,6 @@ void DrawAmmoLabel(const float* mvp, const XrPosef& eye, XrVector3f centre,
     glDrawArrays(GL_TRIANGLE_STRIP,0,4);
     glDisableVertexAttribArray(0);glDisableVertexAttribArray(1);
     glDepthMask(GL_TRUE);glDisable(GL_BLEND);
-}
-
-// Procedural per-eye sniper mask. The target port does not yet expose a safe
-// RenderWare HUD-texture bridge to the OpenXR swapchains, so draw the essential
-// optical crop + centre reticle directly after the eye blit. This avoids a broad
-// CHud hook while keeping the reticle in the same ring epoch as the zoomed world.
-GLuint g_scopeProg = 0, g_scopeVbo = 0;
-GLint g_scopeAspectLoc = -1;
-
-void EnsureScopeProgram() {
-    if (g_scopeProg) return;
-    const char* vs = "#version 300 es\n"
-                     "layout(location=0) in vec2 aPos;\n"
-                     "out vec2 vNdc;\n"
-                     "void main(){ vNdc=aPos; gl_Position=vec4(aPos,0.0,1.0); }\n";
-    const char* fs = "#version 300 es\n"
-                     "precision highp float;\n"
-                     "in vec2 vNdc; uniform float uAspect; out vec4 o;\n"
-                     "void main(){\n"
-                     "  vec2 p=vec2(vNdc.x*uAspect,vNdc.y);\n"
-                     "  float r=length(p); const float radius=0.82;\n"
-                     "  if(r>radius){ o=vec4(0.0,0.0,0.0,1.0); return; }\n"
-                     "  if(abs(r-radius)<0.010){ o=vec4(0.0,0.0,0.0,1.0); return; }\n"
-                     "  float ax=abs(p.x), ay=abs(p.y);\n"
-                     "  bool h=ay<0.008 && ax>0.045 && r<radius-0.012;\n"
-                     "  bool v=ax<0.008 && ay>0.045 && r<radius-0.012;\n"
-                     "  if(h||v){\n"
-                     "    bool inner=(h&&ay<0.003)||(v&&ax<0.003);\n"
-                     "    o=inner?vec4(0.0,0.0,0.0,1.0):vec4(1.0,1.0,1.0,1.0); return;\n"
-                     "  }\n"
-                     "  if(r<0.017){ o=r<0.007?vec4(1.0,1.0,1.0,1.0):vec4(0.0,0.0,0.0,1.0); return; }\n"
-                     "  discard;\n"
-                     "}\n";
-    const GLuint v = CompileHandShader(GL_VERTEX_SHADER, vs);
-    const GLuint f = CompileHandShader(GL_FRAGMENT_SHADER, fs);
-    g_scopeProg = glCreateProgram();
-    glAttachShader(g_scopeProg, v);
-    glAttachShader(g_scopeProg, f);
-    glLinkProgram(g_scopeProg);
-    glDeleteShader(v);
-    glDeleteShader(f);
-    GLint linked = 0;
-    glGetProgramiv(g_scopeProg, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        char log[512]{};
-        glGetProgramInfoLog(g_scopeProg, sizeof(log), nullptr, log);
-        LOGE("[scope] overlay link failed: %s", log);
-        glDeleteProgram(g_scopeProg);
-        g_scopeProg = 0;
-        return;
-    }
-    g_scopeAspectLoc = glGetUniformLocation(g_scopeProg, "uAspect");
-    constexpr float vertices[] = {
-        -1.0f, -1.0f,  1.0f, -1.0f, -1.0f,  1.0f,
-        -1.0f,  1.0f,  1.0f, -1.0f,  1.0f,  1.0f,
-    };
-    glGenBuffers(1, &g_scopeVbo);
-    glBindBuffer(GL_ARRAY_BUFFER, g_scopeVbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    LOGI("[scope] per-eye overlay ready");
-}
-
-void DrawScopeOverlay(int width, int height,
-                      const scopeaim::VisualState& scope) {
-    if (!scope.active || width <= 0 || height <= 0)
-        return;
-    EnsureScopeProgram();
-    if (!g_scopeProg || !g_scopeVbo) return;
-
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
-    glDisable(GL_SCISSOR_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glViewport(0, 0, width, height);
-    glUseProgram(g_scopeProg);
-    glUniform1f(g_scopeAspectLoc,
-                static_cast<float>(width) / static_cast<float>(height));
-    glBindBuffer(GL_ARRAY_BUFFER, g_scopeVbo);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
-                          reinterpret_cast<void*>(0));
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    glDisableVertexAttribArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glUseProgram(0);
-    glDisable(GL_BLEND);
 }
 
 // Head-centred peripheral feedback; sampled once per stereo pair. No world
@@ -12275,7 +12188,6 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const BulletTracer* tracers, int tracerCount,
                      const ObjectiveMarkerVisual* objectiveMarkers,
                      int objectiveMarkerCount,
-                     const scopeaim::VisualState& scope,
                      const driving::WheelVisualState& drivingWheel,
                      const ThrowableTrajectory throwableTrajectory[2],
                      const HandPose bakedHands[2],
@@ -12290,7 +12202,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
                      const WeaponAmmoPose ammoPoses[2],
                      const reloadhint::VisualFrame& reloadHints,const watchhud::Readout& watchData) {
     const bool showReloadHints=reloadHints.Visible() && IsSessionFocused() && !IsMenuVisible();
-    const bool trackedVisuals = !scope.active && drivingWheel.trackedHandsEnabled;
+    const bool trackedVisuals = drivingWheel.trackedHandsEnabled;
     bool chuteVisuals = false, chuteRingVisual = false;
     {
         std::lock_guard<std::mutex> lock(g_headPoseMutex);
@@ -12307,7 +12219,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     const bool hudCalibrating = g_hudActive.load(std::memory_order_relaxed);
     const bool dashAnchored =
         drivingWheel.active || drivingWheel.dashAnchorValid;
-    const bool wristWanted = !scope.active && hudSourceTex != 0 &&
+    const bool wristWanted = hudSourceTex != 0 &&
         (hud::ShouldRenderWristHud() || hudCalibrating) &&
         (dashAnchored ||
          (trackedVisuals &&
@@ -12330,12 +12242,8 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     MatView(view, rp.orientation, eyePos);
     const float nearZ = std::max(0.001f, renderedNearZ);
     const float farZ = std::max(nearZ + 1.0f, renderedFarZ);
-    // Tracers are world geometry drawn after the blit. They must use the same
-    // narrowed frustum as the scoped eye pixels; the projection layer itself
-    // still advertises the normal tangents below.
-    const float zoom = scope.active ? std::max(1.0f, scope.zoom) : 1.0f;
-    MatPersp(proj, g_stereoTanX.load(std::memory_order_relaxed) / zoom,
-             g_stereoTanY.load(std::memory_order_relaxed) / zoom,
+    MatPersp(proj, g_stereoTanX.load(std::memory_order_relaxed),
+             g_stereoTanY.load(std::memory_order_relaxed),
              nearZ, farZ);
     MatMul(mvp, proj, view);
 
@@ -12448,7 +12356,12 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
     // the closed hands are drawn over it at the exact animated rim sockets.
     if (trackedVisuals && drivingWheel.active)
         DrawImmersiveDrivingWheel(mvp, drivingWheel);
-    if (!scope.active) { DrawIgnition(mvp,drivingWheel); DrawRadioKnob(mvp,drivingWheel); DrawLiftLever(mvp,drivingWheel); DrawNitroLever(mvp,drivingWheel); DrawHydraulicsJoystick(mvp,drivingWheel); DrawServiceRadio(mvp,drivingWheel,bakedHands); }
+    DrawIgnition(mvp,drivingWheel);
+    DrawRadioKnob(mvp,drivingWheel);
+    DrawLiftLever(mvp,drivingWheel);
+    DrawNitroLever(mvp,drivingWheel);
+    DrawHydraulicsJoystick(mvp,drivingWheel);
+    DrawServiceRadio(mvp,drivingWheel,bakedHands);
     // Never turn the optional highlight into a wallhack: if the shared game
     // depth cannot be copied this frame, omit it instead of drawing on top.
     if (usingGameDepth)
@@ -12464,11 +12377,11 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawWeaponForEye(mvp);     // active weapon mesh pinned to the hand (Stage 1)
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
-    if(usingGameDepth && !scope.active)DrawRadioLabel(mvp,drivingWheel);
-    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors,rp);
-    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,rp,false,true);
-    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,rp,true);
-    if (!scope.active) for (const auto& frame : bakedRadials.hands) DrawRadialHolsterMenu(mvp,frame);
+    if(usingGameDepth)DrawRadioLabel(mvp,drivingWheel);
+    if (usingGameDepth) DrawVehicleDoorMarkers(mvp,bakedDoors,rp);
+    if (usingGameDepth) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,rp,false,true);
+    if (usingGameDepth) DrawVehicleDoorMarkers(mvp,bakedTestArea,rp,true);
+    for (const auto& frame : bakedRadials.hands) DrawRadialHolsterMenu(mvp,frame);
     if (trackedVisuals && (hud::ShouldRenderWristHud() || (g_calibActive.load(std::memory_order_relaxed) && g_calibGroup.load()==weaponmenu::AMMO))) {
         const auto lower=QuatRotate(rp.orientation,{0,-.05f,0});
         for (int h=0;h<2;++h) if ((weaponHandMask&(1u<<h)) && ammoPoses[h].valid) {
@@ -12519,7 +12432,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
             if (!pumpHand) pumpHand=reloadhint::CopyPumpHandModel(g_handSkeleton);
             reloadhint::AddPumpHands(hints,pumpHand);
         }
-        DrawReloadHintsForEye(hintMvp,hints,scope.active);
+        DrawReloadHintsForEye(hintMvp,hints,false);
     }
 
     glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
@@ -12682,6 +12595,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         outcome = perf::StereoProjectionOutcome::NoSafePair;
         return false;
     }
+    photocapture::ReadbackAfterStereoFence(expectedGeneration);
     if (candidate.ageMs > kStereoHardMaxAgeMs) {
         outcome = perf::StereoProjectionOutcome::StaleRejected;
         return false;
@@ -12712,7 +12626,6 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     vehicledoors::MarkerFrame bakedNpcGrabs{};
     vehicledoors::MarkerFrame bakedTestArea{};
     radialholster::Frames bakedRadial{};
-    scopeaim::VisualState bakedScope{};
     driving::WheelVisualState drivingWheel{};
     BallHandLock ballHandLock{};
     MobileColorState mobileColor{};
@@ -12748,7 +12661,6 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedRadial = g_stereoRadialHolsterMenu[set];
         for (auto& frame : bakedRadial.hands)
             if (!frame.Usable(g_headPoseValid,g_trackingRecovery.epoch)) frame.visible=false;
-        bakedScope     = g_stereoScopeState[set];
         drivingWheel   = g_stereoDrivingWheelState[set];
         ballHandLock   = g_stereoBallHandLock[set];
         mobileColor    = g_stereoMobileColor[set];
@@ -12771,7 +12683,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         g_trackingRecovery.epoch);
     const auto haloFx=peripheral::Select(combatFx,wantedFx,vitalsFx);
     const float nitroStrength=IsSessionFocused()&&!IsMenuVisible()&&drivingWheel.active&&
-        !drivingWheel.nitroGhost&&!bakedScope.active?drivingWheel.nitroEffect:0.f;
+        !drivingWheel.nitroGhost?drivingWheel.nitroEffect:0.f;
     const bool shaderCopyMayRun = fxaaStats.requested ||
         underWaterness > 0.001f || mobileColor.mode != 0 || haloFx.Active() || nitroStrength>.001f;
     // Submit projection layers with their recorded render pose; use theater until that pose is available.
@@ -12780,13 +12692,11 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         return false;
     }
 
-    if (!bakedScope.active) {
-        BuildHandFrames(bakedHands, bakedTwoHand, drivingWheel,
-                        ballHandLock, bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes, bakedDebugPinchHands); // same ring pose + cockpit/support correction
-        BuildWeaponMesh(bakedHands);   // (weapon-mesh path; dead until Approach-B geometry exists)
-    }
+    BuildHandFrames(bakedHands, bakedTwoHand, drivingWheel, ballHandLock,
+                    bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes, bakedDebugPinchHands);
+    BuildWeaponMesh(bakedHands);
     UpdateWatchFrame(bakedHands,bakedTwoHand,drivingWheel,ballHandLock,bakedWeaponHandMask,
-                     bakedPinchAmounts,watchTrackingValid,watchEpoch,bakedScope.active,bakedWatch.mapVisible);
+                     bakedPinchAmounts,watchTrackingValid,watchEpoch,false,bakedWatch.mapVisible);
     BulletTracer liveTracers[kMaxBulletTracers]{};
     const int liveTracerCount = SnapshotBulletTracers(liveTracers);
     ObjectiveMarkerVisual liveObjectiveMarkers[kMaxObjectiveMarkers]{};
@@ -12930,7 +12840,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
             bakedLaser, bakedWeaponHandMask,
             liveTracers, liveTracerCount,
             liveObjectiveMarkers, liveObjectiveMarkerCount,
-            bakedScope, drivingWheel,
+            drivingWheel,
             throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoWatchTex[set].load(std::memory_order_relaxed), g_stereoWatchProjectionTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set], bakedReloadHints,bakedWatch);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
@@ -12965,7 +12875,6 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
                 }
             }
         }
-        DrawScopeOverlay(chain.width, chain.height, bakedScope);
         DrawPeripheralHalo(chain.width,chain.height,tanX,tanY,haloFx);
         EndXrGpuStage(overlayGpuTimer);
         RecordXrCpuStage(e, XrCpuStage::OverlaySubmit, overlayWallStartMs,

@@ -6,6 +6,8 @@
 
 namespace savr::weaponoptic {
 constexpr bool Supported(int type) { return type == 34 || type == 36; }
+constexpr int PhotoCamera = 43;
+constexpr bool Calibratable(int type) { return Supported(type) || type == PhotoCamera; }
 constexpr int FieldCount = 10;
 // Tenths of centimetres/degrees, diameter/width, length, image flips.
 struct Profile {
@@ -13,6 +15,11 @@ struct Profile {
 };
 inline Profile Defaults(int type) {
     Profile p;
+    if (type == PhotoCamera) {
+        p.value[0] = -60;
+        p.value[6] = 100;
+        return p;
+    }
     p.value[1] = type == 34 ? 60 : 80; // above barrel
     p.value[0] = type == 34 ? -60 : -120; // behind model pivot
     p.value[6] = type == 34 ? 60 : 120;
@@ -33,7 +40,7 @@ inline bool ParseProfile(const char* line,int& set,int& type,Profile& p) {
     const int fields=std::sscanf(line+(fine?6:5)," %d %d %d %d %d %d %d %d %d %d %d %d",
         &set,&type,&p.value[0],&p.value[1],&p.value[2],&p.value[3],&p.value[4],
         &p.value[5],&p.value[6],&p.value[7],&p.value[8],&p.value[9]);
-    if((fields!=10 && fields!=12) || set<0 || set>1 || !Supported(type)) return false;
+    if((fields!=10 && fields!=12) || set<0 || set>1 || !Calibratable(type)) return false;
     for(int i=0;i<FieldCount;++i) {
         if(!fine && i<8) p.value[i]=std::clamp(p.value[i],-10000,10000)*5;
         p.value[i]=ClampField(i,p.value[i]);

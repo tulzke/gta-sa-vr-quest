@@ -52,8 +52,7 @@ void DrawWaterStream(){
   g.RwIm3DRenderIndexedPrimitive(3,mesh.indices.data(),static_cast<int>(mesh.indices.size()));g.RwIm3DEnd();}
  for(std::size_t i=0;i<std::size(states);++i)g.RwRenderStateSet(states[i],reinterpret_cast<void*>(saved[i]));
 }
-void RenderEffects(void* sc){
- DrawWaterStream();
+void RenderSceneEffects(void* sc){
  using RenderFx=void(*)(void*,void*,unsigned char);
  static RenderFx fx=[](){void* h=dlopen("libGame.so",RTLD_NOW|RTLD_NOLOAD);if(!h)return RenderFx{};
   auto p=reinterpret_cast<RenderFx>(dlsym(h,"_ZN11FxManager_c6RenderEP8RwCamerah"));
@@ -61,9 +60,13 @@ void RenderEffects(void* sc){
   dlclose(h);return p;}();
  if(fx){auto* manager=reinterpret_cast<unsigned char*>(g.LoadBase+0xa5bcf8);const auto flag=manager[0x110];fx(manager,sc,0);manager[0x110]=flag;}
 }
+void RenderEffects(void* sc){
+ DrawWaterStream();
+ RenderSceneEffects(sc);
+}
 void Prepare(){
  ready=false;
- if(!driving::GetWaterMonitorVisual(&visual)||PhotoViewActive()||FormalCutsceneRunning()||ScriptedCutsceneRunning()||
+ if(!driving::GetWaterMonitorVisual(&visual)||FormalCutsceneRunning()||ScriptedCutsceneRunning()||
     !rear_mirror_render::Resolve()||!WorldFrame(visual.body,body)||!WorldFrame(visual.dock,dock))return;
  static const bool loaded=model.Load(savr_water_monitor_mesh,static_cast<std::size_t>(savr_water_monitor_mesh_end-savr_water_monitor_mesh));
  if(!loaded)return;

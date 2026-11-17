@@ -65,6 +65,8 @@ inline Selection Select(float grip, float trigger, const Context& context) {
     if (context.pinchGrab) return fixed(Gesture::Pinch);
     if (context.steering) return fixed(Gesture::Grip,grip);
     if (context.ball) return fixed(Gesture::OpenPalm);
+    if (context.support && context.weaponType == 43)
+        return fixed(Gesture::Grip, grip);
     if (context.support && Launcher(context.weaponType))
         return fixed(Gesture::GripPistolShoot,trigger);
     if (context.support && ShotgunOffhandWeapon(context.weaponType))
@@ -78,7 +80,8 @@ inline Selection Select(float grip, float trigger, const Context& context) {
         if (context.weaponType==25 || context.weaponType==26)
             return fixed(Gesture::GripShotgun); // SPAS-12 keeps its pistol grip
         if (RifleGripWeapon(context.weaponType)) return fixed(Gesture::GripRifle);
-        if (Firearm(context.weaponType)) return fixed(Gesture::GripPistolShoot,trigger);
+        if (Firearm(context.weaponType) || context.weaponType == 43)
+            return fixed(Gesture::GripPistolShoot,trigger);
         return fixed(Gesture::Grip);
     }
     if (context.horn>=1.f) return fixed(Gesture::OpenPalm);
