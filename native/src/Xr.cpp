@@ -1,6 +1,7 @@
 #include "WeaponCalibrationMenu.h"
 #include "ArcadeReload.h"
 #include "Xr.h"
+#include "HapticPolicy.h"
 #include "Combat.h"
 #include "PeripheralFeedback.h"
 #include "NpcGrabVisual.h"
@@ -3023,6 +3024,8 @@ EGLConfig ConfigOfContext(EGLDisplay display, EGLContext context) {
     return config;
 }
 
+#include "HapticsXr.inl"
+
 void PollEvents() {
     XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
     while (xrPollEvent(s.instance, &event) == XR_SUCCESS) {
@@ -3030,7 +3033,7 @@ void PollEvents() {
         case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED: {
             const auto& changed = *reinterpret_cast<XrEventDataSessionStateChanged*>(&event);
             s.sessionState = changed.state;
-            if(s.sessionState != XR_SESSION_STATE_FOCUSED) InvalidateTracking();
+            if(s.sessionState != XR_SESSION_STATE_FOCUSED) { InvalidateTracking(); ResetHapticOutput(); }
             g_sessionFocused.store(s.sessionState == XR_SESSION_STATE_FOCUSED,
                                    std::memory_order_release);
             if (s.sessionState != XR_SESSION_STATE_FOCUSED)
@@ -3083,6 +3086,9 @@ void PollEvents() {
             }
             break;
         }
+        case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED:
+            ResetHapticOutput();
+            break;
         case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING: {
             const auto& changed=*reinterpret_cast<XrEventDataReferenceSpaceChangePending*>(&event);
             if(changed.referenceSpaceType==XR_REFERENCE_SPACE_TYPE_LOCAL) {
@@ -5135,21 +5141,48 @@ void GetInput(InputState& out) {
     for(int h=0;h<2;++h)if(driving::ServiceRadioConsumesTrigger(h))out.triggers[h]=0;
 }
 
-void TriggerHaptic(int hand, float amplitude, float frequencyHz,
-                   float durationMs) {
-    if (s.session == XR_NULL_HANDLE || s.hapticAction == XR_NULL_HANDLE ||
-        hand < 0 || hand > 1)
-        return;
-    XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
-    vibration.amplitude = std::clamp(amplitude, 0.0f, 1.0f);
-    vibration.frequency = frequencyHz;
-    vibration.duration = static_cast<XrDuration>(durationMs * 1.0e6f);
-    XrHapticActionInfo info{XR_TYPE_HAPTIC_ACTION_INFO};
-    info.action = s.hapticAction;
-    info.subactionPath = s.handPaths[hand];
-    xrApplyHapticFeedback(
-        s.session, &info,
-        reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
+void TriggerHaptic(int hand, float amplitude, float frequencyHz, float durationMs) {
+    if (hand<0 || hand>1 || !IsSessionFocused() || !std::isfinite(amplitude) ||
+        !std::isfinite(frequencyHz) || !std::isfinite(durationMs)) return;
+    std::lock_guard<std::mutex> lock(g_hapticMutex);
+    g_hapticHands[hand].game={haptics::Source::Game,std::clamp(amplitude,0.f,1.f),
+        std::max(0.f,frequencyHz),HapticNow()+.10,
+        false,0,++g_hapticSerial,0,std::clamp(durationMs,1.f,5000.f)*.001};
+}
+void PublishWheelHaptic(int hand, float amplitude, bool pcm, int wave, float frequency) {
+    if (hand<0 || hand>1) return;
+    const auto epoch=CaptureTrackingSnapshot().epoch;
+    std::lock_guard<std::mutex> lock(g_hapticMutex);
+    g_hapticHands[hand].wheel={haptics::Source::Wheel,
+        std::isfinite(amplitude)?std::clamp(amplitude,0.f,.45f):0.f,frequency,
+        HapticNow()+.10,pcm,std::clamp(wave,0,2),++g_hapticSerial,epoch};
+}
+int PcmHapticStatus(int hand) { return hand>=0&&hand<2?g_pcmStatus[hand].load():0; }
+void UpdatePcmHapticTest(bool held, int hand, float strength, int wave, float frequency) {
+    const auto epoch=CaptureTrackingSnapshot().epoch;
+    std::lock_guard<std::mutex> lock(g_hapticMutex);
+    const double now=HapticNow();
+    if (!IsSessionFocused()) {
+        for(auto& h:g_hapticHands)h.test={};
+        g_hapticTestHeld=true; return;
+    }
+    if (!held || hand<0 || hand>1) {
+        for(auto& h:g_hapticHands)h.test={};
+        g_hapticTestHeld=false; return;
+    }
+    if (!g_hapticTestHeld) {
+        if (!g_hapticRandom) g_hapticRandom=static_cast<unsigned>(MonotonicNowNs())|1u;
+        g_hapticRandom^=g_hapticRandom<<13;g_hapticRandom^=g_hapticRandom>>17;g_hapticRandom^=g_hapticRandom<<5;
+        const int chosen=wave==3?static_cast<int>(g_hapticRandom%3):std::clamp(wave,0,2);
+        for(auto& h:g_hapticHands)h.test={};
+        g_hapticHands[hand].test={haptics::Source::Test,std::clamp(strength,0.f,1.f)*.3f,
+            frequency,now+.35,true,chosen,++g_hapticSerial,epoch};
+        // Explicit user-triggered diagnostic: retain trial keys in player builds too.
+        __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,
+            "[haptics.test] trial=%llu hand=%d wave=%d hz=%.0f strength=%.2f PCM=%d",
+            static_cast<unsigned long long>(g_hapticSerial),hand,chosen,frequency,strength,PcmHapticStatus(hand));
+    }
+    g_hapticTestHeld=true;
 }
 
 void PublishHudText(const std::int16_t* brief, int briefCapacity,
@@ -6624,6 +6657,8 @@ bool Initialize(JavaVM* vm, jobject activity) {
     // big core, which is what actually lifts the frame rate (matches the VC build).
     g_hasPerfExt = hasExt(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
     if (g_hasPerfExt) extensions.push_back(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
+    g_hasPcmExt=hasExt(XR_FB_HAPTIC_PCM_EXTENSION_NAME);
+    if (g_hasPcmExt) extensions.push_back(XR_FB_HAPTIC_PCM_EXTENSION_NAME);
     g_hasThreadExt = hasExt(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME);
     if (g_hasThreadExt) extensions.push_back(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME);
     g_hasDisplayRefreshExt = hasExt(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
@@ -6664,6 +6699,8 @@ bool Initialize(JavaVM* vm, jobject activity) {
     if (!Check(xrCreateInstance(&create, &s.instance), "xrCreateInstance")) {
         return false;
     }
+    if (g_hasPcmExt && XR_FAILED(xrGetInstanceProcAddr(s.instance,"xrGetDeviceSampleRateFB",
+            reinterpret_cast<PFN_xrVoidFunction*>(&g_getPcmRate)))) g_getPcmRate=nullptr;
     if (g_hasVisibilityMaskExt) {
         const XrResult maskProcResult = xrGetInstanceProcAddr(
             s.instance, "xrGetVisibilityMaskKHR",
@@ -7784,8 +7821,10 @@ void BuildDrivingMenu() {
     const int sel = g_drivingSel.load(std::memory_order_relaxed);
     const int vehicleType=g_drivingVehicleType.load(std::memory_order_relaxed);
     const int rowCount=driving::GetMenuItemCount(vehicleType);
-    char rows[48][96]{};
-    bool available[48]{};
+    // Menu tables grow as cockpit controls are added; keep row storage in sync.
+    struct Row { char text[96]{}; operator char*() { return text; } };
+    std::vector<Row> rows(rowCount);
+    std::vector<bool> available(rowCount);
     const bool haveModel=driving::HasCurrentModelForType(vehicleType);
     for (int row=0;row<rowCount;++row) {
         const int item=driving::GetMenuItemForRow(vehicleType,row);
@@ -7974,6 +8013,25 @@ void BuildDrivingMenu() {
                     "KEEP RIDER ON FLIPS   < %s >",
                     driving::KeepRiderOnFlipsEnabled()?"ON":"OFF");
                 break;
+            case driving::MENU_WHEEL_HINT:
+                std::snprintf(rows[row],sizeof(rows[row]),"WHEEL HAND HINT < %s >",driving::GetWheelHapticSetting(0)?"ON":"OFF"); break;
+            case driving::MENU_WHEEL_HINT_ZONE:
+                std::snprintf(rows[row],sizeof(rows[row]),"WHEEL FREE MOVEMENT < %d CM >",driving::GetWheelHapticSetting(1)); break;
+            case driving::MENU_WHEEL_HINT_STRENGTH:
+                std::snprintf(rows[row],sizeof(rows[row]),"WHEEL HAPTIC STRENGTH < %d%% >",driving::GetWheelHapticSetting(2)); break;
+            case driving::MENU_WHEEL_HINT_PCM:
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM EXPERIMENT < %s > L:%s R:%s",driving::GetWheelHapticSetting(3)?"ON":"OFF",
+                    PcmHapticStatus(0)==1?"PCM":"FALLBACK",PcmHapticStatus(1)==1?"PCM":"FALLBACK"); break;
+            case driving::MENU_WHEEL_HINT_WAVE: {
+                const char* names[]{"ASYMMETRIC +","ASYMMETRIC -","SYMMETRIC","BLIND TEST"};
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM WAVE < %s >",names[driving::GetWheelHapticSetting(4)]); break; }
+            case driving::MENU_WHEEL_HINT_FREQUENCY:
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM FREQUENCY < %d HZ >",driving::GetWheelHapticSetting(5)?75:40); break;
+            case driving::MENU_WHEEL_HINT_TEST_HAND:
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM TEST HAND < %s >",driving::GetWheelHapticSetting(6)?"RIGHT":"LEFT"); break;
+            case driving::MENU_WHEEL_HINT_TEST:
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM TEST: %s",!driving::GetWheelHapticSetting(3)?"ENABLE PCM FLAG":
+                    PcmHapticStatus(driving::GetWheelHapticSetting(6))==1?"HOLD A (0.35 SEC)":"UNAVAILABLE"); break;
             case driving::MENU_WHEEL_VISIBLE:
                 std::snprintf(rows[row],sizeof(rows[row]),
                     "VIRTUAL STEERING WHEEL   < %s >",
@@ -13292,6 +13350,7 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
                 XR_SUCCEEDED(xrLocateSpace(s.handAimSpace[h], s.space, frameState.predictedDisplayTime, &al)) &&
                 (al.locationFlags & kValid) == kValid;
             hp[h].valid = gok;
+            hp[h].positionTracked = gok && (gl.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT);
             hp[h].aimValid = aok;
             if (gok) {
                 hp[h].gripPos[0] = gl.pose.position.x; hp[h].gripPos[1] = gl.pose.position.y; hp[h].gripPos[2] = gl.pose.position.z;
@@ -13318,6 +13377,8 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
             g_headPoseValid=false;g_handPose[0]={};g_handPose[1]={};
         }
     }
+
+    FlushHaptics();
 
     // Menus/cutscenes use the trusted flat SurfaceTexture. Gameplay normally
     // submits a world projection, with a short repeat grace for producer phase

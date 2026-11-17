@@ -62,6 +62,10 @@ void GetRawInput(InputState& out);
 void TriggerHaptic(int hand, float amplitude, float frequencyHz,
                    float durationMs);
 
+void PublishWheelHaptic(int hand, float amplitude, bool pcm, int wave, float frequency);
+int PcmHapticStatus(int hand); // 0 unavailable, 1 ready, 2 failed; per controller
+void UpdatePcmHapticTest(bool held, int hand, float strength, int wave, float frequency);
+
 // Publish the already-formatted stock text buffers after CMessages::Display.
 // The compositor renders these strings with the APK's own font files onto
 // transparent VR layers, so BIG MESSAGES and HELP TEXT no longer sample crops

@@ -9,6 +9,7 @@ namespace savr::xr {
 struct HandPose {
     bool valid{false};
     bool aimValid{false};
+    bool positionTracked{false};
     float gripPos[3]{};
     float gripOri[4]{0, 0, 0, 1}; // x, y, z, w
     float aimPos[3]{};

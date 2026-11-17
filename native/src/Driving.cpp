@@ -11,6 +11,7 @@
 #include "BicyclePedal.h"
 #include "BikePitchFeedback.h"
 #include "WheelReturn.h"
+#include "WheelHaptics.h"
 #include "QuadHandlebar.h"
 #include "MissionComfort.h"
 #include "IgnitionState.h"
@@ -184,6 +185,14 @@ std::atomic<float> g_value[F_COUNT] = {
     // bike/car-immersive/bike-immersive/plane/boat/boat-immersive side
     0, 0, 0, 0, 0, 0
 };
+// Global preferences: no new per-model calibration requirement.
+constexpr const char* kWheelHapticKeys[]{"WheelHint","WheelHintFreeCm","WheelHintStrength",
+    "WheelHintPcm","WheelHintWave","WheelHintFrequency","WheelHintTestHand"};
+constexpr int kWheelHapticMin[]{0,10,0,0,0,0,0};
+constexpr int kWheelHapticMax[]{1,15,100,1,3,1,1};
+std::atomic<int> g_wheelHapticSettings[7]{0,15,60,0,0,0,1};
+wheelhaptics::State g_wheelHapticState[2];
+double g_wheelHapticTime{};
 std::atomic<bool> g_wheelVisible{true};
 std::atomic<bool> g_highlights{true};
 std::atomic<bool> g_bikeHandsFollowTilt{true};
@@ -658,6 +667,7 @@ void Save() {
     std::fprintf(file, "BikeHalfWidthCm=%.7g\n", g_value[F_BIKE_HALF_WIDTH].load());
     std::fprintf(file, "BikeDistanceCm=%.7g\n", g_value[F_BIKE_DISTANCE].load());
     std::fprintf(file, "BikeHeightCm=%.7g\n", g_value[F_BIKE_HEIGHT].load());
+    for(int i=0;i<7;++i) std::fprintf(file,"%s=%d\n",kWheelHapticKeys[i],g_wheelHapticSettings[i].load());
     std::fprintf(file, "ImmersiveWheelVisible=%d\n", g_wheelVisible.load()?1:0);
     std::fprintf(file, "HandleHighlights=%d\n", g_highlights.load()?1:0);
     std::fprintf(file, "BikeHandsFollowTilt=%d\n",
@@ -791,6 +801,13 @@ void Load() {
     if (FILE* file = std::fopen(kPath, "r")) {
         char line[128];
         while (std::fgets(line, sizeof(line), file)) {
+            char hapticKey[64]{}; int hapticValue{}; bool hapticMatched=false;
+            if(std::sscanf(line,"%63[^=]=%d",hapticKey,&hapticValue)==2)
+                for(int i=0;i<7;++i) if(std::strcmp(hapticKey,kWheelHapticKeys[i])==0) {
+                    g_wheelHapticSettings[i]=std::clamp(hapticValue,kWheelHapticMin[i],kWheelHapticMax[i]);
+                    hapticMatched=true; break;
+                }
+            if(hapticMatched) continue;
             float spatial{}; int spatialModel{}, spatialMode{}, spatialHand{};
             bool spatialMatched=false;
             if (std::sscanf(line,"PlaneSeatDistanceCm=%f",&spatial)==1 && std::isfinite(spatial)) {values[F_PLANE_SEAT_DISTANCE]=spatial; spatialMatched=true;}
@@ -1154,6 +1171,10 @@ void Load() {
 void EnsureInit() { std::call_once(g_initOnce, Load); }
 
 void ClearGrabStateLocked() {
+    for(int hand=0;hand<2;++hand) {
+        g_wheelHapticState[hand]={}; xr::PublishWheelHaptic(hand,0,false,0,40);
+    }
+    g_wheelHapticTime=0;
     g_hornPressed.store(false,std::memory_order_release);
     g_hornState.Reset();g_hornLastTime=0;
     g_rimOwnershipMask=0;
@@ -4148,6 +4169,8 @@ constexpr int kImmersiveCarItems[] = {
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
     MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS,
+    MENU_WHEEL_HINT, MENU_WHEEL_HINT_ZONE, MENU_WHEEL_HINT_STRENGTH, MENU_WHEEL_HINT_PCM,
+    MENU_WHEEL_HINT_WAVE, MENU_WHEEL_HINT_FREQUENCY, MENU_WHEEL_HINT_TEST_HAND, MENU_WHEEL_HINT_TEST,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
     MENU_RESET, MENU_BACK
 };
@@ -4826,6 +4849,18 @@ void ResetVehiclePreset(int vehicleType) {
     }
     Save(); ResetInteraction();
 }
+int GetWheelHapticSetting(int field) {
+    EnsureInit(); return field>=0&&field<7?g_wheelHapticSettings[field].load():0;
+}
+void AdjustWheelHapticSetting(int field,int direction) {
+    EnsureInit(); if(field<0||field>=7||!direction)return;
+    int value=g_wheelHapticSettings[field].load();
+    if(field==1||field==2) value=std::clamp(value+(direction<0?-1:1)*(field==2?10:1),
+        kWheelHapticMin[field],kWheelHapticMax[field]);
+    else value=(value+(direction<0?-1:1)+kWheelHapticMax[field]+1)%(kWheelHapticMax[field]+1);
+    g_wheelHapticSettings[field]=value;
+    ResetInteraction(); Save();
+}
 bool IsWheelVisible() { EnsureInit(); return g_wheelVisible.load(); }
 void ToggleWheelVisible() { EnsureInit(); g_wheelVisible.store(!g_wheelVisible.load()); Save(); }
 bool AreHandleHighlightsEnabled() { EnsureInit(); return g_highlights.load(); }
@@ -5162,6 +5197,18 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
     }
     g_activeBikeAccelerator.store(activeAccelerator,std::memory_order_release);
     std::lock_guard<std::mutex> lock(g_stateMutex);
+    struct WheelHapticOnExit {
+        bool updated{};
+        float amplitudes[2]{};
+        ~WheelHapticOnExit() {
+            for(int hand=0;hand<2;++hand) {
+                if(!updated)g_wheelHapticState[hand]={};
+                xr::PublishWheelHaptic(hand,amplitudes[hand],g_wheelHapticSettings[3].load()!=0,
+                    std::min(g_wheelHapticSettings[4].load(),2),g_wheelHapticSettings[5].load()?75.f:40.f);
+            }
+            if(!updated)g_wheelHapticTime=0;
+        }
+    } wheelFeedback;
     struct BikePitchFeedbackOnExit {
         bool enabled;
         ~BikePitchFeedbackOnExit() { PublishBikePitchFeedback(enabled); }
@@ -5374,6 +5421,21 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         }
         if (input.grip[hand]<=0.30f) g_gripDown[hand]=false;
         else if (input.grip[hand]>=0.65f) g_gripDown[hand]=true;
+    }
+    if(circular && activeType==VEHICLE_CAR && g_wheelHapticSettings[0].load() && xr::IsSessionFocused()) {
+        wheelFeedback.updated=true;
+        const double now=MonotonicSeconds();
+        const float dt=g_wheelHapticTime>0?static_cast<float>(now-g_wheelHapticTime):0.f;
+        g_wheelHapticTime=now;
+        const auto tracking=xr::CaptureTrackingSnapshot();
+        wheelhaptics::Frame frame{{center.x,center.y,center.z},{right.x,right.y,right.z},
+            {up.x,up.y,up.z},{visual.normal[0],visual.normal[1],visual.normal[2]},visual.radius};
+        for(int hand=0;hand<2;++hand) {
+            wheelFeedback.amplitudes[hand]=g_wheelHapticState[hand].Step(frame,
+                {positions[hand].x,positions[hand].y,positions[hand].z},g_grabbed[hand],
+                poseValid[hand]&&poses[hand].positionTracked,justGrabbed[hand],tracking.epoch,dt,
+                g_wheelHapticSettings[1].load()*.01f,g_wheelHapticSettings[2].load()*.01f);
+        }
     }
     {
         bool hornPressed=false;

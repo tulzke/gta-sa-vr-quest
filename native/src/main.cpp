@@ -1464,6 +1464,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 drivingVehicleType=(drivingVehicleType+typeCount+direction)%
                                    typeCount;
                 drivingSel=0;
+            } else if (item>=savr::driving::MENU_WHEEL_HINT && item<=savr::driving::MENU_WHEEL_HINT_TEST_HAND && (enter||step)) {
+                savr::driving::AdjustWheelHapticSetting(item-savr::driving::MENU_WHEEL_HINT,step?step:1);
             } else if (item==savr::driving::MENU_DRIVING_TYPE&&(enter||step)) {
                 savr::driving::CycleModeForVehicleType(
                     drivingVehicleType,step?step:+1);
@@ -2003,6 +2005,12 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     // can suppress their button while the player is navigating any menu page,
     // not only the cheat page (g_menuVisible).
     xr::SetAnyMenuOpen(anyMenu);
+    const bool hapticTest=menuPage==PG_DRIVING &&
+        driving::GetMenuItemForRow(drivingVehicleType,drivingSel)==driving::MENU_WHEEL_HINT_TEST &&
+        driving::GetWheelHapticSetting(3)!=0 && in.a && !grips && !in.b;
+    xr::UpdatePcmHapticTest(hapticTest,driving::GetWheelHapticSetting(6),
+        driving::GetWheelHapticSetting(2)*.01f,driving::GetWheelHapticSetting(4),
+        driving::GetWheelHapticSetting(5)?75.f:40.f);
     audiodiag::Tick(xr::IsSessionFocused(), vrcam::IsStereoActive(), anyMenu,
         (g.CTimer_m_UserPause && *g.CTimer_m_UserPause) ||
         (g.CTimer_m_CodePause && *g.CTimer_m_CodePause));
