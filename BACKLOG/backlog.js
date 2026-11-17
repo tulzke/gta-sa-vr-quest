@@ -636,13 +636,14 @@ const BACKLOG_DATA = {
     },
     {
       "id": 113,
-      "title": "Физическое управление водомётами Firetruck и S.W.A.T.",
-      "file": "113-upravlenie-vodometami-firetruck-i-swat.md",
+      "title": "Видеопульт управления водомётом Firetruck",
+      "file": "113-videopult-upravleniya-vodometom-firetruck.md",
       "categories": [
         "vehicle-controls",
         "weapons",
-        "missions",
-        "story"
+        "graphics",
+        "hud",
+        "missions"
       ],
       "priority": "high",
       "status": "in_progress"
