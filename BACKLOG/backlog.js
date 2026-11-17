@@ -829,6 +829,16 @@ const BACKLOG_DATA = {
       ],
       "priority": "high",
       "status": "open"
+    },
+    {
+      "id": 132,
+      "title": "Тактильная обратная связь стрельбы, хватов и холстеров",
+      "file": "132-obratnaya-svyaz-strelby-khvatov-i-kholsterov.md",
+      "categories": [
+        "weapons"
+      ],
+      "priority": "medium",
+      "status": "open"
     }
   ]
 };
