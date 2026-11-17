@@ -8035,7 +8035,13 @@ void BuildDrivingMenu() {
                 const char* names[]{"ASYMMETRIC +","ASYMMETRIC -","SYMMETRIC","BLIND TEST"};
                 std::snprintf(rows[row],sizeof(rows[row]),"PCM WAVE < %s >",names[driving::GetWheelHapticSetting(4)]); break; }
             case driving::MENU_WHEEL_HINT_FREQUENCY:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM FREQUENCY < %d HZ >",driving::GetWheelHapticFrequency()); break;
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM FIXED / TEST < %d HZ >",driving::GetWheelHapticFrequency()); break;
+            case driving::MENU_WHEEL_HINT_FREQUENCY_MODE:
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM FREQUENCY < %s >",driving::GetWheelHapticSetting(7)?"DISTANCE":"FIXED"); break;
+            case driving::MENU_WHEEL_HINT_FREQUENCY_LOW:
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM NEAR RIM < %d HZ >",driving::GetWheelHapticSetting(8)); break;
+            case driving::MENU_WHEEL_HINT_FREQUENCY_HIGH:
+                std::snprintf(rows[row],sizeof(rows[row]),"PCM FAR FROM RIM < %d HZ >",driving::GetWheelHapticSetting(9)); break;
             case driving::MENU_WHEEL_HINT_TEST_HAND:
                 std::snprintf(rows[row],sizeof(rows[row]),"PCM TEST HAND < %s >",driving::GetWheelHapticSetting(6)?"RIGHT":"LEFT"); break;
             case driving::MENU_WHEEL_HINT_TEST:

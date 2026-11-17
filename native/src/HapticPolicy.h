@@ -29,6 +29,20 @@ struct Hand {
 inline bool PcmUsable(bool extension, bool function, float rate) {
     return extension && function && std::isfinite(rate) && rate>=40 && rate<=192000;
 }
+// Keep waveform phase continuous across changing frequencies. Multiplying the
+// absolute clock by a changing frequency would introduce arbitrary phase jumps.
+struct PhaseClock {
+    double phase{}, started{};
+    float frequency{};
+    bool active{};
+    double Start(double now,float hz,bool restart) {
+        const double dt=now-started;
+        if(!active||restart||dt<0||dt>.2) phase=0;
+        else phase=std::fmod(phase+dt*frequency,1.0);
+        active=true; started=now; frequency=hz;
+        return phase;
+    }
+};
 // Candidate input waveforms, NOT calibrated acceleration or a known spatial pull.
 // Positive/negative candidates have identical RMS; control is RMS matched.
 inline float Sample(double phase, int wave) {

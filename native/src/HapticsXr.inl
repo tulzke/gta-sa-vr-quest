@@ -11,6 +11,7 @@ bool g_pcmFailed[2]{};
 XrPath g_pcmProfile[2]{};
 double g_pcmProbeAt{}, g_hapticAppliedAt[2]{};
 haptics::Effect g_hapticApplied[2];
+haptics::PhaseClock g_hapticPhase[2];
 bool g_hapticTestHeld{};
 unsigned g_hapticRandom{};
 
@@ -26,6 +27,7 @@ void StopHapticOutput(int hand) {
         xrStopHapticFeedback(s.session,&info);
     }
     g_hapticApplied[hand]={}; g_hapticAppliedAt[hand]=0;
+    g_hapticPhase[hand]={};
 }
 void ResetHapticOutput() {
     std::lock_guard<std::mutex> lock(g_hapticMutex);
@@ -95,8 +97,10 @@ void FlushHaptics() {
         bool usedPcm=pcm;
         if (pcm) {
             std::array<float,XR_MAX_HAPTIC_PCM_BUFFER_SIZE_FB> samples{};
+            const double phase=g_hapticPhase[hand].Start(now,desired.frequency,
+                !last.pcm||last.source!=desired.source||last.wave!=desired.wave);
             const auto count=haptics::Buffer(samples.data(),samples.size(),g_pcmRate[hand],
-                desired.frequency,desired.amplitude,desired.wave,now*desired.frequency);
+                desired.frequency,desired.amplitude,desired.wave,phase);
             std::uint32_t consumed=0;
             XrHapticPcmVibrationFB vibration{XR_TYPE_HAPTIC_PCM_VIBRATION_FB};
             vibration.buffer=samples.data(); vibration.bufferSize=static_cast<std::uint32_t>(count);

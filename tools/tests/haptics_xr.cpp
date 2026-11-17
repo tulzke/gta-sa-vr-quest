@@ -16,12 +16,14 @@
 float rates[2]{2000,0};
 int applyCount[2]{},stopCount[2]{},pcmCount[2]{};
 float amplitudes[2]{};
+float firstPcmSample[2]{};
 bool pcmError{},partial{};
 XRAPI_ATTR XrResult XRAPI_CALL xrApplyHapticFeedback(XrSession,const XrHapticActionInfo* info,const XrHapticBaseHeader* effect){
     const int hand=static_cast<int>(info->subactionPath)-1;++applyCount[hand];
     if(effect->type==XR_TYPE_HAPTIC_PCM_VIBRATION_FB){
         ++pcmCount[hand];const auto& p=*reinterpret_cast<const XrHapticPcmVibrationFB*>(effect);
         CHECK(p.append==XR_FALSE&&p.bufferSize>0&&p.bufferSize<=XR_MAX_HAPTIC_PCM_BUFFER_SIZE_FB);
+        firstPcmSample[hand]=p.buffer[0];
         *p.samplesConsumed=partial?p.bufferSize/2:p.bufferSize;
         return pcmError?XR_ERROR_RUNTIME_FAILURE:XR_SUCCESS;
     }
@@ -137,5 +139,17 @@ int main(){
     menu=true;FlushHaptics();menu=false;FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None);
     PublishPickupHaptic(1,.2f,3);s.sessionState=XR_SESSION_STATE_VISIBLE;PublishPickupHaptic(1,.2f,3);
     CHECK(g_hapticHands[1].pickup.source==Source::None);
-    std::puts("production XR adapter: capabilities, PCM failure, stop, priorities and pickup ramps: PASS");
+    // Changing frequency preserves the previous waveform's phase on each hand.
+    s.sessionState=XR_SESSION_STATE_FOCUSED;ResetHapticOutput();
+    menu=false;pcmError=false;partial=false;clockTime=7;rates[0]=rates[1]=2000;
+    tracking.valid=true;tracking.hands[0].positionTracked=tracking.hands[1].positionTracked=true;
+    PublishWheelHaptic(0,.3f,true,0,40);PublishWheelHaptic(1,.3f,true,0,75);FlushHaptics();
+    CHECK(firstPcmSample[0]==0&&firstPcmSample[1]==0);
+    clockTime+=.031;PublishWheelHaptic(0,.3f,true,0,120);PublishWheelHaptic(1,.3f,true,0,75);FlushHaptics();
+    CHECK(std::abs(firstPcmSample[0]-.3f*Sample(.031*40,0))<.0001f);
+    CHECK(std::abs(firstPcmSample[1]-.3f*Sample(.031*75,0))<.0001f);
+    clockTime+=.03;PublishWheelHaptic(0,.3f,true,0,200);FlushHaptics();
+    CHECK(std::abs(firstPcmSample[0]-.3f*Sample(.031*40+.03*120,0))<.0001f);
+    PublishWheelHaptic(0,0,true,0,200);FlushHaptics();CHECK(!g_hapticPhase[0].active);
+    std::puts("production XR adapter: capabilities, stop, priorities, pickup ramps and continuous PCM phase: PASS");
 }

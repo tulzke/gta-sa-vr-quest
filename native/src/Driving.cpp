@@ -241,10 +241,12 @@ std::atomic<float> g_value[F_COUNT] = {
 };
 // Global preferences: no new per-model calibration requirement.
 constexpr const char* kWheelHapticKeys[]{"WheelHint","WheelHintFreeCm","WheelHintStrength",
-    "WheelHintPcm","WheelHintWave","WheelHintFrequency","WheelHintTestHand"};
-constexpr int kWheelHapticMin[]{0,0,0,0,0,0,0};
-constexpr int kWheelHapticMax[]{1,15,100,1,3,wheelhaptics::kFrequencyCount-1,1};
-std::atomic<int> g_wheelHapticSettings[7]{0,15,60,0,0,0,1};
+    "WheelHintPcm","WheelHintWave","WheelHintFrequency","WheelHintTestHand",
+    "WheelHintFrequencyRamp","WheelHintFrequencyLowHz","WheelHintFrequencyHighHz"};
+constexpr int kWheelHapticSettingCount=10;
+constexpr int kWheelHapticMin[]{0,0,0,0,0,0,0,0,20,20};
+constexpr int kWheelHapticMax[]{1,15,100,1,3,wheelhaptics::kFrequencyCount-1,1,1,200,200};
+std::atomic<int> g_wheelHapticSettings[kWheelHapticSettingCount]{0,15,60,0,0,0,1,1,40,200};
 wheelhaptics::State g_wheelHapticState[2];
 double g_wheelHapticTime{};
 std::atomic<bool> g_wheelVisible{true};
@@ -721,7 +723,7 @@ void Save() {
     std::fprintf(file, "BikeHalfWidthCm=%.7g\n", g_value[F_BIKE_HALF_WIDTH].load());
     std::fprintf(file, "BikeDistanceCm=%.7g\n", g_value[F_BIKE_DISTANCE].load());
     std::fprintf(file, "BikeHeightCm=%.7g\n", g_value[F_BIKE_HEIGHT].load());
-    for(int i=0;i<7;++i) std::fprintf(file,"%s=%d\n",kWheelHapticKeys[i],g_wheelHapticSettings[i].load());
+    for(int i=0;i<kWheelHapticSettingCount;++i) std::fprintf(file,"%s=%d\n",kWheelHapticKeys[i],g_wheelHapticSettings[i].load());
     std::fprintf(file, "ImmersiveWheelVisible=%d\n", g_wheelVisible.load()?1:0);
     std::fprintf(file, "HandleHighlights=%d\n", g_highlights.load()?1:0);
     std::fprintf(file, "BikeHandsFollowTilt=%d\n",
@@ -857,7 +859,7 @@ void Load() {
         while (std::fgets(line, sizeof(line), file)) {
             char hapticKey[64]{}; int hapticValue{}; bool hapticMatched=false;
             if(std::sscanf(line,"%63[^=]=%d",hapticKey,&hapticValue)==2)
-                for(int i=0;i<7;++i) if(std::strcmp(hapticKey,kWheelHapticKeys[i])==0) {
+                for(int i=0;i<kWheelHapticSettingCount;++i) if(std::strcmp(hapticKey,kWheelHapticKeys[i])==0) {
                     g_wheelHapticSettings[i]=std::clamp(hapticValue,kWheelHapticMin[i],kWheelHapticMax[i]);
                     hapticMatched=true; break;
                 }
@@ -1195,6 +1197,9 @@ void Load() {
     g_bicycleMode.store(BICYCLE_HANDLEBAR_TRIGGER);
     for (int field=0; field<F_COUNT; ++field)
         g_value[field].store(ClampField(field, values[field]));
+    const int frequencyLow=g_wheelHapticSettings[8].load(),frequencyHigh=g_wheelHapticSettings[9].load();
+    g_wheelHapticSettings[8]=std::min(frequencyLow,frequencyHigh);
+    g_wheelHapticSettings[9]=std::max(frequencyLow,frequencyHigh);
     g_wheelVisible.store(visible!=0);
     g_highlights.store(highlights!=0);
     g_bikeHandsFollowTilt.store(bikeHandsFollowTilt!=0);
@@ -4224,7 +4229,9 @@ constexpr int kImmersiveCarItems[] = {
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
     MENU_WHEEL_VISIBLE, MENU_INTERIOR_GLASS,
     MENU_WHEEL_HINT, MENU_WHEEL_HINT_ZONE, MENU_WHEEL_HINT_STRENGTH, MENU_WHEEL_HINT_PCM,
-    MENU_WHEEL_HINT_WAVE, MENU_WHEEL_HINT_FREQUENCY, MENU_WHEEL_HINT_TEST_HAND, MENU_WHEEL_HINT_TEST,
+    MENU_WHEEL_HINT_WAVE, MENU_WHEEL_HINT_FREQUENCY_MODE,
+    MENU_WHEEL_HINT_FREQUENCY_LOW, MENU_WHEEL_HINT_FREQUENCY_HIGH,
+    MENU_WHEEL_HINT_FREQUENCY, MENU_WHEEL_HINT_TEST_HAND, MENU_WHEEL_HINT_TEST,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
     MENU_RESET, MENU_BACK
 };
@@ -4904,17 +4911,19 @@ void ResetVehiclePreset(int vehicleType) {
     Save(); ResetInteraction();
 }
 int GetWheelHapticSetting(int field) {
-    EnsureInit(); return field>=0&&field<7?g_wheelHapticSettings[field].load():0;
+    EnsureInit(); return field>=0&&field<kWheelHapticSettingCount?g_wheelHapticSettings[field].load():0;
 }
 int GetWheelHapticFrequency() { return wheelhaptics::Frequency(GetWheelHapticSetting(5)); }
 void AdjustWheelHapticSetting(int field,int direction) {
-    EnsureInit(); if(field<0||field>=7||!direction)return;
+    EnsureInit(); if(field<0||field>=kWheelHapticSettingCount||!direction)return;
     int value=g_wheelHapticSettings[field].load();
-    if(field==1||field==2) value=std::clamp(value+(direction<0?-1:1)*(field==2?10:1),
+    if(field==1||field==2||field>=8) value=std::clamp(value+(direction<0?-1:1)*(field==2?10:(field>=8?5:1)),
         kWheelHapticMin[field],kWheelHapticMax[field]);
     else if(field==5) value=wheelhaptics::CycleFrequency(value,direction);
     else value=(value+(direction<0?-1:1)+kWheelHapticMax[field]+1)%(kWheelHapticMax[field]+1);
     g_wheelHapticSettings[field]=value;
+    if(field==8&&value>g_wheelHapticSettings[9].load()) g_wheelHapticSettings[9]=value;
+    if(field==9&&value<g_wheelHapticSettings[8].load()) g_wheelHapticSettings[8]=value;
     ResetInteraction(); Save();
 }
 bool IsWheelVisible() { EnsureInit(); return g_wheelVisible.load(); }
@@ -5259,8 +5268,12 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         ~WheelHapticOnExit() {
             for(int hand=0;hand<2;++hand) {
                 if(!updated)g_wheelHapticState[hand]={};
+                const float frequency=g_wheelHapticSettings[7].load()?
+                    wheelhaptics::RangeFrequency(g_wheelHapticState[hand].frequencyMix,
+                        g_wheelHapticSettings[8].load(),g_wheelHapticSettings[9].load()):
+                    static_cast<float>(wheelhaptics::Frequency(g_wheelHapticSettings[5].load()));
                 xr::PublishWheelHaptic(hand,amplitudes[hand],g_wheelHapticSettings[3].load()!=0,
-                    std::min(g_wheelHapticSettings[4].load(),2),wheelhaptics::Frequency(g_wheelHapticSettings[5].load()));
+                    std::min(g_wheelHapticSettings[4].load(),2),frequency);
             }
             if(!updated)g_wheelHapticTime=0;
         }

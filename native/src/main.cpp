@@ -1466,6 +1466,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 drivingSel=0;
             } else if (item>=savr::driving::MENU_WHEEL_HINT && item<=savr::driving::MENU_WHEEL_HINT_TEST_HAND && (enter||step)) {
                 savr::driving::AdjustWheelHapticSetting(item-savr::driving::MENU_WHEEL_HINT,step?step:1);
+            } else if (item>=savr::driving::MENU_WHEEL_HINT_FREQUENCY_MODE && item<=savr::driving::MENU_WHEEL_HINT_FREQUENCY_HIGH && (enter||step)) {
+                savr::driving::AdjustWheelHapticSetting(7+item-savr::driving::MENU_WHEEL_HINT_FREQUENCY_MODE,step?step:1);
             } else if (item==savr::driving::MENU_DRIVING_TYPE&&(enter||step)) {
                 savr::driving::CycleModeForVehicleType(
                     drivingVehicleType,step?step:+1);

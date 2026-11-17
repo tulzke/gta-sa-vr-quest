@@ -62,12 +62,48 @@ int main() {
     for(int hz:ascending) { CHECK(Frequency(preset)==hz);preset=CycleFrequency(preset,1); }
     CHECK(preset==2&&Frequency(CycleFrequency(2,-1))==200);
     CHECK(Frequency(-1)==40&&Frequency(999)==200);
+    CHECK(RangeFrequency(0,40,200)==40&&RangeFrequency(1,40,200)==200);
+    CHECK(RangeFrequency(.5f,40,200)==120&&RangeFrequency(.5f,200,40)==120);
+    CHECK(RangeFrequency(-1,40,200)==40&&RangeFrequency(2,40,200)==200);
+    State ramp, quiet;
+    ramp.Step(f,{.18f,0,0},true,true,true,1,0,.15f,1);
+    quiet.Step(f,{.18f,0,0},true,true,true,1,0,.15f,0);
+    float lastMix=0;
+    for(int i=0;i<100;++i) {
+        const Vec p{.18f,0,.15f+.0035f*i};
+        ramp.Step(f,p,true,true,false,1,.02f,.15f,1);
+        quiet.Step(f,p,true,true,false,1,.02f,.15f,0);
+        CHECK(ramp.frequencyMix>=lastMix&&ramp.frequencyMix<=1);
+        CHECK(Near(ramp.frequencyMix,quiet.frequencyMix)&&quiet.amplitude==0);
+        lastMix=ramp.frequencyMix;
+    }
+    for(int i=0;i<100;++i)ramp.Step(f,{.18f,0,.325f},true,true,false,1,.02f,.15f,1);
+    CHECK(Near(RangeFrequency(ramp.frequencyMix,40,200),120,.001f));
+    ramp.Step(f,{.18f,0,.5f},true,false,false,1,.02f,.15f,1);
+    CHECK(ramp.frequencyMix==0&&ramp.amplitude==0);
+    ramp.Step(f,{.18f,0,.5f},true,true,false,1,.02f,.15f,1);
+    CHECK(ramp.frequencyMix>0);
+    ramp.Step(f,{.18f,0,0},true,true,false,1,.02f,.15f,1);
+    CHECK(ramp.frequencyMix==0&&ramp.amplitude==0);
+    State inward,outward;
+    for(auto* a:{&inward,&outward})a->Step(f,{.18f,0,0},true,true,true,1,0,0,1);
+    for(int i=0;i<100;++i){
+        inward.Step(f,{.08f,0,0},true,true,false,1,.02f,0,1);
+        outward.Step(f,{.28f,0,0},true,true,false,1,.02f,0,1);
+        CHECK(Near(inward.frequencyMix,outward.frequencyMix));
+    }
     float amplitudes[3]{};int j=0;
     for(int hz:{72,90,120}) { State a;a.Step(f,{.18f,0,0},true,true,true,1,0,.10f,1);
         for(int i=0;i<hz;++i)a.Step(f,{.18f,0,.3f},true,true,false,1,1.f/hz,.10f,1);
         amplitudes[j++]=a.amplitude; }
     CHECK(Near(amplitudes[0],amplitudes[1])&&Near(amplitudes[1],amplitudes[2]));
     using namespace savr::haptics;
+    PhaseClock phase;
+    CHECK(phase.Start(100000,40,false)==0);
+    CHECK(std::abs(phase.Start(100000.031,120,false)-.24)<1e-6);
+    CHECK(std::abs(phase.Start(100000.061,75,false)-.84)<1e-6);
+    CHECK(phase.Start(100001,75,false)==0); // old output cannot bridge a long pause
+    CHECK(phase.Start(100001.031,120,true)==0);
     Hand left,right;
     left.wheel={Source::Wheel,.3f,0,1};right.wheel=left.wheel;
     left.game={Source::Game,.7f,0,.2};
