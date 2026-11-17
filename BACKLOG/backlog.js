@@ -294,17 +294,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 81,
-      "title": "Исправить открытие двери при медленном движении руки",
-      "file": "81-medlennoe-otkrytie-dveri.md",
-      "categories": [
-        "vehicle-controls",
-        "bugs"
-      ],
-      "priority": "critical",
-      "status": "in_progress"
-    },
-    {
       "id": 82,
       "title": "Скрывать VR-элементы, когда камера не принадлежит CJ",
       "file": "82-skrytie-vr-elementov-pri-chuzhoy-kamere.md",
