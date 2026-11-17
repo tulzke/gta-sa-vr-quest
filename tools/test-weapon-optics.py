@@ -41,6 +41,17 @@ HeatLockState HeatLockSnapshot(){return {};}
 void RenderWorldStableSkyPolys(std::uintptr_t,const MobileDistanceFogSnapshot&){}
 '''
 production = helpers + function(camera, 'Rotate') + function(camera, 'MatMul34') + function(camera, 'SetRotate34')
+production += function(camera, 'TrackingToGame') + function(camera, 'SetMatBasis')
+production += r'''
+CamBasis g_vrBase{{-1,0,0},{0,1,0},{0,0,1},{}};
+bool g_vrBaseValid = true;
+struct { bool valid = true; } g_origin;
+void PoseToGame(const float p[3], const float o[4], V3& position, Q& orientation) {
+    position = TrackingToGame(g_vrBase, {p[0], p[1], p[2]});
+    orientation = {o[0], o[1], o[2], o[3]};
+}
+'''
+production += function(camera, 'HandWeaponMatrixForPoseCalibrated')
 production += (ROOT / 'native/src/WeaponOpticFrame.inl').read_text(encoding='utf8')
 production += mirror + (ROOT / 'native/src/WeaponOpticRender.inl').read_text(encoding='utf8')
 production += r'''
@@ -83,7 +94,7 @@ for name in ('ClearHeat', 'ValidHeatEntity', 'UpdateHeat', 'ApplyReticleAim'):
     production += function(scope, name)
 production += '\n}\n'
 harness = (ROOT / 'tools/tests/rear_mirror.cpp').read_text(encoding='utf8')
-harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include "WaterMonitorCamera.h"\n#include "WaterMonitorStream.h"\n#include <fstream>\n#include <iterator>\n' + harness
+harness = '#include "Calib.h"\n#include "TrackingFrame.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include "WaterMonitorCamera.h"\n#include "WaterMonitorStream.h"\n#include <fstream>\n#include <iterator>\n' + harness
 harness = harness.replace('// PRODUCTION_ADAPTER', production)
 tests = (ROOT / 'tools/tests/weapon_optics.inc').read_text(encoding='utf8')
 tests += (ROOT / 'tools/tests/water_monitor_render.inc').read_text(encoding='utf8').replace('WATER_ASSET_PATH', (ROOT / 'assets/firetruck-controller/runtime/monitor.mesh').as_posix())

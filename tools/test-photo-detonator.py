@@ -61,7 +61,9 @@ bool tracked=true;
 float handYaw=0;
 bool HandWeaponMatrix(int hand,int type,RwMat& matrix) {
  if(!tracked || type!=43 || hand<0 || hand>1) return false;
- matrix={{std::sin(handYaw),std::cos(handYaw),0},{0,0,1},{1,0,0},{float(hand),200,30}};
+ const float side = hand == 1 ? 1.f : -1.f;
+ matrix={{std::sin(handYaw),std::cos(handYaw),0},
+         {side*std::cos(handYaw),-side*std::sin(handYaw),0},{0,0,-1},{float(hand),200,30}};
  return true;
 }
 bool WeaponMatrixToTracking(const RwMat& matrix, physicalweapon::TrackingPose& pose) {
@@ -133,6 +135,7 @@ void Test(){
    CHECK(photo_render::requests==beforeRequests+(ok?1:0));
    CamBasis view;CHECK(BuildPhotoView(hand,view));
    CHECK(std::abs(view.forward.x-std::sin(yaw))<1e-5f);
+   CHECK(view.up.z>.999f&&std::abs(view.pos.z-30.012f)<1e-5f);
    if(ok) CHECK(std::memcmp(&photo_render::queued,&view,sizeof(view))==0&&photo_render::queuedFov<20.f);
    CHECK(!BuildPhotoView(1-hand,view));
   }
