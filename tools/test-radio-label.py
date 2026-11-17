@@ -18,7 +18,11 @@ def function(signature):
     return driving[start:end]+'\n'
 (OUT/'radio_runtime.inc').write_text(driving[driving.index('struct V3 {'):driving.index('double MonotonicSeconds()')]+
     function('float PlanarAngle(')+function('bool NormalizeQuaternion('),encoding='utf8')
-(OUT/'radio_update.inc').write_text(function('void UpdateRadioKnob(')+function('void RefreshRadioTracking('),encoding='utf8')
+(OUT/'radio_update.inc').write_text(''.join(function(signature) for signature in (
+    'void ClearRadioVisual(', 'void ResetRadioKnob(', 'void CancelRadioKnob(',
+    'bool RadioVehicleAvailable(', 'void ValidateRadioVisual(', 'void UpdateRadioKnob(',
+    'void RefreshRadioTracking(', 'bool ConsumeRadioEvent(', 'bool ConsumePhysicalRadioEvent(',
+    'bool GetWheelVisualState(')),encoding='utf8')
 where=Path(os.environ.get('ProgramFiles(x86)',r'C:\Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
 vs=subprocess.check_output([str(where),'-latest','-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-property','installationPath'],text=True).strip()
 cmd=OUT/'test.cmd'
@@ -47,6 +51,12 @@ if '--retail' in sys.argv:
     for offset,expected in [(0,0x3943a408),(0x4c,0xb9406e68),(0x100,0xb9407e68),(0x108,0x39c2b66a),
                             (0x15c,0x11177129),(0x16c,0x5281f40a),(0x188,0x5280fa09)]:
         assert word(0x3889a8+offset)==expected,(hex(offset),hex(word(0x3889a8+offset)))
+    vehicle_header=(ROOT/'native/src/VehicleRadio.h').read_text(encoding='utf8')
+    checks=re.findall(r'\{(0x[0-9a-f]+),(0x[0-9a-f]+)u\}',vehicle_header)
+    assert len(checks)==8
+    for address,expected in checks:
+        assert word(int(address,16))==int(expected,16),(address,hex(word(int(address,16))))
+    print('PASS ABI: all 8 vehicle-radio layout signatures match retail ELF')
     print('PASS ABI: native target/delta fields and original 1500/4000/2000 ms instructions match')
 if '--runtime-only' in sys.argv:
     raise SystemExit(0)

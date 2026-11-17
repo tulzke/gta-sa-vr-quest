@@ -1,4 +1,5 @@
 #pragma once
+#include "VehicleRadio.h"
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -16,20 +17,6 @@ inline const char* StationName(int id) {
         "K-JAH WEST", "MASTER SOUNDS 98.3", "WCTR", "USER TRACKS", "RADIO OFF"};
     return id>=1 && id<=kOffStation?names[id]:"";
 }
-// TurnOnRadioForVehicle @39876c and CheckForStationRetune @388a80:
-// only civilian type 0 permits selecting music stations. OFF is independent.
-inline bool HasTunableRadio(unsigned type) { return type==0; }
-// CVehicle ctor @6d8b24 embeds audio at +198; Initialise @3968cc
-// copies tVehicleAudioSettings to audio+94, with radio type at settings+1b.
-inline const void* VehicleRadioSettings(const void* vehicle) {
-    return vehicle?static_cast<const char*>(vehicle)+0x198+0x94:nullptr;
-}
-inline bool VehicleHasTunableRadio(const void* vehicle) {
-    if(!vehicle)return false;
-    const auto* settings=static_cast<const std::uint8_t*>(VehicleRadioSettings(vehicle));
-    return HasTunableRadio(settings[0x1b]);
-}
-
 using Glyph=std::array<std::uint8_t,7>;
 inline Glyph LabelGlyph(char c) {
     // Digits are the exact 5x7 rows from Xr.cpp's ammoDigit shader.

@@ -72,6 +72,13 @@ std::array<std::uint8_t,0x400> car{},other{};
 void* current=car.data();const void* bound=radio::VehicleRadioSettings(current);
 int station=2,stationReads=0;
 bool g_radioRetuneLayoutReady=false;
+bool g_radioVehicleLayoutReady=true;
+bool gameplay=true,cabin=true;
+bool VrGameplayInputAllowed(){return gameplay;}
+bool CabinVisualContext(){return cabin;}
+void ClearInteractionLocked();
+std::mutex g_stateMutex;
+WheelVisualState g_visual{};
 bool driver=true,transformReady=true;
 V3 vehiclePosition{},cameraOffset{};
 void* FindVehicle(int,bool){return current;}void* FindPed(int){return &driver;}
@@ -96,13 +103,15 @@ double MonotonicSeconds(){testTime+=.02;return testTime;}
 bool g_radioGripDown[2]{true,true};std::uint64_t g_radioGrabSequence{};
 std::atomic<int> g_radioKnobNext{},g_radioKnobPrev{};
 bool IsBicycleModel(int model){return model==481;}
-V3 CockpitFingerPoint(const xr::HandPose&,int){return {};}
+V3 fingerPoint{};
+V3 CockpitFingerPoint(const xr::HandPose&,int){return fingerPoint;}
 bool ReadIgnitionFrame(void*,bool,V3* r,V3* f,V3* u,V3* p){*r={1,0,0};*f={0,1,0};*u={0,0,1};*p=vehiclePosition;return transformReady;}
 bool WorldPointToTracking(V3 world,V3* out){*out=world-cameraOffset;return transformReady;}
 namespace vrcam {
 bool TrackingPointToWorld(const float in[3],float out[3]){out[0]=in[0]+cameraOffset.x;out[1]=in[1]+cameraOffset.y;out[2]=in[2]+cameraOffset.z;return transformReady;}
 }
 #include "radio_update.inc"
+void ClearInteractionLocked(){CancelRadioKnob(g_visual);g_visual={};}
 void Tests() {
     WheelVisualState w;w.modelId=411;w.radius=.17f;w.right[0]=1;w.up[1]=1;w.normal[2]=-1;
     xr::InputState input;xr::HandPose hands[2]{};
@@ -165,6 +174,95 @@ void HapticTests() {
         for(const auto& pulse:xr::haptics)Check(pulse.hand==hand,"only owning hand receives radio haptics");
     }
 }
+void RadioLifecycleTests() {
+    xr::InputState input;xr::HandPose hands[2]{};
+    g_modelCalibration.clear();g_radioRetuneLayoutReady=false;
+    const auto arm=[&](int hand) {
+        driver=true;gameplay=cabin=true;transformReady=true;g_radioVehicleLayoutReady=true;
+        current=car.data();bound=radio::VehicleRadioSettings(current);car[0x247]=0;
+        cameraOffset={};vehiclePosition={};
+        g_visual={};g_visual.active=true;g_visual.modelId=411;g_visual.radius=.17f;
+        g_visual.right[0]=1;g_visual.up[1]=1;g_visual.normal[2]=-1;
+        input={};input.grip[hand]=1;hands[hand].valid=true;
+        hands[hand].gripOri[2]=-.70710678f;hands[hand].gripOri[3]=.70710678f;
+        UpdateRadioKnob(g_visual,current,input,hands,0,true);
+        g_radioKnobVehicle=current;g_radioKnobHand=hand;
+        UpdateRadioKnob(g_visual,current,input,hands,0);
+        g_visual.interactionTarget[hand]=2;
+        g_radioKnobNext=2;g_radioKnobPrev=1;
+        Check(g_visual.radioVisible&&g_visual.radioGrabbed[hand],"lifecycle starts with production held knob");
+    };
+    const auto cancelled=[&](const WheelVisualState& visual) {
+        Check(!visual.radioVisible&&!visual.radioGrabbed[0]&&!visual.radioGrabbed[1]&&
+              !visual.radioGrabId[0]&&!visual.radioGrabId[1]&&visual.radioAngle==0&&
+              visual.radioStation==-1&&!visual.radioVehicle&&!visual.radioLocalPoseValid,
+              "cancel removes assembly, station and both pinned hands");
+        Check(g_radioKnobHand==-1&&!g_radioKnobVehicle&&g_radioKnobLastTime==0&&
+              g_radioKnobNext==0&&g_radioKnobPrev==0&&g_radioGripDown[0]&&g_radioGripDown[1],
+              "cancel removes owner, clock, queued detents and requires fresh grip");
+        Check(visual.interactionTarget[0]!=2&&visual.interactionTarget[1]!=2,"cancel clears radio interaction target");
+    };
+    for(int hand=0;hand<2;++hand) {
+        arm(hand);current=other.data();RefreshRadioTracking(g_visual);cancelled(g_visual);
+        arm(hand);car[0x247]=3;RefreshRadioTracking(g_visual);cancelled(g_visual);
+        arm(hand);current=nullptr;RefreshRadioTracking(g_visual);cancelled(g_visual);
+        arm(hand);driver=false;RefreshRadioTracking(g_visual);cancelled(g_visual);
+        arm(hand);transformReady=false;RefreshRadioTracking(g_visual);cancelled(g_visual);
+        arm(hand);car[0x247]=1;
+        WheelVisualState published;integration::GetWheelVisualState(&published);cancelled(published);cancelled(g_visual);
+        arm(hand);current=other.data();integration::GetWheelVisualState(&published);cancelled(published);
+        arm(hand);cabin=false;integration::GetWheelVisualState(&published);cancelled(published);
+        arm(hand);g_radioVehicleLayoutReady=false;integration::GetWheelVisualState(&published);cancelled(published);
+        Check(!RadioVehicleAvailable(reinterpret_cast<void*>(1)),"ABI failure avoids reading vehicle fields");
+        for(bool next:{false,true}) {
+            arm(hand);current=other.data();
+            Check(!ConsumePhysicalRadioEvent(next?g_radioKnobNext:g_radioKnobPrev),"old detent cannot switch new vehicle's station");
+            cancelled(g_visual);
+            arm(hand);car[0x247]=3;
+            Check(!ConsumePhysicalRadioEvent(next?g_radioKnobNext:g_radioKnobPrev),"no-radio vehicle cannot consume old detent");
+            cancelled(g_visual);
+        }
+        arm(hand);gameplay=false;
+        Check(!ConsumePhysicalRadioEvent(g_radioKnobNext),"paused input cancels queued physical detent");cancelled(g_visual);
+        arm(hand);cabin=false;
+        Check(!ConsumePhysicalRadioEvent(g_radioKnobPrev),"foreign camera cancels queued physical detent");cancelled(g_visual);
+        arm(hand);station=13;
+        Check(ConsumePhysicalRadioEvent(g_radioKnobNext)&&g_radioKnobNext==1&&g_radioKnobPrev==1,
+              "valid OFF radio consumes exactly one physical event");
+        // Cancellation cannot erase an existing per-model calibration.
+        auto& cal=g_modelCalibration[411];cal.radioPoseSet=true;cal.radioPose[0]=.2f;
+        const auto saved=cal.radioPose[0];CancelRadioKnob(g_visual);
+        Check(cal.radioPoseSet&&cal.radioPose[0]==saved,"cancellation preserves model calibration");
+        // Return with grip already held: no invisible reacquisition or haptic.
+        g_modelCalibration.clear();xr::haptics.clear();
+        UpdateRadioKnob(g_visual,current,input,hands,0);
+        fingerPoint={g_visual.radioCenter[0],g_visual.radioCenter[1],g_visual.radioCenter[2]};
+        UpdateRadioKnob(g_visual,current,input,hands,0);
+        Check(!g_visual.radioGrabbed[hand]&&xr::haptics.empty(),"return while holding grip cannot reacquire");
+        input.grip[hand]=0;UpdateRadioKnob(g_visual,current,input,hands,0);
+        input.grip[hand]=1;UpdateRadioKnob(g_visual,current,input,hands,0);
+        Check(g_visual.radioGrabbed[hand],"release then fresh grip reacquires available radio");
+        CancelRadioKnob(g_visual);
+        // An empty physical queue must not hide the debug/menu preview.
+        UpdateRadioKnob(g_visual,current,input,hands,0,true);
+        Check(!ConsumePhysicalRadioEvent(g_radioKnobNext)&&g_visual.radioVisible,"empty queue preserves preview geometry");
+    }
+    // Synthetic type 2 is not present in retail model defaults, but is not tunable.
+    car[0x247]=2;UpdateRadioKnob(g_visual,current,input,hands,0,true);cancelled(g_visual);
+    car[0x247]=0;fingerPoint={};
+}
+}
+void VehicleRadioAbiTests() {
+    Check(!radio::VehicleRadioLayoutMatches(nullptr),"missing ELF disables physical radio");
+    std::vector<std::uint8_t> image(0x6d8b28);
+    for(const auto& check:radio::kVehicleRadioAbiWords)
+        std::memcpy(image.data()+check.rva,&check.word,4);
+    Check(radio::VehicleRadioLayoutMatches(image.data()),"matching Android vehicle-radio ABI accepted");
+    for(const auto& check:radio::kVehicleRadioAbiWords) {
+        image[check.rva]^=1;
+        Check(!radio::VehicleRadioLayoutMatches(image.data()),"each mismatched field instruction disables ABI access");
+        image[check.rva]^=1;
+    }
 }
 void RetuneTests() {
     std::array<std::uint8_t,0x400> manager{},user{};
@@ -211,6 +309,8 @@ void RetuneTests() {
 int main(int argc,char** argv) {
     integration::Tests();
     integration::HapticTests();
+    integration::RadioLifecycleTests();
+    VehicleRadioAbiTests();
     RetuneTests();
     Check(std::string(radio::StationName(13))=="RADIO OFF","retail OFF ID");
     for(int id:{-999,-1,0,14,127,255})Check(!*radio::StationName(id),"invalid/emergency stream is not OFF");

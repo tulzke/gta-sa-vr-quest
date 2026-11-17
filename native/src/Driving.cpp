@@ -217,6 +217,7 @@ std::atomic<bool> g_radioButtonDown{false};
 std::atomic<bool> g_radioChangeJustPressed{false};
 std::atomic<bool> g_radioPrevJustPressed{false};
 bool g_radioRetuneLayoutReady{};
+bool g_radioVehicleLayoutReady{};
 
 std::mutex g_stateMutex;
 WheelVisualState g_visual{};
@@ -354,6 +355,39 @@ void* g_radioKnobVehicle{};
 bool g_radioGripDown[2]{true,true};
 std::uint64_t g_radioGrabSequence{};
 std::atomic<int> g_radioKnobNext{0}, g_radioKnobPrev{0};
+
+void ClearRadioVisual(WheelVisualState& visual) {
+    visual.radioVisible=false;visual.radioStation=radio::kUnknownStation;
+    visual.radioAngle=0;visual.radioVehicle=nullptr;
+    visual.radioLocalPoseValid=false;visual.radioLabelBikeFrame=false;
+    for(int h=0;h<2;++h) {
+        visual.radioGrabbed[h]=false;visual.radioGrabId[h]=0;
+    }
+}
+
+void ResetRadioKnob() {
+    g_radioKnob.Reset();g_radioKnobHand=-1;g_radioKnobVehicle=nullptr;
+    g_radioKnobLastTime=0;g_radioGripDown[0]=g_radioGripDown[1]=true;
+    g_radioKnobNext.store(0);g_radioKnobPrev.store(0);
+}
+
+void CancelRadioKnob(WheelVisualState& visual) {
+    ResetRadioKnob();ClearRadioVisual(visual);
+    for(int h=0;h<2;++h)if(visual.interactionTarget[h]==2)visual.interactionTarget[h]=0;
+}
+
+bool RadioVehicleAvailable(void* vehicle) {
+    if(!g_radioVehicleLayoutReady || !radio::VehicleHasTunableRadio(vehicle) ||
+       !g.FindPlayerPed || !g.CVehicle_IsDriver)return false;
+    void* ped=g.FindPlayerPed(-1);
+    return ped && g.CVehicle_IsDriver(vehicle,ped);
+}
+
+void ValidateRadioVisual(WheelVisualState& visual) {
+    if(!visual.radioVisible && !visual.radioGrabbed[0] && !visual.radioGrabbed[1] && !g_radioKnobVehicle)return;
+    void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+    if(vehicle!=visual.radioVehicle || !RadioVehicleAvailable(vehicle))CancelRadioKnob(visual);
+}
 ignition::Rotation g_ignitionRotation;
 ignition::HintState g_ignitionHint;
 void* g_ignitionVehicle{};
@@ -1302,8 +1336,7 @@ void ClearInteractionLocked(bool preserveRadio=false) {
     g_liftLastTime=0;
     g_visual = WheelVisualState{};
     if (!preserveRadio) {
-        g_radioKnob.Reset(); g_radioKnobHand=-1;
-        g_radioGripDown[0]=g_radioGripDown[1]=true;
+        ResetRadioKnob();
     }
     PublishIgnitionPinch(g_visual);
     ClearGrabStateLocked();
@@ -2256,11 +2289,9 @@ void UpdateIgnition(WheelVisualState& visual, void* vehicle,
 void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
                      const xr::InputState& input, const xr::HandPose poses[2],
                      unsigned occupied, bool preview=false, bool probe=false) {
-    visual.radioVisible=false;visual.radioStation=radio::kUnknownStation;
-    if (!radio::VehicleHasTunableRadio(vehicle) || IsBicycleModel(visual.modelId) || !g.FindPlayerPed ||
-        !g.CVehicle_IsDriver || !g.CVehicle_IsDriver(vehicle,g.FindPlayerPed(-1))) {
-        g_radioKnob.Reset(); g_radioKnobHand=-1;
-        g_radioKnobNext.store(0);g_radioKnobPrev.store(0);return;
+    ClearRadioVisual(visual);
+    if (!RadioVehicleAvailable(vehicle) || IsBicycleModel(visual.modelId)) {
+        CancelRadioKnob(visual);return;
     }
     V3 right{visual.right[0],visual.right[1],visual.right[2]};
     V3 up{visual.up[0],visual.up[1],visual.up[2]};
@@ -2325,11 +2356,9 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
             visual.radioLocalPoseValid=true;
         }
     }
-    if (preview) { if (!probe) { g_radioKnob.Reset(); g_radioKnobHand=-1; } return; }
+    if (preview) { if (!probe) ResetRadioKnob(); return; }
     if (g_radioKnobVehicle!=vehicle) {
-        g_radioKnobVehicle=vehicle; g_radioKnob.Reset(); g_radioKnobHand=-1;
-        g_radioGripDown[0]=g_radioGripDown[1]=true;
-        g_radioKnobNext.store(0); g_radioKnobPrev.store(0);
+        ResetRadioKnob();g_radioKnobVehicle=vehicle;
     }
     for (int h=0;h<2;++h) {
         const V3 p=CockpitFingerPoint(poses[h],h);
@@ -2371,18 +2400,18 @@ void UpdateRadioKnob(WheelVisualState& visual, void* vehicle,
 }
 
 void RefreshRadioTracking(WheelVisualState& visual) {
+    ValidateRadioVisual(visual);
     if(!visual.radioVisible)return;
     void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
-    if(vehicle!=visual.radioVehicle || !visual.radioLocalPoseValid ||
-       !radio::VehicleHasTunableRadio(vehicle)) {visual.radioVisible=false;return;}
+    if(!visual.radioLocalPoseValid) {CancelRadioKnob(visual);return;}
     V3 vr{},vf{},vu{},vp{};
-    if(!ReadIgnitionFrame(vehicle,visual.bike,&vr,&vf,&vu,&vp)){visual.radioVisible=false;return;}
+    if(!ReadIgnitionFrame(vehicle,visual.bike,&vr,&vf,&vu,&vp)){CancelRadioKnob(visual);return;}
     V3 points[4]{};
     const auto* local=visual.radioLocalPose;
     const V3 center=vp+vr*local[0]+vf*local[1]+vu*local[2];
     for(int i=0;i<4;++i) {
         const V3 point=i?center+vr*local[i*3]+vf*local[i*3+1]+vu*local[i*3+2]:center;
-        if(!WorldPointToTracking(point,&points[i])){visual.radioVisible=false;return;}
+        if(!WorldPointToTracking(point,&points[i])){CancelRadioKnob(visual);return;}
     }
     float* fields[]{visual.radioCenter,visual.radioRight,visual.radioUp,visual.radioNormal};
     for(int i=0;i<4;++i) {
@@ -3015,8 +3044,17 @@ bool ConsumeRadioEvent(std::atomic<int>& pending) {
     while (count>0) if (pending.compare_exchange_weak(count,count-1,std::memory_order_acq_rel)) return true;
     return false;
 }
+bool ConsumePhysicalRadioEvent(std::atomic<int>& pending) {
+    if(pending.load(std::memory_order_acquire)<=0)return false;
+    std::lock_guard<std::mutex> lock(g_stateMutex);
+    void* vehicle=g.FindPlayerVehicle?g.FindPlayerVehicle(-1,false):nullptr;
+    if(!VrGameplayInputAllowed() || !CabinVisualContext() || vehicle!=g_radioKnobVehicle || !RadioVehicleAvailable(vehicle)) {
+        CancelRadioKnob(g_visual);return false;
+    }
+    return ConsumeRadioEvent(pending);
+}
 bool OnNextStationJustUp(void* pad) {
-    if (VrGameplayInputAllowed() && HasPlayerVehicle() && ConsumeRadioEvent(g_radioKnobNext)) return true;
+    if (ConsumePhysicalRadioEvent(g_radioKnobNext)) return true;
     if (VrGameplayInputAllowed() && HasPlayerVehicle() &&
         g_radioChangeJustPressed.exchange(false, std::memory_order_acq_rel)) {
         LOGI("[driving] Touch X -> next radio station");
@@ -3025,7 +3063,7 @@ bool OnNextStationJustUp(void* pad) {
     return g_origNextStation ? g_origNextStation(pad) : false;
 }
 bool OnLastStationJustUp(void* pad) {
-    if (VrGameplayInputAllowed() && HasPlayerVehicle() && ConsumeRadioEvent(g_radioKnobPrev)) return true;
+    if (ConsumePhysicalRadioEvent(g_radioKnobPrev)) return true;
     if (VrGameplayInputAllowed() && HasPlayerVehicle() &&
         g_radioPrevJustPressed.exchange(false, std::memory_order_acq_rel)) {
         LOGI("[driving] grip+X -> previous radio station");
@@ -3639,6 +3677,8 @@ void InstallRadioRetuneTiming() {
 }
 
 void InstallPadHooks() {
+    g_radioVehicleLayoutReady=radio::VehicleRadioLayoutMatches(reinterpret_cast<const void*>(g.LoadBase));
+    if(!g_radioVehicleLayoutReady)LOGW("[radio] vehicle radio ABI mismatch; physical music knob disabled");
     InstallRadioRetuneTiming();
     InstallNitroHook();
     InstallHydraulicsHooks();
@@ -5688,10 +5728,8 @@ bool GetWheelVisualState(WheelVisualState* out) {
     // A script may change scene/vehicle after UpdateInput. Do not publish the
     // previous cabin into the new eye frame, even when simulation is paused.
     if (!CabinVisualContext()) { ClearInteractionLocked(); *out={}; return false; }
+    ValidateRadioVisual(g_visual);
     *out=g_visual;
-    if(out->radioVisible && (!g.FindPlayerVehicle || out->radioVehicle!=g.FindPlayerVehicle(-1,false))) {
-        out->radioVisible=false;out->radioStation=radio::kUnknownStation;
-    }
     return out->active;
 }
 bool GetGrabbedHandVisual(int hand,float position[3],float right[3],float up[3],float forward[3]) {
