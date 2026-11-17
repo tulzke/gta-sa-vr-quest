@@ -803,7 +803,7 @@ const BACKLOG_DATA = {
         "weapons"
       ],
       "priority": "medium",
-      "status": "open"
+      "status": "in_progress"
     },
     {
       "id": 133,
@@ -814,7 +814,7 @@ const BACKLOG_DATA = {
         "bugs"
       ],
       "priority": "medium",
-      "status": "open"
+      "status": "in_progress"
     },
     {
       "id": 134,
