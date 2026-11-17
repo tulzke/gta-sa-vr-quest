@@ -1,5 +1,6 @@
 #include "PickupGesture.h"
 #include "GrabArbitration.h"
+#include "PickupVisual.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -8,6 +9,28 @@ using namespace savr;
 using pickups::Gesture;
 
 int main() {
+    // Billboard faces the actual HMD position (not the tracking-space origin),
+    // including pitch/roll, vertical views, near contact and marker scaling.
+    using namespace vehicledoors;
+    for(Vec head:std::array<Vec,5>{{{8,1,5},{5,-2,4},{5,2,1},{5,-2,1.02f},{5,-2,1}}})
+    for(Vec headUp:std::array<Vec,3>{{{0,1,0},{-1,0,0},{0,0,1}}})
+    for(float scale:{.5f,1.f,2.f}) {
+        Marker marker{{5,-2,1},{0,1,0},{1,0,0}};marker.scale=scale;
+        const Vec headRight=headUp.x<-.5f?Vec{0,1,0}:Vec{1,0,0};
+        const auto hint=pickups::FacingHint(marker,head,headUp,headRight);
+        const float distance=Length(head-marker.position);
+        const Vec normal=Cross(hint.direction,hint.up)*(1.f/(scale*scale));
+        assert(Finite(hint.position)&&Finite(normal));
+        assert(std::abs(Length(hint.direction)-scale)<.0001f&&std::abs(Length(hint.up)-scale)<.0001f);
+        assert(std::abs(Dot(hint.direction,hint.up))<.0001f);
+        assert(Dot(hint.up,headUp)>=-.0001f);
+        if(distance>.0001f) {
+            assert(Dot(normal,(head-marker.position)*(1.f/distance))>.9999f);
+            assert(std::abs(Length(hint.position-marker.position)-std::min(.06f,distance*.25f))<.0001f);
+            assert(Length(head-hint.position)<distance); // closer, never crosses the HMD
+        }
+        assert(marker.position.x==5&&marker.position.y==-2&&marker.position.z==1);
+    }
     // Held before contact, before tracking recovery, or before menu closure
     // must never turn into a pickup, even after a long wait inside the zone.
     for(int fps:{36,72,90,120}) {

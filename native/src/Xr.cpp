@@ -5,6 +5,7 @@
 #include "Combat.h"
 #include "PeripheralFeedback.h"
 #include "NpcGrabVisual.h"
+#include "PickupVisual.h"
 #include "TrackingRecovery.h"
 #include "TheaterScreen.h"
 #include "HandAnimation.h"
@@ -10437,7 +10438,7 @@ void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
     glBindBuffer(GL_ARRAY_BUFFER,0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 }
 
-void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& frame,bool navigation=false,bool palms=false) {
+void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& frame,const XrPosef& head,bool navigation=false,bool palms=false) {
     if (frame.count<=0) return;
     EnsureMarkerProgram();
     if (!navigation) EnsureNpcSprites();
@@ -10555,10 +10556,17 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
             }
             if (marker.doorGrab) {
                 auto hint=styled;
-                // Face the tracking origin so the handle is legible from either side.
-                auto right=vehicledoors::Cross(marker.position*-1.f,marker.up);
-                const float length=vehicledoors::Length(right);
-                if (length>.001f) hint.direction=right*(marker.scale/length);
+                if(marker.pickupHold) {
+                    const auto up=QuatRotate(head.orientation,{0,1,0});
+                    const auto right=QuatRotate(head.orientation,{1,0,0});
+                    hint=pickups::FacingHint(marker,{head.position.x,head.position.y,head.position.z},
+                        {up.x,up.y,up.z},{right.x,right.y,right.z});
+                } else {
+                    // Existing door handles retain their upright presentation.
+                    auto right=vehicledoors::Cross(marker.position*-1.f,marker.up);
+                    const float length=vehicledoors::Length(right);
+                    if(length>.001f)hint.direction=right*(marker.scale/length);
+                }
                 if (g_npcSpriteProg&&g_npcSpriteTextures[0]) drawSprite(hint,g_npcSpriteTextures[0]);
                 else {
                     const auto mesh=npcgrab::Palm(hint);
@@ -10579,7 +10587,7 @@ void DrawVehicleDoorMarkers(const float* mvp,const vehicledoors::MarkerFrame& fr
                             vertices.insert(vertices.end(),{p,q,r,r,q,s});
                         }
                         if(vertices.empty())return;
-                        glUniform4f(g_markerColLoc,1.f,.86f,.08f,marker.opacity*alpha);
+                        glUniform4f(g_markerColLoc,1.f,.86f+.14f*hint.highlight,.08f+.92f*hint.highlight,marker.opacity*alpha);
                         glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(vehicledoors::Vec),vertices.data(),GL_DYNAMIC_DRAW);
                         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(vertices.size()));
                     };
@@ -12447,9 +12455,9 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         DrawThrowableTrajectories(mvp, throwableTrajectory);
     }
     if(usingGameDepth && !scope.active)DrawRadioLabel(mvp,drivingWheel);
-    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors);
-    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,false,true);
-    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,true);
+    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedDoors,rp);
+    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedNpcGrabs,rp,false,true);
+    if (usingGameDepth && !scope.active) DrawVehicleDoorMarkers(mvp,bakedTestArea,rp,true);
     if (!scope.active) for (const auto& frame : bakedRadials.hands) DrawRadialHolsterMenu(mvp,frame);
     if (trackedVisuals && (hud::ShouldRenderWristHud() || (g_calibActive.load(std::memory_order_relaxed) && g_calibGroup.load()==weaponmenu::AMMO))) {
         const auto lower=QuatRotate(rp.orientation,{0,-.05f,0});

@@ -120,7 +120,7 @@ void Setup(){
  g_updateRwMatrix=SyncMatrix;g_updateRwFrame=SyncFrame;matrixSyncs=frameSyncs=0;
  poses[0]={};poses[0].valid=true;poses[1]={};
  usable=focused=accept=true;owners=weaponMask=0;dropped=false;holdCalls=grantCalls=holdType=0;
- testTime=1;trackingEpoch=1;collect=0;
+ testTime=1;trackingEpoch=1;collect=0;timer=100;
 }
 void ItemAt(int index,int model,float x){
  void* self=pool+index*0x24;Write(self,4,static_cast<void*>(object[index]));
@@ -162,6 +162,14 @@ int main(){
  Setup();ItemAt(0,346,0);assert(!OnPickupUpdate(pool,player,nullptr,0));
  assert(matrices[0][14]>.5f&&matrixSyncs==2&&frameSyncs==2);
  assert(std::abs(renderedPoses[0][14]-matrices[0][14])<.0001f);
+ const float steadyHeight=renderedPoses[0][14];
+ for(std::uint32_t ms:{0u,250u,1000u,2000u,5000u}){
+  timer=ms;assert(!OnPickupUpdate(pool,player,nullptr,0));
+  assert(std::abs(renderedPoses[0][14]-steadyHeight)<.0001f); // no timed weapon bob
+ }
+ matrices[0][0]=0;matrices[0][1]=1;matrices[0][4]=-1;matrices[0][5]=0;
+ assert(!OnPickupUpdate(pool,player,nullptr,0));
+ assert(renderedPoses[0][0]==0&&renderedPoses[0][1]==1&&renderedPoses[0][4]==-1); // keep retail rotation
  // Candidate and icon follow visible pose, not compressed authoring coordinates.
  matrices[0][12]=2.f;Item visible{};assert(LoadItem(pool,player,visible)&&visible.point[0]==2.f);
  Setup();ItemAt(0,346,0);matrices[0][12]=1.5f;matrices[0][14]=.7f;
@@ -170,11 +178,13 @@ int main(){
  // The actual producer follows progress, stops on every cancellation and only drives the grabbing hand.
  for(int mode=0;mode<6;++mode){
   Setup();ItemAt(0,346,0);Step(0);Step(0);Step(1);
+  assert(g_markers.count==1&&g_markers.markers[0].held&&g_markers.markers[0].highlight==1);
   for(int i=0;i<10;++i)Step(1);
   assert(xr::pickupAmplitudes[0]>.17f&&xr::pickupAmplitudes[0]<.18f&&xr::pickupAmplitudes[1]==0);
   if(mode==0)poses[0].gripPos[0]+=1;
   if(mode==1)usable=false;if(mode==2)owners=1;if(mode==3)++trackingEpoch;if(mode==4)weaponMask=2;
   Step(mode==5?0.f:1.f);assert(xr::pickupAmplitudes[0]==0&&xr::pickupAmplitudes[1]==0);
+  if(g_markers.count)assert(!g_markers.markers[0].held&&g_markers.markers[0].highlight==0);
  }
  Setup();ItemAt(0,346,0);poses[1]=poses[0];poses[0].valid=false;
  Step(0);Step(0);poses[1].grip=1;for(int i=0;i<12;++i)Step(0);

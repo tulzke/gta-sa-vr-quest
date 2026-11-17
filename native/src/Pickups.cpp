@@ -32,7 +32,7 @@ namespace savr::pickups {
 namespace {
 constexpr int kObjOff=4,kPosXOff=0x14,kPosYOff=0x16,kPosZOff=0x18;
 constexpr int kEntityMatrix=0x18,kMatrixPos=0x30,kPoolCount=620,kStride=0x24;
-constexpr float kRiseZoneM=3.5f,kRiseHeightM=.80f,kBobM=.06f;
+constexpr float kRiseZoneM=3.5f,kRiseHeightM=.80f,kNonWeaponBobM=.06f;
 using UpdateFn=bool(*)(void*,void*,void*,int);
 UpdateFn g_origUpdate{};
 const std::uint32_t* g_timeMs{};
@@ -101,7 +101,7 @@ float Lift(void* pickup,void* player){
     std::array<float,16> pose{};if(!EntityPose(player,pose))return 0;
     float sum=0;for(int i=0;i<3;++i){const float d=pose[12+i]-ReadPos16(pickup,kPosXOff+i*2);sum+=d*d;}
     const float distance=std::sqrt(sum);if(!std::isfinite(distance)||distance>kRiseZoneM)return 0;
-    const float bob=g_timeMs?std::sin(float(*g_timeMs)*.003f)*kBobM:0;
+    const float bob=!WeaponType(pickup)&&g_timeMs?std::sin(float(*g_timeMs)*.003f)*kNonWeaponBobM:0;
     return (1.f-distance/kRiseZoneM)*(kRiseHeightM+bob);
 }
 std::uint64_t Identity(void* pickup){
@@ -347,6 +347,7 @@ void Tick(){
             Marker marker{{item.point[0],item.point[1],item.point[2]},{1,0,0},{0,0,1}};
             marker.doorGrab=true;marker.hideArrow=true;marker.pickupHold=true;
             marker.progress=g_gestures[h].progress;marker.held=g_gestures[h].active;
+            marker.highlight=marker.held?1.f:0.f;
             g_markers.markers[g_markers.count++]=marker;
         }
         if(!completed||!available||!g_origUpdate||Read<int>(player,0x8d4)!=55)continue;
