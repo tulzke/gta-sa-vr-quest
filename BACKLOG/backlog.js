@@ -317,18 +317,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 84,
-      "title": "Настройка угла наклона автомобильного радара через дебаг-меню",
-      "file": "84-naklon-avtomobilnogo-radara.md",
-      "categories": [
-        "vehicle-calibration",
-        "hud",
-        "tooling"
-      ],
-      "priority": "critical",
-      "status": "in_progress"
-    },
-    {
       "id": 85,
       "title": "Скрывать крутилку радио на транспорте без радио",
       "file": "85-skrytie-krutilki-na-transporte-bez-radio.md",
