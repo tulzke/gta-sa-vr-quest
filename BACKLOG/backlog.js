@@ -317,18 +317,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 85,
-      "title": "Скрывать крутилку радио на транспорте без радио",
-      "file": "85-skrytie-krutilki-na-transporte-bez-radio.md",
-      "categories": [
-        "vehicle-controls",
-        "audio",
-        "bugs"
-      ],
-      "priority": "critical",
-      "status": "in_progress"
-    },
-    {
       "id": 86,
       "title": "Следование камеры за CJ и запрет стрельбы при сбивании с ног",
       "file": "86-kamera-i-strelba-pri-sbivanii-cj.md",
