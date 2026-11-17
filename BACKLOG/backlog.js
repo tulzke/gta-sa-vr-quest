@@ -509,18 +509,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 99,
-      "title": "Отображение активной радиостанции над крутилкой радио",
-      "file": "99-radiostantsiya-nad-krutilkoy-radio.md",
-      "categories": [
-        "vehicle-controls",
-        "hud",
-        "audio"
-      ],
-      "priority": "high",
-      "status": "in_progress"
-    },
-    {
       "id": 100,
       "title": "Виброобратная связь при рулении: холодно/горячо и эксперимент с PCM",
       "file": "100-vibrootklik-pri-rulenii.md",
