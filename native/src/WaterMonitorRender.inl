@@ -41,13 +41,14 @@ void Prepare(){
  V3 up{0,0,1};up=Normalized(up-forward*Dot(up,forward));
  if(Dot(up,up)<.5f)up=body.up;
  const V3 right=Normalized(Cross(forward,up));up=Normalized(Cross(right,forward));
- camera={visual.cameraWorld,W(right),W(forward),W(up)};
+ watermonitor::CameraSettings settings{};std::copy_n(visual.cameraSettings,6,settings.begin());
+ camera=watermonitor::CameraFrame(visual.nozzleWorld,{{},W(right),W(forward),W(up)},settings);
  if(!visual.cameraActive)return;
  weapon_optic_render::remoteEffects=&RenderEffects;
  optic.remote=true;optic.type=-113;optic.excluded=visual.vehicle;
  optic.width=512;optic.height=384;optic.farClip=110.f;optic.tanFov=.70020754f;
  // Native CCamera's first axis points left, unlike our authored model axes.
- optic.frame.camera={right*-1.f,forward,up,V(visual.cameraWorld)};
+ optic.frame.camera={V(camera.right)*-1.f,V(camera.forward),V(camera.up),V(camera.center)};
  optic.visible=true;
  if(!optic.raster)optic.raster=g.RwRasterCreate(optic.width,optic.height,32,5);
 }
@@ -81,7 +82,7 @@ void DrawSurface(){
   const auto channel=[&](float value){return std::pow(value,1.f/2.2f)*light;};
   const auto color=v.role==3?Color(.008f,.009f,.012f):v.role==4?
    Color(visual.cameraActive?.85f:.11f,visual.cameraActive?.40f:.06f,.025f):Color(channel(v.color[0]),channel(v.color[1]),channel(v.color[2]));
-  vertices.push_back({Point(frame,p),normal,color,1.f-v.uv[0],v.uv[1]});
+  vertices.push_back({Point(frame,p),normal,color,v.uv[0],v.uv[1]});
  }
  // Original glass stays black behind the collapsing image.
  indices.assign(model.indices.begin(),model.indices.end());draw(vertices,indices,nullptr);
@@ -119,7 +120,8 @@ void DrawSurface(){
     vertices.push_back(vertex(cx+std::cos(p.first)*p.second,cz+std::sin(p.first)*p.second,white));
    for(int n:{0,1,2,0,2,3})indices.push_back(start+n);
   }
-  quad(-.003f,-.00024f,.003f,.00024f,white);quad(-.00024f,-.003f,.00024f,.003f,white);
+  const auto target=watermonitor::Circle(W(visual.owner>=0?body.forward:dock.forward),camera);const float tx=target.x*.061f,tz=target.y*.04575f;
+  quad(tx-.003f,tz-.00024f,tx+.003f,tz+.00024f,white);quad(tx-.00024f,tz-.003f,tx+.00024f,tz+.003f,white);
   g.RwRenderStateSet(8,nullptr);g.RwRenderStateSet(10,reinterpret_cast<void*>(5));g.RwRenderStateSet(11,reinterpret_cast<void*>(6));g.RwRenderStateSet(12,reinterpret_cast<void*>(1));
   draw(vertices,indices,nullptr);
  }

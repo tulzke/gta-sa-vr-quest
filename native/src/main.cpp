@@ -1494,6 +1494,10 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 savr::driving::AdjustCurrentModelSeatHeightCm(drivingVehicleType,step);
             } else if (item==savr::driving::MENU_REAR_MIRROR && (enter||step)) {
                 savr::driving::CycleRearMirrorQuality(step?step:1);
+            } else if(item>=savr::driving::MENU_WATER_CAMERA_X&&item<=savr::driving::MENU_WATER_CAMERA_ROLL&&step&&available){
+                savr::driving::AdjustWaterMonitorCameraSetting(item-savr::driving::MENU_WATER_CAMERA_X,step);
+            } else if(item==savr::driving::MENU_WATER_CAMERA_RESET&&enter&&available){
+                savr::driving::ResetWaterMonitorCamera();
             } else if (item==savr::driving::MENU_MIRROR_RESET_POSE && enter) {
                 savr::driving::ResetRearMirrorSurface();
             } else if (item==savr::driving::MENU_PASSENGER_RESET && enter) {
@@ -1948,6 +1952,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
 
         xr::SetMainMenu    (menuPage == PG_MAIN,     mainSel);
         const int hydroHandItem=menuPage==PG_DRIVING?savr::driving::GetMenuItemForRow(drivingVehicleType,drivingSel):-1;
+        savr::driving::SetWaterMonitorCameraPreview(menuPage==PG_DRIVING&&drivingVehicleType==savr::driving::VEHICLE_CAR&&savr::driving::IsWaterMonitorCameraMenuItem(hydroHandItem));
         savr::hydrohand::SetPreview(hydroHandItem>=savr::driving::MENU_HYDRAULICS_HAND&&hydroHandItem<=savr::driving::MENU_HYDRAULICS_HAND_RESET);
         xr::SetCalibPage   (menuPage == PG_CALIB, calibSel, 1, calibWeaponType, calibGroup);
         xr::SetHolsterCalibMenu(menuPage == PG_HOLSTER_CALIB, holsterCalibSel);

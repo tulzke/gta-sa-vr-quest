@@ -17,6 +17,7 @@
 #include "RadioKnobState.h"
 #include "ServiceRadio.h"
 #include "WaterMonitorHand.h"
+#include "WaterMonitorCamera.h"
 #include "ServiceRadioMission.h"
 #include "RadioLabel.h"
 #include "RadioRetune.h"
@@ -313,6 +314,7 @@ struct ModelCalibration {
     float ignitionPose[12]{};
     bool ignitionPoseSet{};
     bool ignitionPoseLean{};
+    watermonitor::CameraSettings monitorCamera=watermonitor::DefaultCamera;
     float monitorPose[12]{};
     bool monitorPoseSet{};
     float servicePose[12]{};
@@ -347,7 +349,9 @@ watermonitor::State g_waterMonitor;
 std::atomic<unsigned> g_waterHandMask{};
 std::atomic<bool> g_waterConsumesB{};
 bool g_waterRawB{},g_waterRetailReady{};
-watermonitor::Vec g_waterActualWorld{},g_waterCameraWorld{};
+watermonitor::Vec g_waterActualWorld{};
+std::atomic<bool> g_waterCameraPreview{};
+bool ReadWaterNozzle(void* vehicle,watermonitor::Frame& frame);
 std::uint64_t g_waterTrackingEpoch{};
 void InstallWaterMonitorHook();
 void ResetWaterMonitor(){g_waterMonitor.Reset(g_waterMonitor.owner>=0&&g_waterRawB);g_waterHandMask.store(0);g_waterConsumesB.store(g_waterMonitor.ConsumesFire());}
@@ -727,6 +731,7 @@ void Save() {
             for (int field=0; field<6; ++field)
                 std::fprintf(file, "Ignition.%d.%d=%.7g\n", model, field,
                              calibration.ignition[field]);
+            if(model==407)for(int field=0;field<6;++field)std::fprintf(file,"WaterMonitorCamera.%d.%d=%.3f\n",model,field,calibration.monitorCamera[field]);
             if(calibration.monitorPoseSet)
                 for(int field=0;field<12;++field)std::fprintf(file,"WaterMonitorPose.%d.%d=%.9g\n",model,field,calibration.monitorPose[field]);
             if(calibration.servicePoseSet)
@@ -964,6 +969,9 @@ void Load() {
                     g_modelCalibration[model].liftPose[axis]=poseValue;
                     if(axis==11)g_modelCalibration[model].liftPoseSet=true;
                     continue;
+                }
+                if(std::sscanf(line,"WaterMonitorCamera.%d.%d=%f",&model,&axis,&poseValue)==3&&model==407&&axis>=0&&axis<6&&std::isfinite(poseValue)){
+                    g_modelCalibration[407].monitorCamera[axis]=watermonitor::ClampCamera(axis,poseValue);continue;
                 }
                 if(std::sscanf(line,"WaterMonitorPose.%d.%d=%f",&model,&axis,&poseValue)==3&&model==407&&axis>=0&&axis<12&&std::isfinite(poseValue)&&std::abs(poseValue)<10){
                     g_modelCalibration[model].monitorPose[axis]=poseValue;
@@ -4164,6 +4172,8 @@ constexpr int kDefaultCarItems[] = {
     MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
     MENU_HYDRAULICS_HAND, MENU_HYDRAULICS_HAND_X, MENU_HYDRAULICS_HAND_Y, MENU_HYDRAULICS_HAND_Z,
     MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET,
+    MENU_WATER_CAMERA_X, MENU_WATER_CAMERA_Y, MENU_WATER_CAMERA_Z,
+    MENU_WATER_CAMERA_PITCH, MENU_WATER_CAMERA_YAW, MENU_WATER_CAMERA_ROLL, MENU_WATER_CAMERA_RESET,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -4189,6 +4199,8 @@ constexpr int kImmersiveCarItems[] = {
     MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
     MENU_HYDRAULICS_HAND, MENU_HYDRAULICS_HAND_X, MENU_HYDRAULICS_HAND_Y, MENU_HYDRAULICS_HAND_Z,
     MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET,
+    MENU_WATER_CAMERA_X, MENU_WATER_CAMERA_Y, MENU_WATER_CAMERA_Z,
+    MENU_WATER_CAMERA_PITCH, MENU_WATER_CAMERA_YAW, MENU_WATER_CAMERA_ROLL, MENU_WATER_CAMERA_RESET,
     MENU_CAR_CAMERA_TILT,
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
@@ -4258,6 +4270,7 @@ void MenuTableForType(int vehicleType, const int** items, int* count) {
 }
 } // namespace
 
+bool IsWaterMonitorCameraMenuItem(int item){return item>=MENU_WATER_CAMERA_X&&item<=MENU_WATER_CAMERA_RESET;}
 bool IsHydraulicsMenuItem(int item){
     return item==MENU_HYDRAULICS_SCALE||item==MENU_HYDRAULICS_RESET_POSE||
         (item>=MENU_HYDRAULICS_HAND&&item<=MENU_HYDRAULICS_HAND_RESET);
@@ -4267,6 +4280,7 @@ int GetMenuItemCount(int vehicleType) {
     MenuTableForType(vehicleType,&items,&count);
     int visible=0;
     for(int i=0;i<count;++i){
+        if(IsWaterMonitorCameraMenuItem(items[i])&&GetActiveVehicleModelId()!=407)continue;
         if(items[i]==MENU_LIFT_RESET_POSE&&!liftlever::Supported(GetActiveVehicleModelId()))continue;
         if((items[i]==MENU_NITRO_SCALE||items[i]==MENU_NITRO_RESET_POSE)&&!NitroCompatible(GetActiveVehicleModelId()))continue;
         if(IsHydraulicsMenuItem(items[i])&&!HydraulicsCompatible(GetActiveVehicleModelId()))continue;
@@ -4278,6 +4292,7 @@ int GetMenuItemForRow(int vehicleType,int row) {
     MenuTableForType(vehicleType,&items,&count);
     if(row<0)return MENU_BACK;
     for(int i=0;i<count;++i){
+        if(IsWaterMonitorCameraMenuItem(items[i])&&GetActiveVehicleModelId()!=407)continue;
         if(items[i]==MENU_LIFT_RESET_POSE&&!liftlever::Supported(GetActiveVehicleModelId()))continue;
         if((items[i]==MENU_NITRO_SCALE||items[i]==MENU_NITRO_RESET_POSE)&&!NitroCompatible(GetActiveVehicleModelId()))continue;
         if(IsHydraulicsMenuItem(items[i])&&!HydraulicsCompatible(GetActiveVehicleModelId()))continue;
@@ -4386,6 +4401,21 @@ void SetIgnitionPose(int model,bool bike,const float pose[12]) {
     std::lock_guard<std::mutex> lock(g_modelMutex);
     auto& c=g_modelCalibration[model]; std::copy_n(pose,12,c.ignitionPose); c.ignitionPoseSet=true; c.ignitionPoseLean=bike&&!IsQuadBikeModelId(model);
 }
+float GetWaterMonitorCameraSetting(int field){
+    EnsureInit();if(field<0||field>=6)return 0;
+    std::lock_guard<std::mutex> lock(g_modelMutex);auto it=g_modelCalibration.find(407);
+    return it==g_modelCalibration.end()?watermonitor::DefaultCamera[field]:it->second.monitorCamera[field];
+}
+void AdjustWaterMonitorCameraSetting(int field,int direction){
+    EnsureInit();if(GetActiveVehicleModelId()!=407||field<0||field>=6||!direction)return;
+    {std::lock_guard<std::mutex> lock(g_modelMutex);auto& value=g_modelCalibration[407].monitorCamera[field];
+     value=watermonitor::ClampCamera(field,menu::SpatialValue(value,direction));}Save();
+}
+void ResetWaterMonitorCamera(){
+    EnsureInit();if(GetActiveVehicleModelId()!=407)return;
+    {std::lock_guard<std::mutex> lock(g_modelMutex);g_modelCalibration[407].monitorCamera=watermonitor::DefaultCamera;}Save();
+}
+void SetWaterMonitorCameraPreview(bool active){g_waterCameraPreview.store(active,std::memory_order_release);}
 unsigned WaterMonitorClaimedHands(){return g_waterHandMask.load(std::memory_order_acquire);}
 bool WaterMonitorConsumesFire(){return g_waterConsumesB.load(std::memory_order_acquire);}
 bool GetWaterMonitorVisual(watermonitor::Visual* out){
@@ -4847,7 +4877,7 @@ void ResetVehiclePreset(int vehicleType) {
                             WHEEL_CAL_FIELD_COUNT,0);
         }
         calibration.radioPoseSet=false;
-        calibration.servicePoseSet=false;calibration.monitorPoseSet=false;
+        calibration.servicePoseSet=false;calibration.monitorPoseSet=false;calibration.monitorCamera=watermonitor::DefaultCamera;
         calibration.ignitionPoseSet=false;
         std::fill_n(calibration.ignition,6,0);
         calibration.acceleratorMode=BIKE_ACCEL_HOLD_TRIGGER;
@@ -5217,7 +5247,7 @@ void UpdateInput(const xr::InputState& rawInput,bool gameplay,bool blocked) {
         return;
     }
     const bool preview = blocked && g_menuPreview.load(std::memory_order_acquire);
-    if (blocked) g_ignitionRotation.owners=0;
+    if (blocked) {g_ignitionRotation.owners=0;ResetWaterMonitor();}
     const int activeMode=ModeForAppearance(appearance);
     static int loggedAppearance=-1,loggedMode=-1;
     if (appearance!=loggedAppearance||activeMode!=loggedMode) {

@@ -22,11 +22,18 @@ bool BuildWaterMonitor(WheelVisualState& visual,void* vehicle){
 }
 void PublishWaterMonitor(WheelVisualState& visual,double now){
  auto& v=visual.monitor;if(!v.visible)return;
- v.actualWorld=g_waterActualWorld;v.cameraWorld=g_waterCameraWorld;
+ if(ReadWaterNozzle(v.vehicle,v.nozzleWorld))v.actualWorld=v.nozzleWorld.forward;
+ else v.actualWorld=g_waterActualWorld;
+ const bool preview=g_waterCameraPreview.load(std::memory_order_acquire)&&g_menuPreview.load(std::memory_order_acquire)&&GetVehicleDebugMode()==0;
+ {std::lock_guard<std::mutex> lock(g_modelMutex);auto it=g_modelCalibration.find(407);
+  const auto settings=it==g_modelCalibration.end()?watermonitor::DefaultCamera:it->second.monitorCamera;
+  std::copy(settings.begin(),settings.end(),v.cameraSettings);}
+ v.cameraWorld=v.nozzleWorld.Point({v.cameraSettings[0]*.01f,v.cameraSettings[1]*.01f,v.cameraSettings[2]*.01f});
  v.owner=g_waterMonitor.owner;v.fire=g_waterMonitor.fire;v.screen=g_waterMonitor.Display(now);v.cameraActive=g_waterMonitor.CameraActive(now);
  if(v.owner>=0)v.body=g_waterMonitor.held;
  else if(g_waterMonitor.returnUntil>now)v.body=watermonitor::Blend(v.dock,g_waterMonitor.released,static_cast<float>((g_waterMonitor.returnUntil-now)/watermonitor::ReturnSeconds));
  else v.body=v.dock;
+ if(preview){v.cameraActive=true;v.screen={1,1,1};}
  v.desiredTracking=v.owner>=0?v.body.forward:v.dock.forward;
  g_waterHandMask.store(v.owner>=0?1u<<v.owner:0u,std::memory_order_release);
  g_waterConsumesB.store(g_waterMonitor.ConsumesFire(),std::memory_order_release);

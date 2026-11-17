@@ -82,7 +82,7 @@ for name in ('ClearHeat', 'ValidHeatEntity', 'UpdateHeat', 'ApplyReticleAim'):
     production += function(scope, name)
 production += '\n}\n'
 harness = (ROOT / 'tools/tests/rear_mirror.cpp').read_text(encoding='utf8')
-harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include <fstream>\n#include <iterator>\n' + harness
+harness = '#include "WeaponOptic.h"\n#include "ScopeAim.h"\n#include "StickTurn.h"\n#include "WaterMonitorModel.h"\n#include "WaterMonitorCamera.h"\n#include <fstream>\n#include <iterator>\n' + harness
 harness = harness.replace('// PRODUCTION_ADAPTER', production)
 tests = (ROOT / 'tools/tests/weapon_optics.inc').read_text(encoding='utf8')
 tests += (ROOT / 'tools/tests/water_monitor_render.inc').read_text(encoding='utf8').replace('WATER_ASSET_PATH', (ROOT / 'assets/firetruck-controller/runtime/monitor.mesh').as_posix())

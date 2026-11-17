@@ -1,6 +1,7 @@
 #include "WaterMonitorLogic.h"
 #include "WaterMonitorHand.h"
 #include "WaterMonitorModel.h"
+#include "WaterMonitorCamera.h"
 #include <fstream>
 #include <iterator>
 #include <cstdio>
@@ -47,6 +48,21 @@ int main(int argc,char** argv){
  Servo seam;seam.yaw=Pi-.01f;seam.Step(-Pi+.05f,0,.02f);CHECK(seam.yawSpeed>0);
  const auto before=seam.yaw;seam.Step(std::numeric_limits<float>::quiet_NaN(),0,.01f);CHECK(seam.yaw==before);
  Frame camera{{},{1,0,0},{0,1,0},{0,0,1}};
+ const auto pivot=camera.Point(NozzlePivot);
+ const auto rest=NozzleFrame(camera,pivot,0,0);
+ const auto mounted=CameraFrame(rest,camera,DefaultCamera);
+ CHECK(near(mounted.center.x,.35f)&&near(mounted.center.y,1.63911438f)&&near(mounted.center.z,1.94957905f));
+ for(float yaw:{-2.f,0.f,1.5f})for(float pitch:{-.349f,0.f,.349f}){
+  const auto nozzle=NozzleFrame(camera,pivot,yaw,pitch);
+  CHECK(near(dot(cross(nozzle.right,nozzle.forward),nozzle.up),1));
+  const auto view=CameraFrame(nozzle,camera,DefaultCamera);const auto delta=view.center-pivot;
+  CHECK(near(dot(delta,nozzle.right),.35f)&&near(dot(delta,nozzle.forward),0)&&near(dot(delta,nozzle.up),.30f));
+  CHECK(view.forward.y==1); // camera orientation never inherits the servo lag
+  CameraSettings adjusted{75,40,-10,15,25,30};const auto changed=CameraFrame(nozzle,camera,adjusted);
+  CHECK(near(dot(changed.forward,changed.up),0)&&near(dot(changed.forward,changed.forward),1));
+  CHECK(nozzle.center.x==pivot.x&&nozzle.center.y==pivot.y&&nozzle.center.z==pivot.z); // calibration cannot move water pivot
+ }
+ CHECK(ClampCamera(0,999)==200&&ClampCamera(3,-999)==-180&&ClampCamera(2,std::numeric_limits<float>::quiet_NaN())==30);
  CHECK(near(Circle({0,1,0},camera).x,0));CHECK(Circle({.5f,1,0},camera).x>0);
  CHECK(Circle({0,1,.2f},camera).y>0);CHECK(Circle({10,1,10},camera).x==.9f);
  CHECK(std::isfinite(Circle({0,-1,0},camera).x));

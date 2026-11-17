@@ -10,6 +10,17 @@ std::uint32_t g_waterPhysicsTick=~std::uint32_t{};
 bool WaterTrackingToWorld(watermonitor::Vec p,watermonitor::Vec& out){
  float a[3]{p.x,p.y,p.z},b[3]{};if(!vrcam::TrackingPointToWorld(a,b))return false;out={b[0],b[1],b[2]};return watermonitor::finite(out);
 }
+bool ReadWaterNozzle(void* vehicle,watermonitor::Frame& out){
+ if(!vehicle||!g_waterFrameLtm)return false;
+ const auto* bytes=static_cast<const char*>(vehicle);void* matrix{};std::memcpy(&matrix,bytes+0x18,8);if(!matrix)return false;
+ const auto read=[&](std::size_t at){GameSymbols::Vec3 v{};std::memcpy(&v,static_cast<const char*>(matrix)+at,12);return watermonitor::Vec{v.x,v.y,v.z};};
+ const watermonitor::Frame car{read(0x30),read(0),read(0x10),read(0x20)};
+ auto pivot=car.Point(watermonitor::NozzlePivot);void* frame{};std::memcpy(&frame,bytes+0x8a0,8);
+ if(frame)if(void* ltm=g_waterFrameLtm(frame)){GameSymbols::Vec3 p{};std::memcpy(&p,static_cast<char*>(ltm)+0x30,12);pivot={p.x,p.y,p.z};}
+ float yaw{},pitch{};std::memcpy(&yaw,bytes+0xb80,4);std::memcpy(&pitch,bytes+0xb84,4);
+ if(!watermonitor::finite(pivot)||!std::isfinite(yaw)||!std::isfinite(pitch))return false;
+ out=watermonitor::NozzleFrame(car,pivot,yaw,pitch);return true;
+}
 void OnWaterFireControl(void* vehicle,void* fire){
  if(!vehicle||vehicle!=GetControlledVehicle()||ControlledVehicleModel()!=407||!g.FindPlayerPed||!g.CVehicle_IsDriver||
     !g.CVehicle_IsDriver(vehicle,g.FindPlayerPed(-1))){if(g_origWaterFireControl)g_origWaterFireControl(vehicle,fire);return;}
@@ -56,7 +67,7 @@ void OnWaterFireControl(void* vehicle,void* fire){
   watermonitor::Vec origin=pos+f*1.5f+u*1.8f;
   void* frame{};std::memcpy(&frame,bytes+0x8a0,sizeof(frame));
   if(frame)if(void* ltm=g_waterFrameLtm(frame)){GameSymbols::Vec3 v{};std::memcpy(&v,static_cast<char*>(ltm)+0x30,sizeof(v));origin={v.x,v.y,v.z};}
-  g_waterCameraWorld=origin+r*.13f+u*.15f;g_visual.monitor.cameraWorld=g_waterCameraWorld;
+  // Camera calibration is computed separately from this native emission path.
   // Camera follows desired yaw/pitch immediately; the gun and circle lag.
   if(!shoot||!allowed)return;
   auto start=origin;

@@ -76,7 +76,8 @@ struct State {
 };
 struct Visual {
  bool visible{},cameraActive{},fire{};int owner{-1};void* vehicle{};
- Frame dock{},body{};Screen screen{};Vec desiredTracking{},actualWorld{},cameraWorld{};
+ Frame dock{},body{},nozzleWorld{};Screen screen{};Vec desiredTracking{},actualWorld{},cameraWorld{};
+ float cameraSettings[6]{35,0,30,0,0,0};
 };
 inline Vec Circle(Vec direction,const Frame& camera,float tanX=.70020754f){
  const float depth=dot(direction,camera.forward);

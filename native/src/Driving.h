@@ -209,7 +209,9 @@ enum MenuItem {
     MENU_NITRO_SCALE, MENU_NITRO_RESET_POSE
     , MENU_HYDRAULICS_SCALE, MENU_HYDRAULICS_RESET_POSE,
     MENU_HYDRAULICS_HAND, MENU_HYDRAULICS_HAND_X, MENU_HYDRAULICS_HAND_Y, MENU_HYDRAULICS_HAND_Z,
-    MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET
+    MENU_HYDRAULICS_HAND_RX, MENU_HYDRAULICS_HAND_RY, MENU_HYDRAULICS_HAND_RZ, MENU_HYDRAULICS_HAND_RESET,
+    MENU_WATER_CAMERA_X, MENU_WATER_CAMERA_Y, MENU_WATER_CAMERA_Z,
+    MENU_WATER_CAMERA_PITCH, MENU_WATER_CAMERA_YAW, MENU_WATER_CAMERA_ROLL, MENU_WATER_CAMERA_RESET
 };
 
 bool RearMirrorEnabled();
@@ -239,6 +241,11 @@ unsigned WaterMonitorClaimedHands();
 bool WaterMonitorConsumesFire();
 bool GetWaterMonitorVisual(watermonitor::Visual* out);
 void SetWaterMonitorPose(int model,const float pose[12]);
+bool IsWaterMonitorCameraMenuItem(int item);
+float GetWaterMonitorCameraSetting(int field);
+void AdjustWaterMonitorCameraSetting(int field,int direction);
+void ResetWaterMonitorCamera();
+void SetWaterMonitorCameraPreview(bool active);
 bool ServiceRadioConsumesTrigger(int hand);
 bool ServiceRadioWidget(int widget);
 void SetLiftPose(int model,const float pose[12]);

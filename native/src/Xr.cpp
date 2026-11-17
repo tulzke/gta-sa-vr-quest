@@ -7882,6 +7882,13 @@ void BuildDrivingMenu() {
             case driving::MENU_REAR_MIRROR:
                 std::snprintf(rows[row],sizeof(rows[row]),"REAR MIRROR < %s >",driving::RearMirrorQualityName());
                 break;
+            case driving::MENU_WATER_CAMERA_X:case driving::MENU_WATER_CAMERA_Y:case driving::MENU_WATER_CAMERA_Z:
+            case driving::MENU_WATER_CAMERA_PITCH:case driving::MENU_WATER_CAMERA_YAW:case driving::MENU_WATER_CAMERA_ROLL:{
+                const int field=item-driving::MENU_WATER_CAMERA_X;
+                static const char* names[]{"RIGHT","FORWARD","UP","PITCH","YAW","ROLL"};
+                std::snprintf(rows[row],sizeof(rows[row]),"WATER CAMERA %s < %+.1f %s >",names[field],driving::GetWaterMonitorCameraSetting(field),field<3?"CM":"DEG");break;}
+            case driving::MENU_WATER_CAMERA_RESET:
+                std::snprintf(rows[row],sizeof(rows[row]),"RESET WATER CAMERA / NOZZLE PIVOT");break;
             case driving::MENU_MIRROR_RESET_POSE:
                 std::snprintf(rows[row],sizeof(rows[row]),"RESET MIRROR POSITION");break;
             case driving::MENU_LIFT_RESET_POSE:
