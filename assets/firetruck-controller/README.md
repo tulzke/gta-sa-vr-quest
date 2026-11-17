@@ -48,6 +48,9 @@ Runtime integration uses `runtime/monitor.mesh` (Git LFS), exported by
 `tools/export_firetruck_controller_runtime.py` in Blender. It contains only
 the approved 3222 triangles, normals, vertex colours, UVs and assembly roles;
 the demonstration bitmap is omitted. The mesh is embedded in the native mod.
-The camera layer, CRT scan lines and two reticles bring the active display to
-3726 triangles, including the dock. Existing pistol hand poses are reused;
-grip fit and the initial overhead dock position still need Quest acceptance.
+The camera layer and two reticles bring the active display to 3470 triangles,
+including the dock. CRT scan lines and vignette are disabled for the current
+Quest ripple investigation; the shutdown collapse remains. Existing pistol
+hand poses use a fixed attachment to the grip. The device follows hand roll,
+while the camera and nozzle use only the aiming direction. Hand fit and the
+initial overhead dock position still need Quest acceptance.

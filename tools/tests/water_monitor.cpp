@@ -69,18 +69,29 @@ int main(int argc,char** argv){
  xr::HandPose pose{};pose.valid=pose.aimValid=true;pose.gripOri[3]=pose.aimOri[3]=1;
  auto held=HeldFrame(pose,0);CHECK(near(held.forward.z,-1)&&near(held.right.x,1));
  pose.gripOri[2]=std::sin(.6f);pose.gripOri[3]=std::cos(.6f);
- auto rolled=HeldFrame(pose,1);CHECK(near(rolled.up.y,1)&&near(rolled.forward.z,-1)); // roll ignored
+ auto rolled=HeldFrame(pose,1);CHECK(std::abs(rolled.up.x)>.8f&&near(rolled.forward.z,-1)); // body rolls, aim does not
+ for(int side:{0,1}){const auto inHand=HeldFrame(pose,side);const auto wrist=FixedGrip(inHand,side).position;
+  CHECK(near(wrist.x,pose.gripPos[0])&&near(wrist.y,pose.gripPos[1])&&near(wrist.z,pose.gripPos[2]));}
+ for(const auto& device:{held,rolled})for(int side:{0,1}){
+  const auto pinned=FixedGrip(device,side);
+  const auto contact=handrender::MeshPoint(pinned,GripMeshAnchor),target=device.Point(GripAnchor);
+  CHECK(dot(contact-target,contact-target)<1e-10f);
+  CHECK(near(dot(pinned.forward,device.forward),1)&&near(dot(pinned.right,device.up),1));
+  CHECK(near(dot(pinned.up,device.right),side==0?-1.f:1.f));
+ }
  pose.aimOri[1]=std::sin(.35f);pose.aimOri[3]=std::cos(.35f);
  auto aimed=HeldFrame(pose,0);CHECK(aimed.forward.x<-.6f&&near(dot(aimed.forward,aimed.up),0));
  auto blended=Blend(held,aimed,.5f);CHECK(near(dot(blended.forward,blended.forward),1));
  pose.aimOri[1]=0;pose.aimOri[0]=std::sin(Pi/4);pose.aimOri[3]=std::cos(Pi/4);
  const auto vertical=HeldFrame(pose,0);CHECK(near(dot(vertical.right,vertical.right),1)&&near(dot(vertical.up,vertical.up),1));
+ for(const Vec direction:{Vec{0,0,1},Vec{0,0,-1},Vec{0,1,0}}){const auto aim=LevelAim(direction);
+  CHECK(near(dot(aim.right,aim.right),1)&&near(dot(aim.up,aim.up),1)&&near(dot(aim.forward,aim.up),0));}
  std::ifstream file(argv[1],std::ios::binary);std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)),{});
  Model m;CHECK(m.Load(bytes.data(),bytes.size()));CHECK(m.indices.size()/3==3222);
  unsigned roles[5]{};for(std::size_t i=0;i<m.indices.size();i+=3){const auto role=static_cast<unsigned>(m.vertices[m.indices[i]].role);roles[role]++;
   CHECK(m.vertices[m.indices[i+1]].role==role&&m.vertices[m.indices[i+2]].role==role);}
  CHECK(roles[0]&&roles[2]&&roles[3]);
- CHECK(m.indices.size()/3+roles[3]+256+64+4<=4000); // camera layer, scan lines, circle, crosshair
+ CHECK(m.indices.size()/3+roles[3]+64+4==3470); // clean video layer, circle, crosshair
  CHECK(!m.Load(bytes.data(),bytes.size()-1));bytes[0]=0;CHECK(!m.Load(bytes.data(),bytes.size()));
  std::printf("Water monitor: %d checks passed; 3222 asset triangles, %u screen triangles\n",checks,roles[3]);
 }

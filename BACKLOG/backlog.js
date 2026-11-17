@@ -632,6 +632,7 @@ const BACKLOG_DATA = {
         "vehicle-calibration",
         "weapons",
         "graphics",
+        "bugs",
         "hud",
         "missions"
       ],

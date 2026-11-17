@@ -38,14 +38,11 @@ void Prepare(){
  // Camera position is attached to the nozzle; its orientation follows the
  // physical screen immediately. The native nozzle orientation is independent.
  const V3 forward=visual.owner>=0?body.forward:dock.forward;
- V3 up{0,0,1};up=Normalized(up-forward*Dot(up,forward));
- if(Dot(up,up)<.5f)up=body.up;
- const V3 right=Normalized(Cross(forward,up));up=Normalized(Cross(right,forward));
  watermonitor::CameraSettings settings{};std::copy_n(visual.cameraSettings,6,settings.begin());
- camera=watermonitor::CameraFrame(visual.nozzleWorld,{{},W(right),W(forward),W(up)},settings);
+ camera=watermonitor::CameraFrame(visual.nozzleWorld,watermonitor::LevelAim(W(forward)),settings);
  if(!visual.cameraActive)return;
  weapon_optic_render::remoteEffects=&RenderEffects;
- optic.remote=true;optic.type=-113;optic.excluded=visual.vehicle;
+ optic.remote=true;optic.type=-113;optic.excluded=nullptr;
  optic.width=512;optic.height=384;optic.farClip=110.f;optic.tanFov=.70020754f;
  // Native CCamera's first axis points left, unlike our authored model axes.
  optic.frame.camera={V(camera.right)*-1.f,V(camera.forward),V(camera.up),V(camera.center)};
@@ -93,11 +90,11 @@ void DrawSurface(){
   for(std::size_t i=0;i<model.vertices.size();++i){const auto& v=model.vertices[i];if(v.role!=3)continue;
    const float x=v.position[0]*visual.screen.x,z=(v.position[2]-.173f)*visual.screen.y;
    const float y=-.059f+.0033f*((x/.061f)*(x/.061f)+(z/.04575f)*(z/.04575f))-.00012f;
-   const float vignette=1.f-.14f*std::clamp((v.position[0]/.061f)*(v.position[0]/.061f)+((v.position[2]-.173f)/.04575f)*((v.position[2]-.173f)/.04575f),0.f,1.f);
-   const float light=visual.screen.light*vignette;vertices[i].position=Point(body,{x,y,z+.173f});vertices[i].color=Color(light,light,light);
+   const float light=visual.screen.light;vertices[i].position=Point(body,{x,y,z+.173f});vertices[i].color=Color(light,light,light);
   }
   draw(vertices,glass,optic.raster);
-  // Subtle neutral scan lines. No monochrome tint or full-screen postprocess.
+  // Clean video for the in-headset ripple investigation: no scan lines or
+  // vignette. Shutdown collapse and the two aiming markers are independent.
   vertices.clear();indices.clear();
   const auto vertex=[&](float x,float z,std::uint32_t color){
    x*=visual.screen.x;z*=visual.screen.y;
@@ -108,7 +105,6 @@ void DrawSurface(){
    vertices.push_back(vertex(x0,z0,color));vertices.push_back(vertex(x1,z0,color));vertices.push_back(vertex(x1,z1,color));vertices.push_back(vertex(x0,z1,color));
    for(int i:{0,1,2,0,2,3})indices.push_back(start+i);
   };
-  for(int row=0;row<64;++row){const float z=-.0454f+row*.00142f;for(int col=0;col<2;++col)quad(-.0604f+col*.0604f,z,col*.0604f,z+.00025f,Color(0,0,0,.16f));}
   // Desired crosshair is fixed; the real nozzle circle follows the native
   // direction, including limits and inertia. Off-screen directions pin to edge.
   const auto circle=watermonitor::Circle(visual.actualWorld,camera);

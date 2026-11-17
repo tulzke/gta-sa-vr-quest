@@ -32,6 +32,7 @@
 #include "VehicleHorn.h"
 #include "RadioHandAttachment.h"
 #include "ServiceRadioHand.h"
+#include "WaterMonitorHand.h"
 #include "ServiceRadioModel.h"
 #include "RadioLabel.h"
 #include "VehicleTestArea.h"
@@ -9293,6 +9294,14 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
             }
         }
 
+        if(monitorHand){
+            const auto pinned=watermonitor::FixedGrip(drivingWheel.monitor.body,hand);
+            pos={pinned.position.x,pinned.position.y,pinned.position.z};
+            right={pinned.right.x,pinned.right.y,pinned.right.z};
+            up={pinned.up.x,pinned.up.y,pinned.up.z};
+            forward={pinned.forward.x,pinned.forward.y,pinned.forward.z};
+            grip=1.f;trig=drivingWheel.monitor.fire?1.f:0.f;
+        }
         const auto wristForward=forward,wristRight=right,wristUp=up;
         if(hp[hand].climbGrip){
             forward={hp[hand].climbForward[0],hp[hand].climbForward[1],hp[hand].climbForward[2]};

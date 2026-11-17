@@ -16,6 +16,19 @@ checks = {
     0x5fa9bc: (0x2a1303e0,),
     0x5fa9e0: (0xfd403662,),
     0x5fa9f4: (0x94084a5f,),
+    # Stock Firetruck launch multiplier is 0.5; no reduced VR coefficient.
+    0x5fa994: (0x1e2c1001,),
+    # After a 150ms startup the current sample advances by one, modulo 32,
+    # per update, independent of timestep. This can limit range at higher FPS.
+    0x5f9300: (0x11025929, 0x6b09011f, 0x54000149),
+    0x5f9310: (0x11000508, 0x6b0803e9, 0x12001108, 0x12001129),
+    # Native gravity/position integration, then fixed extinguishing arguments.
+    0x5f9334: (0x52824deb,),
+    0x5f9344: (0x72b7706b,),
+    0x5f9380: (0x1f020400,),
+    0x5f93e4: (0x1e201003, 0x1e2c1004),
+    # Render alpha: 64*(1-segmentAge/32); older sections become fainter.
+    0x5f9c70: (0x1f010400,),
     # Model 407 PreRender consumes these same angles: reset X, then append Z.
     0x6af294: (0xf9445261, 0xbd4b8660, 0xaa1303e0, 0x2a1f03e2, 0x52800023, 0x94058442),
     0x6af2ac: (0xbd4b8260, 0x2a1f03e3, 0x91228268, 0x52800042),

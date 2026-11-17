@@ -18,6 +18,13 @@ inline Frame NozzleFrame(const Frame& car,Vec origin,float yaw,float pitch){
   car.right*(-sy*cp)+car.forward*(cy*cp)+car.up*sp,
   car.right*(sy*sp)+car.forward*(-cy*sp)+car.up*cp};
 }
+inline Frame LevelAim(Vec forward){
+ forward=unit(forward);Vec right=unit(cross(forward,{0,0,1}));
+ // Deterministic pole basis: rotating the device around a vertical aim must
+ // not rotate the camera. Device up/right never enter this calculation.
+ if(dot(right,right)<.5f)right={1,0,0};
+ return {{},right,forward,unit(cross(right,forward))};
+}
 inline Frame CameraFrame(const Frame& nozzle,Frame desired,const CameraSettings& settings){
  desired.center=nozzle.Point({settings[0]*.01f,settings[1]*.01f,settings[2]*.01f});
  const auto rotate=[](Vec& a,Vec& b,float degrees){const float angle=degrees*Pi/180.f,c=std::cos(angle),s=std::sin(angle);const Vec old=a;a=old*c+b*s;b=b*c-old*s;};
