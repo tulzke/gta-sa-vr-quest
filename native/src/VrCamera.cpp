@@ -3699,8 +3699,15 @@ bool BuildPhotoView(int hand, CamBasis& view) {
         !g_stereoActive.load(std::memory_order_relaxed) || !g_vrBaseValid || !g_origin.valid)
         return false;
     RwMat matrix{};
-    return HandWeaponMatrix(hand, weaponoptic::PhotoCamera, matrix) &&
-           BuildPhotoLens(matrix, view);
+    if (!HandWeaponMatrix(hand, weaponoptic::PhotoCamera, matrix)) return false;
+    physicalweapon::TrackingPose pose{};
+    if (!WeaponMatrixToTracking(matrix, pose)) return false;
+    float pivot[3]{}, axis[3]{}, angle{};
+    if (physicalweapon::GetTwoHandTransformTracking(hand, pivot, axis, &angle, &pose)) {
+        ApplyTwoHandRotation(pose, pivot, axis, angle);
+        if (!TrackingWeaponMatrix(pose, matrix)) return false;
+    }
+    return BuildPhotoLens(matrix, view);
 }
 
 int OnPhotoCommands(void* script,int opcode) {

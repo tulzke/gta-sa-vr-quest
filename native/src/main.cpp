@@ -1341,6 +1341,11 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
                 }
             } else if (calibGroup==savr::weaponmenu::OPTIC && fieldRow==35) {
                 if(enter) savr::calib::ResetOptic(type);
+            } else if (calibGroup==savr::weaponmenu::OPTIC &&
+                       fieldRow==savr::weaponmenu::PhotoImageRotation) {
+                if (enter || firstTick)
+                    savr::calib::AdjustOptic(type, savr::weaponoptic::ImageQuarterTurnsField,
+                                            enter ? 1 : dir);
             } else if (calibGroup==savr::weaponmenu::OPTIC && (fieldRow==33 || fieldRow==34)) {
                 const int field=fieldRow-25;
                 const int current=savr::calib::SnapshotOptic(type).value[field];

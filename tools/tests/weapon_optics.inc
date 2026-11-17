@@ -39,6 +39,15 @@
     CHECK(photoBefore.surface.pos.y < photoAfter.surface.pos.y);
     CHECK(photoBefore.halfSize < photoAfter.halfSize);
     CHECK(std::memcmp(&photoBefore.camera,&photoAfter.camera,sizeof(CamBasis))==0);
+    CHECK(PhotoHeightMm(Defaults(PhotoCamera))==75);
+    RwMat cameraModel{{0,1,0},0,{1,0,0},0,{0,0,-1},0,{0,0,0},0};
+    calib::opticProfile=Defaults(PhotoCamera);
+    CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,photoAfter));
+    CHECK(photoAfter.surface.up.z>.999f&&photoAfter.camera.up.z>.999f);
+    CHECK(photoAfter.surface.right.x<-.999f&&photoAfter.camera.right.x<-.999f);
+    cameraModel.a[2]=1; // Opposite handed model uses the same upright basis.
+    CHECK(BuildWeaponOpticFrame(PhotoCamera,cameraModel,photoAfter));
+    CHECK(photoAfter.surface.up.z>.999f&&photoAfter.surface.right.x<-.999f);
     namespace opt=savr::weapon_optic_render;
     opt::Optic optic{};optic.type=34;optic.tanFov=.15f;
     optic.frame.camera={{-1,0,0},{0,-1,0},{0,0,1},{0,0,0}};
@@ -134,6 +143,13 @@
     CHECK(parsed.value[0]==-61&&parsed.value[1]==61&&parsed.value[2]==1&&parsed.value[3]==1);
     CHECK(ParseProfile("optic2 1 43 -60 0 0 0 0 0 100 150 1 0",parsedSet,parsedType,parsed));
     CHECK(parsedSet==1&&parsedType==43&&parsed.value[6]==100);
+    CHECK(PhotoHeightMm(parsed)==75&&!parsed.legacyPhotoMount&&parsed.imageQuarterTurns==0);
+    CHECK(ParseProfile("optic2 1 43 -60 0 0 900 0 0 120 150 1 0",parsedSet,parsedType,parsed));
+    CHECK(parsed.legacyPhotoMount&&parsed.value[3]==900&&PhotoHeightMm(parsed)==90);
+    CHECK(ParseProfile("optic2 1 43 -60 0 0 900 0 0 120 68 1 0 3 1",parsedSet,parsedType,parsed));
+    CHECK(parsed.legacyPhotoMount&&PhotoHeightMm(parsed)==68&&parsed.imageQuarterTurns==3);
+    CHECK(ParseProfile("optic2 0 43 -60 0 0 0 0 0 100 0 1 0 -1 0",parsedSet,parsedType,parsed));
+    CHECK(!parsed.legacyPhotoMount&&PhotoHeightMm(parsed)==75&&parsed.imageQuarterTurns==3);
     CHECK(!ParseProfile("optic2 2 34 0 0 0 0 0 0 60 150 1 0",parsedSet,parsedType,parsed));
     CHECK(!ParseProfile("optic2 0 35 0 0 0 0 0 0 60 150 1 0",parsedSet,parsedType,parsed));
     CHECK(!ParseProfile("optic2 0 34 0 0 0",parsedSet,parsedType,parsed));

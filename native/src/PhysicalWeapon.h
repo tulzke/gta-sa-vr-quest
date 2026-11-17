@@ -140,7 +140,8 @@ int SupportCalibrationPrimaryHand();
 // Pistols return an active identity transform to keep close wrists from steering aim.
 // Returns false unless a support grip is currently engaged.
 bool GetTwoHandTransformTracking(int primaryHand, float pivotOut[3],
-                                 float axisOut[3], float* angleRadiansOut);
+                                 float axisOut[3], float* angleRadiansOut,
+                                 const TrackingPose* modelOverride = nullptr);
 
 // One ballistic record is retained per source hand, matching reference Quest build. A hand may
 // catch either record. Returned pose includes velocity/gravity/spin at query time.

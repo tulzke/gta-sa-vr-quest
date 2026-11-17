@@ -14,6 +14,25 @@ constexpr double ReviewMs = 500.0;
 constexpr double ShrinkMs = 125.0;
 constexpr double SlideMs = 150.0;
 
+struct Point {
+    float x{}, y{};
+};
+
+// Rotation of the entire displayed picture and its controls within the mount.
+constexpr Point DisplayToMount(Point p, int clockwiseTurns) {
+    switch (clockwiseTurns) {
+        case 1: return {p.y, -p.x};
+        case 2: return {-p.x, -p.y};
+        case 3: return {-p.y, p.x};
+        default: return p;
+    }
+}
+
+constexpr Point ImageHalfExtents(float displayAspect) {
+    return {std::min(1.f, Aspect / displayAspect),
+            std::min(1.f, displayAspect / Aspect)};
+}
+
 struct Review {
     bool photo{};
     float shutter{}, scale{1.f}, offset{};

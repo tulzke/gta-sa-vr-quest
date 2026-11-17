@@ -8570,6 +8570,10 @@ void BuildCalibMenu() {
         } else if (group==weaponmenu::OPTIC && r == 35) {
             std::snprintf(row,sizeof(row),"RESET %s   < PRESS A >",
                           weaponmenu::Name(weaponmenu::OPTIC, type));
+        } else if (group==weaponmenu::OPTIC && r == weaponmenu::PhotoImageRotation) {
+            const auto profile = calib::SnapshotOptic(type);
+            std::snprintf(row, sizeof(row), "IMAGE ROTATION   < %d DEG >",
+                          profile.imageQuarterTurns * 90);
         } else if (group==weaponmenu::OPTIC && (r == 33 || r == 34)) {
             const int field=r-25;
             const auto profile=calib::SnapshotOptic(type);
@@ -8579,9 +8583,15 @@ void BuildCalibMenu() {
         } else if (group==weaponmenu::OPTIC && r >= 25) {
             const int field=r-25;
             const auto profile=calib::SnapshotOptic(type);
-            std::snprintf(row,sizeof(row),"%s%s   < %+.1f %s >",photoScreen ? "SCREEN " : "",
-                calib::OpticFieldLabel(field) + (photoScreen ? 6 : 0),profile.value[field]*.1f,
-                field>=3 && field<=5 ? "DEG" : "CM");
+            if (photoScreen && (field == 6 || field == 7)) {
+                const int size = field == 6 ? profile.value[6] : weaponoptic::PhotoHeightMm(profile);
+                std::snprintf(row, sizeof(row), "SCREEN %s   < %.1f CM >",
+                              field == 6 ? "WIDTH" : "HEIGHT", size * .1f);
+            } else {
+                std::snprintf(row,sizeof(row),"%s%s   < %+.1f %s >",photoScreen ? "SCREEN " : "",
+                    calib::OpticFieldLabel(field) + (photoScreen ? 6 : 0),profile.value[field]*.1f,
+                    field>=3 && field<=5 ? "DEG" : "CM");
+            }
         } else if (r == 24) {
             std::snprintf(row, sizeof(row), "TRACER SMOKE   < %d%% >",
                           vrcam::GetTracerSmokeSpreadPercent());

@@ -10,6 +10,7 @@ def fn(file,name):
 code=r"""
 #include "PairedWeapons.h"
 #include "PhotoScreen.h"
+#include "PhysicalWeapon.h"
 #include "WeaponOptic.h"
 #include <algorithm>
 #include <atomic>
@@ -43,6 +44,17 @@ int PhotoHand(){return hand;}
 namespace calib {
 weaponoptic::Profile SnapshotOptic(int){return weaponoptic::Defaults(43);}
 }
+namespace savr::physicalweapon {
+float supportAngle{};
+bool GetTwoHandTransformTracking(int, float* pivot, float* axis, float* angle,
+                                 const TrackingPose* model) {
+ CHECK(model && std::abs(model->position[1]-200.f)<1e-5f);
+ if (supportAngle==0.f) return false;
+ std::copy_n(model->position, 3, pivot);
+ axis[0]=0.f;axis[1]=0.f;axis[2]=1.f;*angle=supportAngle;
+ return true;
+}
+}
 namespace photo {
 std::atomic<bool> g_stereoActive{true};bool g_vrBaseValid=true;struct{bool valid=true;}g_origin;
 bool tracked=true;
@@ -51,6 +63,19 @@ bool HandWeaponMatrix(int hand,int type,RwMat& matrix) {
  if(!tracked || type!=43 || hand<0 || hand>1) return false;
  matrix={{std::sin(handYaw),std::cos(handYaw),0},{0,0,1},{1,0,0},{float(hand),200,30}};
  return true;
+}
+bool WeaponMatrixToTracking(const RwMat& matrix, physicalweapon::TrackingPose& pose) {
+ std::copy_n(matrix.t,3,pose.position);std::copy_n(matrix.r,3,pose.right);
+ std::copy_n(matrix.u,3,pose.forward);std::copy_n(matrix.a,3,pose.up);
+ return true;
+}
+bool TrackingWeaponMatrix(const physicalweapon::TrackingPose& pose, RwMat& matrix) {
+ std::copy_n(pose.position,3,matrix.t);std::copy_n(pose.right,3,matrix.r);
+ std::copy_n(pose.forward,3,matrix.u);std::copy_n(pose.up,3,matrix.a);
+ return true;
+}
+V3 RotateAroundAxis(V3 v,V3 axis,float angle) {
+ return v*std::cos(angle)+Cross(axis,v)*std::sin(angle)+axis*(Dot(axis,v)*(1.f-std::cos(angle)));
 }
 constexpr float kVrFovX=105;
 alignas(16) unsigned char camera[0x1200]{},placeable[0x40]{},scene[0x100]{};
@@ -81,7 +106,7 @@ screen_start=camera_source.index('class ScopedScreenDimensions')
 screen_end=camera_source.index('\n};',screen_start)+3
 code=code.replace('int PhotoHand(){return hand;}', 'int PhotoHand(){return hand;}\n'
     + fn('ScopeAim.cpp','PhotoFovX').replace('gCameraZoom.load(std::memory_order_relaxed)', 'scopeaim::zoom'))
-code+=camera_source[screen_start:screen_end]+fn('WeaponOpticFrame.inl','BuildPhotoLens')+fn('VrCamera.cpp','BuildPhotoView')+fn('VrCamera.cpp','OnPhotoCommands')+fn('VrCamera.cpp','FirePhotograph')+r"""
+code+=camera_source[screen_start:screen_end]+fn('VrCamera.cpp','ApplyTwoHandRotation')+fn('WeaponOpticFrame.inl','BuildPhotoLens')+fn('VrCamera.cpp','BuildPhotoView')+fn('VrCamera.cpp','OnPhotoCommands')+fn('VrCamera.cpp','FirePhotograph')+r"""
 bool NativeFire(void*,void*,V3* origin,V3*,void*,V3*,V3*){
  ++fireCalls;unsigned a=camera[0x5f];CHECK(Read<std::uint16_t>(camera,a*0x228+0x186)==46);
  float f=Read<float>(camera,a*0x228+0x204);CHECK(f<20&&std::abs(f-drawFov)<1e-5f);
@@ -112,6 +137,12 @@ void Test(){
    CHECK(!BuildPhotoView(1-hand,view));
   }
   CHECK(OnPhotoCommands(&dummy,0x800)==17&&observedFov==70);
+  handYaw=0;fireResult=true;
+  physicalweapon::supportAngle=.45f;
+  CHECK(FirePhotograph(&dummy,&dummy,scopeaim::hand));
+  CHECK(std::abs(photo_render::queued.forward.x+std::sin(.45f))<1e-5f);
+  CHECK(std::abs(photo_render::queued.forward.y-std::cos(.45f))<1e-5f);
+  physicalweapon::supportAngle=0;
   scopeaim::hand=-1;OnPhotoCommands(&dummy,0x801);CHECK(observedFov==70);scopeaim::hand=1;
  }
  int n=fireCalls;tracked=false;CHECK(!FirePhotograph(&dummy,&dummy,1));tracked=true;camera[0x5f]=3;CHECK(!FirePhotograph(&dummy,&dummy,1));CHECK(fireCalls==n);
@@ -123,7 +154,17 @@ void Test(){
  CHECK(Sample(850,0,200,true).scale<1.f&&Sample(850,0,200,true).offset==0.f);
  CHECK(Sample(1000,0,200,true).offset>0.f&&!Sample(1100,0,200,true).photo);
  CHECK(!Sample(250,0,200,false).photo&&Sample(250,0,200,false).shutter==.5f);
- std::puts("PASS: both lens poses, native FOV and 20-degree gate, coherent 4:3 shot, engine restoration and shutter review timing");
+ for(int turns=0;turns<4;++turns) {
+  const auto motion=photoscreen::DisplayToMount({Sample(1000,0,200,true).offset,0},turns);
+  const auto restored=photoscreen::DisplayToMount(motion,(4-turns)%4);
+  CHECK(restored.x>0.f&&restored.y==0.f);
+ }
+ constexpr float wide=2.f, tall=.75f;
+ const auto wideFit=photoscreen::ImageHalfExtents(wide);
+ const auto tallFit=photoscreen::ImageHalfExtents(tall);
+ CHECK(std::abs(wideFit.x/wideFit.y*wide-photoscreen::Aspect)<1e-5f);
+ CHECK(std::abs(tallFit.x/tallFit.y*tall-photoscreen::Aspect)<1e-5f);
+ std::puts("PASS: lens and two-hand steering, mission FOV, 4:3 framing, shutter timing and display orientation");
 }
 }
 namespace charges {

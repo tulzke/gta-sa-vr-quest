@@ -478,7 +478,10 @@ void Save() {
     for (int set=0; set<2; ++set) for (int type=0; type<kMaxWeapons; ++type) {
         if (!weaponoptic::Calibratable(type) || !g_opticConfigured[set][type]) continue;
         std::fprintf(f, "optic2 %d %d", set, type);
-        for (int value : g_optics[set][type].value) std::fprintf(f, " %d", value);
+        const auto& profile = g_optics[set][type];
+        for (int value : profile.value) std::fprintf(f, " %d", value);
+        if (type == weaponoptic::PhotoCamera)
+            std::fprintf(f, " %d %d", profile.imageQuarterTurns, profile.legacyPhotoMount ? 1 : 0);
         std::fputc('\n', f);
     }
     for (int t = 0; t < kMaxWeapons; ++t) {
@@ -747,14 +750,22 @@ weaponoptic::Profile SnapshotOptic(int type) {
         ? g_optics[set][type] : weaponoptic::Defaults(type);
 }
 void AdjustOptic(int type, int field, int steps) {
-    if (!weaponoptic::Calibratable(type) || field<0 || field>=weaponoptic::FieldCount) return;
+    const bool photo = type == weaponoptic::PhotoCamera;
+    if (!weaponoptic::Calibratable(type) || field < 0 ||
+        field >= weaponoptic::FieldCount + (photo ? 1 : 0)) return;
     {
         std::lock_guard<std::mutex> guard(g_calibMutex);
         const int set=g_modelSet.load(std::memory_order_relaxed);
         if (!g_opticConfigured[set][type]) g_optics[set][type]=weaponoptic::Defaults(type);
         g_opticConfigured[set][type]=true;
-        int& value=g_optics[set][type].value[field];
-        value=weaponoptic::ClampField(field,value+steps);
+        auto& profile = g_optics[set][type];
+        if (field == weaponoptic::ImageQuarterTurnsField) {
+            profile.imageQuarterTurns = weaponoptic::WrapQuarterTurns(profile.imageQuarterTurns + steps);
+        } else if (photo && field == 7) {
+            profile.value[7] = weaponoptic::ClampPhotoHeightMm(weaponoptic::PhotoHeightMm(profile) + steps);
+        } else {
+            profile.value[field] = weaponoptic::ClampField(field, profile.value[field] + steps);
+        }
     }
     Save();
 }

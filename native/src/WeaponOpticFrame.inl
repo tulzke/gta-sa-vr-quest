@@ -7,7 +7,8 @@ struct WeaponOpticFrame {
 bool BuildPhotoLens(const RwMat& weapon, CamBasis& camera) {
     const V3 forward = Normalized(V3{weapon.r[0], weapon.r[1], weapon.r[2]});
     const V3 top{weapon.u[0], weapon.u[1], weapon.u[2]};
-    const V3 up = Normalized(top - forward * Dot(top, forward));
+    // The camera model's second axis is along the body, not the top of the photo.
+    const V3 up = Normalized(Cross(top, forward));
     const V3 left = Normalized(Cross(up, forward));
     const V3 pivot{weapon.t[0], weapon.t[1], weapon.t[2]};
     if (!Finite(pivot) || Dot(forward, forward) < .9f || Dot(left, left) < .9f)
@@ -29,7 +30,9 @@ bool BuildWeaponOpticFrame(int type, const RwMat& weapon, WeaponOpticFrame& out)
     Mat34 local{barrel,top,side,position};
     local=MatMul34(local,SetRotate34(v[3]*rad,v[4]*rad,v[5]*rad));
     const V3 forward=Normalized(local.right);
-    const V3 up=Normalized(local.fwd-forward*Dot(local.fwd,forward));
+    V3 up=Normalized(local.fwd-forward*Dot(local.fwd,forward));
+    if (type == weaponoptic::PhotoCamera && !profile.legacyPhotoMount)
+        up = Normalized(Cross(up, forward));
     const V3 left=Normalized(Cross(up,forward));
     if(!Finite(position)||!Finite(forward)||Dot(forward,forward)<.9f||Dot(left,left)<.9f) return false;
     out.halfSize=v[6]*.0005f;

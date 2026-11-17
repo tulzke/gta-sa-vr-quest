@@ -5,6 +5,8 @@ using weapon_optic_render::Optic;
 
 Optic preview;
 Optic capture;
+float screenHalfHeight{};
+int imageQuarterTurns{};
 double pressedAt{-1};
 double readyAt{-1};
 bool pending{};
@@ -36,6 +38,8 @@ void Prepare(const RwMat& model) {
         !BuildWeaponOpticFrame(weaponoptic::PhotoCamera, model, preview.frame))
         return;
     const auto profile = calib::SnapshotOptic(weaponoptic::PhotoCamera);
+    screenHalfHeight = weaponoptic::PhotoHeightMm(profile) * .0005f;
+    imageQuarterTurns = profile.imageQuarterTurns;
     preview.visible = true;
     preview.width = photoscreen::PreviewWidth;
     preview.height = photoscreen::PreviewHeight;
@@ -96,10 +100,13 @@ void Draw() {
 
     const auto& surface = preview.frame.surface;
     const float halfWidth = preview.frame.halfSize;
-    const float halfHeight = halfWidth / photoscreen::Aspect;
+    const float displayAspect = imageQuarterTurns % 2 ? screenHalfHeight / halfWidth :
+                                                       halfWidth / screenHalfHeight;
+    const auto imageSize = photoscreen::ImageHalfExtents(displayAspect);
     const auto vertex = [&](float x, float y, float depth, std::uint32_t color, float u, float v) {
+        const auto p = photoscreen::DisplayToMount({x, y}, imageQuarterTurns);
         return SkyBackdropVertex{
-            surface.pos - surface.right * (x * halfWidth) + surface.up * (y * halfHeight)
+            surface.pos - surface.right * (p.x * halfWidth) + surface.up * (p.y * screenHalfHeight)
                 + surface.forward * depth,
             {}, color, u, v
         };
@@ -121,24 +128,28 @@ void Draw() {
         draw(verts, nullptr);
     };
     const auto image = [&](const Optic& optic, float scale, float offset, float depth) {
-        const float left = std::max(-1.f, offset - scale);
-        const float right = std::min(1.f, offset + scale);
+        const float width = scale * imageSize.x;
+        const float height = scale * imageSize.y;
+        const float left = std::max(-1.f, offset - width);
+        const float right = std::min(1.f, offset + width);
         if (left >= right) return;
         const float sign = optic.flipHorizontal ? -1.f : 1.f;
-        const float u0 = .5f + sign * (left - offset) / (2.f * scale);
-        const float u1 = .5f + sign * (right - offset) / (2.f * scale);
+        const float u0 = .5f + sign * (left - offset) / (2.f * width);
+        const float u1 = .5f + sign * (right - offset) / (2.f * width);
         const float top = optic.flipVertical ? 1.f : 0.f;
         const std::uint32_t color = optic.imageReady ? 0xffffffffu : 0xff101010u;
         SkyBackdropVertex verts[]{
-            vertex(left, -scale, depth, color, u0, 1.f - top),
-            vertex(right, -scale, depth, color, u1, 1.f - top),
-            vertex(right, scale, depth, color, u1, top),
-            vertex(left, scale, depth, color, u0, top)
+            vertex(left, -height, depth, color, u0, 1.f - top),
+            vertex(right, -height, depth, color, u1, 1.f - top),
+            vertex(right, height, depth, color, u1, top),
+            vertex(left, height, depth, color, u0, top)
         };
         draw(verts, optic.imageReady ? optic.raster : nullptr);
     };
 
     const auto review = photoscreen::Sample(NowMs(), pressedAt, readyAt, rendered);
+    if (imageSize.x < .999f || imageSize.y < .999f)
+        rectangle(-1.f, -1.f, 1.f, 1.f, .0005f, 0xff101010u);
     if (!review.photo || review.scale < 1.f) image(preview, 1.f, 0.f, 0.f);
     if (review.photo) image(capture, review.scale, review.offset, -.0007f);
 
@@ -168,7 +179,7 @@ void Draw() {
         constexpr char Message[] = "SAVE FAILED";
         constexpr int Pixels = (sizeof(Message) - 1) * 5 * 7;
         constexpr float PixelWidth = .022f;
-        constexpr float PixelHeight = PixelWidth * photoscreen::Aspect;
+        const float pixelHeight = std::min(.028f, PixelWidth * displayAspect);
         constexpr float TextWidth = ((sizeof(Message) - 1) * 6 - 1) * PixelWidth;
         rectangle(-TextWidth * .5f - .08f, -.93f, TextWidth * .5f + .08f, -.61f,
                   -.0021f, 0xff24248cu);
@@ -181,11 +192,11 @@ void Draw() {
             for (int row = 0; row < 7; ++row) for (int column = 0; column < 5; ++column) {
                 if (!(glyph[row] & (1u << (4 - column)))) continue;
                 const float x = -TextWidth * .5f + (letter * 6 + column) * PixelWidth;
-                const float y = -.67f - row * PixelHeight;
+                const float y = -.67f - row * pixelHeight;
                 constexpr auto Ink = 0xffffffffu;
                 constexpr float Depth = -.0028f;
-                text[count] = vertex(x, y - PixelHeight, Depth, Ink, 0, 0);
-                text[count + 1] = vertex(x + PixelWidth, y - PixelHeight, Depth, Ink, 0, 0);
+                text[count] = vertex(x, y - pixelHeight, Depth, Ink, 0, 0);
+                text[count + 1] = vertex(x + PixelWidth, y - pixelHeight, Depth, Ink, 0, 0);
                 text[count + 2] = vertex(x + PixelWidth, y, Depth, Ink, 0, 0);
                 text[count + 3] = vertex(x, y, Depth, Ink, 0, 0);
                 for (int corner : {0, 1, 2, 0, 2, 3})

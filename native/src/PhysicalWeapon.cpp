@@ -663,8 +663,8 @@ bool BuildSupportAnchorLocked(int primaryHand, TrackingPose* out,
     if (!modelOverride && gPrimaryDetached[primaryHand])
         return MapSupportOnlyPoseLocked(primaryHand,gDetachedAnchor[primaryHand],out);
     const int slot = gHeldSlot[primaryHand];
-    if (!ValidSlot(slot) || !gHeldBaseValid[primaryHand] ||
-        gHeldBaseSlot[primaryHand] != slot)
+    if (!ValidSlot(slot) || (!modelOverride && (!gHeldBaseValid[primaryHand] ||
+        gHeldBaseSlot[primaryHand] != slot)))
         return false;
 
     void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
@@ -770,7 +770,7 @@ bool BuildSupportAnchorLocked(int primaryHand, TrackingPose* out,
 }
 
 bool BuildTwoHandTransformLocked(int primaryHand, V3& pivot, V3& axis,
-                                 float& angle) {
+                                 float& angle, const TrackingPose* modelOverride = nullptr) {
     if (!ValidHand(primaryHand) || (!gPrimaryDetached[primaryHand] && !gHands[primaryHand].valid)) return false;
     const int support = gSupportHand[primaryHand];
     if (!ValidHand(support) || !gHands[support].valid) return false;
@@ -786,8 +786,7 @@ bool BuildTwoHandTransformLocked(int primaryHand, V3& pivot, V3& axis,
     const int weaponType = WeaponTypeInSlot(ped, gHeldSlot[primaryHand]);
     // Tec-9 keeps its pistol hand animation but aims from the fore-end support
     // exactly like an AK. Its saved support socket is the solver's reference.
-    if (weaponType == 43 ||
-        (weaponType != 32 && handanimation::PistolStyleSupport(weaponType))) {
+    if (weaponType != 32 && handanimation::PistolStyleSupport(weaponType)) {
         pivot = GripPosition(gHands[primaryHand]);
         axis = {0.0f, 1.0f, 0.0f};
         angle = 0.0f;
@@ -795,14 +794,14 @@ bool BuildTwoHandTransformLocked(int primaryHand, V3& pivot, V3& axis,
     }
 
     TrackingPose anchor{};
-    if (!BuildSupportAnchorLocked(primaryHand, &anchor)) return false;
+    if (!BuildSupportAnchorLocked(primaryHand, &anchor, modelOverride)) return false;
     pivot = GripPosition(gHands[primaryHand]);
     V3 expected = Sub(PositionOf(anchor), pivot);
     V3 actual = Sub(GripPosition(gHands[support]), pivot);
     if (weaponType==25 && arcadereload::Manual(weaponType)) {
         // Axial pump travel belongs to the sliding wrist, not to the aim solver.
         // Keep the same forward rail position even when the loaded gun is locked.
-        const auto& base=gHeldBasePose[primaryHand];
+        const auto& base = modelOverride ? *modelOverride : gHeldBasePose[primaryHand];
         const V3 barrel=Normalized({base.right[0],base.right[1],base.right[2]});
         actual=Sub(actual,Scale(barrel,Dot(Sub(actual,expected),barrel)));
     }
@@ -1903,13 +1902,14 @@ int SupportCalibrationPrimaryHand() {
 }
 
 bool GetTwoHandTransformTracking(int primaryHand, float pivotOut[3],
-                                 float axisOut[3], float* angleRadiansOut) {
+                                 float axisOut[3], float* angleRadiansOut,
+                                 const TrackingPose* modelOverride) {
     if (pivotOut == nullptr || axisOut == nullptr || angleRadiansOut == nullptr)
         return false;
     std::lock_guard<std::mutex> lock(gMutex);
     V3 pivot{}, axis{};
     float angle = 0.0f;
-    if (!BuildTwoHandTransformLocked(primaryHand, pivot, axis, angle))
+    if (!BuildTwoHandTransformLocked(primaryHand, pivot, axis, angle, modelOverride))
         return false;
 
     pivotOut[0] = pivot.x;

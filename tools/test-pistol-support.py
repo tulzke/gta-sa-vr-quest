@@ -111,7 +111,16 @@ int main(){
   CHECK(anchor.position[0]>.06f&&anchor.position[1]<-.03f);
   CHECK(calib::current.supStyle==calib::SUPPORT_FROM_BELOW);
   V3 pivot,axis;float angle=-1;
+  std::copy_n(anchor.position,3,gHands[1-primary].gripPos);
   CHECK(BuildTwoHandTransformLocked(primary,pivot,axis,angle)&&Near(angle,0));
+  gHands[1-primary].gripPos[2]+=.05f;
+  CHECK(BuildTwoHandTransformLocked(primary,pivot,axis,angle)&&angle>.1f);
+  const V3 snapped=Add(pivot,RotateAroundAxis(Sub(PositionOf(anchor),pivot),axis,angle));
+  CHECK(Dot(Normalized(Sub(snapped,pivot)),
+            Normalized(Sub(GripPosition(gHands[1-primary]),pivot)))>.999f);
+  TrackingPose currentModel=gHeldBasePose[primary];
+  currentModel.position[2]+=.05f;
+  CHECK(BuildTwoHandTransformLocked(primary,pivot,axis,angle,&currentModel)&&Near(angle,0));
  }
  calib::WeaponCalib edited;edited.supOffX=17;calib::ApplyEffectiveSupportDefaults(edited,true,22);
  CHECK(edited.supOffX==17&&edited.supOffY==0&&edited.supRotX==0);
