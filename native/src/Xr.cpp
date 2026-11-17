@@ -5147,15 +5147,15 @@ void TriggerHaptic(int hand, float amplitude, float frequencyHz, float durationM
     std::lock_guard<std::mutex> lock(g_hapticMutex);
     g_hapticHands[hand].game={haptics::Source::Game,std::clamp(amplitude,0.f,1.f),
         std::max(0.f,frequencyHz),HapticNow()+.10,
-        false,0,++g_hapticSerial,0,std::clamp(durationMs,1.f,5000.f)*.001};
+        ++g_hapticSerial,0,std::clamp(durationMs,1.f,5000.f)*.001};
 }
-void PublishWheelHaptic(int hand, float amplitude, bool pcm, int wave, float frequency) {
+void PublishWheelHaptic(int hand, float amplitude) {
     if (hand<0 || hand>1) return;
     const auto epoch=CaptureTrackingSnapshot().epoch;
     std::lock_guard<std::mutex> lock(g_hapticMutex);
     g_hapticHands[hand].wheel={haptics::Source::Wheel,
-        std::isfinite(amplitude)?std::clamp(amplitude,0.f,.45f):0.f,frequency,
-        HapticNow()+.10,pcm,std::clamp(wave,0,2),++g_hapticSerial,epoch};
+        std::isfinite(amplitude)?std::clamp(amplitude,0.f,.45f):0.f,0,
+        HapticNow()+.10,++g_hapticSerial,epoch};
 }
 void PublishPickupHaptic(int hand,float amplitude,std::uint64_t epoch) {
     if(hand<0||hand>1)return;
@@ -5164,36 +5164,8 @@ void PublishPickupHaptic(int hand,float amplitude,std::uint64_t epoch) {
         g_hapticHands[hand].pickup={};return;
     }
     g_hapticHands[hand].pickup={haptics::Source::Pickup,std::clamp(amplitude,0.f,.35f),
-        0,HapticNow()+.10,false,0,++g_hapticSerial,epoch};
+        0,HapticNow()+.10,++g_hapticSerial,epoch};
 }
-int PcmHapticStatus(int hand) { return hand>=0&&hand<2?g_pcmStatus[hand].load():0; }
-void UpdatePcmHapticTest(bool held, int hand, float strength, int wave, float frequency) {
-    const auto epoch=CaptureTrackingSnapshot().epoch;
-    std::lock_guard<std::mutex> lock(g_hapticMutex);
-    const double now=HapticNow();
-    if (!IsSessionFocused()) {
-        for(auto& h:g_hapticHands)h.test={};
-        g_hapticTestHeld=true; return;
-    }
-    if (!held || hand<0 || hand>1) {
-        for(auto& h:g_hapticHands)h.test={};
-        g_hapticTestHeld=false; return;
-    }
-    if (!g_hapticTestHeld) {
-        if (!g_hapticRandom) g_hapticRandom=static_cast<unsigned>(MonotonicNowNs())|1u;
-        g_hapticRandom^=g_hapticRandom<<13;g_hapticRandom^=g_hapticRandom>>17;g_hapticRandom^=g_hapticRandom<<5;
-        const int chosen=wave==3?static_cast<int>(g_hapticRandom%3):std::clamp(wave,0,2);
-        for(auto& h:g_hapticHands)h.test={};
-        g_hapticHands[hand].test={haptics::Source::Test,std::clamp(strength,0.f,1.f)*.3f,
-            frequency,now+.35,true,chosen,++g_hapticSerial,epoch};
-        // Explicit user-triggered diagnostic: retain trial keys in player builds too.
-        __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,
-            "[haptics.test] trial=%llu hand=%d wave=%d hz=%.0f strength=%.2f PCM=%d",
-            static_cast<unsigned long long>(g_hapticSerial),hand,chosen,frequency,strength,PcmHapticStatus(hand));
-    }
-    g_hapticTestHeld=true;
-}
-
 void PublishHudText(const std::int16_t* brief, int briefCapacity,
                     const std::int16_t* bigMessages, int bigStyleCount,
                     int bigStyleCapacity,
@@ -6666,8 +6638,6 @@ bool Initialize(JavaVM* vm, jobject activity) {
     // big core, which is what actually lifts the frame rate (matches the VC build).
     g_hasPerfExt = hasExt(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
     if (g_hasPerfExt) extensions.push_back(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
-    g_hasPcmExt=hasExt(XR_FB_HAPTIC_PCM_EXTENSION_NAME);
-    if (g_hasPcmExt) extensions.push_back(XR_FB_HAPTIC_PCM_EXTENSION_NAME);
     g_hasThreadExt = hasExt(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME);
     if (g_hasThreadExt) extensions.push_back(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME);
     g_hasDisplayRefreshExt = hasExt(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
@@ -6708,8 +6678,6 @@ bool Initialize(JavaVM* vm, jobject activity) {
     if (!Check(xrCreateInstance(&create, &s.instance), "xrCreateInstance")) {
         return false;
     }
-    if (g_hasPcmExt && XR_FAILED(xrGetInstanceProcAddr(s.instance,"xrGetDeviceSampleRateFB",
-            reinterpret_cast<PFN_xrVoidFunction*>(&g_getPcmRate)))) g_getPcmRate=nullptr;
     if (g_hasVisibilityMaskExt) {
         const XrResult maskProcResult = xrGetInstanceProcAddr(
             s.instance, "xrGetVisibilityMaskKHR",
@@ -8022,31 +7990,6 @@ void BuildDrivingMenu() {
                     "KEEP RIDER ON FLIPS   < %s >",
                     driving::KeepRiderOnFlipsEnabled()?"ON":"OFF");
                 break;
-            case driving::MENU_WHEEL_HINT:
-                std::snprintf(rows[row],sizeof(rows[row]),"WHEEL HAND HINT < %s >",driving::GetWheelHapticSetting(0)?"ON":"OFF"); break;
-            case driving::MENU_WHEEL_HINT_ZONE:
-                std::snprintf(rows[row],sizeof(rows[row]),"WHEEL FREE MOVEMENT < %d CM >",driving::GetWheelHapticSetting(1)); break;
-            case driving::MENU_WHEEL_HINT_STRENGTH:
-                std::snprintf(rows[row],sizeof(rows[row]),"WHEEL HAPTIC STRENGTH < %d%% >",driving::GetWheelHapticSetting(2)); break;
-            case driving::MENU_WHEEL_HINT_PCM:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM EXPERIMENT < %s > L:%s R:%s",driving::GetWheelHapticSetting(3)?"ON":"OFF",
-                    PcmHapticStatus(0)==1?"PCM":"FALLBACK",PcmHapticStatus(1)==1?"PCM":"FALLBACK"); break;
-            case driving::MENU_WHEEL_HINT_WAVE: {
-                const char* names[]{"ASYMMETRIC +","ASYMMETRIC -","SYMMETRIC","BLIND TEST"};
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM WAVE < %s >",names[driving::GetWheelHapticSetting(4)]); break; }
-            case driving::MENU_WHEEL_HINT_FREQUENCY:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM FIXED / TEST < %d HZ >",driving::GetWheelHapticFrequency()); break;
-            case driving::MENU_WHEEL_HINT_FREQUENCY_MODE:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM FREQUENCY < %s >",driving::GetWheelHapticSetting(7)?"DISTANCE":"FIXED"); break;
-            case driving::MENU_WHEEL_HINT_FREQUENCY_LOW:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM NEAR RIM < %d HZ >",driving::GetWheelHapticSetting(8)); break;
-            case driving::MENU_WHEEL_HINT_FREQUENCY_HIGH:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM FAR FROM RIM < %d HZ >",driving::GetWheelHapticSetting(9)); break;
-            case driving::MENU_WHEEL_HINT_TEST_HAND:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM TEST HAND < %s >",driving::GetWheelHapticSetting(6)?"RIGHT":"LEFT"); break;
-            case driving::MENU_WHEEL_HINT_TEST:
-                std::snprintf(rows[row],sizeof(rows[row]),"PCM TEST: %s",!driving::GetWheelHapticSetting(3)?"ENABLE PCM FLAG":
-                    PcmHapticStatus(driving::GetWheelHapticSetting(6))==1?"HOLD A (0.35 SEC)":"UNAVAILABLE"); break;
             case driving::MENU_WHEEL_VISIBLE:
                 std::snprintf(rows[row],sizeof(rows[row]),
                     "VIRTUAL STEERING WHEEL   < %s >",

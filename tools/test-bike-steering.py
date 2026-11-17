@@ -239,7 +239,7 @@ def lifecycle():
 #include <cstdlib>
 namespace savr::driving {
 ''' + SOURCE[SOURCE.index('struct V3 {'):SOURCE.index('double MonotonicSeconds()')] + function('float WrapAngle(') + function('float UnwrapAngle(') + function('struct RimSteering {') + r''';
-namespace xr {struct HandPose{};void GetHandPoses(HandPose*){} void PublishWheelHaptic(int,float,bool,float,int){}}
+namespace xr {struct HandPose{};void GetHandPoses(HandPose*){} void PublishWheelHaptic(int,float){}}
 std::atomic<bool> g_hornPressed{false};
 vehiclehorn::State g_hornState;double g_hornLastTime{};
 wheelhaptics::State g_wheelHapticState[2];double g_wheelHapticTime{};

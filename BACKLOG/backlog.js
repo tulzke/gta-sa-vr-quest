@@ -478,7 +478,7 @@ const BACKLOG_DATA = {
     },
     {
       "id": 100,
-      "title": "Виброобратная связь при рулении: холодно/горячо и эксперимент с PCM",
+      "title": "Виброобратная связь при рулении",
       "file": "100-vibrootklik-pri-rulenii.md",
       "categories": [
         "vehicle-controls"

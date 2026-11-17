@@ -1,8 +1,7 @@
 #include "../vendor/openxr/include/openxr/openxr.h"
 #include "HapticPolicy.h"
 #include "TrackingFrame.h"
-#include <array>
-#include <atomic>
+#include <cmath>
 #include <mutex>
 #include <cstdio>
 #include <cstdlib>
@@ -13,31 +12,18 @@
 #define SAVR_TAG "test"
 #define __android_log_print(...) ((void)0)
 #define CHECK(c) do {if(!(c)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);std::exit(1);}}while(false)
-float rates[2]{2000,0};
-int applyCount[2]{},stopCount[2]{},pcmCount[2]{};
-float amplitudes[2]{};
-float firstPcmSample[2]{};
-bool pcmError{},partial{};
+int applyCount[2]{},stopCount[2]{};
+float amplitudes[2]{},frequencies[2]{};
+XrDuration durations[2]{};
 XRAPI_ATTR XrResult XRAPI_CALL xrApplyHapticFeedback(XrSession,const XrHapticActionInfo* info,const XrHapticBaseHeader* effect){
     const int hand=static_cast<int>(info->subactionPath)-1;++applyCount[hand];
-    if(effect->type==XR_TYPE_HAPTIC_PCM_VIBRATION_FB){
-        ++pcmCount[hand];const auto& p=*reinterpret_cast<const XrHapticPcmVibrationFB*>(effect);
-        CHECK(p.append==XR_FALSE&&p.bufferSize>0&&p.bufferSize<=XR_MAX_HAPTIC_PCM_BUFFER_SIZE_FB);
-        firstPcmSample[hand]=p.buffer[0];
-        *p.samplesConsumed=partial?p.bufferSize/2:p.bufferSize;
-        return pcmError?XR_ERROR_RUNTIME_FAILURE:XR_SUCCESS;
-    }
-    amplitudes[hand]=reinterpret_cast<const XrHapticVibration*>(effect)->amplitude;
+    CHECK(effect->type==XR_TYPE_HAPTIC_VIBRATION);
+    const auto& vibration=*reinterpret_cast<const XrHapticVibration*>(effect);
+    amplitudes[hand]=vibration.amplitude;frequencies[hand]=vibration.frequency;durations[hand]=vibration.duration;
     return XR_SUCCESS;
 }
 XRAPI_ATTR XrResult XRAPI_CALL xrStopHapticFeedback(XrSession,const XrHapticActionInfo* info){
     ++stopCount[static_cast<int>(info->subactionPath)-1];return XR_SUCCESS;
-}
-XRAPI_ATTR XrResult XRAPI_CALL xrGetCurrentInteractionProfile(XrSession,XrPath path,XrInteractionProfileState* result){
-    result->interactionProfile=path+10;return XR_SUCCESS;
-}
-XrResult XRAPI_CALL FakeRate(XrSession,const XrHapticActionInfo* info,XrDevicePcmSampleRateGetInfoFB* result){
-    result->sampleRate=rates[static_cast<int>(info->subactionPath)-1];return XR_SUCCESS;
 }
 namespace savr::xr {
 struct Session {
@@ -59,66 +45,39 @@ bool IsSessionFocused(){return s.sessionState==XR_SESSION_STATE_FOCUSED;}
 int main(){
     using namespace savr::xr;using namespace savr::haptics;
     tracking.valid=true;for(auto& hand:tracking.hands)hand.positionTracked=true;
-    g_hapticHands[0].wheel={Source::Wheel,.2f,40,1.1,true};
-    FlushHaptics();CHECK(pcmCount[0]==0&&amplitudes[0]==.2f); // no extension
-    g_hasPcmExt=true;g_getPcmRate=FakeRate;g_pcmProbeAt=0;
-    clockTime+=.03;FlushHaptics();CHECK(pcmCount[0]==1&&g_pcmStatus[0]==1&&g_pcmStatus[1]==0);
-    g_hapticHands[1].wheel={Source::Wheel,.25f,40,2,true};
-    FlushHaptics();CHECK(amplitudes[1]==.25f&&pcmCount[1]==0); // per-hand fallback
-    g_hapticHands[0].game={Source::Game,.8f,0,1.3,false,0,99};
-    FlushHaptics();CHECK(amplitudes[0]==.8f);
-    const auto stops=stopCount[0];g_hapticHands[0].wheel={};FlushHaptics();CHECK(stopCount[0]==stops);
+    PublishWheelHaptic(0,.2f);PublishWheelHaptic(1,.25f);
+    CHECK(applyCount[0]==0&&applyCount[1]==0); // producers never call OpenXR
+    FlushHaptics();CHECK(amplitudes[0]==.2f&&amplitudes[1]==.25f);
+    CHECK(frequencies[0]==XR_FREQUENCY_UNSPECIFIED&&durations[0]==50000000);
+    TriggerHaptic(0,.8f,120,100);FlushHaptics();CHECK(amplitudes[0]==.8f&&frequencies[0]==120);
+    const auto stops=stopCount[0];PublishWheelHaptic(0,0);FlushHaptics();CHECK(stopCount[0]==stops);
     tracking.hands[1].positionTracked=false;FlushHaptics();CHECK(stopCount[1]>0);
-    clockTime=1.4;FlushHaptics();CHECK(stopCount[0]>stops); // finished game, no stale wheel
+    clockTime=1.4;FlushHaptics();CHECK(stopCount[0]>stops);
     tracking.hands[1].positionTracked=true;
-    menu=true;g_hapticHands[0].test={Source::Test,.2f,40,1.75,true,1,101};
-    FlushHaptics();CHECK(pcmCount[0]==2);
-    g_hapticHands[0].test={};FlushHaptics();CHECK(g_hapticApplied[0].source==Source::None);
-    g_hapticHands[1].test={Source::Test,.2f,40,1.75,true,1,102};
-    const auto rightCalls=applyCount[1];FlushHaptics();CHECK(applyCount[1]==rightCalls); // test never lies with fallback
-    menu=false;clockTime=2;
-    g_hapticHands[0].wheel={Source::Wheel,.2f,40,2.1,true};
-    partial=true;FlushHaptics();CHECK(g_pcmStatus[0]==2&&amplitudes[0]==.2f);
-    const auto failedCalls=pcmCount[0];clockTime+=.03;FlushHaptics();CHECK(pcmCount[0]==failedCalls);
-    partial=false;rates[0]=0;g_pcmProbeAt=0;FlushHaptics();CHECK(g_pcmStatus[0]==0);
-    rates[0]=2000;g_pcmProbeAt=0;clockTime+=.03;FlushHaptics();CHECK(g_pcmStatus[0]==1&&pcmCount[0]>failedCalls);
-    pcmError=true;clockTime+=.03;FlushHaptics();CHECK(g_pcmStatus[0]==2);
-    ResetHapticOutput();CHECK(g_hapticHands[0].wheel.source==Source::None&&g_hapticTestHeld);
+    PublishWheelHaptic(0,1);FlushHaptics();CHECK(amplitudes[0]==.45f);
+    s.sessionState=XR_SESSION_STATE_VISIBLE;ResetHapticOutput();
     CHECK(g_hapticApplied[0].source==Source::None&&g_hapticApplied[1].source==Source::None);
+    s.sessionState=XR_SESSION_STATE_FOCUSED;
     // A 15 ms pulse survives the publication-to-XR frame delay, at full length.
-    clockTime=3;g_hapticHands[0].game={Source::Game,.6f,0,3.1,false,0,200,0,.015};
+    clockTime=3;g_hapticHands[0].game={Source::Game,.6f,0,3.1,200,0,.015};
     clockTime=3.025;FlushHaptics();CHECK(amplitudes[0]==.6f);
+    CHECK(durations[0]>=14999999&&durations[0]<=15000001);
     CHECK(g_hapticHands[0].game.until>3.039&&g_hapticHands[0].game.pendingDuration==0);
     clockTime=3.05;FlushHaptics();CHECK(g_hapticApplied[0].source==Source::None);
-    tracking.epoch=2;g_hapticHands[0].wheel={Source::Wheel,.2f,40,4,false,0,201,1};
+    tracking.epoch=2;g_hapticHands[0].wheel={Source::Wheel,.2f,40,4,201,1};
     const auto calls=applyCount[0];FlushHaptics();CHECK(applyCount[0]==calls);
-    g_hapticHands[0].wheel={Source::Wheel,.2f,40,4,false,0,202,2};FlushHaptics();CHECK(applyCount[0]>calls);
+    g_hapticHands[0].wheel={Source::Wheel,.2f,40,4,202,2};FlushHaptics();CHECK(applyCount[0]>calls);
     menu=true;FlushHaptics();menu=false;FlushHaptics();CHECK(g_hapticApplied[0].source==Source::None);
     clockTime=4;
     TriggerHaptic(0,.7f,0,15);CHECK(g_hapticHands[0].game.pendingDuration==.015);
-    PublishWheelHaptic(1,.2f,false,0,40);CHECK(g_hapticHands[1].wheel.epoch==tracking.epoch);
+    PublishWheelHaptic(1,.2f);CHECK(g_hapticHands[1].wheel.epoch==tracking.epoch);
     clockTime+=.03;FlushHaptics();CHECK(amplitudes[0]==.7f&&amplitudes[1]==.2f);
     TriggerHaptic(0,0,0,1);FlushHaptics();CHECK(g_hapticApplied[0].source==Source::None);
-    UpdatePcmHapticTest(false,0,.5f,3,40);
-    UpdatePcmHapticTest(true,0,.5f,3,40);const auto trial=g_hapticHands[0].test.serial;
-    CHECK(g_hapticHands[0].test.wave>=0&&g_hapticHands[0].test.wave<3);
-    UpdatePcmHapticTest(true,0,.5f,3,40);CHECK(g_hapticHands[0].test.serial==trial);
-    s.sessionState=XR_SESSION_STATE_VISIBLE;ResetHapticOutput();
-    UpdatePcmHapticTest(true,0,.5f,3,40);CHECK(g_hapticTestHeld);
-    UpdatePcmHapticTest(false,0,.5f,3,40);CHECK(g_hapticTestHeld); // inactive input is not a release
-    s.sessionState=XR_SESSION_STATE_FOCUSED;
-    UpdatePcmHapticTest(true,0,.5f,3,40);CHECK(g_hapticHands[0].test.source==Source::None);
-    UpdatePcmHapticTest(false,0,.5f,3,40);UpdatePcmHapticTest(true,0,.5f,3,40);
-    CHECK(g_hapticHands[0].test.source==Source::Test);
-    menu=true;tracking.hands[0].positionTracked=false;FlushHaptics();
-    CHECK(g_hapticHands[0].test.source==Source::None);
-    tracking.hands[0].positionTracked=true;UpdatePcmHapticTest(true,0,.5f,3,40);
-    CHECK(g_hapticHands[0].test.source==Source::None); // no queued test after tracking returns
-    UpdatePcmHapticTest(false,0,.5f,3,40);CHECK(g_hapticHands[0].test.source==Source::None);
     // Pickup is a separate continuous source, bounded and refreshed at 40 Hz.
     ResetHapticOutput();menu=false;clockTime=5;tracking.epoch=3;tracking.valid=true;
     tracking.hands[0].positionTracked=tracking.hands[1].positionTracked=true;
-    PublishPickupHaptic(0,.1f,3);FlushHaptics();
+    PublishWheelHaptic(0,.3f);PublishPickupHaptic(0,.1f,3);FlushHaptics();
+    PublishWheelHaptic(0,0);
     CHECK(g_hapticApplied[0].source==Source::Pickup&&amplitudes[0]==.1f&&g_hapticApplied[1].source==Source::None);
     clockTime+=.03;PublishPickupHaptic(0,.25f,3);FlushHaptics();CHECK(amplitudes[0]==.25f);
     auto pickupCalls=applyCount[0];clockTime+=.01;PublishPickupHaptic(0,1.f,3);FlushHaptics();
@@ -139,17 +98,5 @@ int main(){
     menu=true;FlushHaptics();menu=false;FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None);
     PublishPickupHaptic(1,.2f,3);s.sessionState=XR_SESSION_STATE_VISIBLE;PublishPickupHaptic(1,.2f,3);
     CHECK(g_hapticHands[1].pickup.source==Source::None);
-    // Changing frequency preserves the previous waveform's phase on each hand.
-    s.sessionState=XR_SESSION_STATE_FOCUSED;ResetHapticOutput();
-    menu=false;pcmError=false;partial=false;clockTime=7;rates[0]=rates[1]=2000;
-    tracking.valid=true;tracking.hands[0].positionTracked=tracking.hands[1].positionTracked=true;
-    PublishWheelHaptic(0,.3f,true,0,40);PublishWheelHaptic(1,.3f,true,0,75);FlushHaptics();
-    CHECK(firstPcmSample[0]==0&&firstPcmSample[1]==0);
-    clockTime+=.031;PublishWheelHaptic(0,.3f,true,0,120);PublishWheelHaptic(1,.3f,true,0,75);FlushHaptics();
-    CHECK(std::abs(firstPcmSample[0]-.3f*Sample(.031*40,0))<.0001f);
-    CHECK(std::abs(firstPcmSample[1]-.3f*Sample(.031*75,0))<.0001f);
-    clockTime+=.03;PublishWheelHaptic(0,.3f,true,0,200);FlushHaptics();
-    CHECK(std::abs(firstPcmSample[0]-.3f*Sample(.031*40+.03*120,0))<.0001f);
-    PublishWheelHaptic(0,0,true,0,200);FlushHaptics();CHECK(!g_hapticPhase[0].active);
-    std::puts("production XR adapter: capabilities, stop, priorities, pickup ramps and continuous PCM phase: PASS");
+    std::puts("production XR adapter: ordinary vibration, stop, priorities and pickup ramps: PASS");
 }

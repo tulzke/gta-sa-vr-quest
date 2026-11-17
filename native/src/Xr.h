@@ -62,11 +62,9 @@ void GetRawInput(InputState& out);
 void TriggerHaptic(int hand, float amplitude, float frequencyHz,
                    float durationMs);
 
-void PublishWheelHaptic(int hand, float amplitude, bool pcm, int wave, float frequency);
+void PublishWheelHaptic(int hand, float amplitude);
 // Continuous pickup progress; zero clears only this source, never game pulses.
 void PublishPickupHaptic(int hand, float amplitude, std::uint64_t epoch);
-int PcmHapticStatus(int hand); // 0 unavailable, 1 ready, 2 failed; per controller
-void UpdatePcmHapticTest(bool held, int hand, float strength, int wave, float frequency);
 
 // Publish the already-formatted stock text buffers after CMessages::Display.
 // The compositor renders these strings with the APK's own font files onto
