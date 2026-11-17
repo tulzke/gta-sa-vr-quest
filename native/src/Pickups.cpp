@@ -251,16 +251,24 @@ extern "C" __attribute__((visibility("hidden"))) bool SavrPickupContactAllowed(v
 void Install(void* handle){
     if(!handle||g_origUpdate)return;
     void* target=dlsym(handle,"_ZN7CPickup6UpdateEP10CPlayerPedP8CVehiclei");
-    g_timeMs=static_cast<const std::uint32_t*>(dlsym(handle,"_ZN6CTimer21m_snTimeInMillisecondsE"));
+    g_timeMs=static_cast<const std::uint32_t*>(dlsym(handle,"_ZN6CTimer22m_snTimeInMillisecondsE"));
     g_collectBuffer=static_cast<std::int32_t*>(dlsym(handle,"CollectPickupBuffer"));
     g_weaponForModel=reinterpret_cast<int(*)(int)>(dlsym(handle,"_ZN8CPickups14WeaponForModelEi"));
     g_updateRwMatrix=reinterpret_cast<void(*)(void*)>(dlsym(handle,"_ZN7CEntity14UpdateRwMatrixEv"));
     g_updateRwFrame=reinterpret_cast<void(*)(void*)>(dlsym(handle,"_ZN7CEntity13UpdateRwFrameEv"));
     g_pool=static_cast<std::uint8_t*>(dlsym(handle,"_ZN8CPickups8aPickUpsE"));
-    if(!target||!g_pool||!g_weaponForModel||!g_updateRwMatrix||!g_updateRwFrame||!g_collectBuffer||!g_timeMs||!InstallContactGate(target)||!InstallUpdateHook(target)){
-        LOGE("[pickups] required retail ABI unavailable; manual weapon pickup disabled");return;
+    if(!target||!g_pool||!g_weaponForModel||!g_updateRwMatrix||!g_updateRwFrame||!g_collectBuffer||!g_timeMs){
+        LOGE("[pickups] missing imports: update=%d pool=%d weapon=%d rwMatrix=%d rwFrame=%d collect=%d timer=%d",
+            !target,!g_pool,!g_weaponForModel,!g_updateRwMatrix,!g_updateRwFrame,!g_collectBuffer,!g_timeMs);
+        return;
     }
-    LOGI("[pickups] deliberate weapon pickup installed (1 second hold)");
+    if(!InstallContactGate(target)||!InstallUpdateHook(target)){
+        LOGE("[pickups] verified hook installation failed; manual weapon pickup disabled");return;
+    }
+    // One startup message remains visible in player builds so a disabled
+    // installer can be distinguished from a failed gameplay gesture.
+    __android_log_print(ANDROID_LOG_INFO,SAVR_TAG,
+        "[pickups] ready: rise/contact hooks installed, 1 second hold");
 }
 
 void ProbeGrabs(const xr::HandPose hands[2]){

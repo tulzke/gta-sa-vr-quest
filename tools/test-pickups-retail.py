@@ -2,6 +2,7 @@
 from pathlib import Path
 import struct
 import sys
+import re
 
 data = Path(sys.argv[1]).read_bytes()
 assert data[:5] == b'\x7fELF\x02'
@@ -39,6 +40,16 @@ for section in sections:
         name, _, _, _, value, size = struct.unpack_from('<IBBHQQ', data, at)
         start = strings[4]+name
         symbols[data[start:data.index(b'\0', start)].decode()] = (value, size)
+
+# Exercise the real import names from the installer, not hand-written copies.
+# Runtime fixtures replace Install(), so they cannot catch a typo that disables
+# the entire module before any rise, candidate or icon code can execute.
+runtime = (Path(__file__).resolve().parents[1]/'native/src/Pickups.cpp').read_text(encoding='utf8')
+installer = runtime[runtime.index('void Install(void* handle)'):runtime.index('void ProbeGrabs(')]
+imports = re.findall(r'\bdlsym\s*\(\s*handle\s*,\s*"([^"]+)"\s*\)', installer)
+assert imports, 'No production pickup imports found'
+missing = [name for name in imports if name not in symbols]
+assert not missing, f'Pickup installer imports missing from retail ELF: {missing}'
 for name, expected in {
     '_ZN7CPickup6UpdateEP10CPlayerPedP8CVehiclei': (0x403674, 0x1638),
     '_ZN8CPickups8aPickUpsE': (0x983b00, 620*0x24),
@@ -46,6 +57,7 @@ for name, expected in {
     '_ZN4CPed17GiveDelayedWeaponE11eWeaponTypej': (0x58db2c, 0x90),
     '_ZN7CEntity14UpdateRwMatrixEv': (0x417950, 0x30),
     '_ZN7CEntity13UpdateRwFrameEv': (0x48bfe0, 0x14),
+    '_ZN6CTimer22m_snTimeInMillisecondsE': (0xa1a33c, 4),
 }.items():
     assert symbols[name] == expected, name
-print('Retail pickup contact gate, pool identity and delayed grant ABI: passed')
+print('Retail pickup installer imports, contact gate, pool identity and delayed grant ABI: passed')
