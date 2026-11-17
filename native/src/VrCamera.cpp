@@ -10,6 +10,7 @@
 #include "Tbone.h"
 #include "BeachDance.h"
 #include "MissionScenes.h"
+#include "ResprayTransition.h"
 #include "JustBusiness.h"
 #include "VrCamera.h"
 #include "VrFire.h"
@@ -3262,6 +3263,101 @@ void DrawWeaponClump(void* clump, RwMat& mtx) {
 using CopyFn = void (*)(void* self, bool);
 CopyFn g_origCopy = nullptr;
 
+using GarageUpdateFn = void (*)(void*, int);
+GarageUpdateFn g_origGarageUpdate{};
+constexpr std::size_t kGarageTypeOffset = 0x50;
+constexpr std::size_t kGarageStateOffset = 0x51;
+const std::uint8_t* g_resprayGarage{};
+void* g_resprayVehicle{};
+std::uint64_t g_respraySerial{};
+std::uint64_t g_resprayCameraCue{};
+std::atomic<std::uint64_t> g_resprayPresentation{};
+std::atomic<bool> g_resprayControlsBlocked{};
+
+std::uint16_t PlayerControlLocks(const void* pad) {
+    return pad ? *reinterpret_cast<const std::uint16_t*>(
+        static_cast<const char*>(pad) + 0x110) : 0;
+}
+
+std::uint16_t PlayerControlLocks() {
+    return PlayerControlLocks(g.CPad_GetPad ? g.CPad_GetPad(0) : nullptr);
+}
+
+void PublishRespray(respray::Phase phase) {
+    g_resprayPresentation.store(phase == respray::Phase::Idle ? 0 :
+        respray::Cue(++g_respraySerial, phase), std::memory_order_release);
+}
+
+void EndRespray(bool interrupted) {
+    g_resprayGarage = nullptr;
+    g_resprayVehicle = nullptr;
+    g_resprayControlsBlocked.store(false, std::memory_order_release);
+    if (interrupted) PublishRespray(respray::Phase::Idle);
+}
+
+void RefreshRespray() {
+    if (!g_resprayGarage) return;
+    const void* ped = g.FindPlayerPed(-1);
+    const bool cutscene = g.CCutsceneMgr_ms_running && *g.CCutsceneMgr_ms_running;
+    const bool scriptedCamera = g.TheCamera &&
+        static_cast<const std::uint8_t*>(g.TheCamera)[0x43] != 0;
+    if (!ped || playerlife::Dead(ped) || cutscene || scriptedCamera ||
+        missionscenes::Theater() || g.FindPlayerVehicle(-1, false) != g_resprayVehicle ||
+        g_resprayGarage[kGarageTypeOffset] != respray::kGarageType) {
+        EndRespray(true);
+        return;
+    }
+
+    const bool locked = (PlayerControlLocks() & respray::kControlLock) != 0;
+    const auto state = g_resprayGarage[kGarageStateOffset];
+    const auto phase = respray::GetPhase(ResprayPresentation());
+    if (phase == respray::Phase::Painting &&
+        (!locked || (state != respray::kClosing && state != respray::kClosed))) {
+        EndRespray(true);
+        return;
+    }
+    if (phase != respray::Phase::Painting &&
+        (state == respray::kOpen || (phase == respray::Phase::Idle && !locked))) {
+        // The player drove clear, or both the fade and the native lock ended.
+        EndRespray(false);
+        return;
+    }
+    g_resprayControlsBlocked.store(locked, std::memory_order_release);
+}
+
+void OnGarageUpdate(void* self, int index) {
+    const auto* garage = static_cast<const std::uint8_t*>(self);
+    if (garage[kGarageTypeOffset] != respray::kGarageType) {
+        g_origGarageUpdate(self, index);
+        return;
+    }
+    const auto before = garage[kGarageStateOffset];
+    const auto controlsBefore = before == respray::kOpen ? PlayerControlLocks() : 0;
+    g_origGarageUpdate(self, index);
+    const auto after = garage[kGarageStateOffset];
+
+    if (before == respray::kOpen && after == respray::kClosing &&
+        respray::Accepted(before, after, controlsBefore, PlayerControlLocks())) {
+        if (void* vehicle = g.FindPlayerVehicle(-1, false)) {
+            g_resprayGarage = garage;
+            g_resprayVehicle = vehicle;
+            g_resprayControlsBlocked.store(true, std::memory_order_release);
+            PublishRespray(respray::Phase::Painting);
+            LOGI("[respray] vehicle accepted garage=%d", index);
+        }
+    }
+    if (garage == g_resprayGarage) {
+        // The native update repaints while transitioning from closed to
+        // opening. HasResprayHappened clears a mission-visible event bit.
+        if (before == respray::kClosed && after == respray::kOpening &&
+            respray::GetPhase(ResprayPresentation()) == respray::Phase::Painting) {
+            PublishRespray(respray::Phase::Reveal);
+            LOGI("[respray] service complete garage=%d", index);
+        }
+        RefreshRespray();
+    }
+}
+
 // The 2.11 flow-screen frontend is OPEN when int32 gMobileMenu+0x24 != 0 or
 // the current FlowScreen pointer at +0x30 is set — the same two gates the
 // engine's own OS_ApplicationTick/Event handlers test (disasm-verified).
@@ -3307,8 +3403,9 @@ bool ShouldRunStereo() {
     // CPad accessor gates on — disasm-verified across GetJump/CarGun/etc.)
     if (g.CPad_GetPad != nullptr) {
         if (const void* pad = g.CPad_GetPad(0)) {
-            if (*reinterpret_cast<const std::uint16_t*>(
-                    static_cast<const char*>(pad) + 0x110) != 0) {
+            auto locks = PlayerControlLocks(pad);
+            if (ResprayControlsBlocked()) locks &= ~respray::kControlLock;
+            if (locks != 0) {
                 // GAMEPLAY cutscene vs shop UI: mid-mission scripted cameras
                 // also disable controls, but they raise the widescreen
                 // borders (CCamera+0x43 - SetWideScreenOn stores the 0x100
@@ -3658,6 +3755,10 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
 
     bool stereo = false;
     if (!inHook) {
+        if (self == g.TheCamera) {
+            RefreshRespray();
+            g_resprayCameraCue = 0;
+        }
         stereo = ShouldRunStereo();
         PublishTheaterPresentation(stereo);
         g_stereoActive.store(stereo, std::memory_order_relaxed);
@@ -3861,15 +3962,40 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                     {
                         static void* chaseVehicle = nullptr;
                         static V3 chasePos{};
+                        static V3 chaseVehiclePos{};
                         static float chaseFxS = 0.0f, chaseFyS = 1.0f;
                         static bool chaseValid = false;
+                        static bool resprayRecovery = false;
                         if (chaseVehicle != vehicle) {
                             chaseVehicle = vehicle;
                             chaseValid = false;
+                            resprayRecovery = false;
                         }
-                        if (chaseValid) {
+                        const bool painting = vehicle == g_resprayVehicle &&
+                            respray::GetPhase(ResprayPresentation()) == respray::Phase::Painting;
+                        if (chaseValid && painting) {
+                            // The native garage can move the chase camera
+                            // outside. Follow the car from the last VR anchor.
+                            anchorPosition = chasePos + (vehiclePosition - chaseVehiclePos);
+                            anchorFx = chaseFxS;
+                            anchorFy = chaseFyS;
+                            resprayRecovery = true;
+                        } else if (chaseValid) {
                             const V3 jump = anchorPosition - chasePos;
-                            if (Dot(jump, jump) > 1.5f * 1.5f) {
+                            const float distanceSquared = Dot(jump, jump);
+                            if (resprayRecovery) {
+                                const float oldYaw = std::atan2(chaseFyS, chaseFxS);
+                                const float newYaw = std::atan2(anchorFy, anchorFx);
+                                const float turn = std::remainder(newYaw - oldYaw, 6.2831853f);
+                                if (distanceSquared > 0.01f || std::abs(turn) > 0.035f) {
+                                    anchorPosition = chasePos + jump * 0.18f;
+                                    const float yaw = oldYaw + turn * 0.18f;
+                                    anchorFx = std::cos(yaw);
+                                    anchorFy = std::sin(yaw);
+                                } else {
+                                    resprayRecovery = false;
+                                }
+                            } else if (distanceSquared > 1.5f * 1.5f) {
                                 // Obstruction cut: converge instead of snap.
                                 anchorPosition = chasePos + jump * 0.18f;
                                 anchorFx = chaseFxS + (anchorFx - chaseFxS) *
@@ -3879,9 +4005,10 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
                             }
                         }
                         chasePos = anchorPosition;
+                        chaseVehiclePos = vehiclePosition;
                         chaseFxS = anchorFx;
                         chaseFyS = anchorFy;
-                        chaseValid = true;
+                        chaseValid = Finite(anchorPosition);
                     }
                     anchorReady = Finite(anchorPosition);
                     anchorSource = "chase-cam";
@@ -4502,6 +4629,9 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
             if (Finite(vr.right) && Finite(vr.forward) && Finite(vr.up) &&
                 Finite(vr.pos)) {
                 WriteCam(cam, vr);
+                const auto resprayCue = ResprayPresentation();
+                if (respray::GetPhase(resprayCue) == respray::Phase::Reveal)
+                    g_resprayCameraCue = resprayCue;
                 // Scope zoom narrows only the GAME render frustum. The projection
                 // layer remains at the normal 105-degree headset frustum below,
                 // stretching the narrow pixels over the full view for a real
@@ -5063,7 +5193,8 @@ void OnUpdatePads() {
 
     const bool bothGrips = in.grip[0] >= 0.75f && in.grip[1] >= 0.75f;
     const bool openChord = bothGrips && (in.menu || in.y);   // B is weapon fire now
-    const bool inputBlocked = g_inputBlocked.load(std::memory_order_relaxed);
+    const bool inputBlocked = g_inputBlocked.load(std::memory_order_relaxed) ||
+        ResprayControlsBlocked();
     const bool stereo = ShouldRunStereo();
     // Publish from gameplay input, independently of the optional flat HUD pass.
     const int torenoSignal=stereo?missionhud::TorenoSignal(
@@ -22368,7 +22499,7 @@ void OnRenderScene(bool underwater) {
                              std::isfinite(pdaHeading) ? pdaHeading : 0.0f,
                              outdoorMap,
                              renderedNear, renderedFar,
-                             g_recordCounter, g_eyeRasterW, g_eyeRasterH);
+                             g_recordCounter, g_eyeRasterW, g_eyeRasterH, g_resprayCameraCue);
     xr::NotifyGameFrame();                                    // for the on-screen FPS readout
     traffic_census::Viewpoint trafficView{};
     const TrafficInterestBasis trafficInterest =
@@ -30176,6 +30307,18 @@ std::uint64_t TheaterPresentation() {
     return g_theaterPresentation.load(std::memory_order_acquire);
 }
 
+std::uint64_t ResprayPresentation() {
+    return g_resprayPresentation.load(std::memory_order_acquire);
+}
+
+void FinishResprayReveal(std::uint64_t cue) {
+    g_resprayPresentation.compare_exchange_strong(cue, 0, std::memory_order_acq_rel);
+}
+
+bool ResprayControlsBlocked() {
+    return g_resprayControlsBlocked.load(std::memory_order_acquire);
+}
+
 // The camera-copy hook that normally refreshes g_stereoActive stops running
 // the moment the pause menu takes over the frame, so the stale "stereo" value
 // kept the compositor on the frozen eye ring. The per-frame input pump on the
@@ -30185,6 +30328,7 @@ bool RecruitGestureActive() {
 }
 
 void RefreshStereoGate() {
+    RefreshRespray();
     const bool stereo = ShouldRunStereo();
     PublishTheaterPresentation(stereo);
     g_stereoActive.store(stereo, std::memory_order_relaxed);
@@ -30770,6 +30914,20 @@ bool Install() {
         return false;
     }
     LOGI("[vr] head-tracked camera hook installed on CopyCameraMatrixToRWCam");
+    // The garage type/state offsets and lifecycle were verified on this entry
+    // in the Android 2.11.311 game library.
+    const auto garageEntry = reinterpret_cast<std::uintptr_t>(g.CGarage_Update);
+    constexpr std::uint32_t garagePrologue[]{
+        0xd10383ffu, 0x6d0633edu, 0x6d072bebu, 0x6d0823e9u};
+    if (g.LoadBase && garageEntry == g.LoadBase + 0x3f2490u &&
+        g.CPad_GetPad && g.FindPlayerPed && g.FindPlayerVehicle &&
+        std::memcmp(reinterpret_cast<const void*>(garageEntry),
+                    garagePrologue, sizeof(garagePrologue)) == 0) {
+        g_origGarageUpdate = reinterpret_cast<GarageUpdateFn>(
+            InstallTrampoline(reinterpret_cast<void*>(garageEntry),
+                              reinterpret_cast<void*>(&OnGarageUpdate)));
+    }
+    LOGI("[respray] Android garage hook installed=%d", g_origGarageUpdate != nullptr);
     if (g.LoadBase) {
         auto* control = reinterpret_cast<void*>(g.LoadBase + 0x5b69acu);
         constexpr std::uint32_t expected[]{0xd10243ffu,0x6d0223e9u,0xa9037bfdu,0xa9046ffcu};

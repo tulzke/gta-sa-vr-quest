@@ -76,6 +76,7 @@ struct GameSymbols {
     void  (*CCamera_CalculateDerivedValues)(void* self, bool a, bool b);
     void  (*CCamera_CopyCameraMatrixToRWCam)(void* self, bool alsoPlayerCam);
     int   (*CCamera_GetScreenFadeStatus)(void* self);
+    void  (*CGarage_Update)(void* self, int index);
     void  (*CVisibilityPlugins_SetRenderWareCamera)(void* rwCamera);
     void  (*RwCameraBeginUpdate)(void* rwCamera);
     void  (*RwCameraEndUpdate)(void* rwCamera);

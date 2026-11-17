@@ -2811,7 +2811,7 @@ void BikePreRenderCommon(void* bike, BikePreRenderFn origPreRender) {
 
 bool VrGameplayInputAllowed() {
     if (!vrcam::IsStereoActive()||g_inputBlocked.load(std::memory_order_acquire)||
-        vrfire::IsScriptedWeaponCamera()) return false;
+        vrcam::ResprayControlsBlocked()||vrfire::IsScriptedWeaponCamera()) return false;
     if (GetRemoteControlledVehicle()||IsCraneControlActive()) {
         xr::InputState input{}; xr::GetInput(input);
         if (input.grip[0]>=0.75f&&input.grip[1]>=0.75f) return false;

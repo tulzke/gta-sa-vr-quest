@@ -1,9 +1,40 @@
 #include "TheaterScreen.h"
 #include "FrontendPointer.h"
+#include "ResprayTransition.h"
 #include <cassert>
 #include <limits>
 #include <cstdio>
 bool Near(float a,float b) { return std::abs(a-b)<0.0001f; }
+
+void CheckResprayTransition() {
+    using namespace savr::respray;
+    assert(Accepted(kOpen, kClosing, 0, kControlLock));
+    assert(!Accepted(kOpen, kOpen, 0, 0));
+    assert(!Accepted(kOpen, kOpenAfterService, 0, 0));
+    assert(!Accepted(kOpen, kClosing, 0, 0));
+    assert(!Accepted(kOpen, kClosing, kControlLock, kControlLock));
+
+    Fade fade;
+    const auto painting = Cue(1, Phase::Painting);
+    const auto reveal = Cue(2, Phase::Reveal);
+    assert(Near(fade.Update(painting, 100, true, false), 0.0f));
+    assert(Near(fade.Update(painting, 200, true, false), 0.5f));
+    assert(Near(fade.Update(painting, 300, true, false), 1.0f));
+    assert(Near(fade.Update(reveal, 2400, true, false), 1.0f));
+    assert(Near(fade.Update(reveal, 2500, true, true), 1.0f));
+    assert(Near(fade.Update(reveal, 2950, true, false), 0.5f));
+    assert(Near(fade.Update(reveal, 3000, false, false), 1.0f));
+    assert(Near(fade.Update(reveal, 3250, true, false), 1.0f));
+    assert(Near(fade.Update(reveal, 3300, true, true), 1.0f));
+    assert(Near(fade.Update(reveal, 4200, true, false), 0.0f));
+    assert(Near(fade.Update(reveal, 4300, false, false), 0.0f));
+
+    const auto repeat = Cue(3, Phase::Painting);
+    assert(Near(fade.Update(repeat, 5300, true, false), 0.0f));
+    assert(Near(fade.Update(repeat, 5400, true, false), 0.5f));
+    assert(Near(fade.Update(0, 5420, true, false), 0.0f));
+}
+
 int main() {
     savr::theater::Screen s;
     // A translated player looking right and down: height remains eye height,
@@ -40,5 +71,7 @@ int main() {
     assert(touch.Update(false,true,true,.5f,.5f,640,448).action==A::None);
     touch.Update(false,false,true,.5f,.5f,640,448);
     assert(touch.Update(false,true,true,.5f,.5f,640,448).action==A::Down);
+    CheckResprayTransition();
     std::puts("PASS: level placement, fixed pose, flat transitions, recovery, aspect/edge hits and touch cancellation");
+    std::puts("PASS: respray acceptance, fade timing, fresh stereo, interruption and repeat");
 }

@@ -110,6 +110,7 @@ bool ResolveGameSymbols(void* handle) {
         {"_ZN7CCamera22CalculateDerivedValuesEbb",                               reinterpret_cast<void**>(&g.CCamera_CalculateDerivedValues),        true },
         {"_ZN7CCamera23CopyCameraMatrixToRWCamEb",                               reinterpret_cast<void**>(&g.CCamera_CopyCameraMatrixToRWCam),       true },
         {"_ZN7CCamera19GetScreenFadeStatusEv",                                   reinterpret_cast<void**>(&g.CCamera_GetScreenFadeStatus),           false},
+        {"_ZN7CGarage6UpdateEi",                                                reinterpret_cast<void**>(&g.CGarage_Update),                       false},
         {"_ZN18CVisibilityPlugins19SetRenderWareCameraEP8RwCamera",             reinterpret_cast<void**>(&g.CVisibilityPlugins_SetRenderWareCamera), true },
         {"_Z19RwCameraBeginUpdateP8RwCamera",                                    reinterpret_cast<void**>(&g.RwCameraBeginUpdate),                   true },
         {"_Z17RwCameraEndUpdateP8RwCamera",                                      reinterpret_cast<void**>(&g.RwCameraEndUpdate),                     true },

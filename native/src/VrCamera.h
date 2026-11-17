@@ -30,6 +30,10 @@ void EndGameFrameTelemetry();
 bool IsStereoActive();
 // One atomic snapshot: bit 0 is stereo, upper bits identify the flat opening.
 std::uint64_t TheaterPresentation();
+// Pay 'n' Spray display cue shared with the XR compositor.
+std::uint64_t ResprayPresentation();
+void FinishResprayReveal(std::uint64_t cue);
+bool ResprayControlsBlocked();
 
 // Refresh the stereo/theater gate each input frame, including native pause menus.
 void RefreshStereoGate();

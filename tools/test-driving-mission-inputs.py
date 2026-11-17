@@ -82,7 +82,11 @@ struct Symbols {
     void* (*FindPlayerVehicle)(int,bool)=FindVehicle;
     int (*CVehicle_GetVehicleAppearance)(const void*)=Appearance;
 } g;
-namespace vrcam { bool IsStereoActive() { return allowed; } }
+namespace vrcam {
+    bool resprayBlocked = false;
+    bool IsStereoActive() { return allowed; }
+    bool ResprayControlsBlocked() { return resprayBlocked; }
+}
 namespace vrfire { bool scripted=false; bool IsScriptedWeaponCamera() { return scripted; } }
 void* g_hydraulicControlVehicle=nullptr;
 std::atomic<bool> g_inputBlocked{false};
@@ -255,6 +259,11 @@ int main() {
     g_inputBlocked=true;
     Check(!VrGameplayInputAllowed(),"blocked input does not drive");
     g_inputBlocked=false;
+    vrcam::resprayBlocked=true;
+    Check(!VrGameplayInputAllowed() && OnGetSteeringUpDown(pad)==71,
+          "respray preserves retail input lock with stereo active");
+    vrcam::resprayBlocked=false;
+    Check(VrGameplayInputAllowed(),"VR driving resumes on respray unlock");
     std::memset(players,0,sizeof(players)); seated=vehicle;
     appearance=4; immersive=true; xr::input={};
     Check(OnGetAccelerate(pad)==0&&OnGetBrake(pad)==0,"boat has no thrust at released triggers");

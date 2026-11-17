@@ -52,6 +52,7 @@
 #include "ScopeAim.h"
 #include "TrafficCensus.h"
 #include "VrCamera.h"
+#include "ResprayTransition.h"
 
 #define XR_USE_PLATFORM_ANDROID
 #define XR_USE_GRAPHICS_API_OPENGL_ES
@@ -316,6 +317,7 @@ std::atomic<int>          g_stereoEyeH[kStereoSets] = {};
 std::atomic<int>          g_stereoSeq{-1};   // newest published pair index (-1 = none)
 std::atomic<int>          g_stereoGeneration[kStereoSets] = {};
 std::atomic<std::uint64_t> g_stereoPublishedNs[kStereoSets] = {};
+std::uint64_t g_stereoResprayCameraCue[kStereoSets]{};  // protected by the slot lease
 // One atomic state is the complete producer/consumer exclusion protocol for a
 // ring slot: -1 = the GameThread owns it for recording, 0 = idle, >0 = XR
 // readers. Keeping writer and reader ownership in one modification order avoids
@@ -4759,6 +4761,7 @@ void BlitGameFrame() {
 enum class TheaterFrameSource {
     GameSurface,
     Black,
+    ResprayFade,
 };
 
 // Logical source dimensions (see SetTheaterCrop). The flat game SurfaceTexture
@@ -4770,7 +4773,8 @@ std::atomic<int> g_theaterCropH{0};
 // The theater swapchain accepts a trusted flat frame or neutral black; stereo eyes require projection validation.
 bool RenderTheaterQuad(XrSpace space, XrCompositionLayerQuad& quad,
                        bool fillView = false,
-                       TheaterFrameSource source = TheaterFrameSource::GameSurface) {
+                       TheaterFrameSource source = TheaterFrameSource::GameSurface,
+                       float opacity = 1.0f) {
     if ((!fillView && !s.theaterScreen.valid) ||
         s.theater.handle == XR_NULL_HANDLE || s.theater.poisoned) {
         return false;
@@ -4813,8 +4817,8 @@ bool RenderTheaterQuad(XrSpace space, XrCompositionLayerQuad& quad,
     if (source == TheaterFrameSource::GameSurface && s.gameTexture != 0) {
         BlitGameFrame();
     } else {
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        const GLfloat black[]{0.0f, 0.0f, 0.0f, opacity};
+        glClearBufferfv(GL_COLOR, 0, black);
     }
 
     // Late GL colours use the same legacy/display-referred byte space as the
@@ -4901,7 +4905,8 @@ bool RenderTheaterQuad(XrSpace space, XrCompositionLayerQuad& quad,
         : static_cast<float>(s.theater.width)/static_cast<float>(s.theater.height);
 
     quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-    quad.layerFlags   = 0;
+    quad.layerFlags   = source == TheaterFrameSource::ResprayFade
+        ? XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT : 0;
     quad.space        = space;
     quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
     quad.subImage.swapchain        = s.theater.handle;
@@ -4911,6 +4916,10 @@ bool RenderTheaterQuad(XrSpace space, XrCompositionLayerQuad& quad,
     quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
     quad.pose.position    = {0.0f, 0.0f, -kDistanceMeters};
     quad.size             = {kWidthMeters, kWidthMeters / aspect};
+    if (source == TheaterFrameSource::ResprayFade) {
+        // Cover the entire view in both eyes, independent of the phone crop.
+        quad.size = {8.0f, 8.0f};
+    }
     if (!fillView) {
         if (!s.theaterScreen.valid) return false;
         const auto& screen=s.theaterScreen;
@@ -6283,7 +6292,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           float pdaHeading,
                           bool mapVisible,
                           const float* nearZ, const float* farZ,
-                          int seq, int width, int height) {
+                          int seq, int width, int height, std::uint64_t resprayCameraCue) {
     // `tex` points at a [kStereoSets][2] row-major table of GL texture ids. The
     // ids are stable once the RenderQueue thread has created the rasters, so the
     // per-frame cost here is trivial; only `seq` actually advances. Publish the
@@ -6428,6 +6437,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     }
     // Publish only after texture, depth and pose for this ring slot are complete.
     const std::uint64_t publishedNs = MonotonicNowNs();
+    g_stereoResprayCameraCue[ws] = resprayCameraCue;
     g_stereoPublishedNs[ws].store(publishedNs, std::memory_order_relaxed);
     g_stereoGeneration[ws].store(seq, std::memory_order_release);
     // Release ownership before advertising this generation as newest. A reader
@@ -12631,6 +12641,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
                                int& submittedSequence,
                                bool& generationRace,
                                double& submittedSequenceAgeMs,
+                               std::uint64_t& resprayCameraCue,
                                perf::StereoProjectionOutcome& outcome,
                                unsigned int& eyeReleaseFailureMask,
                                FxaaFrameStats& fxaaStats) {
@@ -12662,6 +12673,7 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     }
     ScopedStereoGpuRead gpuRead(readLease);
     const int set = candidate.set;
+    resprayCameraCue = g_stereoResprayCameraCue[set];
     const int expectedGeneration = candidate.sequence;
     if (!WaitStereoProducerFenceForCandidate(set, expectedGeneration)) {
         // The direct-stereo producer published metadata before RenderQueue
@@ -13204,6 +13216,7 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
     bool repeatCopyFallback = false;
     bool projectionLayerSubmitted = false;
     bool projectionFullCopy = false;
+    std::uint64_t submittedResprayCameraCue = 0;
     std::uint64_t projectionEpoch = 0;
     int telemetryRecoveryProgress = 0;
     StereoSyncWaitResult stereoSyncWait{};
@@ -13366,12 +13379,17 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
 
     FlushHaptics();
 
+    static respray::Fade resprayFade;
+    const auto resprayCue = vrcam::ResprayPresentation();
+    const double displayMs = static_cast<double>(frameState.predictedDisplayTime) / 1e6;
+    float resprayOpacity = 0.0f;
     // Menus/cutscenes use the trusted flat SurfaceTexture. Gameplay normally
     // submits a world projection, with a short repeat grace for producer phase
     // jitter. A dead producer is never allowed to leave an arbitrarily old world
     // in the compositor: after the grace window we hold a stable neutral black
     // view until two distinct fresh pairs prove that production has recovered.
     if (frameState.shouldRender != XR_TRUE) {
+        resprayFade.Update(resprayCue, displayMs, false, false);
         g_directStereoProjectionHealthy.store(false,
                                                std::memory_order_release);
     }
@@ -13514,7 +13532,8 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
                 projectionReady = RenderStereoEyeProjection(
                     eyeProjection, eyeViews, candidate.sequence,
                     submittedStereoSequence, stereoGenerationRace,
-                    submittedStereoSequenceAgeMs, stereoProjectionOutcome,
+                    submittedStereoSequenceAgeMs, submittedResprayCameraCue,
+                    stereoProjectionOutcome,
                     eyeReleaseFailureMask, fxaaStats);
                 projectionFullCopy = projectionReady;
             }
@@ -13538,8 +13557,9 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
                     sRecoveryProgress = 0;
                     staleStereoRejected = true;
                 }
-                if (RenderTheaterQuad(s.viewSpace, theaterQuad, true,
-                                      TheaterFrameSource::Black)) {
+                const auto blackSource = resprayCue != 0
+                    ? TheaterFrameSource::ResprayFade : TheaterFrameSource::Black;
+                if (RenderTheaterQuad(s.viewSpace, theaterQuad, true, blackSource)) {
                     layers[0] = reinterpret_cast<
                         const XrCompositionLayerBaseHeader*>(&theaterQuad);
                     layerCount = 1;
@@ -13550,10 +13570,13 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
             }
         }
 
-        // Composite the classic HUD into projection eyes only.
+        resprayOpacity = resprayFade.Update(
+            resprayCue, displayMs, projectionLayerSubmitted && publishTrackingPose,
+            projectionFullCopy && submittedResprayCameraCue == resprayCue);
 
         // FPS/debug panel on top, selected only through the VR menu.
-        if ((g_packageHint.load(std::memory_order_relaxed) || ProfilerVisible() || g_menuVisible.load(std::memory_order_relaxed) ||
+        if ((s.theaterMode || projectionLayerSubmitted || resprayOpacity == 0.0f) &&
+            (g_packageHint.load(std::memory_order_relaxed) || ProfilerVisible() || g_menuVisible.load(std::memory_order_relaxed) ||
              g_calibActive.load(std::memory_order_relaxed) ||
              g_mainMenuActive.load(std::memory_order_relaxed) ||
              g_holsterCalibActive.load(std::memory_order_relaxed) ||
@@ -13574,6 +13597,14 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
              g_aboutActive.load(std::memory_order_relaxed)) && PresentDebugPanel(debugQuad)) {
             layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&debugQuad);
         }
+        if (projectionLayerSubmitted && resprayOpacity > 0.0f) {
+            if (RenderTheaterQuad(s.viewSpace, theaterQuad, true,
+                                  TheaterFrameSource::ResprayFade, resprayOpacity)) {
+                layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&theaterQuad);
+            } else if (resprayOpacity == 1.0f) {
+                layerCount = 0;
+            }
+        }
     }
 
     if (!projectionLayerSubmitted)
@@ -13588,6 +13619,10 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
     endInfo.layers               = layerCount ? layers : nullptr;
     const XrResult ended = xrEndFrame(s.session, &endInfo);
     Check(ended, "xrEndFrame");
+    if (XR_SUCCEEDED(ended) && projectionLayerSubmitted && resprayOpacity == 0.0f &&
+        respray::GetPhase(resprayCue) == respray::Phase::Reveal) {
+        vrcam::FinishResprayReveal(resprayCue);
+    }
     if (XR_FAILED(ended)) ResetStereoPhaseFeedback();
     const long long tEndDone = nowNs();
     if (XR_SUCCEEDED(ended) && projectionLayerSubmitted &&

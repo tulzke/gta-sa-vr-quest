@@ -1051,6 +1051,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     // the player there. So in menus only the laser pointer (tap) and Back are
     // live, which is predictable; the game pad is reconnected for gameplay.
     const bool inGameplay = vrcam::IsStereoActive();
+    const bool resprayBlocked = vrcam::ResprayControlsBlocked();
 
     // VR menu (Vice City style): both grips + the Menu button open one VR menu whose
     // root lists the sections. A enters a section, B steps back (and closes from the
@@ -2045,7 +2046,7 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     savr::hud::FlushWatchSettings();
 
     // The left stick drives the menu, not the player, while a menu is up.
-    vrcam::SetInputBlocked(anyMenu);
+    vrcam::SetInputBlocked(anyMenu || resprayBlocked);
     savr::locomotion::UpdateRunToggle(
         inGameplay && !anyMenu && !grips && vrcam::GroundWalkControlsActive(),
         savr::locomotion::ActionHeld(savr::locomotion::BIND_ACT_SPRINT,
@@ -2068,7 +2069,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     if (inGameplay) {
         float trackingPosition[3]{},trackingOrientation[4]{};
         const bool trackingReady=xr::GetHeadPose(trackingPosition,trackingOrientation);
-        const bool catalystBlocked = anyMenu || !trackingReady || vrcam::ParachuteWeaponInteractionBlocked();
+        const bool catalystBlocked = anyMenu || resprayBlocked || !trackingReady ||
+            vrcam::ParachuteWeaponInteractionBlocked();
         const bool weaponInteractionsBlocked = catalystBlocked || savr::catalyst::Active() ||
             driving::GetRemoteControlledVehicle() != nullptr ||
             driving::IsCraneControlActive();
@@ -2149,7 +2151,8 @@ void SendInputToGame(JNIEnv* env, jclass clazz) {
     static bool providerA = false, providerB = false, providerX = false;
     static bool providerUp = false, providerDown = false;
     static bool providerLeft = false, providerRight = false;
-    if (inGameplay && !anyMenu && (!grips || savr::combat::IsBlocking())) {
+    if (inGameplay && !anyMenu && !resprayBlocked &&
+        (!grips || savr::combat::IsBlocking())) {
         // The engine's stick Y runs the opposite way to OpenXR's, so it is flipped.
         const bool driving = (g.FindPlayerVehicle && g.FindPlayerVehicle(-1, false)) ||
             savr::driving::GetRemoteControlledVehicle() != nullptr ||
