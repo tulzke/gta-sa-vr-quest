@@ -9144,7 +9144,7 @@ WheelHandGuide MakeWheelHandGuide(const HandPose& pose, XrVector3f pinned) {
     const XrVector3f controller{pose.gripPos[0],pose.gripPos[1],pose.gripPos[2]};
     const auto delta=vsub(pinned,controller);
     const float distance=std::sqrt(vdot(delta,delta));
-    constexpr float fadeStart=.10f, fadeEnd=.28f;
+    constexpr float fadeStart=.075f, fadeEnd=.28f;
     if (!std::isfinite(distance) || distance<=fadeStart) return {};
     const float t=std::clamp((distance-fadeStart)/(fadeEnd-fadeStart),0.f,1.f);
     return {controller,pinned,.23f*t*t*(3.f-2.f*t)};

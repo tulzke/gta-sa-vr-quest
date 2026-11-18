@@ -57,10 +57,10 @@ int main() {
     pose.valid=true;pose.positionTracked=false;
     CHECK(MakeWheelHandGuide(pose,far).opacity==0);
     pose.positionTracked=true;
-    CHECK(MakeWheelHandGuide(pose,{.10f,0,0}).opacity==0);
-    CHECK(MakeWheelHandGuide(pose,{.12f,0,0}).opacity>0);
+    CHECK(MakeWheelHandGuide(pose,{.075f,0,0}).opacity==0);
+    CHECK(MakeWheelHandGuide(pose,{.09f,0,0}).opacity>0);
     CHECK(MakeWheelHandGuide(pose,{0,0,std::numeric_limits<float>::infinity()}).opacity==0);
-    CHECK(Near(MakeWheelHandGuide(pose,{0,.19f,0}).opacity,.115f));
+    CHECK(Near(MakeWheelHandGuide(pose,{0,.1775f,0}).opacity,.115f));
     CHECK(Near(MakeWheelHandGuide(pose,{0,0,.28f}).opacity,.23f));
     CHECK(Near(MakeWheelHandGuide(pose,far).opacity,.23f));
 
