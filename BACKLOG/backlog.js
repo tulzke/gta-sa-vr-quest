@@ -836,6 +836,19 @@ const BACKLOG_DATA = {
       ],
       "priority": "medium",
       "status": "open"
+    },
+    {
+      "id": 137,
+      "title": "Вход и выход из зданий в VR",
+      "file": "137-vkhod-i-vykhod-iz-zdaniy-v-vr.md",
+      "categories": [
+        "player",
+        "graphics",
+        "story",
+        "bugs"
+      ],
+      "priority": "critical",
+      "status": "in_progress"
     }
   ]
 };
