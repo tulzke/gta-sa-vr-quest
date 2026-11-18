@@ -59,13 +59,18 @@ struct HolsterPacer {
     struct Pulse { float amplitude{}; double seconds{}; Envelope envelope{}; };
 
     Pulse Step(int candidate, float proximity, double now) {
-        if (candidate!=point || now<time || now-time>.15) {
+        constexpr float centerProximity=.90f;
+        if (candidate<0) { *this={}; return {}; }
+        const bool newVisit=point<0 || now<time || now-time>.15;
+        if (candidate!=point || newVisit) {
+            const double nextPhase=newVisit?1.:phase;
             *this={}; point=candidate; time=now;
+            // Switching between overlapping sockets keeps the cadence.
+            phase=nextPhase;
         }
         const double elapsed=now-time;
         time=now;
-        if (candidate<0) return {};
-        if (proximity>=.90f && !atCenter) {
+        if (proximity>=centerProximity && !atCenter) {
             atCenter=true; phase=0;
             return {.22f,.044,Envelope::Fade};
         }
@@ -74,7 +79,8 @@ struct HolsterPacer {
             atCenter=false;
             phase=1; // Resume the clicks when the hand leaves the center.
         }
-        phase+=elapsed*(2.+8.*proximity*proximity);
+        const double progress=std::clamp(proximity/centerProximity,0.f,1.f);
+        phase+=elapsed*(5.+13.*progress*progress);
         if (phase<1.) return {};
         phase-=std::floor(phase);
         return {.10f+.06f*proximity,.018};

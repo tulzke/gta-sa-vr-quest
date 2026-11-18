@@ -122,17 +122,21 @@ int main(){
     PublishFlameHaptic(1,0);FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None);
 
     HolsterPacer far,near;
+    CHECK(far.Step(1,0,0).amplitude==.10f); // immediate cue on entry
+    CHECK(near.Step(1,.899f,0).amplitude>0);
     int farPulses{},nearPulses{};
-    for (int i=0;i<=100;++i) {
-        farPulses+=(far.Step(1,.05f,i*.01).amplitude>0);
-        nearPulses+=(near.Step(1,.84f,i*.01).amplitude>0);
+    for (int i=1;i<=100;++i) {
+        farPulses+=(far.Step(1,0,i*.01).amplitude>0);
+        nearPulses+=(near.Step(1,.899f,i*.01).amplitude>0);
     }
-    CHECK(farPulses>=1&&nearPulses>=farPulses*2);
+    CHECK(farPulses>=4&&farPulses<=5&&nearPulses==17);
+    CHECK(far.Step(2,0,1.01).amplitude==0); // overlap is not a fresh visit
     CHECK(near.Step(1,.98f,1.01).amplitude==.22f);
     CHECK(near.Step(1,.98f,1.02).amplitude==0);
     CHECK(near.Step(1,.85f,1.03).amplitude==0);
     CHECK(near.Step(1,.70f,1.04).amplitude>0);
     CHECK(near.Step(-1,0,1.05).amplitude==0);
+    CHECK(near.Step(1,.02f,1.06).amplitude>0); // re-entering starts a new visit
     clockTime=9;PublishHolsterHaptic(1,1,1.f,3);FlushHaptics();
     CHECK(g_hapticApplied[1].source==Source::Holster);
     ++tracking.epoch;FlushHaptics();CHECK(g_hapticApplied[1].source==Source::None);
