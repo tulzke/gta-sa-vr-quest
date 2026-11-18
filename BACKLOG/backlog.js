@@ -596,7 +596,7 @@ const BACKLOG_DATA = {
         "player"
       ],
       "priority": "high",
-      "status": "open"
+      "status": "in_progress"
     },
     {
       "id": 116,
