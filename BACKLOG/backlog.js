@@ -247,18 +247,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 74,
-      "title": "Перекраска машины без передачи управления VR-камерой",
-      "file": "74-perekraska-bez-peredachi-vr-kamery.md",
-      "categories": [
-        "vehicle-controls",
-        "graphics",
-        "bugs"
-      ],
-      "priority": "high",
-      "status": "in_progress"
-    },
-    {
       "id": 75,
       "title": "Отдельная настройка счётчика патронов для каждого оружия",
       "file": "75-nastroyka-schetchika-patronov-dlya-kazhdogo-oruzhiya.md",
