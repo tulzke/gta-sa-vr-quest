@@ -27,6 +27,7 @@
 #include "Appearance.h"
 #include "Basketball.h"
 #include "Calib.h"
+#include "CameraPresence.h"
 #include "BuildStamp.h"
 #include "AnimatedTextures.h"
 #include "Cheats.h"
@@ -317,6 +318,7 @@ std::atomic<int>          g_stereoEyeH[kStereoSets] = {};
 std::atomic<int>          g_stereoSeq{-1};   // newest published pair index (-1 = none)
 std::atomic<int>          g_stereoGeneration[kStereoSets] = {};
 std::atomic<std::uint64_t> g_stereoPublishedNs[kStereoSets] = {};
+std::atomic<std::uint64_t> g_stereoCameraPresence[kStereoSets]{};
 std::uint64_t g_stereoResprayCameraCue[kStereoSets]{};  // protected by the slot lease
 // One atomic state is the complete producer/consumer exclusion protocol for a
 // ring slot: -1 = the GameThread owns it for recording, 0 = idle, >0 = XR
@@ -1174,7 +1176,13 @@ struct StereoCandidate {
     int sequence{-1};
     int set{-1};
     double ageMs{};
+    std::uint64_t cameraPresence{};
 };
+
+bool MatchCameraPresence(int set, StereoCandidate& candidate) {
+    candidate.cameraPresence = g_stereoCameraPresence[set].load(std::memory_order_relaxed);
+    return candidate.cameraPresence == vrcam::CameraPresence();
+}
 
 class StereoReadLease {
 public:
@@ -1710,7 +1718,7 @@ bool LeaseStereoCandidate(int sequence, StereoCandidate& candidate,
         lease.Release();
         return false;
     }
-    if (!StereoProducerGenerationReady(set, sequence)) {
+    if (!MatchCameraPresence(set, candidate) || !StereoProducerGenerationReady(set, sequence)) {
         failure = perf::StereoProjectionOutcome::NoSafePair;
         lease.Release();
         return false;
@@ -1748,7 +1756,7 @@ bool ProbeStereoCandidate(int sequence, StereoCandidate& candidate,
         failure = perf::StereoProjectionOutcome::GenerationPre;
         return false;
     }
-    if (!StereoProducerGenerationReady(set, sequence)) {
+    if (!MatchCameraPresence(set, candidate) || !StereoProducerGenerationReady(set, sequence)) {
         failure = perf::StereoProjectionOutcome::NoSafePair;
         return false;
     }
@@ -2132,6 +2140,7 @@ struct State {
     XrSpace        viewSpace{XR_NULL_HANDLE};    // VIEW  (head-locked)
     XrSessionState sessionState{XR_SESSION_STATE_UNKNOWN};
     bool           running{false};
+    std::uint32_t  maxLayerCount{};
 
     std::vector<XrViewConfigurationView> configViews;
     std::vector<Swapchain>               swapchains;
@@ -2145,6 +2154,9 @@ struct State {
     bool      theaterMode{true};
     theater::Screen theaterScreen;
     bool theaterInputReady{};
+    Swapchain controllerMarker;
+    bool controllerMarkerAttempted{};
+    bool controllerMarkerReady{};
 
     // Head-locked FPS/debug panel (selected only in the VR menu), in the spirit of
     // the Vice City VR port's overlay.
@@ -3680,6 +3692,11 @@ void main() {
     // why tutorial and money text appeared upside-down in the headset.
     vec2 sourceUv = uSourceRect.xy + local * uSourceRect.zw;
     vec4 colour = texture(uTexture, sourceUv);
+    if (uHighlight < -0.5) {
+        // Retail scene subtitles include dark outlines and use texture alpha.
+        outColor = colour;
+        return;
+    }
     float coverage = max(colour.r, max(colour.g, colour.b));
     float keyedAlpha = smoothstep(0.008, 0.055, coverage);
     float edge = min(min(local.x, 1.0 - local.x),
@@ -4422,6 +4439,27 @@ bool DrawHudComposite(GLuint sourceTexture,int targetWidth,int targetHeight,
         LOGI("[hud] full stock surface composited into both stereo eyes");
     }
     return true;
+}
+
+void DrawSceneSubtitles(GLuint sourceTexture, int eye) {
+    if (!sourceTexture || !BuildHudCompositeProgram()) return;
+    const float tanX = std::max(0.2f, g_stereoTanX.load(std::memory_order_relaxed));
+    const float eyeShift = (eye == 0 ? 1.0f : -1.0f) * kStereoHalfIpd /
+        (2.0f * kHudPlaneDistanceMetres * tanX);
+    glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glUseProgram(s.hudCompositeProgram);
+    glBindVertexArray(s.hudCompositeVertexArray);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sourceTexture);
+    glBindSampler(0, s.hudCompositeSampler);
+    glUniform1i(s.hudCompositeTextureUniform, 0);
+    glUniform4f(s.hudCompositeSourceRectUniform, 0, 0, 1, 1);
+    glUniform4f(s.hudCompositeDestinationRectUniform, eyeShift, 0, 1, 1);
+    glUniform1f(s.hudCompositeHighlightUniform, -1);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDisable(GL_BLEND);
 }
 
 void UploadMobileColorUniforms(const MobileColorState& colour,
@@ -6342,7 +6380,8 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           float pdaHeading,
                           bool mapVisible,
                           const float* nearZ, const float* farZ,
-                          int seq, int width, int height, std::uint64_t resprayCameraCue) {
+                          int seq, int width, int height, std::uint64_t resprayCameraCue,
+                          std::uint64_t cameraPresence) {
     // `tex` points at a [kStereoSets][2] row-major table of GL texture ids. The
     // ids are stable once the RenderQueue thread has created the rasters, so the
     // per-frame cost here is trivial; only `seq` actually advances. Publish the
@@ -6487,6 +6526,7 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
     // Publish only after texture, depth and pose for this ring slot are complete.
     const std::uint64_t publishedNs = MonotonicNowNs();
     g_stereoResprayCameraCue[ws] = resprayCameraCue;
+    g_stereoCameraPresence[ws].store(cameraPresence, std::memory_order_relaxed);
     g_stereoPublishedNs[ws].store(publishedNs, std::memory_order_relaxed);
     g_stereoGeneration[ws].store(seq, std::memory_order_release);
     // Release ownership before advertising this generation as newest. A reader
@@ -6762,6 +6802,11 @@ bool Initialize(JavaVM* vm, jobject activity) {
     systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     if (!Check(xrGetSystem(s.instance, &systemInfo, &s.systemId), "xrGetSystem")) {
         return false;
+    }
+    XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
+    if (Check(xrGetSystemProperties(s.instance, s.systemId, &systemProperties),
+              "xrGetSystemProperties")) {
+        s.maxLayerCount = systemProperties.graphicsProperties.maxLayerCount;
     }
 
     if (!EnumerateViews()) {
@@ -12721,6 +12766,8 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     }
     ScopedStereoGpuRead gpuRead(readLease);
     const int set = candidate.set;
+    const bool showPlayerPresence = camerapresence::ViewOf(candidate.cameraPresence) ==
+        camerapresence::View::Player;
     resprayCameraCue = g_stereoResprayCameraCue[set];
     const int expectedGeneration = candidate.sequence;
     if (!WaitStereoProducerFenceForCandidate(set, expectedGeneration)) {
@@ -12808,35 +12855,39 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         bakedHandWeaponTypes[1] = g_stereoHandWeaponTypes[set][1];
         bakedDebugPinchHands = g_stereoDebugPinchHands[set];
     }
-    const combat::Feedback combatFx=IsSessionFocused() && !IsMenuVisible()
+    const bool playerFeedback = showPlayerPresence && IsSessionFocused() && !IsMenuVisible();
+    const combat::Feedback combatFx=playerFeedback
         ? combat::GetFeedback() : combat::Feedback{};
     const auto wantedFx=wantedfeedback::GetFeedback(
-        IsSessionFocused() && !IsMenuVisible() && g_headPoseValid,
-        g_trackingRecovery.epoch);
+        playerFeedback && g_headPoseValid, g_trackingRecovery.epoch);
     const auto vitalsFx=vitalsfeedback::GetFeedback(
-        IsSessionFocused() && !IsMenuVisible() && g_headPoseValid,
-        g_trackingRecovery.epoch);
+        playerFeedback && g_headPoseValid, g_trackingRecovery.epoch);
     const auto haloFx=peripheral::Select(combatFx,wantedFx,vitalsFx);
-    const float nitroStrength=IsSessionFocused()&&!IsMenuVisible()&&drivingWheel.active&&
+    const float nitroStrength=playerFeedback&&drivingWheel.active&&
         !drivingWheel.nitroGhost?drivingWheel.nitroEffect:0.f;
+    const GLuint hudSource = g_stereoHudTex[set].load(std::memory_order_relaxed);
     const bool shaderCopyMayRun = fxaaStats.requested ||
-        underWaterness > 0.001f || mobileColor.mode != 0 || haloFx.Active() || nitroStrength>.001f;
+        underWaterness > 0.001f || mobileColor.mode != 0 || haloFx.Active() || nitroStrength>.001f ||
+        (!showPlayerPresence && hudSource != 0);
     // Submit projection layers with their recorded render pose; use theater until that pose is available.
     if (!haveRenderPose) {
         outcome = perf::StereoProjectionOutcome::MissingPose;
         return false;
     }
 
-    BuildHandFrames(bakedHands, bakedTwoHand, drivingWheel, ballHandLock,
-                    bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes, bakedDebugPinchHands);
-    BuildWeaponMesh(bakedHands);
+    if (showPlayerPresence) {
+        BuildHandFrames(bakedHands, bakedTwoHand, drivingWheel, ballHandLock,
+                        bakedWeaponHandMask, bakedPinchAmounts, bakedHandWeaponTypes, bakedDebugPinchHands);
+        BuildWeaponMesh(bakedHands);
+    }
     UpdateWatchFrame(bakedHands,bakedTwoHand,drivingWheel,ballHandLock,bakedWeaponHandMask,
-                     bakedPinchAmounts,watchTrackingValid,watchEpoch,false,bakedWatch.mapVisible);
+                     bakedPinchAmounts,showPlayerPresence && watchTrackingValid,
+                     watchEpoch,false,bakedWatch.mapVisible);
     BulletTracer liveTracers[kMaxBulletTracers]{};
-    const int liveTracerCount = SnapshotBulletTracers(liveTracers);
+    const int liveTracerCount = showPlayerPresence ? SnapshotBulletTracers(liveTracers) : 0;
     ObjectiveMarkerVisual liveObjectiveMarkers[kMaxObjectiveMarkers]{};
-    const int liveObjectiveMarkerCount =
-        SnapshotObjectiveMarkers(liveObjectiveMarkers);
+    const int liveObjectiveMarkerCount = showPlayerPresence ?
+        SnapshotObjectiveMarkers(liveObjectiveMarkers) : 0;
 
     GLint prevDraw = 0, prevRead = 0, prevVp[4]{};
     FxaaGlState fxaaGlState{};
@@ -12869,8 +12920,6 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
 
     const float tanX = g_stereoTanX.load(std::memory_order_relaxed);
     const float tanY = g_stereoTanY.load(std::memory_order_relaxed);
-    const GLuint hudSource=g_stereoHudTex[set].load(
-        std::memory_order_relaxed);
     bool ok = true;
     for (int e = 0; e < 2 && ok; ++e) {
         Swapchain& chain = s.swapchains[e];
@@ -12961,22 +13010,31 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
         const double overlayCpuStartMs = perf::ThreadCpuMs();
         const bool overlayGpuTimer = BeginXrGpuStage(
             e == 0 ? XrGpuStage::OverlayLeft : XrGpuStage::OverlayRight);
-        // Mission/tutorial text is an independent immersive layer. Disabling
-        // CLASSIC hides phone-HUD crops, not text or calibration samples.
-        if (hudSource||g_signalPercent.load(std::memory_order_relaxed)>=0)
-            DrawHudComposite(hudSource,chain.width,chain.height,
-                             hud::ShouldRenderClassicHud(),e);
-        DrawHandsForEye(
-            rp, e, chain.width, chain.height,
-            g_stereoEyeDepth[set][e].load(std::memory_order_relaxed),
-            ew, eh,
-            g_stereoEyeNear[set][e].load(std::memory_order_relaxed),
-            g_stereoEyeFar[set][e].load(std::memory_order_relaxed),
-            bakedLaser, bakedWeaponHandMask,
-            liveTracers, liveTracerCount,
-            liveObjectiveMarkers, liveObjectiveMarkerCount,
-            drivingWheel,
-            throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters, bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource, g_stereoPdaTex[set].load(std::memory_order_relaxed), g_stereoWatchTex[set].load(std::memory_order_relaxed), g_stereoWatchProjectionTex[set].load(std::memory_order_relaxed), g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes, g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set], bakedReloadHints,bakedWatch);
+        if (showPlayerPresence) {
+            // Mission and tutorial text remain independent of the CLASSIC HUD.
+            if (hudSource || g_signalPercent.load(std::memory_order_relaxed) >= 0)
+                DrawHudComposite(hudSource, chain.width, chain.height,
+                                 hud::ShouldRenderClassicHud(), e);
+            DrawHandsForEye(
+                rp, e, chain.width, chain.height,
+                g_stereoEyeDepth[set][e].load(std::memory_order_relaxed),
+                ew, eh,
+                g_stereoEyeNear[set][e].load(std::memory_order_relaxed),
+                g_stereoEyeFar[set][e].load(std::memory_order_relaxed),
+                bakedLaser, bakedWeaponHandMask,
+                liveTracers, liveTracerCount,
+                liveObjectiveMarkers, liveObjectiveMarkerCount,
+                drivingWheel,
+                throwableTrajectory, bakedHands, bakedTwoHand, bakedHolsters,
+                bakedDoors, bakedNpcGrabs, bakedTestArea, bakedRadial, hudSource,
+                g_stereoPdaTex[set].load(std::memory_order_relaxed),
+                g_stereoWatchTex[set].load(std::memory_order_relaxed),
+                g_stereoWatchProjectionTex[set].load(std::memory_order_relaxed),
+                g_stereoPdaHeading[set].load(std::memory_order_relaxed), bakedHandWeaponTypes,
+                g_stereoAmmoHolsters[set], g_stereoWeaponAmmoPose[set], bakedReloadHints, bakedWatch);
+        } else {
+            DrawSceneSubtitles(hudSource, e);
+        }
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         // The second eye above is the final consumer of this ring slot's colour,
         // depth and HUD textures. Validate the generation while the CPU lease
@@ -13091,6 +13149,81 @@ bool RenderStereoEyeProjection(XrCompositionLayerProjection& layer,
     layer.views     = views;
     submittedSequence = expectedGeneration;
     outcome = perf::StereoProjectionOutcome::Submitted;
+    return true;
+}
+
+constexpr int kControllerMarkerPixels = 16;
+constexpr float kControllerMarkerSize = 0.014f;
+
+bool PrepareControllerMarker() {
+    if (s.controllerMarkerAttempted) return s.controllerMarkerReady;
+    s.controllerMarkerAttempted = true;
+
+    auto& chain = s.controllerMarker;
+    XrSwapchainCreateInfo create{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    create.createFlags = XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT;
+    create.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+    create.format = g_swapchainFormat;
+    create.sampleCount = 1;
+    create.width = create.height = kControllerMarkerPixels;
+    create.faceCount = create.arraySize = create.mipCount = 1;
+    if (!Check(xrCreateSwapchain(s.session, &create, &chain.handle), "create(controller marker)"))
+        return false;
+    // A static swapchain has one image. The two controller layers reuse it.
+    XrSwapchainImageOpenGLESKHR image{XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR};
+    std::uint32_t count = 0;
+    if (!Check(xrEnumerateSwapchainImages(chain.handle, 1, &count,
+                   reinterpret_cast<XrSwapchainImageBaseHeader*>(&image)),
+               "images(controller marker)") || count != 1) return false;
+
+    XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    std::uint32_t index = 0;
+    if (!Check(xrAcquireSwapchainImage(chain.handle, &acquire, &index), "acquire(controller marker)") ||
+        !WaitSwapchainImageReady(chain, "controller marker", "wait(controller marker)")) return false;
+
+    std::array<std::uint8_t, kControllerMarkerPixels * kControllerMarkerPixels * 4> rgba{};
+    for (int y = 0; y < kControllerMarkerPixels; ++y) {
+        for (int x = 0; x < kControllerMarkerPixels; ++x) {
+            const float dx = (2.0f * x + 1) / kControllerMarkerPixels - 1.0f;
+            const float dy = (2.0f * y + 1) / kControllerMarkerPixels - 1.0f;
+            const float coverage = std::clamp((1.0f - dx * dx - dy * dy) * 1.5f, 0.0f, 1.0f);
+            const int pixel = (y * kControllerMarkerPixels + x) * 4;
+            rgba[pixel] = 255;
+            rgba[pixel + 1] = 210;
+            rgba[pixel + 2] = 35;
+            rgba[pixel + 3] = static_cast<std::uint8_t>(coverage * 56.0f);
+        }
+    }
+    GLint previousTexture = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
+    glBindTexture(GL_TEXTURE_2D, image.image);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kControllerMarkerPixels, kControllerMarkerPixels,
+                    GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    const GLenum uploadError = glGetError();
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previousTexture));
+    glFlush();
+    XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    const bool released = Check(xrReleaseSwapchainImage(chain.handle, &release),
+                                "release(controller marker)");
+    if (uploadError != GL_NO_ERROR) LOGE("[controller.marker] upload GL error 0x%x", uploadError);
+    s.controllerMarkerReady = released && uploadError == GL_NO_ERROR;
+    return s.controllerMarkerReady;
+}
+
+bool BuildControllerMarker(XrCompositionLayerQuad& quad, const HandPose& hand,
+                           const XrQuaternionf& orientation) {
+    const auto& p = hand.gripPos;
+    if (!hand.positionTracked || !std::isfinite(p[0]) || !std::isfinite(p[1]) ||
+        !std::isfinite(p[2]) || !PrepareControllerMarker()) return false;
+    quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    quad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                      XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+    quad.space = s.space;
+    quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    quad.subImage.swapchain = s.controllerMarker.handle;
+    quad.subImage.imageRect.extent = {kControllerMarkerPixels, kControllerMarkerPixels};
+    quad.pose = {orientation, {p[0], p[1], p[2]}};
+    quad.size = {kControllerMarkerSize, kControllerMarkerSize};
     return true;
 }
 
@@ -13238,12 +13371,14 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
                                              {XR_TYPE_COMPOSITION_LAYER_QUAD},
                                              {XR_TYPE_COMPOSITION_LAYER_QUAD}};
     XrCompositionLayerQuad       debugQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad       controllerMarkers[2]{};
     XrCompositionLayerProjection eyeProjection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
     XrCompositionLayerProjectionView eyeViews[2]{{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
                                                  {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
     const XrCompositionLayerBaseHeader* layers[6]{};
     uint32_t layerCount = 0;
     int submittedStereoSequence = -1;
+    std::uint64_t submittedCameraPresence = 0;
     bool stereoGenerationRace = false;
     double submittedStereoSequenceAgeMs = 0.0;
     double candidateStereoSequenceAgeMs = 0.0;
@@ -13379,9 +13514,9 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
     }
 #endif
 
-    // Locate both hands' grip + aim poses (LOCAL space) for the VR hands.
+    // Locate both hands' grip + aim poses once at the current display time.
+    HandPose hp[2]{};
     {
-        HandPose hp[2];
         for (int h = 0; h < 2; ++h) {
             XrSpaceLocation gl{XR_TYPE_SPACE_LOCATION}, al{XR_TYPE_SPACE_LOCATION};
             constexpr XrSpaceLocationFlags kValid =
@@ -13583,6 +13718,7 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
             }
 
             if (projectionReady) {
+                submittedCameraPresence = candidate.cameraPresence;
                 g_directStereoProjectionHealthy.store(true,
                                                        std::memory_order_release);
                 layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(
@@ -13651,6 +13787,37 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
         }
     }
 
+    const auto cameraPresence = vrcam::CameraPresence();
+    bool controllerMarkerValid[2]{};
+    if (frameState.shouldRender == XR_TRUE && publishTrackingPose && IsSessionFocused() &&
+        camerapresence::ViewOf(cameraPresence) == camerapresence::View::Scene) {
+        for (int h = 0; h < 2; ++h)
+            controllerMarkerValid[h] = BuildControllerMarker(controllerMarkers[h], hp[h], nextHead.orientation);
+    }
+    // Validate again after rendering overlays. A handover can arrive while XR
+    // is copying the eyes or is about to reuse a previously composed projection.
+    const auto readyPresence = vrcam::CameraPresence();
+    if (projectionLayerSubmitted && submittedCameraPresence != readyPresence) {
+        projectionLayerSubmitted = false;
+        submittedStereoSequence = -1;
+        zeroCopyRepeat = false;
+        projectionFullCopy = false;
+        stereoProjectionOutcome = perf::StereoProjectionOutcome::NoSafePair;
+        g_directStereoProjectionHealthy.store(false, std::memory_order_release);
+        if (layerCount != 0) {
+            for (std::uint32_t i = 1; i < layerCount; ++i) layers[i - 1] = layers[i];
+            --layerCount;
+        }
+    }
+    if (camerapresence::ViewOf(readyPresence) == camerapresence::View::Scene) {
+        const auto maxLayers = std::min(s.maxLayerCount, static_cast<std::uint32_t>(std::size(layers)));
+        for (int h = 0; h < 2 && layerCount < maxLayers; ++h) {
+            if (controllerMarkerValid[h]) {
+                layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+                    &controllerMarkers[h]);
+            }
+        }
+    }
     if (!projectionLayerSubmitted)
         InvalidateStereoRepeatProjectionCache();
 

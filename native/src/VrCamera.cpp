@@ -6,6 +6,7 @@
 #include "RadarTextureLeases.h"
 #include "RadarTextureStreaming.h"
 #include "PlayerLife.h"
+#include "CameraPresence.h"
 #include "MissionHud.h"
 #include "Tbone.h"
 #include "BeachDance.h"
@@ -1524,6 +1525,7 @@ constexpr float kVrHalfIpd = 0.032f;   // ~64 mm total; must match the present s
 
 std::atomic<bool> g_stereoActive{false};
 std::atomic<std::uint64_t> g_theaterPresentation{0};
+std::atomic<std::uint64_t> g_cameraPresence{0};
 // True while the freefall head-down dive (right trigger) is held; the camera
 // pitches down with the body so the player looks along the dive. Declared
 // this early because the camera hook consumes it.
@@ -3575,6 +3577,56 @@ bool ScriptedCutsceneRunning() {
                           nowMs - g_scriptedCutsceneLastWideMs <= 250.0);
 }
 
+camerapresence::View ObserveCameraPresence() {
+    using camerapresence::View;
+    if (!g.TheCamera || MobileMenuOpen()) return View::Unavailable;
+    if (FormalCutsceneRunning() || missionscenes::Theater()) return View::Scene;
+    const void* ped = g.FindPlayerPed ? g.FindPlayerPed(-1) : nullptr;
+    if (!ped) return View::Unavailable;
+    // CamControl branches on ped state 63 for the arrest camera.
+    const auto pedState = *reinterpret_cast<const std::uint32_t*>(
+        static_cast<const std::uint8_t*>(ped) + 0x54c);
+    if (playerlife::Dead(ped) || pedState == 63 || driving::GetRemoteControlledVehicle() ||
+        driving::IsCraneControlActive() || ScriptedCutsceneRunning()) return View::Scene;
+
+    // These verified mission phases deliberately use the live CJ anchor even
+    // when the retail script has requested its own camera for the activity.
+    if (beachdance::Active() || catalyst::Active()) return View::Player;
+
+    // Android 2.11: TakeControl, NoEntity, Attach and Spline clear +0x31;
+    // Restore and RestoreWithJumpCut set it. The target can still be CJ in a
+    // directed shot. +0x5e remains set while the retail camera blends views.
+    if (!g.LoadBase || reinterpret_cast<std::uintptr_t>(g.CCamera_CopyCameraMatrixToRWCam)
+            != g.LoadBase + 0x472d0cu) return View::Player;
+    const auto* camera = static_cast<const std::uint8_t*>(g.TheCamera);
+    if (camera[0x31] == 0) {
+        const auto mode = *reinterpret_cast<const std::uint16_t*>(camera + 0xc64);
+        // A fixed/spline shot owns the view even when the player still has a
+        // usable gun. Other mission gunners can keep their live CJ view.
+        if (mode == 15 || mode == 17 || !vrfire::IsScriptedWeaponCamera()) return View::Scene;
+        if (justbusiness::Active()) return View::Player;
+        const auto target = *reinterpret_cast<void* const*>(camera + 0x938);
+        const auto vehicle = g.FindPlayerVehicle ? g.FindPlayerVehicle(-1, false) : nullptr;
+        const auto attached = *reinterpret_cast<void* const*>(static_cast<const char*>(ped) + 0x150);
+        if (target != ped && !(target && (target == vehicle || target == attached))) return View::Scene;
+    }
+    if (camera[0x5e] != 0 && camerapresence::ViewOf(CameraPresence()) == View::Scene)
+        return View::Scene;
+    return View::Player;
+}
+
+std::uint64_t RefreshCameraPresence(bool cameraCopied) {
+    const auto previous = CameraPresence();
+    const auto next = camerapresence::Update(previous, ObserveCameraPresence(), cameraCopied);
+    if (next != previous) {
+        g_cameraPresence.store(next, std::memory_order_release);
+        LOGI("[camera.presence] generation=%llu view=%u",
+             static_cast<unsigned long long>(next >> 2),
+             static_cast<unsigned>(camerapresence::ViewOf(next)));
+    }
+    return next;
+}
+
 bool CutsceneCameraControlsActiveInternal() {
     if (missionscenes::Theater()) return false;
     if (FormalCutsceneRunning()) return locomotion::CutsceneMode() != 0;
@@ -3768,6 +3820,7 @@ bool StabilizeRemoteCamera(CamBasis& base) {
 void FinishRoomMovement();
 void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
     static thread_local bool inHook = false;
+    const bool mainCamera = !inHook && self == g.TheCamera;
 
     bool stereo = false;
     if (!inHook) {
@@ -4660,6 +4713,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
     }
 
     g_origCopy(self, alsoPlayerCam);
+    if (mainCamera) RefreshCameraPresence(true);
 }
 
 // --- movement: feed the player pad directly ----------------------------------
@@ -20950,7 +21004,7 @@ private:
     bool alphaActive_{};
 };
 
-void RenderGameplayHudPass() {
+void RenderGameplayHudPass(bool showPlayerPresence) {
     if (g.RwRenderStateSet) {
         g.RwRenderStateSet(6,  reinterpret_cast<void*>(0)); // ZTEST OFF
         g.RwRenderStateSet(8,  reinterpret_cast<void*>(0)); // ZWRITE OFF
@@ -20959,6 +21013,15 @@ void RenderGameplayHudPass() {
         g.RwRenderStateSet(10, reinterpret_cast<void*>(5)); // SRCALPHA
         g.RwRenderStateSet(11, reinterpret_cast<void*>(6)); // INVSRCALPHA
         g.RwRenderStateSet(20, reinterpret_cast<void*>(1)); // CULL NONE
+    }
+    if (!showPlayerPresence) {
+        // Stereo scenes sample only the retail subtitles. Flat scenes already
+        // get them as part of the original game surface.
+        if (g.CMessages_Display) g.CMessages_Display(1);
+        if (g.CMessages_Display) g.CMessages_Display(0);
+        g.CHud_DrawSubtitles();
+        g.CFont_RenderFontBuffer();
+        return;
     }
     if (g.CHud_Draw) g.CHud_Draw();
     // CHud::Draw queues script texts, before-fade subtitles, vital stats,
@@ -21419,6 +21482,9 @@ void OnRenderScene(bool underwater) {
         g_origRenderScene(underwater);
         return;
     }
+    const auto cameraPresence = RefreshCameraPresence(false);
+    const auto cameraView = camerapresence::ViewOf(cameraPresence);
+    const bool showPlayerPresence = cameraView == camerapresence::View::Player;
     if (render_diag::Enabled()) {
         static thread_local std::uint64_t loggedSurfaceSize = 0;
         const std::uint64_t observedSize =
@@ -21594,22 +21660,19 @@ void OnRenderScene(bool underwater) {
         hud::GetElementSettings(hud::MESSAGES).enabled||
         hud::GetElementSettings(hud::HELP_TEXT).enabled||
         hud::GetElementSettings(hud::TIMERS).enabled;
-    // Stereo story and gameplay cutscenes own the whole view. The phone HUD
-    // raster also contains mission/help text, so merely disabling CLASSIC is
-    // insufficient: publish no HUD source for these frames. The short scripted
-    // scene debounce above prevents a one-frame HUD flash between camera shots.
-    const bool cutsceneHudSuppressed = FormalCutsceneRunning() ||
-        ScriptedCutsceneRunning();
-    const bool hudNeeded=!cutsceneHudSuppressed&&(
+    const bool playerHudNeeded=showPlayerPresence&&(
         hud::ShouldRenderClassicHud()||hud::ShouldRenderWristHud()||
         directTextEnabled||xr::HudCalibrationActive());
+    const bool sceneSubtitlesNeeded = cameraView == camerapresence::View::Scene &&
+        g.CHud_DrawSubtitles && g.CFont_RenderFontBuffer;
+    const bool hudNeeded = playerHudNeeded || sceneSubtitlesNeeded;
     // First-time HUD raster creation records RenderQueue resource commands.
     // Keep that rare lifecycle transition behind the completed retail token;
     // the steady already-materialised HUD ring remains overlap-safe.
     if (hudNeeded && !g_hudRaster[0]) closeEnginePreFinish();
     const bool hudReady=hudNeeded&&PrepareHudRasterRing();
     const bool outdoorMap=OutdoorRadarVisible();
-    const bool mapNeeded=outdoorMap&&hudNeeded && (hud::ShouldRenderWristHud() || xr::HudCalibrationActive());
+    const bool mapNeeded=outdoorMap&&playerHudNeeded && (hud::ShouldRenderWristHud() || xr::HudCalibrationActive());
     g_mapTextureLeases.Begin();
     g_mapPriorityTexels=0;
     const bool pdaNeeded=mapNeeded && ((g.FindPlayerVehicle&&g.FindPlayerVehicle(-1,false))||xr::HudCalibrationActive());
@@ -21628,8 +21691,9 @@ void OnRenderScene(bool underwater) {
     // Keep it warm while the watch is worn, before a projection is opened.
     if(watchNeeded||pdaNeeded)WarmRadarTextures(watchNeeded?watchhud::kZoomMin:1.f,closeEnginePreFinish);
     const auto radialMenu = xr::GetRadialHolsterMenu();
-    if (radialMenu.Visible() && !g_radialIconRaster[0]) closeEnginePreFinish();
-    const bool radialReady = radialMenu.Visible() && PrepareRadialIconRasters();
+    const bool radialNeeded = showPlayerPresence && radialMenu.Visible();
+    if (radialNeeded && !g_radialIconRaster[0]) closeEnginePreFinish();
+    const bool radialReady = radialNeeded && PrepareRadialIconRasters();
     if (hudReady)
         for (int setIndex=0;setIndex<kEyeSets;++setIndex)
             hudTex[setIndex]=EyeRasterTexId(g_hudRaster[setIndex]);
@@ -21665,14 +21729,18 @@ void OnRenderScene(bool underwater) {
     inHook = true;
     const std::uintptr_t camU = reinterpret_cast<std::uintptr_t>(g.TheCamera);
     CamBasis base = ReadCam(camU);
-    if (driving::RearMirrorEnabled() && !rear_mirror_render::raster &&
-        driving::GetActiveVehicleType()==driving::VEHICLE_CAR && !driving::ThirdPersonViewActive())
-        closeEnginePreFinish();
-    rear_mirror_render::Prepare(base);
     weapon_optic_render::ResetFrame();
     photo_render::ResetFrame();
-    if(water_monitor_render::NeedsRaster())closeEnginePreFinish();
-    water_monitor_render::Prepare();
+    rear_mirror_render::visible = false;
+    water_monitor_render::ready = false;
+    if (showPlayerPresence) {
+        if (driving::RearMirrorEnabled() && !rear_mirror_render::raster &&
+            driving::GetActiveVehicleType()==driving::VEHICLE_CAR && !driving::ThirdPersonViewActive())
+            closeEnginePreFinish();
+        rear_mirror_render::Prepare(base);
+        if (water_monitor_render::NeedsRaster()) closeEnginePreFinish();
+        water_monitor_render::Prepare();
+    }
     unsigned char black[4] = {0, 0, 0, 255};
 
     // Build one eye-independent draw list from the physical ownership state. A
@@ -21707,12 +21775,12 @@ void OnRenderScene(bool underwater) {
     // Hand-thruster turbines + flames (present thread) show in REALISTIC mode.
     // The weapon-hand mask tells the compositor which hand holds a gun so it
     // draws the weapon there instead of a turbine (fly one-handed + shoot).
-    const bool vectored = jetpack::IsActive() && jetpack::IsVectoredMode();
+    const bool vectored = showPlayerPresence && jetpack::IsActive() && jetpack::IsVectoredMode();
     xr::SetJetpackThrusterMode(vectored);
     xr::SetJetpackGloveMode(false);   // IRONMAN gauntlets disabled for now
     xr::SetJetpackWeaponHandMask(
         vectored ? physicalweapon::HeldHandMaskRelaxed() : 0u);
-    if (jetpack::IsActive() && g_vrBaseValid) {
+    if (showPlayerPresence && jetpack::IsActive() && g_vrBaseValid) {
         void* jpTask  = jetpack::ActiveTask();
         void* jpClump = jpTask ? *reinterpret_cast<void**>(
             static_cast<std::uint8_t*>(jpTask) + 0x48) : nullptr;   // m_JetPackClump
@@ -21751,8 +21819,7 @@ void OnRenderScene(bool underwater) {
     if (cutsceneFirstPersonHead) {
         headHideClump = *reinterpret_cast<void**>(
             static_cast<std::uint8_t*>(g_cutsceneCameraActor) + 0x20);
-    } else if (playerPed && !playerlife::Dead(playerPed) && !FormalCutsceneRunning() &&
-               !ScriptedCutsceneRunning() && playerInVehicle &&
+    } else if (showPlayerPresence && playerPed && playerInVehicle &&
                driving::GetMode() != driving::MODE_IMMERSIVE &&
                !driving::ThirdPersonViewActive()) {
         headHideClump = *reinterpret_cast<void**>(
@@ -21795,7 +21862,7 @@ void OnRenderScene(bool underwater) {
     const bool scriptedWeaponCamera = vrfire::IsScriptedWeaponCamera();
     const bool vehicleImmersiveWeapons = playerInVehicle &&
         (driving::VehicleWeaponsImmersive() || scriptedWeaponCamera);
-    if (playerPed && g_vrBaseValid &&
+    if (showPlayerPresence && playerPed && g_vrBaseValid &&
         (!playerInVehicle || vehicleImmersiveWeapons)) {
         // Held models. The exact final matrix is fed back in OpenXR LOCAL space;
         // release/throw on the input thread therefore starts from these pixels.
@@ -22308,7 +22375,7 @@ void OnRenderScene(bool underwater) {
             // late VR hands. IMMERSIVE uses the same eye anchor but hides CJ and
             // renders the tracked hands plus the virtual wheel instead.
             const bool hideBody = playerlife::HideBody(playerlife::Dead(playerPed),
-                FormalCutsceneRunning()||ScriptedCutsceneRunning(),playerInVehicle,
+                !showPlayerPresence,playerInVehicle,
                 driving::GetMode()==driving::MODE_IMMERSIVE||driving::IsPlayerOnQuad());
             ScopedPlayerBodyHide hidePlayerBody(hideBody ? playerPed : nullptr);
             airhlod::Render(eye.pos.x, eye.pos.y,
@@ -22436,7 +22503,7 @@ void OnRenderScene(bool underwater) {
             if (g.RwCameraClear)
                 g.RwCameraClear(sc,transparent,1|2|4);
             g.RwCameraBeginUpdate(sc);
-            RenderGameplayHudPass();
+            RenderGameplayHudPass(showPlayerPresence);
             g.RwCameraEndUpdate(sc);
             static bool logged=false;
             if (!logged) {
@@ -22509,9 +22576,10 @@ void OnRenderScene(bool underwater) {
     if(g_releaseMapTexture)g_mapTextureLeases.Finish([](void* texture){g_releaseMapTexture(texture);});
     xr::SetStereoEyeTextures(&tex[0][0], &depth[0][0], hudTex, pdaTex, watchTex, projectionTex,
                              std::isfinite(pdaHeading) ? pdaHeading : 0.0f,
-                             outdoorMap,
+                             showPlayerPresence && outdoorMap,
                              renderedNear, renderedFar,
-                             g_recordCounter, g_eyeRasterW, g_eyeRasterH, g_resprayCameraCue);
+                             g_recordCounter, g_eyeRasterW, g_eyeRasterH, g_resprayCameraCue,
+                             cameraPresence);
     xr::NotifyGameFrame();                                    // for the on-screen FPS readout
     traffic_census::Viewpoint trafficView{};
     const TrafficInterestBasis trafficInterest =
@@ -30319,6 +30387,10 @@ std::uint64_t TheaterPresentation() {
     return g_theaterPresentation.load(std::memory_order_acquire);
 }
 
+std::uint64_t CameraPresence() {
+    return g_cameraPresence.load(std::memory_order_acquire);
+}
+
 std::uint64_t ResprayPresentation() {
     return g_resprayPresentation.load(std::memory_order_acquire);
 }
@@ -30341,6 +30413,7 @@ bool RecruitGestureActive() {
 
 void RefreshStereoGate() {
     RefreshRespray();
+    RefreshCameraPresence(false);
     const bool stereo = ShouldRunStereo();
     PublishTheaterPresentation(stereo);
     g_stereoActive.store(stereo, std::memory_order_relaxed);

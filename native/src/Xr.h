@@ -268,7 +268,8 @@ void SetStereoEyeTextures(const unsigned int* tex, const unsigned int* depth,
                           float pdaHeading,
                           bool mapVisible,
                           const float* nearZ, const float* farZ,
-                          int seq, int width, int height, std::uint64_t resprayCameraCue);
+                          int seq, int width, int height, std::uint64_t resprayCameraCue,
+                          std::uint64_t cameraPresence);
 
 // True while the wrist map projection is opening, open or closing.
 bool WatchProjectionNeeded();

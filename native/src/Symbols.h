@@ -96,6 +96,7 @@ struct GameSymbols {
     // camera is still updating, without guessing any CHud field offsets.
     void  (*CHud_Draw)();
     void  (*CHud_DrawAfterFade)();
+    void  (*CHud_DrawSubtitles)();
     // Android's gameplay HUD is split between CHud and the mobile touch
     // partitions. DrawAll(false) owns player status; CMessages::Display owns
     // tutorial/mission text in the two stock before/after-fade passes.

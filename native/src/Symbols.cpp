@@ -120,6 +120,7 @@ bool ResolveGameSymbols(void* handle) {
         {"_Z12DefinedStatev",                                                    reinterpret_cast<void**>(&g.DefinedState),                          false},
         {"_ZN4CHud4DrawEv",                                                     reinterpret_cast<void**>(&g.CHud_Draw),                             false},
         {"_ZN4CHud13DrawAfterFadeEv",                                          reinterpret_cast<void**>(&g.CHud_DrawAfterFade),                    false},
+        {"_ZN4CHud13DrawSubtitlesEv",                                          reinterpret_cast<void**>(&g.CHud_DrawSubtitles),                    false},
         {"_ZN15CTouchInterface7DrawAllEb",                                      reinterpret_cast<void**>(&g.CTouchInterface_DrawAll),               false},
         {"_ZN9CMessages7DisplayEh",                                             reinterpret_cast<void**>(&g.CMessages_Display),                     false},
         {"_ZN4CHud9m_MessageE",                                                reinterpret_cast<void**>(&g.CHud_m_Message),                        false},

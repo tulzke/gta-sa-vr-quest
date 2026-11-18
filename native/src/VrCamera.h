@@ -30,6 +30,8 @@ void EndGameFrameTelemetry();
 bool IsStereoActive();
 // One atomic snapshot: bit 0 is stereo, upper bits identify the flat opening.
 std::uint64_t TheaterPresentation();
+// Camera ownership and generation, published together by the game thread.
+std::uint64_t CameraPresence();
 // Pay 'n' Spray display cue shared with the XR compositor.
 std::uint64_t ResprayPresentation();
 void FinishResprayReveal(std::uint64_t cue);
