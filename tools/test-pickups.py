@@ -304,6 +304,7 @@ bool gInteractionsBlocked=false,gGripLatched[2]{},supported=false,dropped=false;
 struct Menu{bool open{};} gRadialMenus[2];
 std::atomic<unsigned> gHeldMaskRelaxed{0};
 int owner=-1,calls=0;
+int gCollectedType[2]{};
 constexpr float kGripOpen=.3f;
 bool ValidHand(int h){return h>=0&&h<2;}
 bool ValidSlot(int slot){return slot>0&&slot<13;}
@@ -329,6 +330,7 @@ int main(){
  assert(!HoldCollectedWeapon(-1,2,22)&&!HoldCollectedWeapon(2,2,22));
  assert(calls==0&&gHeldMaskRelaxed.load()==0);
  assert(HoldCollectedWeapon(0,2,22));assert(calls==1&&owner==0&&gGripLatched[0]&&gHeldMaskRelaxed.load()==1);
+ assert(gCollectedType[0]==22&&gCollectedType[1]==0);
  assert(WeaponTypeInSlot(ped,2)==22);
 }
 '''

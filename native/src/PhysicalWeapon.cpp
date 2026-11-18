@@ -83,6 +83,9 @@ struct DroppedWeapon {
 
 std::mutex gMutex;
 int gHeldSlot[kHandCount] = {-1, -1};
+// A newly collected world weapon can choose either waist socket on release.
+// Keep the type with the held owner so a later inventory replacement is stale.
+int gCollectedType[kHandCount]{};
 // Lock-free mirror of "which hands hold a weapon", refreshed at the end of
 // every Update(). Driving reads it inside its own state lock to keep a
 // weapon hand off the steering wheel; taking gMutex there would invert the
@@ -351,6 +354,7 @@ void ClearHeldLocked(int hand) {
     if (!ValidHand(hand)) return;
     ClearSupportForHandLocked(hand);
     gHeldSlot[hand] = -1;
+    gCollectedType[hand] = 0;
     gAwaitFirstGrip[hand] = false;
     ClearVisualPoseLocked(hand);
     if (gPreferredHand == hand) gPreferredHand = AnyHeldHandLocked();
@@ -366,6 +370,7 @@ void ResetRuntimeLocked() {
     for (int hand = 0; hand < kHandCount; ++hand) {
         xr::PublishHolsterHaptic(hand, -1, 0, 0);
         gHeldSlot[hand] = -1;
+        gCollectedType[hand] = 0;
         gSupportHand[hand] = -1;
         gPrimaryDetached[hand] = false;
         gGripLatched[hand] = false;
@@ -501,6 +506,7 @@ void GiveToHandLocked(void* ped, int hand, int slot, const char* reason) {
     gDisarmCatchBlocked[hand]=false;
     ClearSupportForHandLocked(hand);
     gHeldSlot[hand] = slot;
+    gCollectedType[hand] = 0;
     gAwaitFirstGrip[hand] = false;
     gPreferredHand = hand;
     ClearVisualPoseLocked(hand);
@@ -637,6 +643,47 @@ int ClosestAvailableHolsterSlotLocked(
     }
     if (distanceOut != nullptr) *distanceOut = closestDistance;
     return closestSlot;
+}
+
+bool CollectedWeaponLocked(void* ped, int hand) {
+    return ValidHand(hand) && ValidSlot(gHeldSlot[hand]) && gCollectedType[hand] > 0 &&
+        WeaponTypeInSlot(ped,gHeldSlot[hand]) == gCollectedType[hand];
+}
+
+bool CanStoreCollectedLocked(void* ped, int hand, int point) {
+    if (!CollectedWeaponLocked(ped,hand) || point < 0 || point > holster::WAIST_RIGHT || point >= holster::PointCount() ||
+        !holster::PointGrabbable(point)) return false;
+    const int slot = gHeldSlot[hand];
+    if (!((slot >= 1 && slot <= 9) || slot == 12)) return false;
+    const int previous = holster::PointSlot(point);
+    return previous == slot || !ValidSlot(previous) ||
+        !(OccupiedSlotMaskLocked() & (1u << previous));
+}
+
+int ClosestReturnPointLocked(void* ped, int owner, int contactHand,
+    const float (*anchors)[3], const bool* anchorValid) {
+    if (!ValidHand(owner) || !ValidHand(contactHand) || !gHands[contactHand].valid ||
+        !ValidSlot(gHeldSlot[owner])) return -1;
+    const bool collected = CollectedWeaponLocked(ped,owner);
+    const int home = holster::FindPointForSlot(gHeldSlot[owner]);
+    int closest = -1;
+    float best = kHolsterReturnRadius;
+    for (int point=0; point<holster::PointCount(); ++point) {
+        if (!anchorValid[point] || (collected ? !CanStoreCollectedLocked(ped,owner,point) : point != home)) continue;
+        const float distance = Distance(GripPosition(gHands[contactHand]),
+            {anchors[point][0],anchors[point][1],anchors[point][2]});
+        if (distance <= best && (closest < 0 || distance < best)) { closest=point; best=distance; }
+    }
+    return closest;
+}
+
+bool ReturnHeldLocked(void* ped, int owner, int contactHand,
+    const float (*anchors)[3], const bool* anchorValid, int* pointOut = nullptr) {
+    const int point=ClosestReturnPointLocked(ped,owner,contactHand,anchors,anchorValid);
+    if (point < 0 || (CollectedWeaponLocked(ped,owner) &&
+        !holster::SetPointSlot(point,gHeldSlot[owner]))) return false;
+    if (pointOut) *pointOut=point;
+    return true;
 }
 
 bool MapSupportOnlyPoseLocked(int primaryHand, const TrackingPose& source, TrackingPose* out) {
@@ -1088,7 +1135,8 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
         for (int hand=0; hand<kHandCount; ++hand) {
             if (!gHands[hand].valid || IsSupportHandLocked(hand) ||
                 (vehicleImmersive && (seatWheel.grabbed[hand] || seatWheel.ignitionGrabbed[hand] || seatWheel.radioGrabbed[hand]))) continue;
-            const bool returning = ValidSlot(gHeldSlot[hand]) && gHeldSlot[hand] == slot;
+            const bool returning = ValidSlot(gHeldSlot[hand]) &&
+                (gHeldSlot[hand] == slot || CanStoreCollectedLocked(ped,hand,point));
             // Empty sockets also accept the trigger-driven loadout wheel.
             const bool configuring = !ValidSlot(gHeldSlot[hand]) && holster::PointGrabbable(point);
             if (!returning && !configuring) continue;
@@ -1233,6 +1281,21 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
     if (!interactionsBlocked) {
         std::uint32_t handledHands = doorHands | radialHandledHands;
 
+        // A collected gun's deliberate stow wins before support promotion or
+        // hand transfer. A detached long gun uses its actual support controller.
+        for (int owner=0; owner<kHandCount; ++owner) {
+            if (!CollectedWeaponLocked(ped,owner)) continue;
+            const int support=gSupportHand[owner];
+            const int contact=gPrimaryDetached[owner] ? support : owner;
+            if (!ValidHand(contact) || !gHands[contact].valid ||
+                (handledHands & ((1u<<owner)|(1u<<contact))) || gHands[contact].grip>kGripOpen ||
+                !ReturnHeldLocked(ped,owner,contact,anchors,anchorValid)) continue;
+            ClearHeldLocked(owner);
+            handledHands |= (1u<<owner)|(1u<<contact);
+            if (ValidHand(support)) handledHands |= 1u<<support;
+            xr::TriggerWeaponClick(contact,.22f);
+        }
+
         // Keep/release an established support grip first. Separate foregrips
         // retain their own contact when the primary leaves; shared pistol grips
         // may transfer to the remaining hand.
@@ -1295,8 +1358,10 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                     gHeldVisualValid[primary] && gHeldVisualSlot[primary] == slot;
                 const TrackingPose finalPose = haveFinalPose
                     ? gHeldVisualPose[primary] : RawGripFallbackPose(gHands[primary]);
+                const int collectedType=gCollectedType[primary];
                 ClearHeldLocked(primary);
                 GiveToHandLocked(ped, support, slot, "promoted support");
+                gCollectedType[support]=collectedType;
                 gHeldVisualPose[support] = finalPose;
                 gHeldVisualSlot[support] = slot;
                 gHeldVisualValid[support] = true;
@@ -1349,8 +1414,10 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                     gHeldVisualValid[primary] && gHeldVisualSlot[primary] == slot
                         ? gHeldVisualPose[primary]
                         : RawGripFallbackPose(gHands[primary]);
+                const int collectedType=gCollectedType[primary];
                 ClearHeldLocked(primary);
                 GiveToHandLocked(ped, support, slot, "promoted fresh support");
+                gCollectedType[support]=collectedType;
                 gHeldVisualPose[support] = finalPose;
                 gHeldVisualSlot[support] = slot;
                 gHeldVisualValid[support] = true;
@@ -1390,8 +1457,10 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             if (std::min(modelDistance, handleDistance) > kTransferRadius)
                 continue;
             const int slot = gHeldSlot[source];
+            const int collectedType=gCollectedType[source];
             ClearHeldLocked(source);
             GiveToHandLocked(ped, receiver, slot, "transferred");
+            gCollectedType[receiver]=collectedType;
             xr::TriggerWeaponClick(receiver, .22f);
             // Preserve the exact reflected final basis until the renderer publishes
             // the receiver's newly calibrated model pose on the next render pass.
@@ -1443,11 +1512,8 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 gHands[hand].grip > kGripOpen)
                 continue;
             const int slot = gHeldSlot[hand];
-            const int point = holster::FindPointForSlot(slot);
-            const bool returnToHolster = point >= 0 && anchorValid[point] &&
-                Distance(GripPosition(gHands[hand]),
-                         {anchors[point][0], anchors[point][1], anchors[point][2]}) <=
-                    kHolsterReturnRadius;
+            int point=-1;
+            const bool returnToHolster = ReturnHeldLocked(ped,hand,hand,anchors,anchorValid,&point);
             if ((gGripLock || gAwaitFirstGrip[hand]) && !returnToHolster) continue;
 
             if (!returnToHolster) StartDropLocked(hand, slot, now);
@@ -1511,7 +1577,8 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
                 ? gHeldSlot[supportFor] : gHeldSlot[hand];
             const float grabRadius = holster::GrabRadiusMetres();
             if (ValidSlot(slot)) {
-                const int home = holster::FindPointForSlot(slot);
+                const int owner=ValidHand(supportFor) ? supportFor : hand;
+                const int home = ClosestReturnPointLocked(ped,owner,hand,anchors,anchorValid);
                 if (home>=0 && anchorValid[home] && holster::PointGrabbable(home)) {
                     const float radius = std::min(kHolsterReturnRadius, .75f*grabRadius);
                     const float distance = Distance(GripPosition(gHands[hand]),
@@ -1556,6 +1623,16 @@ void Update(bool interactionsBlocked, bool showHolsterMarkersWhileBlocked,
             for (int point = 0; point < holster::PointCount(); ++point) {
                 const int slot = holster::PointSlot(point);
                 if (!anchorValid[point]) continue;
+                bool collectedReturn=false;
+                if (gameplayMarkers && holster::PointVisible(point))
+                    for (int hand=0;hand<kHandCount;++hand)
+                        collectedReturn |= CanStoreCollectedLocked(ped,hand,point);
+                if (collectedReturn) {
+                    auto& marker=markers[markerCount++];
+                    marker.kind=holstermarker::Kind::Return;
+                    std::memcpy(marker.position,anchors[point],sizeof(marker.position));
+                    continue;
+                }
                 if (gameplayMarkers && slot < 0 && holster::PointVisible(point)) {
                     auto& marker = markers[markerCount++];
                     marker.kind = holstermarker::Kind::Empty;
@@ -1703,6 +1780,7 @@ bool HoldCollectedWeapon(int hand,int slot,int expectedType) {
        IsSupportHandLocked(hand)||gRadialMenus[hand].open||DroppedSourceForSlotLocked(slot)>=0||
        WeaponTypeInSlot(ped,slot)!=expectedType)return false;
     GiveToHandLocked(ped,hand,slot,"world pickup");
+    gCollectedType[hand]=expectedType;
     gGripLatched[hand]=true;
     gHeldMaskRelaxed.fetch_or(1u<<hand,std::memory_order_relaxed);
     return true;

@@ -10448,17 +10448,24 @@ void main(){
 }
 
 // Draw the holster marker cubes (uses the depth already set up by the hand pass).
-void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
+void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame, bool returnOverlay=false) {
     const auto& markers = frame.markers;
     const float* eye = frame.eye;
     const int count = frame.count;
     if (count <= 0) return;
+    const bool depthTest=glIsEnabled(GL_DEPTH_TEST);
+    GLboolean depthWrite=GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK,&depthWrite);
+    // Return hints are a final UI overlay: body/held weapon meshes must never
+    // cover the socket that is offering to store or replace a collected gun.
+    if (returnOverlay) { glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE); }
     EnsureMarkerProgram();
     const float size = 0.026f;
     int vc=0, ic=0;
     static const unsigned short cube[36] = {0,1,2, 2,1,3, 4,6,5, 5,6,7, 0,2,4, 4,2,6,
                                             1,5,3, 3,5,7, 0,4,1, 1,4,5, 2,3,6, 6,3,7};
     for (int m=0; m<count; ++m) {
+        if (returnOverlay) continue;
         if (markers[m].kind == holstermarker::Kind::Return || markers[m].kind == holstermarker::Kind::Empty) continue;
         const float* p=markers[m].position;
         const int base=vc;
@@ -10495,7 +10502,7 @@ void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
     glDisable(GL_CULL_FACE); // flat return geometry must be visible from either side
     glUniform4f(g_markerColLoc,1.0f,0.75f,0.25f,1);
     for (int i=0; i<count; ++i) {
-        if (markers[i].kind != holstermarker::Kind::Return) continue;
+        if (!returnOverlay || markers[i].kind != holstermarker::Kind::Return) continue;
         const auto mesh=holstermarker::ReturnMesh(markers[i].position,eye);
         draw(mesh.vertices.data(),mesh.vertexCount,mesh.indices.data(),mesh.indexCount);
     }
@@ -10503,13 +10510,14 @@ void DrawHolsterMarkers(const float* mvp, const holstermarker::Frame& frame) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
     for (int i=0; i<count; ++i) {
-        if (markers[i].kind != holstermarker::Kind::Empty) continue;
+        if (returnOverlay || markers[i].kind != holstermarker::Kind::Empty) continue;
         auto mesh=holstermarker::ReturnMesh(markers[i].position,eye);
         mesh.indexCount -= 12;
         glUniform4f(g_markerColLoc,1.0f,0.85f,0.12f,markers[i].opacity);
         draw(mesh.vertices.data(),mesh.vertexCount,mesh.indices.data(),mesh.indexCount);
     }
-    glDepthMask(GL_TRUE);
+    glDepthMask(depthWrite);
+    if (depthTest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
     if (cull) glEnable(GL_CULL_FACE);
     glDisableVertexAttribArray(0); glUseProgram(0);
@@ -12567,6 +12575,7 @@ void DrawHandsForEye(const XrPosef& rp, int e, int fbW, int fbH,
         for (const auto& ray : laser) DrawWeaponLaser(mvp, ray); // calibrated red beam, occluded by world + weapon
         DrawWeaponForEye(mvp);     // active weapon mesh pinned to the hand (Stage 1)
         DrawThrowableTrajectories(mvp, throwableTrajectory);
+        DrawHolsterMarkers(mvp,bakedHolsters,true); // return UI above all weapon models
     }
     if (usingGameDepth && haveHands && IsSessionFocused() && !IsMenuVisible())
         DrawWheelHandGuides(mvp,rp.position);

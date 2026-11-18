@@ -64,9 +64,11 @@ namespace savr::xr {void SetAmmoHolsters(const holstermarker::Frame&) {} void Tr
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 constexpr int kHandCount=2;
 struct Vec {float x{},y{},z{};};
+using V3=Vec;
 struct Hand {bool valid{true};float grip{};Vec pos{};};
 struct Drop {int slot{-1};};
 Hand gHands[2]; Drop gDropped[2]; int gHeldSlot[2]={-1,-1};
+int gCollectedType[2]{},gSupportHand[2]{-1,-1};bool gPrimaryDetached[2]{};
 bool gGripLatched[2]{},gAwaitFirstGrip[2]{},gGripLock{},gDualHoldEnabled=true;
 bool enabled=true,interactionsBlocked=false,showHolsterMarkersWhileBlocked=false,showSupportMarkerWhileBlocked=false;
 bool vehicleImmersive=false,scriptedGunner=false;
@@ -76,6 +78,8 @@ int slots[7]={1,2,3,4,5,6,7}, visibility[7]{};
 int types[13]={0,1,2,3,4,5,6,7,8,9,10,11,12};
 namespace savr::holster {
 constexpr int POINT_COUNT=7;
+constexpr int WAIST_RIGHT=1;
+bool assignmentAccepted=true;int assignmentCalls=0;
 int PointCount(){return 7;} int PointSlot(int p){return slots[p];}
 bool PointVisible(int p){return visibility[p]==0;}
 bool PointGrabbable(int p){return visibility[p]!=2;}
@@ -83,6 +87,12 @@ bool GripMarkersEnabled(){return enabled;}
 float GrabRadiusMetres(){return 0.18f;}
 int FindPointForSlot(int slot){for(int p=0;p<7;++p)if(slots[p]==slot)return p;return -1;}
 const char* PointName(int){return "test";}
+bool SetPointSlot(int p,int s){
+ ++assignmentCalls;if(!assignmentAccepted)return false;
+ const int previous=slots[p];
+ for(int other=0;other<2;++other)if(other!=p&&slots[other]==s)slots[other]=previous;
+ slots[p]=s;return true;
+}
 }
 bool ValidSlot(int s){return s>0&&s<13;}
 bool ValidHand(int h){return h>=0&&h<2;}
@@ -95,16 +105,32 @@ void* Vehicle(int,bool){return vehicleImmersive?reinterpret_cast<void*>(1):nullp
 struct {void*(*FindPlayerVehicle)(int,bool)=Vehicle;} g;
 namespace savr::vrfire {bool IsScriptedWeaponCamera(){return scriptedGunner;}}
 void StartDropLocked(int h,int s,double){gDropped[h].slot=s;}
-void ClearHeldLocked(int h){gHeldSlot[h]=-1;}
-void GiveToHandLocked(void*,int h,int s,const char*){gHeldSlot[h]=s;}
+void ClearSupportForHandLocked(int h){gSupportHand[h]=-1;gPrimaryDetached[h]=false;}
+void ClearVisualPoseLocked(int){}
+void GiveToHandLocked(void*,int h,int s,const char*){gHeldSlot[h]=s;gCollectedType[h]=0;}
+struct TrackingPose{Vec position;};
+TrackingPose gHeldVisualPose[2]{};int gHeldVisualSlot[2]{-1,-1};bool gHeldVisualValid[2]{};
+TrackingPose RawGripFallbackPose(Hand h){return {h.pos};}
+Vec PositionOf(TrackingPose p){return p.position;}
 '''
-constants = '\n'.join(line for line in physical.splitlines() if line.startswith('constexpr float ') and any(name in line for name in ('kGripClose ', 'kGripOpen ', 'kHolsterReturnRadius ')))
-production = '\n'.join(function(sig) for sig in ('bool OwnedConfiguredSlot(', 'int HeldHandForSlotLocked(', 'std::uint32_t OccupiedSlotMaskLocked(', 'int AnyHeldHandLocked(', 'int ClosestAvailableHolsterSlotLocked('))
+constants = '\n'.join(line for line in physical.splitlines() if line.startswith('constexpr float ') and any(name in line for name in ('kGripClose ', 'kGripOpen ', 'kHolsterReturnRadius ', 'kTransferRadius ')))
+production = '\n'.join(function(sig) for sig in ('bool OwnedConfiguredSlot(', 'int HeldHandForSlotLocked(', 'std::uint32_t OccupiedSlotMaskLocked(', 'int AnyHeldHandLocked(', 'void ClearHeldLocked(', 'int ClosestAvailableHolsterSlotLocked(', 'bool CollectedWeaponLocked(', 'bool CanStoreCollectedLocked(', 'int ClosestReturnPointLocked(', 'bool ReturnHeldLocked('))
 # AnyHeldHand reads only a preferred hand in addition to the two owners.
 prefix += '\nint gPreferredHand=-1;\n'
 transition_fn = 'void Transition(){void* ped=nullptr;double now=1;std::uint32_t handledHands=0;\n' + transitions + '\n}\n'
 marker_fn = 'int Publish(holstermarker::Marker out[8]) {void* ped=nullptr;\n' + markers + '\n    }\nstd::memcpy(out,markers,sizeof(markers));return markerCount;\n}\n'
+early_stow = physical[physical.index('        // A collected gun\'s deliberate stow'):physical.index('        // Keep/release an established support grip first.')]
+transition_fn += 'void EarlyStow(){void* ped=nullptr;std::uint32_t handledHands=0;\n'+early_stow+'\n}\n'
+transfer = physical[physical.index('        // Explicit hand-to-hand transfer at the final rendered gun body.'):physical.index('        // Recoil-ejected weapons cannot snap back')]
+transition_fn += 'void Transfer(){void* ped=nullptr;std::uint32_t handledHands=0;\n'+transfer+'\n}\n'
 tests = r'''
+void Collected(int hand,int slot=6){
+ for(int p=0;p<7;++p){anchors[p][0]=float(p);anchorValid[p]=true;slots[p]=p+1;visibility[p]=p<2?0:2;}
+ for(int h=0;h<2;++h){gHeldSlot[h]=-1;gCollectedType[h]=0;gDropped[h].slot=-1;gHands[h]={};gSupportHand[h]=-1;gPrimaryDetached[h]=false;gGripLatched[h]=false;gHeldVisualValid[h]=false;}
+ enabled=true;interactionsBlocked=false;showHolsterMarkersWhileBlocked=false;gGripLock=false;
+ holster::assignmentAccepted=true;holster::assignmentCalls=0;
+ gHeldSlot[hand]=slot;gCollectedType[hand]=types[slot];gHands[hand].grip=1;
+}
 int main(){
     for(int p=0;p<7;++p)anchors[p][0]=float(p);
     holstermarker::Marker m[8];CHECK(Publish(m)==0);
@@ -144,12 +170,67 @@ int main(){
     // Invalid socket cannot be grabbed and cannot produce a marker.
     anchorValid[0]=false;gDropped[0].slot=-1;gGripLatched[1]=false;Transition();CHECK(gHeldSlot[1]==-1);
     CHECK(Publish(m)==0);
+    // Newly collected guns offer both occupied waist sockets; release replaces
+    // either loadout entry without a trigger/menu, with grip lock on or off.
+    for(int hand=0;hand<2;++hand)for(int point=0;point<2;++point)for(bool lock:{false,true}){
+        Collected(hand);gGripLock=lock;
+        CHECK(Publish(m)==2&&m[0].kind==holstermarker::Kind::Return&&m[1].kind==holstermarker::Kind::Return);
+        gHands[hand].pos={float(point),0,0};gHands[hand].grip=0;
+        const int other=slots[1-point];Transition();
+        CHECK(slots[point]==6&&slots[1-point]==other&&gHeldSlot[hand]==-1);
+        CHECK(gCollectedType[hand]==0&&gDropped[hand].slot==-1&&holster::assignmentCalls==1);
+        CHECK(Publish(m)==0);
+    }
+    Collected(0);slots[1]=6;gHands[0].grip=0;Transition();
+    CHECK(slots[0]==6&&slots[1]==1); // already assigned elsewhere: preserve swap semantics
+    Collected(0);slots[0]=-1;CHECK(Publish(m)==2&&m[0].kind==holstermarker::Kind::Return);
+    gHands[0].grip=0;Transition();CHECK(slots[0]==6&&gDropped[0].slot==-1);
+    Collected(0);gHands[0].pos={.5f,0,0};anchors[1][0]=.1f;gHands[0].pos={.06f,0,0};
+    gHands[0].grip=0;Transition();CHECK(slots[1]==6&&slots[0]==1); // nearest socket wins
+    Collected(0);gHands[0].pos={10,0,0};gHands[0].grip=0;Transition();
+    CHECK(gDropped[0].slot==6&&gCollectedType[0]==0&&holster::assignmentCalls==0);
+    Collected(0);gGripLock=true;gHands[0].pos={10,0,0};gHands[0].grip=0;Transition();
+    CHECK(gHeldSlot[0]==6&&gCollectedType[0]==types[6]&&holster::assignmentCalls==0);
+    for(int mode=0;mode<5;++mode){
+        Collected(0);gGripLock=true;gHands[0].grip=0;
+        if(mode==0)visibility[0]=2;
+        if(mode==1)anchorValid[0]=false;
+        if(mode==2)gHeldSlot[1]=slots[0];
+        if(mode==3)gDropped[1].slot=slots[0];
+        if(mode==4)holster::assignmentAccepted=false;
+        Transition();CHECK(gHeldSlot[0]==6&&slots[0]==1&&gDropped[0].slot==-1);
+    }
+    Collected(0);visibility[0]=1;CHECK(Publish(m)==1); // hidden still accepts stow, OFF does not
+    gHands[0].grip=0;Transition();CHECK(slots[0]==6);
+    Collected(0);gCollectedType[0]=999;CHECK(!CanStoreCollectedLocked(nullptr,0,0));
+    Collected(0);gSupportHand[0]=1;gHands[0].grip=0;EarlyStow();
+    CHECK(gHeldSlot[0]==-1&&gSupportHand[0]==-1&&slots[0]==6);
+    Collected(0);gSupportHand[0]=1;gPrimaryDetached[0]=true;
+    gHands[1].pos={1,0,0};EarlyStow();CHECK(gHeldSlot[0]==-1&&slots[1]==6);
+    for(int source=0;source<2;++source){
+        Collected(source);const int receiver=1-source;
+        gHands[source].pos={.5f,0,0};gHands[receiver].pos={.55f,0,0};gHands[receiver].grip=1;
+        Transfer();CHECK(gHeldSlot[receiver]==6&&gCollectedType[receiver]==types[6]);
+        CHECK(gHeldSlot[source]==-1&&gCollectedType[source]==0);
+        gHands[receiver].pos={1,0,0};gHands[receiver].grip=0;Transition();
+        CHECK(slots[1]==6&&gHeldSlot[receiver]==-1&&gDropped[receiver].slot==-1);
+    }
     std::puts("PASS: production grab/release and marker branches, both owners, return vs drop, lock, visibility and calibration");
 }
 '''
 generated = OUT / 'gameplay.cpp'
 generated.write_text(prefix + constants + '\n' + production + '\n' + transition_fn + marker_fn + tests, encoding='utf8')
 compile_run(generated, 'holster-gameplay')
+
+# Execute the real renderer with a GL state recorder: only Return markers get
+# the final depth-independent pass; calibration and empty hints keep depth.
+renderer = (ROOT/'native/src/Xr.cpp').read_text(encoding='utf8')
+render_fixture = (ROOT/'tools/tests/holster_return_overlay.cpp').read_text(encoding='utf8')
+generated = OUT/'return-overlay.cpp'
+generated.write_text(render_fixture.replace('// PRODUCTION_RENDERER',function('void DrawHolsterMarkers(',renderer)),encoding='utf8')
+compile_run(generated,'holster-return-overlay')
+hand_pass = function('void DrawHandsForEye(',renderer)
+assert hand_pass.index('DrawWeaponForEye(mvp);') < hand_pass.index('DrawHolsterMarkers(mvp,bakedHolsters,true);')
 
 camera = (ROOT / 'native/src/VrCamera.cpp').read_text(encoding='utf8')
 holsters = (ROOT / 'native/src/Holster.cpp').read_text(encoding='utf8')
@@ -347,6 +428,7 @@ struct {bool grabbed[2]{},ignitionGrabbed[2]{},radioGrabbed[2]{};}seatWheel;
 float headPosition[3]{},headOrientation[4]{0,0,0,1};std::uint64_t trackingEpoch=1;
 bool ValidSlot(int s){return s>=0&&s<26;}
 bool IsSupportHandLocked(int h){return support[h];}
+bool CanStoreCollectedLocked(void*,int,int){return false;}
 namespace savr::holster {
 int PointCount(){return 2;}int PointSlot(int p){return slots[p];}
 bool PointGrabbable(int p){return grabbable[p];}bool BodyFrameEnabled(){return bodyEnabled;}
@@ -367,7 +449,7 @@ void UpdateHolsterBodyTracking(const float*,const float*,bool valid,std::uint64_
 }
 }
 int frame;
-void Tick(int tick){const double now=tick/100.0;
+void Tick(int tick){const double now=tick/100.0;void* ped=nullptr;
 '''
 reach_tests = r'''
 }

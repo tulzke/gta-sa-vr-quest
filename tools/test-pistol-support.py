@@ -54,6 +54,7 @@ Hand gHands[2];
 V3 GripPosition(const Hand& h){return {h.gripPos[0],h.gripPos[1],h.gripPos[2]};}
 TrackingPose RawGripFallbackPose(const Hand& h){TrackingPose p;std::memcpy(p.position,h.gripPos,sizeof(p.position));p.right[0]=std::cos(h.yaw);p.right[2]=-std::sin(h.yaw);p.forward[0]=-std::sin(h.yaw);p.forward[2]=-std::cos(h.yaw);return p;}
 int gHeldSlot[2]{-1,-1},gSupportHand[2]{-1,-1},gHeldBaseSlot[2]{-1,-1},gHeldVisualSlot[2]{-1,-1};
+int gCollectedType[2]{};
 TrackingPose gHeldBasePose[2],gHeldVisualPose[2];
 bool gHeldBaseValid[2]{},gHeldVisualValid[2]{},gGripLatched[2]{},gGripLock{};
 bool gInteractionsBlocked{},gPrimaryDetached[2]{};
@@ -71,8 +72,8 @@ constexpr float kGripOpen=.30f,kGripClose=.65f,kSupportGrabRadius=.18f,kHolsterR
 namespace savr::holster {int FindPointForSlot(int){return -1;}}
 void StartDropLocked(int,int,double,int velocityHand=-1){++dropCount;dropVelocityHand=velocityHand;}
 int ClosestAvailableHolsterSlotLocked(void*,int,const float[][3],const bool*){return availableHolster;}
-void ClearHeldLocked(int h){ClearSupportForHandLocked(h);gHeldSlot[h]=-1;}
-void GiveToHandLocked(void*,int h,int slot,const char*){gHeldSlot[h]=slot;}
+void ClearHeldLocked(int h){ClearSupportForHandLocked(h);gHeldSlot[h]=-1;gCollectedType[h]=0;}
+void GiveToHandLocked(void*,int h,int slot,const char*){gHeldSlot[h]=slot;gCollectedType[h]=0;}
 namespace savr::xr {void TriggerWeaponClick(int,float){}}
 void Tick(){void* ped=FindPlayerPed(-1);unsigned handledHands=0;float anchors[7][3]{};bool anchorValid[7]{};
 '''+physical[physical.index('        // Keep/release an established support grip first.'):physical.index('        // Explicit hand-to-hand transfer at the final rendered gun body.')]+r'''
@@ -80,6 +81,7 @@ void Tick(){void* ped=FindPlayerPed(-1);unsigned handledHands=0;float anchors[7]
 void Reset(int primary,int weaponType){
  type=weaponType;availableHolster=-1;gGripLock=false;now=10;gPreferredHand=primary;dropCount=0;dropVelocityHand=-1;
  for(int h=0;h<2;++h){gHands[h]=Hand{};gHeldSlot[h]=gSupportHand[h]=gHeldBaseSlot[h]=-1;
+  gCollectedType[h]=0;
   gPrimaryDetached[h]=false;gHeldBaseValid[h]=gHeldVisualValid[h]=gGripLatched[h]=false;gSupportStartedAt[h]=0;}
  gHeldSlot[primary]=gHeldBaseSlot[primary]=2;gHeldBaseValid[primary]=true;
  auto& model=gHeldBasePose[primary];model=TrackingPose{};
@@ -172,9 +174,20 @@ int main(){
   CHECK(SupportAnimationProgress(primary)==0);
   gGripLatched[support]=false;gHands[support].grip=1;
   std::memcpy(gHands[support].gripPos,anchor.position,sizeof(anchor.position));Tick();
+  gCollectedType[primary]=t;
   gHands[primary].grip=0;Tick();
   if(t==32){CHECK(gPrimaryDetached[primary]&&gHeldSlot[primary]==2&&gHeldSlot[support]==-1);}
   else {CHECK(gHeldSlot[support]==2&&gHeldSlot[primary]==-1);CHECK(gSupportHand[primary]==-1);} // support promoted on primary release
+  CHECK(gCollectedType[t==32?primary:support]==t);
+  if(t!=32)CHECK(gCollectedType[primary]==0);
+ }
+
+ for(int primary:{0,1}){
+  Reset(primary,22);const int support=1-primary;TrackingPose anchor{};
+  CHECK(BuildSupportAnchorLocked(primary,&anchor));
+  std::memcpy(gHands[support].gripPos,anchor.position,sizeof(anchor.position));
+  gCollectedType[primary]=22;gHands[primary].grip=0;Tick();
+  CHECK(gHeldSlot[support]==2&&gCollectedType[support]==22&&gCollectedType[primary]==0);
  }
 
  for(int primary:{0,1}) {
