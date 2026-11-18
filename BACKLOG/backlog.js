@@ -340,17 +340,6 @@ const BACKLOG_DATA = {
       "status": "open"
     },
     {
-      "id": 89,
-      "title": "Настройка подбора оружия с земли без ложных срабатываний",
-      "file": "89-nastroyka-podbora-oruzhiya-s-zemli.md",
-      "categories": [
-        "weapons",
-        "bugs"
-      ],
-      "priority": "high",
-      "status": "in_progress"
-    },
-    {
       "id": 90,
       "title": "Физика и коллизии бросаемого оружия",
       "file": "90-fizika-i-kollizii-brosaemogo-oruzhiya.md",
