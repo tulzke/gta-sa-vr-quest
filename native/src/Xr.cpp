@@ -3700,11 +3700,6 @@ void main() {
     // why tutorial and money text appeared upside-down in the headset.
     vec2 sourceUv = uSourceRect.xy + local * uSourceRect.zw;
     vec4 colour = texture(uTexture, sourceUv);
-    if (uHighlight < -0.5) {
-        // Retail scene subtitles include dark outlines and use texture alpha.
-        outColor = colour;
-        return;
-    }
     float coverage = max(colour.r, max(colour.g, colour.b));
     float keyedAlpha = smoothstep(0.008, 0.055, coverage);
     float edge = min(min(local.x, 1.0 - local.x),
@@ -4465,7 +4460,9 @@ void DrawSceneSubtitles(GLuint sourceTexture, int eye) {
     glUniform1i(s.hudCompositeTextureUniform, 0);
     glUniform4f(s.hudCompositeSourceRectUniform, 0, 0, 1, 1);
     glUniform4f(s.hudCompositeDestinationRectUniform, eyeShift, 0, 1, 1);
-    glUniform1f(s.hudCompositeHighlightUniform, -1);
+    // The retail raster can return opaque alpha for its cleared black area.
+    // Use the shared HUD colour key so only subtitle pixels cover the eye.
+    glUniform1f(s.hudCompositeHighlightUniform, 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glDisable(GL_BLEND);
 }
