@@ -84,7 +84,6 @@ bool HoldCollectedWeapon(int h,int,int type){++holdCalls;holdType=type;weaponMas
 }
 namespace vrcam {
 bool TrackingPointToWorld(const float p[3],float w[3]){std::copy_n(p,3,w);return true;}
-bool WeaponPickupGripWorld(int,const void* m,float p[3]){std::memcpy(p,static_cast<const float*>(m)+12,12);return true;}
 }
 }
 ''' + runtime + r'''
@@ -136,6 +135,39 @@ void Step(float grip){
 }
 void Hold(){Step(0);Step(0);for(int i=0;i<24;++i)Step(1);}
 int main(){
+ // Both pose representations keep contact, arbitration and the icon on the
+ // rotation axis. A fixed hand near the range limit must finish a full hold
+ // while an asymmetric weapon makes a complete revolution.
+ for(bool simple:{false,true}){
+  Setup();ItemAt(0,352,1.f);
+  if(simple){
+   Write(object[0],0x18,static_cast<void*>(nullptr));
+   Write(object[0],8,1.f);Write(object[0],0x10,.7f);
+  }else matrices[0][14]=.7f;
+  poses[0].gripPos[0]=1.f+kGrabRangeM-.01f;
+  poses[0].gripPos[1]=0;poses[0].gripPos[2]=.7f;
+  Step(0);Step(0);
+  for(int phase=0;phase<=24;++phase){
+   const float angle=phase*6.28318530718f/20;
+   if(simple)Write(object[0],0x14,angle);
+   else{
+    matrices[0][0]=std::cos(angle);matrices[0][1]=std::sin(angle);
+    matrices[0][4]=-std::sin(angle);matrices[0][5]=std::cos(angle);
+   }
+   Item item{};assert(LoadItem(pool,player,item));
+   assert(item.point[0]==1.f&&item.point[1]==0&&item.point[2]==.7f);
+   Step(1);
+   if(phase<20){
+    assert(g_gestures[0].active&&g_targets[0].pickup==pool);
+    assert(g_markers.count==1);
+    const auto p=g_markers.markers[0].position;
+    assert(p.x==1.f&&p.y==0&&p.z==.7f);
+    assert(std::abs(grabarbitration::current.hands[0].distance-(kGrabRangeM-.01f))<.0001f);
+   }
+   if(grantCalls)break;
+  }
+  assert(grantCalls==1&&g_pending.type==28);
+ }
  // Real pickups can have only CSimpleTransform. These same-slot replacements
  // reproduce Colt versus Deagle and Uzi versus Tec without allocating CMatrix.
  for(int incoming:{22,28}){

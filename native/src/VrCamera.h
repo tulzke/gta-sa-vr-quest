@@ -109,8 +109,6 @@ bool GetWeaponRayTracking(const xr::HandPose& renderedPose, int hand,
 // used by the stereo camera into GTA world coordinates. Physical melee uses
 // this narrow bridge before passing tracked weapon sweeps to CWorld.
 bool TrackingPointToWorld(const float trackingPoint[3], float worldPoint[3]);
-// Controller contact point expressed in the final world pickup model matrix.
-bool WeaponPickupGripWorld(int weaponType, const void* matrix, float out[3]);
 
 // Latest tracked eye and gaze in the same GTA frame as the stereo camera.
 bool GetHeadWorldRay(float originOut[3], float directionOut[3]);

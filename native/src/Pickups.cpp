@@ -122,11 +122,13 @@ bool LoadItem(void* pickup,void* player,Item& item){
     if(!type||!obj||physicalweapon::IsSlotDropped(slot))return false;
     // Identical inventory weapons are ammunition sources, handled by walking.
     if(CanWalkCollect(type,OwnedType(player,slot)))return false;
-    // Use the actual visible object's pose. A second authored-position + lift
-    // reconstruction can target empty air when the retail frame differs.
+    // Anchor contact and the marker at the visible object's rotation pivot.
+    // A model-local grip offset orbits this axis on asymmetric weapons and
+    // can cancel a stationary hand's hold as the retail model spins.
     std::array<float,16> pose{};if(!EntityPose(obj,pose))return false;
     item={pickup,obj,Identity(pickup),type,slot,{}};
-    return item.id&&vrcam::WeaponPickupGripWorld(type,pose.data(),item.point);
+    std::copy_n(pose.data()+12,3,item.point);
+    return item.id!=0;
 }
 unsigned OtherOwners(){return vehicledoors::ClaimedHands()|npcgrab::ClaimedHands()|
     basketball::HeldHandMask()|physicalweapon::RadialMenuHandMask()|driving::ServiceRadioClaimedHands()|driving::WaterMonitorClaimedHands();}

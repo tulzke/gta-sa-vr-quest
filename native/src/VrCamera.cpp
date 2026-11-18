@@ -30619,21 +30619,6 @@ bool TrackingPointToWorld(const float trackingPoint[3], float worldPoint[3]) {
     return true;
 }
 
-bool WeaponPickupGripWorld(int weaponType,const void* matrix,float out[3]) {
-    if(!matrix||!out)return false;
-    xr::HandPose neutral{};neutral.valid=true;neutral.gripOri[3]=1;
-    RwMat model{};
-    if(!HandWeaponMatrixForPoseCalibrated(1,weaponType,neutral,calib::Snapshot(1,weaponType),model,false))return false;
-    const V3 grip=TrackingPointToGame({0,0,0});
-    const V3 delta=grip-V3{model.t[0],model.t[1],model.t[2]};
-    const float local[]={Dot(delta,{model.r[0],model.r[1],model.r[2]}),
-        Dot(delta,{model.u[0],model.u[1],model.u[2]}),
-        Dot(delta,{model.a[0],model.a[1],model.a[2]})};
-    const auto* m=static_cast<const float*>(matrix);
-    for(int i=0;i<3;++i)out[i]=m[12+i]+m[i]*local[0]+m[4+i]*local[1]+m[8+i]*local[2];
-    return std::isfinite(out[0])&&std::isfinite(out[1])&&std::isfinite(out[2]);
-}
-
 bool GetNeutralVehicleEyeWorld(float out[3]) {
     if (!out || !g_vrBaseValid || !g_origin.valid ||
         !g.FindPlayerVehicle || !g.FindPlayerVehicle(-1,false) ||
