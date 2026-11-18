@@ -541,6 +541,6 @@ void SetTheaterCrop(int width, int height);
 // Hand over the engine's finished frame for the compositor to show. The texture
 // is an external OES texture in the render thread's context; transform is the 4x4
 // matrix SurfaceTexture reports for it. Passing 0 falls back to the test colours.
-void SetGameFrame(unsigned int texture, const float* transform);
+void SetGameFrame(unsigned int texture, const float* transform, std::int64_t timestampNs);
 
 } // namespace savr::xr

@@ -49,6 +49,7 @@
 #include "HudSettings.h"
 #include "Locomotion.h"
 #include "Log.h"
+#include "MissionScenes.h"
 #include "RenderDiagnosticsGl.h"
 #include "PerfTelemetry.h"
 #include "PhotoCapture.h"
@@ -1180,9 +1181,14 @@ struct StereoCandidate {
     std::uint64_t cameraPresence{};
 };
 
+// XR thread only. Cumulative so a brief rejection shows up in the next sample.
+std::uint64_t g_cameraPresenceRejections{};
+
 bool MatchCameraPresence(int set, StereoCandidate& candidate) {
     candidate.cameraPresence = g_stereoCameraPresence[set].load(std::memory_order_relaxed);
-    return candidate.cameraPresence == vrcam::CameraPresence();
+    if (candidate.cameraPresence == vrcam::CameraPresence()) return true;
+    ++g_cameraPresenceRejections;
+    return false;
 }
 
 class StereoReadLease {
@@ -2173,6 +2179,7 @@ struct State {
     // The engine's last finished frame, as an external texture, plus the layout
     // matrix SurfaceTexture reports for it.
     GLuint gameTexture{0};
+    std::int64_t gameTextureTimestampNs{-1};
     float  gameTransform[16]{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 
     GLuint blitProgram{0};
@@ -6659,8 +6666,9 @@ void SetRenderHeadPose(const float position[3], const float orientation[4]) {
     g_renderHeadPoseValid = true;
 }
 
-void SetGameFrame(unsigned int texture, const float* transform) {
+void SetGameFrame(unsigned int texture, const float* transform, std::int64_t timestampNs) {
     s.gameTexture = texture;
+    s.gameTextureTimestampNs = timestampNs;
     if (transform != nullptr) {
         std::memcpy(s.gameTransform, transform, sizeof(s.gameTransform));
     }
@@ -13804,6 +13812,7 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
     // is copying the eyes or is about to reuse a previously composed projection.
     const auto readyPresence = vrcam::CameraPresence();
     if (projectionLayerSubmitted && submittedCameraPresence != readyPresence) {
+        ++g_cameraPresenceRejections;
         projectionLayerSubmitted = false;
         submittedStereoSequence = -1;
         zeroCopyRepeat = false;
@@ -13997,6 +14006,24 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
         .fxaaErrors = fxaaStats.errors,
         .fxaaSubmitWallMs = fxaaStats.submitWallMs,
     });
+
+    if (missionscenes::Smoke2Tracing()) {
+        missionscenes::TraceSmoke2Presentation({
+            .cameraPresence = readyPresence,
+            .presenceRejections = g_cameraPresenceRejections,
+            .surfaceTimestampNs = s.gameTextureTimestampNs,
+            .newestStereo = g_stereoSeq.load(std::memory_order_acquire),
+            .submittedStereo = submittedStereoSequence,
+            .outcome = stereoProjectionOutcome,
+            .fallback = stereoFallbackSource,
+            .endFrameResult = static_cast<int>(ended),
+            .layers = layerCount,
+            .theater = s.theaterMode,
+            .projection = projectionLayerSubmitted && layerCount > 0,
+            .shouldRender = frameState.shouldRender == XR_TRUE,
+            .fullscreenFade = std::max(buildingOpacity, resprayOpacity),
+        });
+    }
 
     // The one measurement that settles why the headset is black: whether we even
     // submit a layer, and whether the runtime accepts it. A black headset with

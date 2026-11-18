@@ -350,6 +350,10 @@ public final class SavrApplication extends Application {
         return textureTransform;
     }
 
+    public static long getGameTextureTimestamp() {
+        return gameTexture != null && attached ? gameTexture.getTimestamp() : -1;
+    }
+
     private static void log(String state, Activity activity) {
         if (GAME_ACTIVITY.equals(activity.getClass().getName())) {
             android.util.Log.i(TAG, "activity " + state);

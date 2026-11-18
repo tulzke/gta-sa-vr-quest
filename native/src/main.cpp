@@ -755,7 +755,16 @@ void PublishGameFrame(JNIEnv* env) {
     float transform[16]{};
     env->GetFloatArrayRegion(matrix, 0, 16, transform);
     env->DeleteLocalRef(matrix);
-    xr::SetGameFrame(g_gameTexture, transform);
+    std::int64_t timestamp = -1;
+    if (missionscenes::Smoke2Tracing()) {
+        static const jmethodID getTimestamp = env->GetStaticMethodID(appClass, "getGameTextureTimestamp", "()J");
+        if (getTimestamp) timestamp = env->CallStaticLongMethod(appClass, getTimestamp);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            timestamp = -1;
+        }
+    }
+    xr::SetGameFrame(g_gameTexture, transform, timestamp);
 }
 
 void OnSurfaceChanged(JNIEnv* env, jclass clazz, jobject surface, jint width, jint height) {
