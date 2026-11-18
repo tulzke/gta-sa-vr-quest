@@ -5,6 +5,7 @@
 #include "Tbone.h"
 #include "BeachDance.h"
 #include "MissionScenes.h"
+#include "BuildingTransition.h"
 #include "JustBusiness.h"
 #include "AnimatedTextures.h"
 #include "Appearance.h"
@@ -2742,6 +2743,7 @@ void* WaitForGameLibrary(void*) {
     savr::beachdance::Install(handle);
     savr::tbone::Install(handle);
     savr::missionscenes::Install(handle);
+    savr::buildingtransition::Install(handle);
     savr::swimming::Install(handle);
     savr::boatentry::Install(handle);
     savr::vehicledoors::Install(handle);

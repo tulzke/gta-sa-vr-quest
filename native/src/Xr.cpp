@@ -1,5 +1,6 @@
 #include "WeaponCalibrationMenu.h"
 #include "ArcadeReload.h"
+#include "BuildingTransition.h"
 #include "Xr.h"
 #include "HapticPolicy.h"
 #include "Combat.h"
@@ -4798,7 +4799,7 @@ void BlitGameFrame() {
 enum class TheaterFrameSource {
     GameSurface,
     Black,
-    ResprayFade,
+    FullscreenFade,
 };
 
 // Logical source dimensions (see SetTheaterCrop). The flat game SurfaceTexture
@@ -4942,7 +4943,7 @@ bool RenderTheaterQuad(XrSpace space, XrCompositionLayerQuad& quad,
         : static_cast<float>(s.theater.width)/static_cast<float>(s.theater.height);
 
     quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-    quad.layerFlags   = source == TheaterFrameSource::ResprayFade
+    quad.layerFlags   = source == TheaterFrameSource::FullscreenFade
         ? XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT : 0;
     quad.space        = space;
     quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
@@ -4953,7 +4954,7 @@ bool RenderTheaterQuad(XrSpace space, XrCompositionLayerQuad& quad,
     quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
     quad.pose.position    = {0.0f, 0.0f, -kDistanceMeters};
     quad.size             = {kWidthMeters, kWidthMeters / aspect};
-    if (source == TheaterFrameSource::ResprayFade) {
+    if (source == TheaterFrameSource::FullscreenFade) {
         // Cover the entire view in both eyes, independent of the phone crop.
         quad.size = {8.0f, 8.0f};
     }
@@ -13560,6 +13561,7 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
 
     static respray::Fade resprayFade;
     const auto resprayCue = vrcam::ResprayPresentation();
+    const float buildingOpacity = s.theaterMode ? 0.0f : buildingtransition::Opacity();
     const double displayMs = static_cast<double>(frameState.predictedDisplayTime) / 1e6;
     float resprayOpacity = 0.0f;
     // Menus/cutscenes use the trusted flat SurfaceTexture. Gameplay normally
@@ -13737,8 +13739,8 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
                     sRecoveryProgress = 0;
                     staleStereoRejected = true;
                 }
-                const auto blackSource = resprayCue != 0
-                    ? TheaterFrameSource::ResprayFade : TheaterFrameSource::Black;
+                const auto blackSource = resprayCue != 0 || buildingOpacity > 0.0f
+                    ? TheaterFrameSource::FullscreenFade : TheaterFrameSource::Black;
                 if (RenderTheaterQuad(s.viewSpace, theaterQuad, true, blackSource)) {
                     layers[0] = reinterpret_cast<
                         const XrCompositionLayerBaseHeader*>(&theaterQuad);
@@ -13755,7 +13757,8 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
             projectionFullCopy && submittedResprayCameraCue == resprayCue);
 
         // FPS/debug panel on top, selected only through the VR menu.
-        if ((s.theaterMode || projectionLayerSubmitted || resprayOpacity == 0.0f) &&
+        if (buildingOpacity == 0.0f &&
+            (s.theaterMode || projectionLayerSubmitted || resprayOpacity == 0.0f) &&
             (g_packageHint.load(std::memory_order_relaxed) || ProfilerVisible() || g_menuVisible.load(std::memory_order_relaxed) ||
              g_calibActive.load(std::memory_order_relaxed) ||
              g_mainMenuActive.load(std::memory_order_relaxed) ||
@@ -13777,11 +13780,12 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
              g_aboutActive.load(std::memory_order_relaxed)) && PresentDebugPanel(debugQuad)) {
             layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&debugQuad);
         }
-        if (projectionLayerSubmitted && resprayOpacity > 0.0f) {
+        const float fullscreenOpacity = std::max(buildingOpacity, resprayOpacity);
+        if (projectionLayerSubmitted && fullscreenOpacity > 0.0f) {
             if (RenderTheaterQuad(s.viewSpace, theaterQuad, true,
-                                  TheaterFrameSource::ResprayFade, resprayOpacity)) {
+                                  TheaterFrameSource::FullscreenFade, fullscreenOpacity)) {
                 layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&theaterQuad);
-            } else if (resprayOpacity == 1.0f) {
+            } else if (fullscreenOpacity == 1.0f) {
                 layerCount = 0;
             }
         }
@@ -13789,7 +13793,8 @@ void RenderFrame(double consumerUpdateMs, double consumerUpdateCpuMs) {
 
     const auto cameraPresence = vrcam::CameraPresence();
     bool controllerMarkerValid[2]{};
-    if (frameState.shouldRender == XR_TRUE && publishTrackingPose && IsSessionFocused() &&
+    if (frameState.shouldRender == XR_TRUE && buildingOpacity == 0.0f &&
+        publishTrackingPose && IsSessionFocused() &&
         camerapresence::ViewOf(cameraPresence) == camerapresence::View::Scene) {
         for (int h = 0; h < 2; ++h)
             controllerMarkerValid[h] = BuildControllerMarker(controllerMarkers[h], hp[h], nextHead.orientation);

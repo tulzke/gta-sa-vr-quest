@@ -164,6 +164,7 @@ add_library(savr SHARED
     src/BeachDance.cpp
     src/Tbone.cpp
     src/MissionScenes.cpp
+    src/BuildingTransition.cpp
     src/PerfTelemetry.cpp
     src/PhysicalWeapon.cpp
     src/Pickups.cpp

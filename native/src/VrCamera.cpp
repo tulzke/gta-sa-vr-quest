@@ -11,6 +11,7 @@
 #include "Tbone.h"
 #include "BeachDance.h"
 #include "MissionScenes.h"
+#include "BuildingTransition.h"
 #include "ResprayTransition.h"
 #include "JustBusiness.h"
 #include "VrCamera.h"
@@ -3397,7 +3398,7 @@ bool ShouldRunStereo() {
     // opaque camera fade, but continues updating the flat GameSurface with
     // DoFade/UI. Follow that path in theater instead of letting XR reject a
     // frozen stereo pair as black. This function is called only on GameThread.
-    if (g.CCamera_GetScreenFadeStatus && g.TheCamera &&
+    if (!buildingtransition::Active() && g.CCamera_GetScreenFadeStatus && g.TheCamera &&
         g.CCamera_GetScreenFadeStatus(g.TheCamera) == 2) {
         return false;
     }
@@ -3428,6 +3429,7 @@ bool ShouldRunStereo() {
         if (const void* pad = g.CPad_GetPad(0)) {
             auto locks = PlayerControlLocks(pad);
             if (ResprayControlsBlocked()) locks &= ~respray::kControlLock;
+            if (buildingtransition::Active()) locks &= ~buildingtransition::kControlLock;
             if (locks != 0) {
                 // GAMEPLAY cutscene vs shop UI: mid-mission scripted cameras
                 // also disable controls, but they raise the widescreen
@@ -3826,6 +3828,7 @@ void OnCopyCameraMatrixToRWCam(void* self, bool alsoPlayerCam) {
     if (!inHook) {
         if (self == g.TheCamera) {
             RefreshRespray();
+            buildingtransition::Update();
             g_resprayCameraCue = 0;
         }
         stereo = ShouldRunStereo();
@@ -30413,6 +30416,7 @@ bool RecruitGestureActive() {
 
 void RefreshStereoGate() {
     RefreshRespray();
+    buildingtransition::Update();
     RefreshCameraPresence(false);
     const bool stereo = ShouldRunStereo();
     PublishTheaterPresentation(stereo);
