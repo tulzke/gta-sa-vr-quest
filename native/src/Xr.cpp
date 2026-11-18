@@ -8111,6 +8111,11 @@ void BuildDrivingMenu() {
                     "WHEEL HAND GUIDE   < %s >",
                     driving::IsWheelHandGuideEnabled()?"ON":"OFF");
                 break;
+            case driving::MENU_WHEEL_HAND_GUIDE_THRESHOLD:
+                std::snprintf(rows[row],sizeof(rows[row]),
+                    "WHEEL GUIDE THRESHOLD   < %.1f CM >",
+                    driving::GetWheelHandGuideThresholdCm());
+                break;
             case driving::MENU_INTERIOR_GLASS:
                 std::snprintf(rows[row],sizeof(rows[row]),
                     "INTERIOR WINDOW TINT   < %s >",
@@ -9144,12 +9149,12 @@ struct WheelHandGuide {
     float opacity{};
 };
 
-WheelHandGuide MakeWheelHandGuide(const HandPose& pose, XrVector3f pinned) {
+WheelHandGuide MakeWheelHandGuide(const HandPose& pose, XrVector3f pinned, float fadeStart) {
     if (!pose.valid || !pose.positionTracked) return {};
     const XrVector3f controller{pose.gripPos[0],pose.gripPos[1],pose.gripPos[2]};
     const auto delta=vsub(pinned,controller);
     const float distance=std::sqrt(vdot(delta,delta));
-    constexpr float fadeStart=.075f, fadeEnd=.28f;
+    constexpr float fadeEnd=.28f;
     if (!std::isfinite(distance) || distance<=fadeStart) return {};
     const float t=std::clamp((distance-fadeStart)/(fadeEnd-fadeStart),0.f,1.f);
     return {controller,pinned,.23f*t*t*(3.f-2.f*t)};
@@ -9211,6 +9216,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
     EnsureHandAssets();
     const bool wheelGuideEnabled=drivingWheel.trackedHandsEnabled && drivingWheel.active &&
         !drivingWheel.bike && !drivingWheel.yoke && driving::IsWheelHandGuideEnabled();
+    const float wheelGuideThreshold=wheelGuideEnabled?driving::GetWheelHandGuideThresholdCm()/100.0f:0.0f;
     for (int hand = 0; hand < 2; ++hand) {
         if (!drivingWheel.radioGrabbed[hand] || !hp[hand].valid) radioHands[hand].Reset();
         if(!hp[hand].valid)hydroHands[hand].Reset();
@@ -9527,7 +9533,7 @@ void BuildHandFrames(const HandPose hp[2], const TwoHandVisualState& twoHand,
         if(monitorHand)selected=watermonitor::PistolPose(drivingWheel.monitor.press);
         if(serviceHand)selected={handanimation::Gesture::HandleRadio,handanimation::Gesture::HandleRadio,drivingWheel.servicePress,0.f};
         auto& frame=g_skeletalHands[hand];
-        if (guideHand) frame.wheelGuide=MakeWheelHandGuide(hp[hand],pos);
+        if (guideHand) frame.wheelGuide=MakeWheelHandGuide(hp[hand],pos,wheelGuideThreshold);
         g_handSkeleton.Evaluate(selected,pinchAmount,pinchWeight,frame.palette);
         const auto model=[](XrVector3f p,XrVector3f f,XrVector3f r,XrVector3f u) {
             return handskeleton::Mat{f.x,f.y,f.z,0,-u.x,-u.y,-u.z,0,r.x,r.y,r.z,0,

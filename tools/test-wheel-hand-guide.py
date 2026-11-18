@@ -7,15 +7,25 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / 'native/src/Xr.cpp').read_text(encoding='utf8')
-compile_run = runpy.run_path(str(ROOT / 'tools/test-bike-steering.py'))['compile_run']
+helpers = runpy.run_path(str(ROOT / 'tools/test-bike-steering.py'))
+compile_run = helpers['compile_run']
+driving = helpers['SOURCE']
 
 math = SOURCE[SOURCE.index('inline XrVector3f vadd('):SOURCE.index('XrVector3f RotateAroundAxis(')]
 guide = SOURCE[SOURCE.index('struct WheelHandGuide {'):SOURCE.index('struct SkeletalHandFrame {')]
 draw = SOURCE[SOURCE.index('void DrawWheelHandGuides('):SOURCE.index('#include "RadioLabelRender.inl"')]
+setting = driving[driving.index('constexpr float kDefaultWheelHandGuideThresholdCm='):
+                  driving.index('std::atomic<bool> g_highlights')]
+format_line = next(line for line in driving.splitlines() if '"WheelHandGuideThresholdCm=%.1f' in line)
+parse_start = driving.index('else if (std::sscanf(line, "WheelHandGuideThresholdCm=')
+parse_line = driving[parse_start + len('else '):driving.index('else if', parse_start + len('else if'))]
+get_threshold = helpers['function']('float GetWheelHandGuideThresholdCm()')
+adjust_threshold = helpers['function']('void AdjustWheelHandGuideThreshold(')
 
 test = r'''
 #include "TrackingFrame.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -27,7 +37,27 @@ struct XrVector3f {float x,y,z;};
     std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#condition); std::exit(1); \
 } } while (false)
 bool Near(float a,float b) { return std::abs(a-b)<.00001f; }
-''' + math + guide + r'''
+''' + setting + r'''
+char savedThreshold[64]{};
+void EnsureInit() {}
+void Save() {
+    FILE* file=std::tmpfile();
+    CHECK(file);
+''' + format_line + r'''
+    std::rewind(file);
+    CHECK(std::fgets(savedThreshold,sizeof(savedThreshold),file));
+    std::fclose(file);
+}
+float LoadThreshold(const char* line) {
+    float wheelHandGuideThresholdCm=kDefaultWheelHandGuideThresholdCm;
+    float spatial{};
+''' + parse_line + r'''
+    return wheelHandGuideThresholdCm;
+}
+''' + get_threshold + adjust_threshold + math + guide + r'''
+WheelHandGuide GuideAtCurrentThreshold(const HandPose& pose,XrVector3f pinned) {
+    return MakeWheelHandGuide(pose,pinned,GetWheelHandGuideThresholdCm()/100.f);
+}
 struct { WheelHandGuide wheelGuide; } g_skeletalHands[2];
 enum { GL_FALSE, GL_TRUE, GL_BLEND, GL_FUNC_ADD, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA };
 bool blend=false, depthWrite=true;
@@ -50,28 +80,47 @@ void DrawDrivingBoxes(const float*,const float* vertices,int count,const unsigne
 }
 ''' + draw + r'''
 int main() {
+    CHECK(GetWheelHandGuideThresholdCm()==7.5f);
+    CHECK(LoadThreshold("WheelHandGuide=0")==7.5f);
+    CHECK(LoadThreshold("WheelHandGuideThresholdCm=nan")==7.5f);
+    CHECK(LoadThreshold("WheelHandGuideThresholdCm=-2")==1.f);
+    CHECK(LoadThreshold("WheelHandGuideThresholdCm=40")==15.f);
+    AdjustWheelHandGuideThreshold(1);
+    CHECK(GetWheelHandGuideThresholdCm()==8.f && LoadThreshold(savedThreshold)==8.f);
+    AdjustWheelHandGuideThreshold(-1);
+    CHECK(GetWheelHandGuideThresholdCm()==7.5f && LoadThreshold(savedThreshold)==7.5f);
+
     HandPose pose{};
     const XrVector3f far{.35f,0,0};
     pose.positionTracked=true;
-    CHECK(MakeWheelHandGuide(pose,far).opacity==0);
+    CHECK(GuideAtCurrentThreshold(pose,far).opacity==0);
     pose.valid=true;pose.positionTracked=false;
-    CHECK(MakeWheelHandGuide(pose,far).opacity==0);
+    CHECK(GuideAtCurrentThreshold(pose,far).opacity==0);
     pose.positionTracked=true;
-    CHECK(MakeWheelHandGuide(pose,{.075f,0,0}).opacity==0);
-    CHECK(MakeWheelHandGuide(pose,{.09f,0,0}).opacity>0);
-    CHECK(MakeWheelHandGuide(pose,{0,0,std::numeric_limits<float>::infinity()}).opacity==0);
-    CHECK(Near(MakeWheelHandGuide(pose,{0,.1775f,0}).opacity,.115f));
-    CHECK(Near(MakeWheelHandGuide(pose,{0,0,.28f}).opacity,.23f));
-    CHECK(Near(MakeWheelHandGuide(pose,far).opacity,.23f));
+    CHECK(GuideAtCurrentThreshold(pose,{.075f,0,0}).opacity==0);
+    CHECK(GuideAtCurrentThreshold(pose,{.09f,0,0}).opacity>0);
+    CHECK(GuideAtCurrentThreshold(pose,{0,0,std::numeric_limits<float>::infinity()}).opacity==0);
+    CHECK(Near(GuideAtCurrentThreshold(pose,{0,.1775f,0}).opacity,.115f));
+    CHECK(Near(GuideAtCurrentThreshold(pose,{0,0,.28f}).opacity,.23f));
+    CHECK(Near(GuideAtCurrentThreshold(pose,far).opacity,.23f));
+
+    for (int i=0;i<30;++i) AdjustWheelHandGuideThreshold(-1);
+    CHECK(GetWheelHandGuideThresholdCm()==1.f);
+    CHECK(GuideAtCurrentThreshold(pose,{.009f,0,0}).opacity==0);
+    CHECK(GuideAtCurrentThreshold(pose,{.02f,0,0}).opacity>0);
+    for (int i=0;i<30;++i) AdjustWheelHandGuideThreshold(1);
+    CHECK(GetWheelHandGuideThresholdCm()==15.f);
+    CHECK(GuideAtCurrentThreshold(pose,{.15f,0,0}).opacity==0);
+    CHECK(GuideAtCurrentThreshold(pose,{.16f,0,0}).opacity>0);
 
     DrawWheelHandGuides(nullptr,{0,1,1});
     CHECK(draws==0 && !blend && depthWrite);
-    g_skeletalHands[0].wheelGuide=MakeWheelHandGuide(pose,far);
+    g_skeletalHands[0].wheelGuide=GuideAtCurrentThreshold(pose,far);
     pose.gripPos[1]=-.3f;
-    g_skeletalHands[1].wheelGuide=MakeWheelHandGuide(pose,{0,0,-.2f});
+    g_skeletalHands[1].wheelGuide=GuideAtCurrentThreshold(pose,{0,0,-.2f});
     DrawWheelHandGuides(nullptr,{0,1,1});
     CHECK(draws==2 && !blend && depthWrite);
-    std::puts("PASS: wheel guide visibility, stereo arrow endpoints and draw state");
+    std::puts("PASS: wheel guide setting, visibility, stereo arrow endpoints and draw state");
 }
 '''
 

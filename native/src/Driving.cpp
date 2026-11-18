@@ -244,6 +244,8 @@ wheelhaptics::State g_wheelHapticState[2];
 double g_wheelHapticTime{};
 std::atomic<bool> g_wheelVisible{true};
 std::atomic<bool> g_wheelHandGuide{true};
+constexpr float kDefaultWheelHandGuideThresholdCm=7.5f;
+std::atomic<float> g_wheelHandGuideThresholdCm{kDefaultWheelHandGuideThresholdCm};
 std::atomic<bool> g_highlights{true};
 std::atomic<bool> g_bikeHandsFollowTilt{true};
 std::atomic<bool> g_bikeBlockWheelie{false};
@@ -719,6 +721,7 @@ void Save() {
     std::fprintf(file, "BikeHeightCm=%.7g\n", g_value[F_BIKE_HEIGHT].load());
     std::fprintf(file, "ImmersiveWheelVisible=%d\n", g_wheelVisible.load()?1:0);
     std::fprintf(file, "WheelHandGuide=%d\n", g_wheelHandGuide.load()?1:0);
+    std::fprintf(file, "WheelHandGuideThresholdCm=%.1f\n", g_wheelHandGuideThresholdCm.load());
     std::fprintf(file, "HandleHighlights=%d\n", g_highlights.load()?1:0);
     std::fprintf(file, "BikeHandsFollowTilt=%d\n",
                  g_bikeHandsFollowTilt.load()?1:0);
@@ -841,6 +844,7 @@ void Load() {
     std::copy(std::begin(kDefaults), std::end(kDefaults), values);
     int visible = 1, highlights = 1, bikeHandsFollowTilt = 1;
     int wheelHandGuide = 1;
+    float wheelHandGuideThresholdCm = kDefaultWheelHandGuideThresholdCm;
     int bikeLockHorizon = 1, bikeVisualLeanPercent = 50;
     int bikeLeanSteering = 1, bikeLeanSensitivity = 100;
     int keepRiderOnFlips = 0;
@@ -979,6 +983,8 @@ void Load() {
             else if (std::sscanf(line, "BikeHeightCm=%d", &value)==1) values[F_BIKE_HEIGHT]=value;
             else if (std::sscanf(line, "ImmersiveWheelVisible=%d", &value)==1) visible=value;
             else if (std::sscanf(line, "WheelHandGuide=%d", &value)==1) wheelHandGuide=value;
+            else if (std::sscanf(line, "WheelHandGuideThresholdCm=%f", &spatial)==1 && std::isfinite(spatial))
+                wheelHandGuideThresholdCm=std::round(std::clamp(spatial,1.0f,15.0f)*2.0f)*0.5f;
             else if (std::sscanf(line, "HandleHighlights=%d", &value)==1) highlights=value;
             else if (std::sscanf(line, "BikeHandsFollowTilt=%d", &value)==1)
                 bikeHandsFollowTilt=value;
@@ -1191,6 +1197,7 @@ void Load() {
         g_value[field].store(ClampField(field, values[field]));
     g_wheelVisible.store(visible!=0);
     g_wheelHandGuide.store(wheelHandGuide!=0);
+    g_wheelHandGuideThresholdCm.store(wheelHandGuideThresholdCm);
     g_highlights.store(highlights!=0);
     g_bikeHandsFollowTilt.store(bikeHandsFollowTilt!=0);
     g_bikeHorizonLocked.store(bikeLockHorizon!=0);
@@ -4217,7 +4224,7 @@ constexpr int kImmersiveCarItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_WHEEL_HAND_GUIDE, MENU_INTERIOR_GLASS,
+    MENU_WHEEL_VISIBLE, MENU_WHEEL_HAND_GUIDE, MENU_WHEEL_HAND_GUIDE_THRESHOLD, MENU_INTERIOR_GLASS,
     MENU_VEHICLE_TEST_AREA, MENU_VEHICLE_TEST_PAGE,
     MENU_RESET, MENU_BACK
 };
@@ -4250,7 +4257,7 @@ constexpr int kImmersiveBoatItems[] = {
     MENU_GLOBAL_SIDE, MENU_GLOBAL_FORWARD, MENU_GLOBAL_HEIGHT,
     MENU_MODEL_SIDE, MENU_MODEL_FORWARD, MENU_MODEL_HEIGHT,
     MENU_CONTROL_CALIBRATION, MENU_HANDLE_HIGHLIGHTS,
-    MENU_WHEEL_VISIBLE, MENU_WHEEL_HAND_GUIDE, MENU_RESET, MENU_BACK
+    MENU_WHEEL_VISIBLE, MENU_WHEEL_HAND_GUIDE, MENU_WHEEL_HAND_GUIDE_THRESHOLD, MENU_RESET, MENU_BACK
 };
 
 void MenuTableForType(int vehicleType, const int** items, int* count) {
@@ -4900,6 +4907,16 @@ bool IsWheelVisible() { EnsureInit(); return g_wheelVisible.load(); }
 void ToggleWheelVisible() { EnsureInit(); g_wheelVisible.store(!g_wheelVisible.load()); Save(); }
 bool IsWheelHandGuideEnabled() { EnsureInit(); return g_wheelHandGuide.load(); }
 void ToggleWheelHandGuide() { EnsureInit(); g_wheelHandGuide.store(!g_wheelHandGuide.load()); Save(); }
+float GetWheelHandGuideThresholdCm() { EnsureInit(); return g_wheelHandGuideThresholdCm.load(); }
+void AdjustWheelHandGuideThreshold(int direction) {
+    EnsureInit();
+    if (!direction) return;
+    const float current=g_wheelHandGuideThresholdCm.load();
+    const float next=std::clamp(current+(direction<0?-0.5f:0.5f),1.0f,15.0f);
+    if (next==current) return;
+    g_wheelHandGuideThresholdCm.store(next);
+    Save();
+}
 bool AreHandleHighlightsEnabled() { EnsureInit(); return g_highlights.load(); }
 void ToggleHandleHighlights() { EnsureInit(); g_highlights.store(!g_highlights.load()); Save(); }
 bool DoBikeHandsFollowTilt() { EnsureInit(); return g_bikeHandsFollowTilt.load(); }
